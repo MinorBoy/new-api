@@ -79,6 +79,15 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatOpenAIRealtime)
 		})
 	}
+
+	seedanceImageRouter := router.Group("/api/v3")
+	seedanceImageRouter.Use(middleware.RouteTag("relay"))
+	seedanceImageRouter.Use(middleware.SystemPerformanceCheck())
+	seedanceImageRouter.Use(middleware.SeedanceRequestConvert(), middleware.TokenAuth())
+	seedanceImageRouter.Use(middleware.ModelRequestRateLimit(), middleware.Distribute())
+	seedanceImageRouter.POST("/images/generations", func(c *gin.Context) {
+		controller.Relay(c, types.RelayFormatOpenAIImage)
+	})
 	{
 		//http router
 		httpRouter := relayV1Router.Group("")

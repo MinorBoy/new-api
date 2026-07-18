@@ -122,6 +122,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	if c.GetBool(common.KeySeedanceOfficialAPI) && relayFormat == types.RelayFormatOpenAIImage {
+		if imageRequest, ok := request.(*dto.ImageRequest); ok {
+			if err := helper.NormalizeSeedreamNativeImageRequest(c, imageRequest); err != nil {
+				newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				return
+			}
+		}
+	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -579,18 +587,30 @@ func RelayTask(c *gin.Context) {
 		service.LogTaskConsumption(c, relayInfo)
 
 		task := model.InitTask(result.Platform, relayInfo)
+		var generateAudio *bool
+		if value, exists := c.Get(string(constant.ContextKeyTaskGenerateAudio)); exists {
+			if enabled, ok := value.(bool); ok {
+				generateAudio = common.GetPointer(enabled)
+			}
+		}
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios(),
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			ModelPrice:        relayInfo.PriceData.ModelPrice,
+			GroupRatio:        relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:        relayInfo.PriceData.ModelRatio,
+			OtherRatios:       relayInfo.PriceData.OtherRatios(),
+			OriginModelName:   relayInfo.OriginModelName,
+			UpstreamModelName: relayInfo.UpstreamModelName,
+			HasVideoInput:     c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
+			GenerateAudio:     generateAudio,
+			Draft:             c.GetBool(string(constant.ContextKeyTaskDraft)),
+			ServiceTier:       c.GetString(string(constant.ContextKeyTaskServiceTier)),
+			Resolution:        c.GetString("task_resolution"),
+			PerCallBilling:    common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData
@@ -607,6 +627,19 @@ func RelayTask(c *gin.Context) {
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		if taskErr.Code == "do_request_failed" || taskErr.Code == "fail_to_fetch_task" {
+			taskErr.Code = "InternalServiceError"
+			taskErr.Message = "The service encountered an unexpected internal error. Please retry later."
+		}
+		c.JSON(taskErr.StatusCode, gin.H{
+			"error": gin.H{
+				"code":    taskErr.Code,
+				"message": taskErr.Message,
+			},
+		})
+		return
+	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}

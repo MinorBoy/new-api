@@ -29,6 +29,94 @@ func updateOpenAIImageCount(info *relaycommon.RelayInfo, count int64) {
 	info.PriceData.AddOtherRatio("n", float64(count))
 }
 
+func updateSeedreamGeneratedImageCount(info *relaycommon.RelayInfo, usage *dto.Usage, raw []byte) bool {
+	const seedreamMaxGeneratedImages = int64(15)
+	count, present := seedreamUsageNumber(raw, "usage.generated_images")
+	if !present {
+		return false
+	}
+	if count < 0 {
+		common.SysError("Seedream usage.generated_images is negative; clamped to zero")
+		count = 0
+	}
+	if count > seedreamMaxGeneratedImages {
+		common.SysError(fmt.Sprintf("Seedream usage.generated_images exceeds %d; clamped", seedreamMaxGeneratedImages))
+		count = seedreamMaxGeneratedImages
+	}
+	if usage != nil {
+		usage.GeneratedImages = int(count)
+		if count == 0 {
+			usage.TotalTokens = 0
+		}
+	}
+	if info == nil || !info.PriceData.UsePrice {
+		return true
+	}
+	rations := info.PriceData.OtherRatios()
+	if count == 0 {
+		delete(rations, "n")
+		info.PriceData.ReplaceOtherRatios(rations)
+	} else {
+		info.PriceData.AddOtherRatio("n", float64(count))
+	}
+	return true
+}
+
+func recordSeedreamGeneratedImageCount(c *gin.Context, raw []byte) {
+	if c == nil {
+		return
+	}
+	count, present := seedreamUsageNumber(raw, "usage.generated_images")
+	if !present {
+		return
+	}
+	if count < 0 {
+		count = 0
+	}
+	if count > 15 {
+		count = 15
+	}
+	c.Set("seedream_generated_images_present", true)
+	c.Set("seedream_generated_images", int(count))
+}
+
+func normalizeSeedreamUsage(usage *dto.Usage, raw []byte) {
+	if usage == nil {
+		return
+	}
+	if value, present := seedreamUsageNumber(raw, "usage.input_images"); present {
+		if value < 0 {
+			value = 0
+		}
+		usage.InputImages = int(value)
+	}
+	outputTokens, present := seedreamUsageNumber(raw, "usage.output_tokens")
+	if !present {
+		return
+	}
+	if outputTokens < 0 {
+		common.SysError("Seedream usage.output_tokens is negative; clamped to zero")
+		outputTokens = 0
+	}
+	if outputTokens > int64(common.MaxQuota) {
+		common.SysError("Seedream usage.output_tokens exceeds quota bound; clamped")
+		outputTokens = int64(common.MaxQuota)
+	}
+	usage.InputTokens = 0
+	usage.PromptTokens = 0
+	usage.OutputTokens = int(outputTokens)
+	usage.CompletionTokens = int(outputTokens)
+	usage.TotalTokens = int(outputTokens)
+}
+
+func seedreamUsageNumber(raw []byte, path string) (int64, bool) {
+	value := gjson.GetBytes(raw, path)
+	if !value.Exists() || value.Type != gjson.Number {
+		return 0, false
+	}
+	return value.Int(), true
+}
+
 // OpenaiImageHandler handles non-streaming OpenAI image responses
 // (generations/edits), returning the parsed usage for billing.
 func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -49,12 +137,23 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+	// Normalize before applying Seedream's authoritative generated_images=0
+	// override; the final OpenAI-image normalization below would otherwise
+	// reconstruct total_tokens from output_tokens and undo the zero charge.
+	normalizeOpenAIUsage(&usageResp.Usage)
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		recordSeedreamGeneratedImageCount(c, responseBody)
+		normalizeSeedreamUsage(&usageResp.Usage, responseBody)
+		if !updateSeedreamGeneratedImageCount(info, &usageResp.Usage, responseBody) {
+			updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+		}
+	} else {
+		updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+	}
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
-	normalizeOpenAIUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 	return &usageResp.Usage, nil
 }
@@ -112,6 +211,8 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	usage := &dto.Usage{}
 	var lastStreamData []byte
 	var completedImages int64
+	var nativeGeneratedImages int64
+	var nativeGeneratedPresent bool
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		raw := common.StringToByteSlice(data)
@@ -127,11 +228,21 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 		}
 		if err := common.Unmarshal(raw, &chunk); err == nil {
 			normalizeOpenAIUsage(&chunk.Usage)
+			if c.GetBool(common.KeySeedanceOfficialAPI) {
+				recordSeedreamGeneratedImageCount(c, raw)
+				normalizeSeedreamUsage(&chunk.Usage, raw)
+			}
 			if service.ValidUsage(&chunk.Usage) {
 				usage = &chunk.Usage
 			}
 			if chunk.Type == "image_generation.completed" || chunk.Type == "image_edit.completed" {
 				completedImages++
+			}
+			if c.GetBool(common.KeySeedanceOfficialAPI) {
+				if generated, present := seedreamUsageNumber(raw, "usage.generated_images"); present {
+					nativeGeneratedPresent = true
+					nativeGeneratedImages = generated
+				}
 			}
 		}
 		if err := writeOpenaiImageStreamChunk(c, raw); err != nil {
@@ -146,6 +257,10 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	}
 
 	applyUsagePostProcessing(info, usage, lastStreamData)
+	if c.GetBool(common.KeySeedanceOfficialAPI) && nativeGeneratedPresent {
+		generatedRaw, _ := common.Marshal(map[string]interface{}{"usage": map[string]int64{"generated_images": nativeGeneratedImages}})
+		updateSeedreamGeneratedImageCount(info, usage, generatedRaw)
+	}
 	// Only trust completedImages when upstream finished the stream (done/eof).
 	// On client-side aborts (client_gone, or handler_stop from a failed client
 	// write) the counter undercounts what upstream actually generated and
@@ -160,7 +275,9 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 		if n, ok := info.PriceData.OtherRatios()["n"]; ok {
 			requestedN = n
 		}
-		if upstreamFinished || float64(completedImages) > requestedN {
+		if c.GetBool(common.KeySeedanceOfficialAPI) && !nativeGeneratedPresent && upstreamFinished {
+			updateOpenAIImageCount(info, completedImages)
+		} else if !c.GetBool(common.KeySeedanceOfficialAPI) && (upstreamFinished || float64(completedImages) > requestedN) {
 			updateOpenAIImageCount(info, completedImages)
 		}
 	}
@@ -250,10 +367,19 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 	normalizeOpenAIUsage(&usageResp.Usage)
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		recordSeedreamGeneratedImageCount(c, responseBody)
+		normalizeSeedreamUsage(&usageResp.Usage, responseBody)
+		if !updateSeedreamGeneratedImageCount(info, &usageResp.Usage, responseBody) {
+			updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+		}
+	}
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 
 	imageCount := gjson.GetBytes(responseBody, "data.#").Int()
-	updateOpenAIImageCount(info, imageCount)
+	if !c.GetBool(common.KeySeedanceOfficialAPI) {
+		updateOpenAIImageCount(info, imageCount)
+	}
 
 	helper.SetEventStreamHeaders(c)
 	c.Status(http.StatusOK)

@@ -78,6 +78,12 @@ type TaskAdaptor interface {
 	ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error)
 }
 
+// TaskBillingRequestValidator allows a task adaptor to validate pricing
+// dimensions after channel model mapping has resolved the upstream model.
+type TaskBillingRequestValidator interface {
+	ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError
+}
+
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }

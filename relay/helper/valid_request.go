@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -17,6 +18,209 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// NormalizeSeedreamNativeImageRequest validates the request fields that affect
+// image-generation billing and converts the bounded output estimate into the
+// canonical OpenAI request count used by pre-consume billing. The outbound ARK
+// body is never changed by this normalization.
+func NormalizeSeedreamNativeImageRequest(c *gin.Context, request *dto.ImageRequest) error {
+	if c == nil || request == nil || !c.GetBool(common.KeySeedanceOfficialAPI) {
+		return nil
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	rawBody, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(rawBody, &fields); err != nil {
+		return fmt.Errorf("invalid Seedream request body: %w", err)
+	}
+	inputImages := seedreamNativeInputImageCount(fields["image"])
+	if inputImages >= 15 {
+		return errors.New("input image count must be less than 15")
+	}
+
+	sequence := "disabled"
+	if value, ok := fields["sequential_image_generation"]; ok {
+		if err := common.Unmarshal(value, &sequence); err != nil {
+			return errors.New("sequential_image_generation must be a string")
+		}
+		sequence = strings.ToLower(strings.TrimSpace(sequence))
+		if sequence != "auto" && sequence != "disabled" {
+			return errors.New("sequential_image_generation must be auto or disabled")
+		}
+	}
+	options, hasOptions := fields["sequential_image_generation_options"]
+	if sequence != "auto" && hasOptions {
+		return errors.New("sequential_image_generation_options requires sequential_image_generation=auto")
+	}
+	if sequence == "disabled" {
+		request.N = common.GetPointer(uint(1))
+		return nil
+	}
+
+	maxImages := int64(15)
+	if hasOptions {
+		var optionFields map[string]json.RawMessage
+		if err := common.Unmarshal(options, &optionFields); err != nil {
+			return errors.New("sequential_image_generation_options must be an object")
+		}
+		if maxValue, ok := optionFields["max_images"]; ok {
+			if err := common.Unmarshal(maxValue, &maxImages); err != nil || maxImages < 1 || maxImages > 15 {
+				return errors.New("max_images must be between 1 and 15")
+			}
+		}
+	}
+	outputLimit := maxImages
+	if available := int64(15 - inputImages); outputLimit > available {
+		outputLimit = available
+	}
+	if outputLimit < 1 {
+		return errors.New("input images leave no output image capacity")
+	}
+	request.N = common.GetPointer(uint(outputLimit))
+	return nil
+}
+
+func seedreamNativeInputImageCount(raw json.RawMessage) int {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var value string
+	if err := common.Unmarshal(raw, &value); err == nil {
+		if strings.TrimSpace(value) != "" {
+			return 1
+		}
+		return 0
+	}
+	var values []json.RawMessage
+	if err := common.Unmarshal(raw, &values); err != nil {
+		return 0
+	}
+	count := 0
+	for _, item := range values {
+		if len(item) > 0 && string(item) != "null" {
+			count++
+		}
+	}
+	return count
+}
+
+// ValidateSeedreamNativeModelRequest applies the documented Seedream family
+// capability matrix after channel model mapping has selected the upstream ID.
+func ValidateSeedreamNativeModelRequest(c *gin.Context, request *dto.ImageRequest, upstreamModel string) error {
+	if c == nil || request == nil || !c.GetBool(common.KeySeedanceOfficialAPI) {
+		return nil
+	}
+	family := seedreamModelFamily(upstreamModel)
+	if family == "" {
+		return nil
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	rawBody, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(rawBody, &fields); err != nil {
+		return fmt.Errorf("invalid Seedream request body: %w", err)
+	}
+	inputImages := seedreamNativeInputImageCount(fields["image"])
+	maxInputImages := 14
+	if family == "pro" {
+		maxInputImages = 10
+	}
+	if inputImages > maxInputImages {
+		return fmt.Errorf("%s supports at most %d input images", upstreamModel, maxInputImages)
+	}
+
+	sequenceRaw, hasSequence := fields["sequential_image_generation"]
+	sequence := "disabled"
+	if hasSequence {
+		if err := common.Unmarshal(sequenceRaw, &sequence); err != nil {
+			return errors.New("sequential_image_generation must be a string")
+		}
+		sequence = strings.ToLower(strings.TrimSpace(sequence))
+	}
+	if family == "pro" {
+		if hasSequence || hasJSONField(fields, "sequential_image_generation_options") {
+			return errors.New("Seedream Pro does not support sequential image generation")
+		}
+		if stream, ok, err := seedreamNativeBool(fields["stream"]); err != nil {
+			return err
+		} else if ok && stream {
+			return errors.New("Seedream Pro does not support stream")
+		}
+		if request.N != nil && *request.N > 1 {
+			return errors.New("Seedream Pro only supports one output image")
+		}
+	} else {
+		if hasSequence && sequence != "auto" && sequence != "disabled" {
+			return errors.New("sequential_image_generation must be auto or disabled")
+		}
+		if hasJSONField(fields, "sequential_image_generation_options") && sequence != "auto" {
+			return errors.New("sequential_image_generation_options requires sequential_image_generation=auto")
+		}
+	}
+
+	if hasJSONField(fields, "output_format") && family != "pro" && family != "lite" {
+		return errors.New("output_format is supported only by Seedream Pro and Lite")
+	}
+	if hasJSONField(fields, "tools") && family != "lite" {
+		return errors.New("tools is supported only by Seedream Lite")
+	}
+	if hasJSONField(fields, "optimize_prompt_options") {
+		var options struct {
+			Mode string `json:"mode"`
+		}
+		if err := common.Unmarshal(fields["optimize_prompt_options"], &options); err != nil {
+			return errors.New("optimize_prompt_options must be an object")
+		}
+		if strings.EqualFold(options.Mode, "fast") && family != "4.0" {
+			return errors.New("optimize_prompt_options.mode=fast is supported only by Seedream 4.0")
+		}
+	}
+	return nil
+}
+
+func seedreamNativeBool(raw json.RawMessage) (bool, bool, error) {
+	if len(raw) == 0 {
+		return false, false, nil
+	}
+	var value bool
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return false, true, errors.New("stream must be a boolean")
+	}
+	return value, true, nil
+}
+
+func hasJSONField(fields map[string]json.RawMessage, key string) bool {
+	_, ok := fields[key]
+	return ok
+}
+
+func seedreamModelFamily(modelName string) string {
+	name := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(modelName), ".", "-"))
+	switch {
+	case strings.Contains(name, "seedream-5-0-lite") || strings.Contains(name, "seedream-5-lite"):
+		return "lite"
+	case strings.Contains(name, "seedream-5-0-pro") || strings.Contains(name, "seedream-5-pro") || strings.Contains(name, "seedream-5-0"):
+		return "pro"
+	case strings.Contains(name, "seedream-4-5"):
+		return "4.5"
+	case strings.Contains(name, "seedream-4-0"):
+		return "4.0"
+	default:
+		return ""
+	}
+}
 
 func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dto.Request, err error) {
 	relayMode := relayconstant.Path2RelayMode(c.Request.URL.Path)

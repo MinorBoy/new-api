@@ -132,6 +132,21 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 				other[k] = v
 			}
 		}
+		if bc.UpstreamModelName != "" {
+			other["upstream_model_name"] = bc.UpstreamModelName
+		}
+		other["has_video_input"] = bc.HasVideoInput
+		if bc.Resolution != "" {
+			other["resolution"] = bc.Resolution
+		}
+		if bc.ServiceTier != "" {
+			other["service_tier"] = bc.ServiceTier
+		}
+		if bc.GenerateAudio != nil {
+			other["generate_audio"] = *bc.GenerateAudio
+		}
+		other["draft"] = bc.Draft
+		other["billing_tokens"] = bc.BillingTokens
 	}
 	props := task.Properties
 	if props.UpstreamModelName != "" && props.UpstreamModelName != props.OriginModelName {
@@ -173,9 +188,14 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
-
 	// 2. 退还令牌额度
 	taskAdjustTokenQuota(ctx, task, -quota)
+
+	model.UpdateUserUsedQuotaDelta(task.UserId, -quota)
+	if task.ChannelId > 0 {
+		model.UpdateChannelUsedQuota(task.ChannelId, -quota)
+	}
+	taskAdjustQuotaData(task, -quota, 0)
 
 	// 3. 记录日志
 	other := taskBillingOther(task)
@@ -199,13 +219,24 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
-	if actualQuota <= 0 {
+	recalculateTaskQuota(ctx, task, actualQuota, 0, reason, false, clamps...)
+}
+
+func RecalculateTaskQuotaWithTokens(ctx context.Context, task *model.Task, actualQuota, billingTokens int, reason string, clamps ...*common.QuotaClamp) {
+	recalculateTaskQuota(ctx, task, actualQuota, billingTokens, reason, true, clamps...)
+}
+
+func recalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota, billingTokens int, reason string, allowZero bool, clamps ...*common.QuotaClamp) {
+	if actualQuota < 0 || (actualQuota == 0 && !allowZero) {
 		return
 	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
 
 	if quotaDelta == 0 {
+		if billingTokens > 0 {
+			taskAdjustQuotaData(task, 0, billingTokens)
+		}
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
 			task.TaskID, logger.LogQuota(actualQuota), reason))
 		return
@@ -233,13 +264,17 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
 
+	model.UpdateUserUsedQuotaDelta(task.UserId, quotaDelta)
+	if task.ChannelId > 0 {
+		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
+	}
+	taskAdjustQuotaData(task, quotaDelta, billingTokens)
+
 	var logType int
 	var logQuota int
 	if quotaDelta > 0 {
 		logType = model.LogTypeConsume
 		logQuota = quotaDelta
-		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
-		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 	} else {
 		logType = model.LogTypeRefund
 		logQuota = -quotaDelta
@@ -268,12 +303,12 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
 // 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
 // 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
-func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) {
-	if totalTokens <= 0 {
+func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int, clamps ...*common.QuotaClamp) {
+	if totalTokens < 0 {
 		return
 	}
 
-	modelName := taskModelName(task)
+	modelName := taskBillingModelName(task)
 
 	// 获取模型价格和倍率
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
@@ -314,5 +349,42 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
-	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
+	clamps = append(clamps, clamp)
+	RecalculateTaskQuotaWithTokens(ctx, task, actualQuota, totalTokens, reason, clamps...)
+}
+
+func taskAdjustQuotaData(task *model.Task, quotaDelta, tokenDelta int) {
+	if task == nil || !common.DataExportEnabled || (quotaDelta == 0 && tokenDelta == 0) {
+		return
+	}
+	createdAt := task.SubmitTime
+	if createdAt == 0 {
+		createdAt = task.CreatedAt
+	}
+	if createdAt == 0 {
+		createdAt = common.GetTimestamp()
+	}
+	username := task.Username
+	if username == "" {
+		username, _ = model.GetUsernameById(task.UserId, false)
+	}
+	model.LogQuotaDataAdjust(model.QuotaDataLogParams{
+		UserID:    task.UserId,
+		Username:  username,
+		ModelName: taskModelName(task),
+		Quota:     quotaDelta,
+		CreatedAt: createdAt,
+		UseGroup:  task.Group,
+		TokenID:   task.PrivateData.TokenId,
+		ChannelID: task.ChannelId,
+		NodeName:  task.PrivateData.NodeName,
+		TokenUsed: tokenDelta,
+	})
+}
+
+func taskBillingModelName(task *model.Task) string {
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.UpstreamModelName != "" {
+		return bc.UpstreamModelName
+	}
+	return taskModelName(task)
 }

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +38,15 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
+	upstreamModel := info.UpstreamModelName
+	if upstreamModel == "" {
+		upstreamModel = info.OriginModelName
+	}
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		if err := helper.ValidateSeedreamNativeModelRequest(c, request, upstreamModel); err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+	}
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -46,7 +56,25 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	var requestBody io.Reader
 
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		jsonData, err := buildSeedreamImageRequestBody(c, upstreamModel)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if len(info.ParamOverride) > 0 {
+			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+			if err != nil {
+				return newAPIErrorFromParamOverride(err)
+			}
+		}
+		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		defer closer.Close()
+		info.UpstreamRequestBodySize = size
+		requestBody = body
+	} else if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -122,12 +150,23 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if request.N != nil {
 		imageN = *request.N
 	}
-
-	if usage.(*dto.Usage).TotalTokens == 0 {
-		usage.(*dto.Usage).TotalTokens = 1
+	generatedImagesPresent := false
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		if value, exists := c.Get("seedream_generated_images_present"); exists {
+			generatedImagesPresent, _ = value.(bool)
+		}
+		if generatedImagesPresent {
+			imageN = uint(c.GetInt("seedream_generated_images"))
+		}
 	}
-	if usage.(*dto.Usage).PromptTokens == 0 {
-		usage.(*dto.Usage).PromptTokens = 1
+
+	if !c.GetBool(common.KeySeedanceOfficialAPI) {
+		if usage.(*dto.Usage).TotalTokens == 0 {
+			usage.(*dto.Usage).TotalTokens = 1
+		}
+		if usage.(*dto.Usage).PromptTokens == 0 {
+			usage.(*dto.Usage).PromptTokens = 1
+		}
 	}
 
 	quality := request.Quality
@@ -143,10 +182,33 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if len(quality) > 0 {
 		logContent = append(logContent, fmt.Sprintf("品质 %s", quality))
 	}
-	if imageN > 0 {
+	if imageN > 0 || generatedImagesPresent {
 		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
 	}
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	return nil
+}
+
+func buildSeedreamImageRequestBody(c *gin.Context, upstreamModel string) ([]byte, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, err
+	}
+	rawBody, err := storage.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(rawBody, &fields); err != nil {
+		return nil, fmt.Errorf("invalid Seedream request body: %w", err)
+	}
+	if strings.TrimSpace(upstreamModel) != "" {
+		modelJSON, err := common.Marshal(upstreamModel)
+		if err != nil {
+			return nil, err
+		}
+		fields["model"] = modelJSON
+	}
+	return common.Marshal(fields)
 }

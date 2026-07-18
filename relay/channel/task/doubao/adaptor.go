@@ -2,11 +2,12 @@ package doubao
 
 import (
 	"bytes"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -17,10 +18,12 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 )
 
 // ============================
@@ -28,12 +31,15 @@ import (
 // ============================
 
 type ContentItem struct {
-	Type     string    `json:"type,omitempty"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *MediaURL `json:"image_url,omitempty"`
-	VideoURL *MediaURL `json:"video_url,omitempty"`
-	AudioURL *MediaURL `json:"audio_url,omitempty"`
-	Role     string    `json:"role,omitempty"`
+	Type      string    `json:"type,omitempty"`
+	Text      string    `json:"text,omitempty"`
+	ImageURL  *MediaURL `json:"image_url,omitempty"`
+	VideoURL  *MediaURL `json:"video_url,omitempty"`
+	AudioURL  *MediaURL `json:"audio_url,omitempty"`
+	DraftTask *struct {
+		ID string `json:"id,omitempty"`
+	} `json:"draft_task,omitempty"`
+	Role string `json:"role,omitempty"`
 }
 
 type MediaURL struct {
@@ -117,6 +123,9 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // ValidateRequestAndSetAction parses body, validates fields and sets default action.
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		return a.validateNativeRequest(c, info)
+	}
 	// Accept only POST /v1/video/generations as "generate" action.
 	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
 }
@@ -141,12 +150,214 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 	hasVideo := hasVideoInMetadata(req.Metadata)
-	resolution, _ := req.Metadata["resolution"].(string)
-	ratio, ok := GetVideoInputRatio(info.OriginModelName, resolution, hasVideo)
+	resolution := c.GetString("task_resolution")
+	modelName := info.UpstreamModelName
+	if modelName == "" {
+		modelName = info.OriginModelName
+	}
+	family := seedancePricingFamily(modelName)
+	if family == "" {
+		return nil
+	}
+	if resolution == "" {
+		resolution = metadataStringDefault(req.Metadata, "resolution", "720p")
+	}
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	serviceTier := c.GetString(string(constant.ContextKeyTaskServiceTier))
+	if serviceTier == "" {
+		serviceTier = metadataStringDefault(req.Metadata, "service_tier", "default")
+	}
+	serviceTier = strings.ToLower(strings.TrimSpace(serviceTier))
+	draft := c.GetBool(string(constant.ContextKeyTaskDraft))
+	if _, exists := c.Get(string(constant.ContextKeyTaskDraft)); !exists {
+		draft = metadataBoolDefault(req.Metadata, "draft", false)
+	}
+	generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily
+	if value, exists := c.Get(string(constant.ContextKeyTaskGenerateAudio)); exists {
+		generateAudio, _ = value.(bool)
+	}
+	generateAudio = metadataBoolDefault(req.Metadata, "generate_audio", generateAudio)
+	c.Set(string(constant.ContextKeyTaskVideoHasInput), hasVideo)
+	c.Set(string(constant.ContextKeyTaskGenerateAudio), generateAudio)
+	c.Set(string(constant.ContextKeyTaskDraft), draft)
+	c.Set(string(constant.ContextKeyTaskServiceTier), serviceTier)
+	c.Set("task_resolution", resolution)
+	if family == seedance15ProFamily {
+		ratios, _ := GetSeedance15ProRatios(generateAudio, draft, serviceTier)
+		return ratios
+	}
+	ratio, ok := GetVideoInputRatio(modelName, resolution, hasVideo)
 	if !ok || ratio == 1.0 {
 		return nil
 	}
 	return map[string]float64{"video_input": ratio}
+}
+
+// ValidateBillingRequest runs after model mapping, so aliases cannot bypass
+// unsupported pricing combinations or receive a cheaper default tier.
+func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+	}
+	modelName := info.UpstreamModelName
+	if modelName == "" {
+		modelName = info.OriginModelName
+	}
+	family := seedancePricingFamily(modelName)
+	if family == "" {
+		if c.GetBool(common.KeySeedanceOfficialAPI) {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("unsupported Seedance model: %s", modelName), "invalid_request", http.StatusBadRequest)
+		}
+		return nil
+	}
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		storage, storageErr := common.GetBodyStorage(c)
+		if storageErr != nil {
+			return service.TaskErrorWrapperLocal(storageErr, "invalid_request", http.StatusBadRequest)
+		}
+		rawBody, bodyErr := storage.Bytes()
+		if bodyErr != nil {
+			return service.TaskErrorWrapperLocal(bodyErr, "invalid_request", http.StatusBadRequest)
+		}
+		var nativeRequest seedanceNativeRequest
+		if err := common.Unmarshal(rawBody, &nativeRequest); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+		}
+		nativeRequest.Model = modelName
+		facts, factsErr := validateSeedanceContent(modelName, nativeRequest.Content)
+		if factsErr != nil {
+			return service.TaskErrorWrapperLocal(factsErr, "invalid_request", http.StatusBadRequest)
+		}
+		if fieldsErr := validateSeedanceNativeFields(nativeRequest, facts); fieldsErr != nil {
+			return service.TaskErrorWrapperLocal(fieldsErr, "invalid_request", http.StatusBadRequest)
+		}
+		generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily
+		if nativeRequest.GenerateAudio != nil {
+			generateAudio = bool(*nativeRequest.GenerateAudio)
+		}
+		serviceTier := strings.ToLower(strings.TrimSpace(nativeRequest.ServiceTier))
+		if serviceTier == "" {
+			serviceTier = "default"
+		}
+		resolution := strings.ToLower(strings.TrimSpace(nativeRequest.Resolution))
+		if resolution == "" {
+			resolution = "720p"
+			if nativeRequest.Draft != nil && bool(*nativeRequest.Draft) {
+				resolution = "480p"
+			}
+			if family == "1.0" || family == "1.0-fast" {
+				resolution = "1080p"
+			}
+		}
+		c.Set(string(constant.ContextKeyTaskVideoHasInput), facts.videoCount > 0)
+		c.Set(string(constant.ContextKeyTaskGenerateAudio), generateAudio)
+		c.Set(string(constant.ContextKeyTaskDraft), nativeRequest.Draft != nil && bool(*nativeRequest.Draft))
+		c.Set(string(constant.ContextKeyTaskServiceTier), serviceTier)
+		c.Set("task_resolution", resolution)
+	}
+	resolution := strings.ToLower(strings.TrimSpace(c.GetString("task_resolution")))
+	if resolution == "" {
+		resolution = strings.ToLower(strings.TrimSpace(metadataStringDefault(req.Metadata, "resolution", "720p")))
+	}
+	if _, ok := GetVideoInputRatio(modelName, resolution, metadataContentHasVideo(req.Metadata)); family != seedance15ProFamily && !ok {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, modelName), "invalid_request", http.StatusBadRequest)
+	}
+	serviceTier := strings.ToLower(strings.TrimSpace(c.GetString(string(constant.ContextKeyTaskServiceTier))))
+	if serviceTier == "" {
+		serviceTier = strings.ToLower(strings.TrimSpace(metadataStringDefault(req.Metadata, "service_tier", "default")))
+	}
+	if family == seedance15ProFamily {
+		if serviceTier != "default" && serviceTier != "flex" {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("service_tier=%s is not supported by %s", serviceTier, modelName), "invalid_request", http.StatusBadRequest)
+		}
+		generateAudio := metadataBoolDefault(req.Metadata, "generate_audio", true)
+		draft := metadataBoolDefault(req.Metadata, "draft", false)
+		if draft && resolution != "480p" {
+			return service.TaskErrorWrapperLocal(stderrors.New("draft requires 480p"), "invalid_request", http.StatusBadRequest)
+		}
+		if draft && serviceTier == "flex" {
+			return service.TaskErrorWrapperLocal(stderrors.New("draft does not support flex service tier"), "invalid_request", http.StatusBadRequest)
+		}
+		_ = generateAudio
+		return nil
+	}
+	if serviceTier != "default" {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("service_tier=%s is not supported by %s", serviceTier, modelName), "invalid_request", http.StatusBadRequest)
+	}
+	if metadataBoolDefault(req.Metadata, "draft", false) {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("draft is not supported by %s", modelName), "invalid_request", http.StatusBadRequest)
+	}
+	return nil
+}
+
+func metadataStringDefault(metadata map[string]interface{}, key, fallback string) string {
+	if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
+}
+
+func metadataBoolDefault(metadata map[string]interface{}, key string, fallback bool) bool {
+	value, ok := metadata[key]
+	if !ok {
+		return fallback
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		if parsed, err := strconv.ParseBool(strings.TrimSpace(typed)); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func metadataContentHasVideo(metadata map[string]interface{}) bool {
+	return hasVideoInMetadata(metadata)
+}
+
+func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
+	bc := task.PrivateData.BillingContext
+	if bc == nil || taskResult == nil {
+		return 0
+	}
+	modelName := bc.UpstreamModelName
+	if modelName == "" {
+		modelName = bc.OriginModelName
+	}
+	family := seedancePricingFamily(modelName)
+	priceData := &types.PriceData{}
+	priceData.ReplaceOtherRatios(bc.OtherRatios)
+	if (family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily) && taskResult.Resolution != "" {
+		if ratio, ok := GetVideoInputRatio(modelName, taskResult.Resolution, bc.HasVideoInput); ok {
+			if ratio == 1 {
+				rations := priceData.OtherRatios()
+				delete(rations, "video_input")
+				priceData.ReplaceOtherRatios(rations)
+			} else {
+				priceData.AddOtherRatio("video_input", ratio)
+			}
+		}
+	}
+	if taskResult.CompletionTokensPresent || taskResult.CompletionTokens != 0 || taskResult.TotalTokens != 0 {
+		ratios := priceData.OtherRatios()
+		delete(ratios, "draft_estimate")
+		priceData.ReplaceOtherRatios(ratios)
+	}
+	bc.OtherRatios = priceData.OtherRatios()
+	if taskResult.Resolution != "" {
+		resolution := strings.ToLower(strings.TrimSpace(taskResult.Resolution))
+		if family == seedance15ProFamily {
+			if resolution == "480p" || resolution == "720p" || resolution == "1080p" {
+				bc.Resolution = resolution
+			}
+		} else if _, ok := GetVideoInputRatio(modelName, resolution, bc.HasVideoInput); ok {
+			bc.Resolution = resolution
+		}
+	}
+	return 0
 }
 
 // hasVideoInMetadata 直接检查 metadata 的 content 数组是否包含 video_url 条目，
@@ -180,6 +391,9 @@ func hasVideoInMetadata(metadata map[string]interface{}) bool {
 
 // BuildRequestBody converts request into Doubao specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		return a.buildNativeRequestBody(c, info)
+	}
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil, err
@@ -227,13 +441,13 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		return
 	}
 
-	ov := dto.NewOpenAIVideo()
-	ov.ID = info.PublicTaskID
-	ov.TaskID = info.PublicTaskID
-	ov.CreatedAt = time.Now().Unix()
-	ov.Model = info.OriginModelName
-
-	c.JSON(http.StatusOK, ov)
+	var publicResponse map[string]interface{}
+	if err := common.Unmarshal(responseBody, &publicResponse); err != nil {
+		taskErr = service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
+		return
+	}
+	publicResponse["id"] = info.PublicTaskID
+	c.JSON(http.StatusOK, publicResponse)
 	return dResp.ID, responseBody, nil
 }
 
@@ -328,13 +542,19 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		taskResult.Status = model.TaskStatusSuccess
 		taskResult.Progress = "100%"
 		taskResult.Url = resTask.Content.VideoURL
+		taskResult.Resolution = resTask.Resolution
 		// 解析 usage 信息用于按倍率计费
 		taskResult.CompletionTokens = resTask.Usage.CompletionTokens
 		taskResult.TotalTokens = resTask.Usage.TotalTokens
-	case "failed":
+		completionTokens := gjson.GetBytes(respBody, "usage.completion_tokens")
+		taskResult.CompletionTokensPresent = completionTokens.Exists() && completionTokens.Type == gjson.Number
+	case "failed", "expired", "cancelled":
 		taskResult.Status = model.TaskStatusFailure
 		taskResult.Progress = "100%"
 		taskResult.Reason = resTask.Error.Message
+		if taskResult.Reason == "" {
+			taskResult.Reason = resTask.Status
+		}
 	default:
 		// Unknown status, treat as processing
 		taskResult.Status = model.TaskStatusInProgress

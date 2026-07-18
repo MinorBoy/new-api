@@ -2,210 +2,131 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 doubao-seedance 系列视频模型按火山方舟(ARK)官方价格表 `ark-video-price.md` 精确计费——支持 3 个维度(模型 × 输出分辨率 × 是否含视频输入)的全档位倍率,并以上游响应的实际分辨率为准结算(防请求侧旁路),同时修复异步任务退款的额度守恒 bug。
+**Goal:** 按火山方舟 `ark-video-price.md` 对 Seedance 视频任务进行精确预扣和终态结算，覆盖模型、实际输出分辨率、是否含视频输入、`service_tier`、是否有声和 Draft 折算，并修复异步退款/差额结算后的用户、渠道及 `quota_data` 统计不守恒。
 
-**Architecture:** 以社区 PR #5387 的"响应分辨率结算"架构为骨架(`AdjustBillingOnComplete` 用 `taskResult.Resolution` 重算 `video_input` 倍率),按官方文档 `ark-video-price.md` 补全价格表(#5387 缺 4k 档、mini 模型、1.5-pro 声音维度),并从 PR #4560 摘取异步任务退款额度守恒修复(普适 bug,与计费倍率无关)。
+**Architecture:** 提交阶段由 doubao adaptor 根据映射后的上游模型和请求事实生成受控 `OtherRatios`，并把无法从响应反推的事实冻结到 `TaskBillingContext`。轮询成功后优先使用上游实际 `resolution` 修正单价档，使用官方指定的 `usage.completion_tokens`（缺失时才回退 `total_tokens`）通过现有 `common.QuotaFromFloatChecked` 链路结算。所有统计调整以任务提交小时为桶，差额只调整金额/token，不增加请求次数。
 
-**Tech Stack:** Go 1.22+, GORM v2, testify(require+assert),JSON 统一走 `common.*`。计费安全遵循 AGENTS.md:`common.QuotaFromFloat`/`QuotaRound` 集中转换,饱和用 `*Checked` 变体。
+**Tech Stack:** Go 1.22+、GORM v2、testify（`require` + `assert`）、`common.QuotaFromFloatChecked`、`types.PriceData.AddOtherRatio`。
 
-**参考基线:**
-- [PR #5387](https://github.com/QuantumNous/new-api/pull/5387) `feat/seedance-resolution-billing`(响应分辨率结算架构,17 文件,含前端)
-- [PR #4560](https://github.com/QuantumNous/new-api/pull/4560) `fix/seedance-price`(额度守恒修复,8 文件)
-- 官方价格表:`ark-video-price.md`(项目根目录)
+**Required reading:** 实施前必须完整阅读 `pkg/billingexpr/expr.md`。本功能保留 adaptor `OtherRatios`，因为最终分辨率只在异步响应阶段可知，不能只用请求时 billing expression 决定最终价格。
 
-**依赖:** 本计划假设 `2026-07-18-ark-native-compat.md` 已合并或至少 Task 5(adaptor 改动)已落地,因为两者都改 `relay/channel/task/doubao/adaptor.go` 的 `ParseTaskResult`。
+**References:** [PR #5387](https://github.com/QuantumNous/new-api/pull/5387)、[PR #4560](https://github.com/QuantumNous/new-api/pull/4560) 仅作参考；正式视频字段/模型能力以 `docs/channel/api-doc-doubao-video-generation.md` 为准，必须修复其模型映射、统计时桶和前端契约 review 问题后再采用。
 
 ---
 
-## Scope
+## Review Decisions
 
-✅ 价格表按官方文档全档位补全(4k/mini/1.5-pro 声音)
-✅ 响应分辨率结算(防 `--rs 1080p` 旁路,采纳 #5387 架构)
-✅ 异步任务退款额度守恒修复(摘自 #4560)
-❌ 前端退款对账展示(#5387 的前端 i18n 改动,非计费核心,可后续独立 PR)
-❌ 完整复刻 #5387 前端日志"计费过程"展示
+本审定版替代原计划中的以下错误或缺口：
 
----
+1. 价格查表使用 `info.UpstreamModelName`；`TaskBillingContext` 同时保存 origin 和 upstream 模型，结算优先使用 upstream。
+2. 新增资料确认 Mini 的可调用模型 ID 为 `doubao-seedance-2-0-mini-260615`。价格匹配仍按稳定 family 前缀识别版本化 ID，但 `relay/channel/task/doubao/constants.go` 的 `ModelList` 必须显式加入该精确 ID，并由回归测试锁定。
+3. 未知分辨率或不支持的模型/分辨率组合必须在请求校验阶段返回 400，不能静默按基准价少收。
+4. Seedance 1.5 Pro family 的 `generate_audio` 默认值是 `true`。是否有声只看输出控制字段，输入 `audio_url` 不等于有声输出。
+5. 1.5 Pro 同时支持 `service_tier=flex`（单价 0.5 倍）和 Draft token 预估折算（有声 0.6、无声 0.7）；原计划漏算这两个维度。Draft 折算已反映在上游实际 `completion_tokens` 中，终态结算前必须移除预估倍率，禁止重复折扣。
+6. Seedance 2.0 系列当前不支持 `service_tier=flex`，请求阶段拒绝，而不是应用 0.5。
+7. 官方说明准确 token 用量以 `usage.completion_tokens` 为准；不能无条件使用 `usage.total_tokens`。
+8. 原生视频的模型能力校验以 `2026-07-18-ark-native-compat.md` 为入口；本计划在映射后再次拒绝会影响价格或预扣的模型/分辨率/服务等级组合，不能依赖上游返回 400。
+9. 图片生成不使用本计划的视频 token 结算逻辑；其成功张数由原生图像计划按 `usage.generated_images` 收口。
+10. `AdjustBillingOnComplete` 返回 0 时仍可先修正内存中的 BillingContext，再由通用 token 结算读取；但日志字段必须由 `taskBillingOther` 显式写入。
+11. 退款函数当前签名是 `RefundTaskQuota(ctx, task, reason)` 且无返回值，计划不得编造 `error` 返回值或不存在的测试 helper。
+12. `User.UsedQuota` 的负向调整不能调用会增加 `request_count` 的 `UpdateUserUsedQuotaAndRequestCount`；新增只调整 used quota 的 API。
+13. `quota_data` 调整写入任务提交小时，并沿用 `group/token/channel/node` 维度；差额记录的 `Count` 必须是 0。
+14. 不新增裸 `int(float64(...))`。预扣和终态结算继续使用带 clamp 的公共额度转换，并把 clamp 写入 `admin_info.quota_saturation`。
 
-## 官方价格表(计费依据,来自 ark-video-price.md)
+## Billing Baselines
 
-| 模型 | 分辨率 | 输入不含视频 | 输入含视频 | 计费维度 |
-|---|---|---|---|---|
-| doubao-seedance-2.0 | 480p/720p | 46 | 28 | 分辨率×视频 |
-| doubao-seedance-2.0 | 1080p | 51 | 31 | 分辨率×视频 |
-| doubao-seedance-2.0 | 4k | 26 | 16 | 分辨率×视频 |
-| doubao-seedance-2.0-fast | 480p/720p | 37 | 22 | 分辨率×视频(不支持1080/4k) |
-| doubao-seedance-2.0-mini | 480p/720p | 23 | 14 | 分辨率×视频(不支持1080/4k) |
-| doubao-seedance-1.5-pro | - | 有声16/无声8 | - | **声音维度**(非分辨率) |
-| doubao-seedance-1.0-pro | - | 15 | - | 单价 |
-| doubao-seedance-1.0-pro-fast | - | 4.2 | - | 单价 |
+管理员对每个模型配置“在线、无附加条件”的基准 `ModelRatio`：
 
-**关键规则(官方文档 line 44-48):**
-- 仅对成功生成的视频计费,审核失败不收费
-- 准确 token 用量以 `usage.completion_tokens` 为准
-- token 用量公式:`(输入视频时长+输出视频时长) × 宽 × 高 × 帧率 / 1024`
-- 含视频输入时有最低 token 用量限制(低于则按最低计费)
+| Family | 基准单价（元/百万 token） | 附加规则 |
+|---|---:|---|
+| Seedance 2.0 | 46 | 分辨率 × 视频输入 |
+| Seedance 2.0 Fast | 37 | 视频输入；仅 480p/720p |
+| Seedance 2.0 Mini | 23 | 视频输入；仅 480p/720p |
+| Seedance 1.5 Pro | 8 | 有声 × flex × Draft |
 
----
+2.0 精确档位：46/28（480p、720p），51/31（1080p），26/16（4k）。Fast 为 37/22，Mini 为 23/14。斜杠前后分别表示输入不含/包含视频。
+
+1.5 Pro：有声单价倍率 2；`flex` 单价倍率 0.5；Draft 在预扣阶段使用有声 0.6、无声 0.7 的 `draft_estimate`。终态拿到权威 `completion_tokens` 后删除 `draft_estimate`，只保留单价倍率。
 
 ## File Structure
 
-| 文件 | 责任 | 来源 |
-|---|---|---|
-| `relay/common/relay_info.go` | TaskInfo 加 `Resolution` 字段 | #5387 |
-| `relay/channel/task/doubao/constants.go` | 重写价格表(全档位)+ `GetVideoBillingRatio` | #5387 + 官方文档补全 |
-| `relay/channel/task/doubao/constants_test.go` | 价格表测试(新增) | 新建 |
-| `relay/channel/task/doubao/adaptor.go` | ParseTaskResult 回填 Resolution + AdjustBillingOnComplete + 1.5-pro 声音分支 | #5387 + 1.5-pro 扩展 |
-| `service/task_billing.go` | 退款额度守恒修复 | #4560 摘取 |
+| 文件 | 责任 |
+|---|---|
+| `relay/channel/task/doubao/constants.go` | family 归一化、价格和请求组合校验 |
+| `relay/channel/task/doubao/constants_test.go` | 官方价格矩阵测试 |
+| `relay/channel/task/doubao/adaptor.go` | 请求事实、预扣倍率、响应权威字段、终态倍率修正 |
+| `relay/channel/task/doubao/adaptor_test.go` | 预扣和终态结算测试 |
+| `relay/channel/adapter.go` | 可选的映射后计费请求校验接口 |
+| `relay/relay_task.go` | 模型映射后、预扣前执行计费组合校验 |
+| `constant/context_key.go` | 传递任务计费事实 |
+| `relay/common/relay_info.go` | `TaskInfo.Resolution` |
+| `model/task.go` | 持久化计费快照 |
+| `controller/relay.go` | 冻结 origin/upstream 模型和请求事实 |
+| `service/task_polling.go` | 选择权威 billing token |
+| `service/task_billing.go` | 差额结算、日志、统计守恒 |
+| `service/task_billing_test.go` | 钱包/订阅/统计不变量测试 |
+| `model/user.go` | used quota 有符号增量 API |
+| `model/usedata.go` | `quota_data` 不增 count 的调整 API |
+| `model/log.go` | 任务差额日志不再自行重复写 dashboard 统计 |
 
 ---
 
-## Task 1: TaskInfo 加 Resolution 字段(基础设施)
-
-**Files:**
-- Modify: `relay/common/relay_info.go:772-782`(TaskInfo 结构体)
-
-- [ ] **Step 1: 加字段**
-
-修改 `relay/common/relay_info.go` 的 `TaskInfo` 结构体,在 `TotalTokens` 之后追加:
-
-```go
-type TaskInfo struct {
-	Code             int    `json:"code"`
-	TaskID           string `json:"task_id"`
-	Status           string `json:"status"`
-	Reason           string `json:"reason,omitempty"`
-	Url              string `json:"url,omitempty"`
-	RemoteUrl        string `json:"remote_url,omitempty"`
-	Progress         string `json:"progress,omitempty"`
-	CompletionTokens int    `json:"completion_tokens,omitempty"` // 用于按倍率计费
-	TotalTokens      int    `json:"total_tokens,omitempty"`      // 用于按倍率计费
-	Resolution       string `json:"resolution,omitempty"`        // 上游实际输出分辨率,用于按真实分辨率结算
-}
-```
-
-- [ ] **Step 2: 验证编译**
-
-Run: `go build ./relay/common/`
-Expected: 无输出
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add relay/common/relay_info.go
-git commit -m "feat(seedance-billing): add Resolution field to TaskInfo for response-based settlement"
-```
-
----
-
-## Task 2: 重写价格表(全档位,按官方文档)
+## Task 1: 价格 family 和完整倍率矩阵
 
 **Files:**
 - Modify: `relay/channel/task/doubao/constants.go`
-- Test: `relay/channel/task/doubao/constants_test.go`(新建)
+- Create: `relay/channel/task/doubao/constants_test.go`
 
-> 这是计费核心,从纯函数 `GetVideoBillingRatio` 开始 TDD。
+- [ ] **Step 1: 写失败的官方价格表测试**
 
-- [ ] **Step 1: 写失败测试(2.0 全档位)**
+使用确定性表驱动测试覆盖：
 
-创建 `relay/channel/task/doubao/constants_test.go`:
+- 2.0 的 480p/720p/1080p/4k × 有无视频八个组合。
+- Fast 和 Mini 的 480p/720p × 有无视频。
+- Mini 的无后缀 ID 和任意日期后缀 ID 命中同一 family。
+- `doubao-seedance-2-0-mini-260615` 必须出现在 `ModelList`，并命中 Mini 的 23/14 价格。
+- `1080p`/`4k` 在 Fast/Mini 返回“不支持”，未知分辨率返回“不支持”。
+- 1.5 Pro 有声/无声、default/flex、draft/non-draft 组合。
+- 未知模型返回 `ok=false`。
+
+断言使用 `assert.InDelta`，不增加只包装一次比较的手写 helper。
+
+Run: `go test ./relay/channel/task/doubao -run SeedancePricing -v`
+
+Expected: FAIL。
+
+- [ ] **Step 2: 实现稳定 family 归一化**
+
+先匹配更具体的 Fast/Mini，再匹配普通 2.0，避免前缀吞掉子 family：
 
 ```go
-package doubao
-
-import (
-	"math"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+const (
+	seedance20Family     = "seedance-2.0"
+	seedance20FastFamily = "seedance-2.0-fast"
+	seedance20MiniFamily = "seedance-2.0-mini"
+	seedance15ProFamily  = "seedance-1.5-pro"
 )
 
-// ratioEqual 比较两个 float64 倍率是否相等(允许 1e-6 误差,处理 28/46 这类除法)
-func ratioEqual(t *testing.T, expected, actual float64) {
-	t.Helper()
-	assert.True(t, math.Abs(expected-actual) < 1e-6,
-		"ratio mismatch: expected %v, got %v", expected, actual)
-}
-
-// TestSeedance20AllTiers 覆盖 doubao-seedance-2-0-260128 全部分辨率档×视频档
-// 价格依据 ark-video-price.md:基准 46(480p/720p 不含视频)
-func TestSeedance20AllTiers(t *testing.T) {
-	const model = "doubao-seedance-2-0-260128"
-	const base = 46.0
-
-	cases := []struct {
-		name       string
-		resolution string
-		hasVideo   bool
-		price      float64 // 官方单价
-	}{
-		{"480p_no_video", "480p", false, 46},
-		{"720p_no_video", "720p", false, 46},
-		{"480p_with_video", "480p", true, 28},
-		{"720p_with_video", "720p", true, 28},
-		{"1080p_no_video", "1080p", false, 51},
-		{"1080p_with_video", "1080p", true, 31},
-		{"4k_no_video", "4k", false, 26},     // ★ 官方有,#5387 缺
-		{"4k_with_video", "4k", true, 16},    // ★ 官方有,#5387 缺
+func seedancePricingFamily(modelName string) string {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	switch {
+	case strings.HasPrefix(modelName, "doubao-seedance-2-0-fast"):
+		return seedance20FastFamily
+	case strings.HasPrefix(modelName, "doubao-seedance-2-0-mini"):
+		return seedance20MiniFamily
+	case strings.HasPrefix(modelName, "doubao-seedance-2-0"):
+		return seedance20Family
+	case strings.HasPrefix(modelName, "doubao-seedance-1-5-pro"):
+		return seedance15ProFamily
+	default:
+		return ""
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ratio, ok := GetVideoBillingRatio(model, tc.resolution, tc.hasVideo)
-			require.True(t, ok, "model %s must have pricing config", model)
-			ratioEqual(t, tc.price/base, ratio)
-		})
-	}
-}
-
-// TestSeedance20FastTiers 覆盖 doubao-seedance-2-0-fast-260128(不支持 1080p/4k)
-func TestSeedance20FastTiers(t *testing.T) {
-	const model = "doubao-seedance-2-0-fast-260128"
-	const base = 37.0
-
-	// 480p/720p 两档
-	ratio, ok := GetVideoBillingRatio(model, "720p", false)
-	require.True(t, ok)
-	ratioEqual(t, 37.0/base, ratio)
-
-	ratio, ok = GetVideoBillingRatio(model, "480p", true)
-	require.True(t, ok)
-	ratioEqual(t, 22.0/base, ratio)
-}
-
-// TestSeedance20MiniTiers 覆盖 doubao-seedance-2-0-mini(★ 官方有,所有 PR 都缺)
-// 官方价格:不含视频 23,含视频 14,不支持 1080p/4k
-func TestSeedance20MiniTiers(t *testing.T) {
-	// 注意:实际模型名常量需先在 ModelList 注册(见 Task 2 Step 5)
-	// 这里用官方文档模型名,执行时以 ARK 实际发布的模型 id 为准
-	const model = "doubao-seedance-2-0-mini-XXXXXX" // ★ 待确认实际后缀,见 Task 2 Step 5 说明
-	const base = 23.0
-
-	ratio, ok := GetVideoBillingRatio(model, "720p", false)
-	require.True(t, ok, "mini model must be configured")
-	ratioEqual(t, 23.0/base, ratio)
-
-	ratio, ok = GetVideoBillingRatio(model, "720p", true)
-	require.True(t, ok)
-	ratioEqual(t, 14.0/base, ratio)
 }
 ```
 
-- [ ] **Step 2: 运行测试,验证失败**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedance20 -v`
-Expected: FAIL(当前函数名是 `GetVideoInputRatio` 而非 `GetVideoBillingRatio`,且无 4k/mini 配置)
-
-- [ ] **Step 3: 重写价格表(替换现有 videoPriceTable + GetVideoInputRatio)**
-
-修改 `relay/channel/task/doubao/constants.go`,**完全替换** line 16-56 的 `videoPriceKey`/`videoPriceTable`/`GetVideoInputRatio`:
+在同一文件的 `ModelList` 中保留已有模型并追加官方确认的精确 ID：
 
 ```go
-package doubao
-
-import "strings"
-
 var ModelList = []string{
 	"doubao-seedance-1-0-pro-250528",
 	"doubao-seedance-1-0-lite-t2v",
@@ -213,667 +134,519 @@ var ModelList = []string{
 	"doubao-seedance-1-5-pro-251215",
 	"doubao-seedance-2-0-260128",
 	"doubao-seedance-2-0-fast-260128",
-	// ★ 新增(需确认实际模型名,见 Step 5)
-	// "doubao-seedance-2-0-mini-XXXXXX",
+	"doubao-seedance-2-0-mini-260615",
 }
+```
 
-var ChannelName = "doubao-video"
+测试同时断言列表包含 `doubao-seedance-2-0-mini-260615`，价格函数对该 ID 和任意 `doubao-seedance-2-0-mini-*` 后缀返回同一 family。
 
-// videoPricing 单个模型的分辨率×视频档位价格表。
-// base 为基准价(480p/720p 不含视频),其他档位以 base 为 1.0 折算倍率。
-type videoPricing struct {
-	base    float64                          // 基准单价(元/百万token)
-	tiers   map[pricingTier]float64          // 各档位实际单价
-}
+- [ ] **Step 3: 实现 2.0 系列价格表**
 
-// pricingTier 分辨率 × 是否含视频输入 的组合键
-type pricingTier struct {
-	resolution string  // "480p"/"720p"(基准)/"1080p"/"4k"
+用 `(family, resolution, hasVideo)` 查实际单价，再除以 family 基准价。空分辨率按官方默认 `720p`；只有大小写变体可归一化。未知值和未配置组合返回 `(0, false)`，由请求验证返回 400。
+
+```go
+type videoPricingTier struct {
+	family     string
+	resolution string
 	hasVideo   bool
 }
 
-// videoPricingMap 严格依据 ark-video-price.md(2026-01-28 官方价格表)。
-// 未登记的模型(seedance-1.x)跳过倍率,由管理员配 ModelRatio 全额计费。
-var videoPricingMap = map[string]videoPricing{
-	// doubao-seedance-2.0:支持 480p/720p/1080p/4k 全档
-	"doubao-seedance-2-0-260128": {
-		base: 46,
-		tiers: map[pricingTier]float64{
-			{"480p", false}: 46,  {"480p", true}: 28,
-			{"720p", false}: 46,  {"720p", true}: 28,
-			{"1080p", false}: 51, {"1080p", true}: 31,
-			{"4k", false}: 26,    {"4k", true}: 16,
-		},
-	},
-	// doubao-seedance-2.0-fast:不支持 1080p/4k
-	"doubao-seedance-2-0-fast-260128": {
-		base: 37,
-		tiers: map[pricingTier]float64{
-			{"480p", false}: 37, {"480p", true}: 22,
-			{"720p", false}: 37, {"720p", true}: 22,
-		},
-	},
-	// ★ doubao-seedance-2.0-mini(待确认实际模型名后取消注释)
-	// 官方价格:不含视频 23,含视频 14,不支持 1080p/4k
-	// "doubao-seedance-2-0-mini-XXXXXX": {
-	// 	base: 23,
-	// 	tiers: map[pricingTier]float64{
-	// 		{"480p", false}: 23, {"480p", true}: 14,
-	// 		{"720p", false}: 23, {"720p", true}: 14,
-	// 	},
-	// },
+var videoPrices = map[videoPricingTier]float64{
+	{seedance20Family, "480p", false}: 46,
+	{seedance20Family, "480p", true}:  28,
+	{seedance20Family, "720p", false}: 46,
+	{seedance20Family, "720p", true}:  28,
+	{seedance20Family, "1080p", false}: 51,
+	{seedance20Family, "1080p", true}:  31,
+	{seedance20Family, "4k", false}:    26,
+	{seedance20Family, "4k", true}:     16,
+	{seedance20FastFamily, "480p", false}: 37,
+	{seedance20FastFamily, "480p", true}:  22,
+	{seedance20FastFamily, "720p", false}: 37,
+	{seedance20FastFamily, "720p", true}:  22,
+	{seedance20MiniFamily, "480p", false}: 23,
+	{seedance20MiniFamily, "480p", true}:  14,
+	{seedance20MiniFamily, "720p", false}: 23,
+	{seedance20MiniFamily, "720p", true}:  14,
 }
 
-// normalizeResolution 把 "480P"/"1080p"/"4K" 等大小写变体统一为标准形式。
-// 空或未知值回退为 "720p"(豆包默认输出分辨率)。
-func normalizeResolution(r string) string {
-	switch strings.ToLower(strings.TrimSpace(r)) {
-	case "480p":
-		return "480p"
-	case "1080p":
-		return "1080p"
-	case "4k":
-		return "4k"
-	default:
-		return "720p"
-	}
+var videoBasePrices = map[string]float64{
+	seedance20Family: 46,
+	seedance20FastFamily: 37,
+	seedance20MiniFamily: 23,
 }
 
-// GetVideoBillingRatio 返回指定模型在(输出分辨率, 是否含视频输入)下相对基准价的计费倍率。
-// 第二返回值表示该模型是否配置了价格表;未配置时返回 (0, false),调用方应保持原 ModelRatio 全额计费。
-// 倍率为 1.0 表示命中基准档,调用方可忽略(不产生 OtherRatio)。
 func GetVideoBillingRatio(modelName, resolution string, hasVideo bool) (float64, bool) {
-	p, ok := videoPricingMap[modelName]
-	if !ok || p.base <= 0 {
+	family := seedancePricingFamily(modelName)
+	base, baseOK := videoBasePrices[family]
+	if !baseOK || base <= 0 {
 		return 0, false
 	}
-	res := normalizeResolution(resolution)
-	price, ok := p.tiers[pricingTier{resolution: res, hasVideo: hasVideo}]
-	if !ok {
-		// 未配置组合(如 fast 传 1080p):上游会自行拒绝,这里按基准价计费
-		price = p.base
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	if resolution == "" {
+		resolution = "720p"
 	}
-	return price / p.base, true
+	if resolution != "480p" && resolution != "720p" && resolution != "1080p" && resolution != "4k" {
+		return 0, false
+	}
+	price, ok := videoPrices[videoPricingTier{family: family, resolution: resolution, hasVideo: hasVideo}]
+	if !ok {
+		return 0, false
+	}
+	return price / base, true
 }
 ```
 
-- [ ] **Step 4: 运行 2.0 和 fast 测试,验证通过(mini 测试暂时跳过)**
+- [ ] **Step 4: 实现 1.5 Pro 倍率**
 
-Run: `go test ./relay/channel/task/doubao/ -run "TestSeedance20AllTiers|TestSeedance20FastTiers" -v`
-Expected: PASS
+稳定函数返回独立倍率，调用方通过 `PriceData.AddOtherRatio` 合并：
 
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedance20MiniTiers -v`
-Expected: FAIL(mini 未配置,这是预期,等 Step 5)
+```go
+func GetSeedance15ProRatios(generateAudio, draft bool, serviceTier string) (map[string]float64, bool) {
+	serviceTier = strings.ToLower(strings.TrimSpace(serviceTier))
+	if serviceTier == "" {
+		serviceTier = "default"
+	}
+	if serviceTier != "default" && serviceTier != "flex" {
+		return nil, false
+	}
 
-- [ ] **Step 5: 确认 mini 模型名并补全**
+	ratios := make(map[string]float64)
+	if generateAudio {
+		ratios["audio"] = 2
+	}
+	if serviceTier == "flex" {
+		ratios["service_tier"] = 0.5
+	}
+	if draft {
+		if generateAudio {
+			ratios["draft_estimate"] = 0.6
+		} else {
+			ratios["draft_estimate"] = 0.7
+		}
+	}
+	return ratios, true
+}
+```
 
-**执行前必须先确认** `doubao-seedance-2.0-mini` 的实际模型 id。官方文档 `ark-video-price.md` 只写 "doubao-seedance-2.0-mini",但 new-api 的模型名约定带日期后缀(如 `-260128`)。
+- [ ] **Step 5: 验证并提交**
 
-确认方式(任选其一):
-1. 查火山方舟控制台的模型列表
-2. 用 ARK API 查询:`GET https://ark.cn-beijing.volces.com/api/v3/models`
-3. 临时先不注册 mini,跳过 `TestSeedance20MiniTiers`,等模型名确认后单独补 PR
-
-**若已确认模型名**(假设是 `doubao-seedance-2-0-mini-260128`):
-
-1. 在 `ModelList` 取消注释该行(填实际名)
-2. 在 `videoPricingMap` 取消注释 mini 配置(填实际名)
-3. 在 `constants_test.go` 把 `TestSeedance20MiniTiers` 的 `const model` 改为实际名
-
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedance20MiniTiers -v`
-Expected: PASS
-
-- [ ] **Step 6: 运行全部价格表测试**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedance20 -v`
-Expected: 全部 PASS(mini 待 Step 5 确认后)
-
-- [ ] **Step 7: Commit**
+Run: `go test ./relay/channel/task/doubao -run SeedancePricing -v`
 
 ```bash
 git add relay/channel/task/doubao/constants.go relay/channel/task/doubao/constants_test.go
-git commit -m "feat(seedance-billing): full-tier pricing per ark-video-price.md (4k/fast/mini)"
+git commit -m "feat(seedance-billing): cover official pricing matrix"
 ```
 
 ---
 
-## Task 3: ParseTaskResult 回填 Resolution + AdjustBillingOnComplete(响应分辨率结算)
+## Task 2: 请求校验、预扣倍率和计费快照
 
 **Files:**
+- Modify: `constant/context_key.go`
+- Modify: `relay/channel/adapter.go`
+- Modify: `relay/relay_task.go`
 - Modify: `relay/channel/task/doubao/adaptor.go`
-- Test: `relay/channel/task/doubao/adaptor_test.go`(已在原生入口计划创建,这里追加)
+- Modify: `relay/channel/task/doubao/adaptor_test.go`
+- Modify: `model/task.go`
+- Modify: `controller/relay.go`
 
-- [ ] **Step 1: 写失败测试(ParseTaskResult 回填 Resolution)**
+- [ ] **Step 1: 写失败测试**
 
-在 `relay/channel/task/doubao/adaptor_test.go` 追加:
+测试以下可观察行为：
+
+- 模型映射 alias -> `doubao-seedance-2-0-260128` 时，按 upstream 模型命中 2.0 价格。
+- 模型映射到精确 Mini ID `doubao-seedance-2-0-mini-260615` 时，按 Mini 价格；Mini/Fast 的 1080p、普通 2.0 的 4k 组合分别按支持/不支持处理。
+- 2.0 1080p + 视频输入得到 `31/46`；4k 无视频得到 `26/46`。
+- Fast/Mini 的 1080p、2.0 系列的 `service_tier=flex` 返回 400。
+- 1.5 Pro 未传 `generate_audio` 按 `true`；显式 `false` 保留并按无声计费。
+- 1.5 Pro `flex + draft + generate_audio=true` 同时得到 `audio=2`、`service_tier=0.5`、`draft_estimate=0.6`。
+- 1.5 Pro `draft=true` 只允许 480p，且拒绝 `service_tier=flex` 和 `return_last_frame=true`；2.0/Fast/Mini 的 `draft=true` 返回 400，但这些模型的 `generate_audio` 仍按官方支持范围处理。
+- 视频时长遵循原生计划的模型范围（1.0: 2~12、1.5: 4~12/-1、2.0: 4~15/-1），不能把 `duration=-1` 当成负的计费倍率。
+- 预扣计算出的每个倍率最终都通过 `PriceData.AddOtherRatio`，不存在 0、负数、NaN 或 +Inf。
+
+Run: `go test ./relay/channel/task/doubao -run SeedanceEstimateBilling -v`
+
+Expected: FAIL。
+
+- [ ] **Step 2: 增加请求事实 context key**
+
+在 `constant/context_key.go` 添加：
 
 ```go
-// TestParseTaskResultFillsResolution 验证 succeeded 时 Resolution 被回填到 TaskInfo
-// 这是响应分辨率结算的前提:ParseTaskResult 必须把上游实际分辨率传给结算阶段
-func TestParseTaskResultFillsResolution(t *testing.T) {
-	adaptor := &TaskAdaptor{}
-	body := []byte(`{"id":"t1","status":"succeeded","resolution":"1080p","content":{"video_url":"https://x/v.mp4"},"usage":{"completion_tokens":1000,"total_tokens":1200}}`)
+ContextKeyTaskVideoHasInput ContextKey = "task_video_has_input"
+ContextKeyTaskGenerateAudio ContextKey = "task_generate_audio"
+ContextKeyTaskDraft         ContextKey = "task_draft"
+ContextKeyTaskServiceTier   ContextKey = "task_service_tier"
+```
 
-	result, err := adaptor.ParseTaskResult(body)
-	require.NoError(t, err)
-	require.Equal(t, model.TaskStatusSuccess, result.Status)
-	assert.Equal(t, "1080p", result.Resolution, "Resolution must be filled from upstream response")
-	assert.Equal(t, 1000, result.CompletionTokens)
-	assert.Equal(t, 1200, result.TotalTokens)
+- [ ] **Step 3: 基础解析后、模型映射后分别校验**
+
+`ValidateRequestAndSetAction` 只完成现有/ARK 原生基础解析和与模型无关的类型、范围校验。模型 mapping 在该方法之后才执行，因此不能只在这里校验 family 组合。
+
+在 `relay/channel/adapter.go` 增加可选接口：
+
+```go
+type TaskBillingRequestValidator interface {
+	ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError
 }
 ```
 
-- [ ] **Step 2: 运行,验证失败**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestParseTaskResultFillsResolution -v`
-Expected: FAIL(当前 succeeded 分支未填 Resolution)
-
-- [ ] **Step 3: 实现 Resolution 回填**
-
-修改 `relay/channel/task/doubao/adaptor.go` 的 `ParseTaskResult`,在 `case "succeeded":` 分支追加一行:
+在 `relay.RelayTaskSubmit` 调用 `helper.ModelMappedHelper` 成功后、`ModelPriceHelperPerCall` 和任何预扣之前执行：
 
 ```go
-	case "succeeded":
-		taskResult.Status = model.TaskStatusSuccess
-		taskResult.Progress = "100%"
-		taskResult.Url = resTask.Content.VideoURL
-		taskResult.CompletionTokens = resTask.Usage.CompletionTokens
-		taskResult.TotalTokens = resTask.Usage.TotalTokens
-		taskResult.Resolution = resTask.Resolution // ★ 新增:回填上游实际分辨率供结算
-```
-
-- [ ] **Step 4: 运行,验证通过**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestParseTaskResultFillsResolution -v`
-Expected: PASS
-
-- [ ] **Step 5: 写失败测试(AdjustBillingOnComplete 按响应分辨率重算)**
-
-在 `adaptor_test.go` 追加:
-
-```go
-// TestAdjustBillingOnCompleteUsesResponseResolution 验证结算时用响应分辨率(而非请求分辨率)
-// 防 --rs 1080p 旁路:即使请求侧解析不到 1080p,响应返回 1080p 仍按 1080p 计费
-func TestAdjustBillingOnCompleteUsesResponseResolution(t *testing.T) {
-	adaptor := &TaskAdaptor{}
-
-	// 模拟任务提交时按 720p 预扣(请求侧),但上游实际输出 1080p
-	task := &model.Task{
-		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
-		PrivateData: model.TaskPrivateData{
-			BillingContext: &model.TaskBillingContext{
-				OriginModelName: "doubao-seedance-2-0-260128",
-				HasVideoInput:   false,
-				OtherRatios:     map[string]float64{}, // 预扣时 720p 基准,无 video_input
-			},
-		},
+if validator, ok := adaptor.(channel.TaskBillingRequestValidator); ok {
+	if taskErr := validator.ValidateBillingRequest(c, info); taskErr != nil {
+		return nil, taskErr
 	}
-	// 上游响应返回 1080p
-	taskResult := &relaycommon.TaskInfo{
-		Status:     model.TaskStatusSuccess,
-		Resolution: "1080p",
-		TotalTokens: 1200,
-	}
-
-	// AdjustBillingOnComplete 返回 0(不直接给额度),而是修正 BillingContext.OtherRatios
-	quota := adaptor.AdjustBillingOnComplete(task, taskResult)
-	assert.Equal(t, 0, quota, "must return 0, let generic token-based settlement handle it")
-
-	// 验证 OtherRatios 被修正为 1080p 档(51/46)
-	ratio, ok := task.PrivateData.BillingContext.OtherRatios["video_input"]
-	require.True(t, ok, "video_input ratio must be set for 1080p")
-	assert.InDelta(t, 51.0/46.0, ratio, 1e-6)
-
-	// Resolution 和 TotalTokens 被记录到 BillingContext(供日志展示)
-	assert.Equal(t, "1080p", task.PrivateData.BillingContext.Resolution)
-	assert.Equal(t, 1200, task.PrivateData.BillingContext.TotalTokens)
 }
 ```
 
-- [ ] **Step 6: 运行,验证失败**
+doubao adaptor 的 `ValidateBillingRequest` 从 `relaycommon.GetTaskRequest(c)` 读取 metadata，并使用已经映射完成的 `info.UpstreamModelName` 校验 family 组合。这样 alias 映射到 Fast/Mini 后也能在预扣前拒绝 1080p。
 
-Run: `go test ./relay/channel/task/doubao/ -run TestAdjustBillingOnCompleteUsesResponseResolution -v`
-Expected: FAIL(当前 AdjustBillingOnComplete 是 BaseBilling 的 no-op,返回 0 但不修正 OtherRatios)
+规则：
 
-- [ ] **Step 7: 实现 AdjustBillingOnComplete**
+- 2.0：分辨率仅 480p/720p/1080p/4k，`service_tier` 仅空/default。
+- Fast/Mini：分辨率仅 480p/720p，`service_tier` 仅空/default。
+- 1.5 Pro：分辨率仅 480p/720p/1080p，`service_tier` 仅空/default/flex。
+- `generate_audio` 和 `draft` 非 boolean 时返回 400；2.0/Fast/Mini 与 1.5 Pro 支持 `generate_audio`，但 `draft` 仅 1.5 Pro 支持，1.0 系列拒绝两者；1.5 Pro 的 `draft` 约束由原生校验执行。
+- `resolution` 缺省按官方 720p 进入价格查表；`duration`、`frames`、`priority` 等已在原生校验中完成上限检查，计费 adaptor 不从 `metadata` 旁路字段读取第二份值。
 
-首先,`TaskBillingContext` 需要加 `HasVideoInput`/`Resolution`/`TotalTokens` 字段(若 #5387 未合并,需手动加)。修改 `model/task.go` 的 `TaskBillingContext`:
+- [ ] **Step 4: 预扣时记录请求事实并返回倍率**
 
-```go
-type TaskBillingContext struct {
-	ModelPrice      float64           `json:"model_price,omitempty"`
-	GroupRatio      float64           `json:"group_ratio,omitempty"`
-	ModelRatio      float64           `json:"model_ratio,omitempty"`
-	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`
-	OriginModelName string            `json:"origin_model_name,omitempty"`
-	PerCallBilling  bool              `json:"per_call_billing,omitempty"`
-	// ★ 新增(计费精确化)
-	HasVideoInput bool   `json:"has_video_input,omitempty"` // 输入是否含视频(请求侧事实)
-	Resolution    string `json:"resolution,omitempty"`     // 结算时上游实际输出分辨率(日志展示)
-	TotalTokens   int    `json:"total_tokens,omitempty"`   // 结算时上游 total_tokens(日志展示)
-}
-```
+`EstimateBilling` 必须使用 `info.UpstreamModelName`，为空才回退 `info.OriginModelName`。1.5 Pro 的 `generate_audio` 默认 true；不要根据 `content[].audio_url` 推断。
 
-> **注意:** 需先 grep `model/task.go` 确认 `TaskBillingContext` 的实际定义位置和现有字段,按实际为准。
+把原生校验归一化后的 `generate_audio` 以指针写入 `TaskBillingContext`，这样显式 `false` 不会因 `omitempty` 丢失；历史任务 `GenerateAudio == nil` 时，1.5 Pro 按官方默认 `true`，其他模型不应用声音倍率。
 
-然后,在 `relay/channel/task/doubao/adaptor.go` 实现 `AdjustBillingOnComplete`(覆盖 BaseBilling 的 no-op):
+返回的 map 只包含倍率不为 1 的项；`RelayTaskSubmit` 已逐项调用 `info.PriceData.AddOtherRatio`，不得直接写 `PriceData` 内部 map。`draft_estimate` 只用于降低预扣，不能作为最终单价倍率保留。
+
+- [ ] **Step 5: 扩展持久化快照**
+
+在 `model.TaskBillingContext` 添加：
 
 ```go
-// AdjustBillingOnComplete 在任务完成时,用上游"实际输出分辨率"重算 video_input 倍率。
-// 这样结算严格按真实出片分辨率计费,而非提交时请求的分辨率,防 --rs 1080p 等请求侧旁路。
-// "是否含视频输入"是请求侧事实(响应无法反推),取自冻结的 BillingContext.HasVideoInput。
-// 返回 0:不直接给最终额度,而是修正 BillingContext.OtherRatios 后交由通用 token 重算结算,
-// 复用其差额结算与日志记录逻辑。
-func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
-	if task == nil || taskResult == nil {
-		return 0
-	}
-	bc := task.PrivateData.BillingContext
-	if bc == nil {
-		return 0
-	}
-	// 上游未返回分辨率时不覆盖,保留提交时按请求分辨率冻结的倍率
-	actualResolution := taskResult.Resolution
-	if actualResolution == "" {
-		return 0
-	}
-	ratio, ok := GetVideoBillingRatio(bc.OriginModelName, actualResolution, bc.HasVideoInput)
-	if !ok {
-		return 0
-	}
-	if bc.OtherRatios == nil {
-		bc.OtherRatios = map[string]float64{}
-	}
-	if ratio == 1.0 {
-		delete(bc.OtherRatios, "video_input")
-	} else {
-		bc.OtherRatios["video_input"] = ratio
-	}
-	bc.Resolution = actualResolution
-	bc.TotalTokens = taskResult.TotalTokens
-	return 0
-}
+UpstreamModelName string `json:"upstream_model_name,omitempty"`
+HasVideoInput     bool   `json:"has_video_input,omitempty"`
+GenerateAudio     *bool  `json:"generate_audio,omitempty"`
+Draft             bool   `json:"draft,omitempty"`
+ServiceTier       string `json:"service_tier,omitempty"`
+Resolution        string `json:"resolution,omitempty"`
+BillingTokens     int    `json:"billing_tokens,omitempty"`
 ```
 
-同时需要修改 `EstimateBilling`(预扣阶段)在冻结 BillingContext 时记录 `HasVideoInput`。定位 `relay/relay_task.go` 中 `BillingContext` 构造处(controller/relay.go:587-594 或 relay_task.go 类似位置),在构造时追加:
+在 `controller.RelayTask` 创建 `TaskBillingContext` 时追加：
 
 ```go
-task.PrivateData.BillingContext = &model.TaskBillingContext{
-	// ... 现有字段 ...
-	HasVideoInput: seedanceHasVideoInput(relayInfo), // ★ 新增
-}
+UpstreamModelName: relayInfo.UpstreamModelName,
+HasVideoInput:     c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
+GenerateAudio:     common.GetPointer(c.GetBool(string(constant.ContextKeyTaskGenerateAudio))),
+Draft:             c.GetBool(string(constant.ContextKeyTaskDraft)),
+ServiceTier:       c.GetString(string(constant.ContextKeyTaskServiceTier)),
 ```
 
-并实现辅助函数(放在 `relay/channel/task/doubao/adaptor.go`):
+保留 `OriginModelName` 用于用户日志，upstream 只用于供应商价格 family 查表。
 
-```go
-// HasVideoInputForBilling 导出供 relay_task.go 在冻结 BillingContext 时调用,
-// 判断请求是否含视频输入(从 metadata.content 检测 video_url)。
-func HasVideoInputForBilling(metadata map[string]interface{}) bool {
-	return hasVideoInMetadata(metadata)
-}
-```
+- [ ] **Step 6: 验证并提交**
 
-> **注意:** `HasVideoInput` 的设置点需 grep `BillingContext` 的构造位置确认。若实现复杂,可简化:在 `EstimateBilling` 返回时同时通过其他渠道传递。执行时核实最优路径。
+Run: `go test ./relay/channel/task/doubao -run SeedanceEstimateBilling -v`
 
-- [ ] **Step 8: 运行,验证通过**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestAdjustBillingOnCompleteUsesResponseResolution -v`
-Expected: PASS
-
-- [ ] **Step 9: Commit**
+Run: `go test ./controller ./model`
 
 ```bash
-git add relay/channel/task/doubao/adaptor.go relay/channel/task/doubao/adaptor_test.go model/task.go
-# 视实际改动文件增减
-git commit -m "feat(seedance-billing): response-resolution settlement via AdjustBillingOnComplete"
+git add constant/context_key.go relay/channel/adapter.go relay/relay_task.go relay/channel/task/doubao/adaptor.go relay/channel/task/doubao/adaptor_test.go model/task.go controller/relay.go
+git commit -m "feat(seedance-billing): snapshot mapped pricing context"
 ```
 
 ---
 
-## Task 4: 1.5-pro 声音维度计费(独立分支)
+## Task 3: 响应分辨率和权威 token 结算
 
 **Files:**
-- Modify: `relay/channel/task/doubao/adaptor.go`(EstimateBilling 增加 1.5-pro 声音分支)
+- Modify: `relay/common/relay_info.go`
+- Modify: `relay/channel/task/doubao/adaptor.go`
+- Modify: `relay/channel/task/doubao/adaptor_test.go`
+- Modify: `service/task_polling.go`
+- Modify: `service/task_polling_test.go`
+- Modify: `service/task_billing.go`
 
-> **关键差异:** 官方文档 line 33-36 明确 `doubao-seedance-1.5-pro` 按"是否有声"计费(有声 16/无声 8),**不按分辨率**。两个 PR(#5387/#4560)都错误地把它纳入分辨率矩阵。
+- [ ] **Step 1: 写失败测试**
 
-- [ ] **Step 1: 写失败测试(1.5-pro 有声/无声倍率)**
+覆盖：
 
-在 `constants_test.go` 追加:
+- `ParseTaskResult` 同时保留 `CompletionTokens`、`TotalTokens` 和 `Resolution`。
+- `completion_tokens=1000,total_tokens=1200` 时结算使用 1000；completion 缺失时回退 1200。
+- `completion_tokens=0,total_tokens=1200` 且字段存在时结算使用 0；不能用 `>0` 把明确的零值误判成缺失。负数或超过 `common.MaxQuota` 的上游 token 值必须在进入额度乘法前截断并记录异常。
+- 提交按 720p 预扣、响应为 1080p 时，把 `video_input` 更新为 1080p 对应倍率，同时保留 `service_tier` 等单价倍率。
+- 1.5 Pro Draft 成功并返回权威 completion tokens 时删除 `draft_estimate`，避免 token 已折算后再次乘 0.6/0.7。
+- 模型 mapping 后，终态查表使用 `BillingContext.UpstreamModelName`；历史任务为空时回退 origin。
+- 上游无 resolution 时保留预扣倍率。
+- clamp 继续进入结算日志 `admin_info.quota_saturation`。
+
+Run: `go test ./relay/channel/task/doubao ./service -run 'Seedance.*Complete|TaskBillingTokens' -v`
+
+Expected: FAIL。
+
+- [ ] **Step 2: `TaskInfo` 加实际分辨率**
+
+在 `relay/common/relay_info.go` 的 `TaskInfo` 末尾添加：
 
 ```go
-// TestSeedance15ProAudioTiers 验证 1.5-pro 按声音维度计费(非分辨率)
-// 官方:有声 16,无声 8,基准取无声 8
-func TestSeedance15ProAudioTiers(t *testing.T) {
-	const model = "doubao-seedance-1-5-pro-251215"
+Resolution string `json:"resolution,omitempty"`
+CompletionTokensPresent bool `json:"-"`
+```
 
-	// 有声:16/8 = 2.0
-	ratio, ok := GetSeedance15ProAudioRatio(true)
-	require.True(t, ok)
-	ratioEqual(t, 16.0/8.0, ratio)
+doubao `ParseTaskResult` 成功分支填入 `resTask.Resolution`，同时保留两个 usage 字段，并用 `gjson.GetBytes(respBody, "usage.completion_tokens").Exists()` 设置 `CompletionTokensPresent`。不要通过重新计算 `TotalTokens` 覆盖上游协议字段。
 
-	// 无声:8/8 = 1.0(基准,不产生 OtherRatio)
-	ratio, ok = GetSeedance15ProAudioRatio(false)
-	require.True(t, ok)
-	ratioEqual(t, 1.0, ratio)
+- [ ] **Step 3: 终态只替换视频价格倍率**
+
+`AdjustBillingOnComplete` 选择模型：
+
+```go
+modelName := billingContext.UpstreamModelName
+if modelName == "" {
+	modelName = billingContext.OriginModelName
 }
 ```
 
-- [ ] **Step 2: 运行,验证失败**
+只对 2.0 family 更新 `video_input`。先把历史 `BillingContext.OtherRatios` 装入临时 `types.PriceData`，通过 `AddOtherRatio`/`OtherRatios()` 获得净化后的副本，再替换目标项，避免传播非法历史倍率。对所有 Seedance family，只要响应提供权威 completion/total tokens，就从最终倍率副本删除 `draft_estimate`，因为 Draft 折算已反映在 token 数中。把响应分辨率写入 `Resolution`，billing token 在 service 选定后写入 `BillingTokens`。
 
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedance15ProAudioTiers -v`
-Expected: FAIL(`GetSeedance15ProAudioRatio` 未定义)
+- [ ] **Step 4: 统一选择 billing token**
 
-- [ ] **Step 3: 实现 1.5-pro 声音倍率函数**
-
-在 `constants.go` 追加:
+在 `service/task_polling.go` 增加稳定领域函数：
 
 ```go
-// GetSeedance15ProAudioRatio 返回 doubao-seedance-1.5-pro 按声音维度的计费倍率。
-// 官方:有声 16 元/百万token,无声 8 元/百万token。基准取无声(8),有声倍率 2.0。
-// hasAudio 为 true 表示生成有声视频(generate_audio=true 或响应含音频)。
-func GetSeedance15ProAudioRatio(hasAudio bool) (float64, bool) {
-	if hasAudio {
-		return 16.0 / 8.0, true
+func taskBillingTokens(taskResult *relaycommon.TaskInfo) int {
+	if taskResult == nil {
+		return 0
 	}
-	return 1.0, true
+	billingTokens := taskResult.TotalTokens
+	if taskResult.CompletionTokensPresent {
+		billingTokens = taskResult.CompletionTokens
+	}
+	// Preserve existing non-Doubao adaptors that only populate completion_tokens
+	// while leaving total_tokens empty.
+	if !taskResult.CompletionTokensPresent && taskResult.CompletionTokens > 0 && taskResult.TotalTokens == 0 {
+		billingTokens = taskResult.CompletionTokens
+	}
+	if billingTokens < 0 {
+		common.SysError("negative task billing token count; clamped to zero")
+		return 0
+	}
+	if billingTokens > common.MaxQuota {
+		common.SysError("task billing token count exceeds quota bound; clamped to common.MaxQuota")
+		return common.MaxQuota
+	}
+	return billingTokens
 }
 ```
 
-- [ ] **Step 4: 运行,验证通过**
+`TaskInfo` 增加 `CompletionTokensPresent bool json:"-"`；doubao 解析时用 `gjson.GetBytes(respBody, "usage.completion_tokens").Exists()` 保存字段存在性。`taskBillingTokens` 对负数返回 0，对超过 `common.MaxQuota` 的值截断到 `common.MaxQuota` 并通过 `common.SysError` 记录。`settleTaskBillingOnComplete` 的 adaptor quota 分支和 token 重算分支都使用该值。不要覆盖 `TaskInfo.TotalTokens` 的协议含义。
 
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedance15ProAudioTiers -v`
-Expected: PASS
+具体调用顺序必须是：先调用 adaptor 的 `AdjustBillingOnComplete`（使其删除 `draft_estimate` / 更新 `video_input`），再将 `taskBillingTokens(taskResult)` 传给 `RecalculateTaskQuotaWithTokens` 或 `RecalculateTaskQuotaByTokens`。这样 token 结算读取的是已经修正的 `BillingContext`。
 
-- [ ] **Step 5: 在 EstimateBilling 增加 1.5-pro 分支**
+- [ ] **Step 5: 保留旧 API，新增带 token 的结算入口**
 
-修改 `adaptor.go` 的 `EstimateBilling`:
+保留现有调用兼容性：
 
 ```go
-func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
-	req, err := relaycommon.GetTaskRequest(c)
-	if err != nil {
-		return nil
-	}
-
-	// ★ 1.5-pro 走声音维度,不走分辨率矩阵
-	if strings.HasPrefix(info.OriginModelName, "doubao-seedance-1-5-pro") {
-		hasAudio := seedanceHasAudioInRequest(req)
-		ratio, ok := GetSeedance15ProAudioRatio(hasAudio)
-		if !ok || ratio == 1.0 {
-			return nil
-		}
-		return map[string]float64{"audio": ratio}
-	}
-
-	// 其他 2.x 系列走分辨率×视频矩阵
-	hasVideo := hasVideoInMetadata(req.Metadata)
-	resolution, _ := req.Metadata["resolution"].(string)
-	ratio, ok := GetVideoBillingRatio(info.OriginModelName, resolution, hasVideo)
-	if !ok || ratio == 1.0 {
-		return nil
-	}
-	return map[string]float64{"video_input": ratio}
+func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
+	recalculateTaskQuota(ctx, task, actualQuota, 0, reason, clamps...)
 }
 
-// seedanceHasAudioInRequest 判断 1.5-pro 请求是否生成有声视频。
-// 判断依据:metadata.generate_audio == true(官方字段),或 content[] 含 audio_url。
-func seedanceHasAudioInRequest(req relaycommon.TaskSubmitReq) bool {
-	if req.Metadata != nil {
-		if genAudio, ok := req.Metadata["generate_audio"]; ok {
-			if b, ok := toBool(genAudio); ok {
-				return b
-			}
-		}
-	}
-	// content[] 含 audio_url 也认为需要音频
-	if content, ok := req.Metadata["content"].([]interface{}); ok {
-		for _, item := range content {
-			if m, ok := item.(map[string]interface{}); ok {
-				if m["type"] == "audio_url" {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// toBool 容忍 JSON 反序列化后 bool 可能是 bool 或 float64(json.Number)
-func toBool(v interface{}) (bool, bool) {
-	switch x := v.(type) {
-	case bool:
-		return x, true
-	case float64:
-		return x != 0, true
-	case string:
-		return x == "true" || x == "1", true
-	}
-	return false, false
+func RecalculateTaskQuotaWithTokens(ctx context.Context, task *model.Task, actualQuota, billingTokens int, reason string, clamps ...*common.QuotaClamp) {
+	recalculateTaskQuota(ctx, task, actualQuota, billingTokens, reason, clamps...)
 }
 ```
 
-- [ ] **Step 6: 验证编译 + 运行全部计费测试**
-
-Run: `go build ./relay/channel/task/doubao/`
-Run: `go test ./relay/channel/task/doubao/ -v`
-Expected: 全部 PASS
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add relay/channel/task/doubao/adaptor.go relay/channel/task/doubao/constants.go relay/channel/task/doubao/constants_test.go
-git commit -m "feat(seedance-billing): 1.5-pro audio-dimension billing per official doc"
-```
-
----
-
-## Task 5: 异步任务退款额度守恒修复(摘自 #4560)
-
-**Files:**
-- Modify: `service/task_billing.go`(及可能的 model 层)
-
-> **背景(#4560 描述):** `RefundTaskQuota`/`RecalculateTaskQuota` 只动了资金来源(钱包/订阅)与令牌额度,但没有同步回退 `User.UsedQuota`/`Channel.UsedQuota`/`quota_data` 看板统计。导致视频任务失败退款或事后差额结算时:`UsedQuota` 永远偏高、渠道用量偏高、看板与实际收费不一致。这是**普适 bug**,对所有视频渠道有效。
-
-- [ ] **Step 1: 定位现有退款函数**
-
-Run: `grep -n "func.*RefundTaskQuota\|func.*RecalculateTaskQuota\|func.*SettleTaskBilling" service/task_billing.go`
-
-记录函数签名和当前实现。
-
-- [ ] **Step 2: 写失败测试(退款后 UsedQuota 守恒)**
-
-创建 `service/task_billing_test.go`(若已存在则追加):
+`RecalculateTaskQuotaByTokens` 调用带 token 版本；`settleTaskBillingOnComplete` 的 adaptor 正额度分支也必须传入同一个 `billingTokens`。额度计算仍为：
 
 ```go
-package service
-
-import (
-	"testing"
-
-	"github.com/QuantumNous/new-api/model"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+actualQuota, clamp := common.QuotaFromFloatChecked(
+	float64(billingTokens) * modelRatio * finalGroupRatio * otherMultiplier,
 )
-
-// TestRefundTaskQuotaDecrementsUsedQuota 验证退款时 User.UsedQuota / Channel.UsedQuota 同步回退
-// 这是 #4560 修复的核心不变量:退款后"总额度 = Quota + UsedQuota"必须守恒
-func TestRefundTaskQuotaDecrementsUsedQuota(t *testing.T) {
-	// Setup:初始化 DB(SQLite 内存)、用户、渠道、任务记录
-	// (参考 model 包现有测试的 DB 初始化方式)
-	setupTestDB(t)
-	user := setupTestUser(t, usedQuota: 1000, quota: 500)
-	channel := setupTestChannel(t, usedQuota: 1000)
-	task := setupTestTask(t, userId: user.Id, channelId: channel.Id, quota: 200)
-
-	// Act:退款 200
-	err := RefundTaskQuota(task, 200, "test refund")
-	require.NoError(t, err)
-
-	// Assert:UsedQuota 同步回退
-	refreshedUser := getUser(t, user.Id)
-	assert.Equal(t, int64(800), refreshedUser.UsedQuota, "User.UsedQuota must decrease by refund amount")
-
-	refreshedChannel := getChannel(t, channel.Id)
-	assert.Equal(t, int64(800), refreshedChannel.UsedQuota, "Channel.UsedQuota must decrease by refund amount")
-
-	// 看板数据(quota_data)也同步回退(若适用)
-	// ... 视实际 quota_data 表结构补充 ...
-}
 ```
 
-> **注意:** 测试的具体 setup 函数(`setupTestDB`/`setupTestUser` 等)需参考 `model/` 包现有测试风格。执行时先 grep `model/*_test.go` 找 DB 初始化的 helper。
+- [ ] **Step 6: 日志暴露权威结算事实**
 
-- [ ] **Step 3: 运行,验证失败**
+`taskBillingOther` 加入 `resolution`、`billing_tokens`、`service_tier`；在 `BillingContext` 存在时同时记录 `has_video_input`、`draft`，并在 `GenerateAudio != nil` 时记录 `generate_audio`，不能因显式 `false` 或 0 而丢失事实。这些字段只在 backend log `other` 中记录；本计划不包含前端展示改造。
 
-Run: `go test ./service/ -run TestRefundTaskQuotaDecrementsUsedQuota -v`
-Expected: FAIL(当前 RefundTaskQuota 未回退 UsedQuota)
+- [ ] **Step 7: 验证并提交**
 
-- [ ] **Step 4: 摘取 #4560 的修复**
-
-获取 #4560 的 task_billing.go 改动:
+Run: `go test ./relay/channel/task/doubao ./service -run 'Seedance.*Complete|TaskBillingTokens' -v`
 
 ```bash
-gh pr diff 4560 > /tmp/4560.diff
-# 手动审查 /tmp/4560.diff 中 service/task_billing.go 的改动,
-# 摘取 RefundTaskQuota/RecalculateTaskQuota 里同步 UsedQuota/Channel.UsedQuota/quota_data 的部分
+git add relay/common/relay_info.go relay/channel/task/doubao/adaptor.go relay/channel/task/doubao/adaptor_test.go service/task_polling.go service/task_polling_test.go service/task_billing.go
+git commit -m "feat(seedance-billing): settle by actual output and completion tokens"
 ```
 
-按 #4560 的实现方式,在 `RefundTaskQuota`/`RecalculateTaskQuota` 中追加 `User.UsedQuota`/`Channel.UsedQuota`/`quota_data` 的同步回退逻辑。**只摘取额度守恒部分,不摘取 #4560 的 constants.go 价格表**(我们用 Task 2 的版本)。
+---
 
-具体改动参照 #4560 diff,核心模式:
+## Task 4: 异步退款和差额结算守恒
+
+**Files:**
+- Modify: `model/user.go`
+- Modify: `model/usedata.go`
+- Modify: `model/log.go`
+- Modify: `service/task_billing.go`
+- Modify: `service/task_billing_test.go`
+
+- [ ] **Step 1: 先扩展现有测试 fixture**
+
+在现有 `service/task_billing_test.go` 中复用 `TestMain`、`truncate`、`seedUser`、`seedChannel`、`makeTask`，添加明确 helper：
 
 ```go
-func RefundTaskQuota(task *model.Task, quota int, reason string) error {
-	// ... 现有退款逻辑(钱包/订阅/令牌额度) ...
+func seedUserWithUsage(t *testing.T, id, quota, usedQuota, requestCount int) {
+	t.Helper()
+	user := &model.User{
+		Id: id, Username: "test_user", Quota: quota, UsedQuota: usedQuota,
+		RequestCount: requestCount, Status: common.UserStatusEnabled,
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+}
 
-	// ★ 摘自 #4560:同步回退统计字段,保证额度守恒
-	if err := model.DecreaseUserUsedQuota(task.UserId, quota); err != nil {
-		return err
+func seedChannelWithUsage(t *testing.T, id int, usedQuota int64) {
+	t.Helper()
+	channel := &model.Channel{
+		Id: id, Name: "test_channel", Key: "sk-test",
+		Status: common.ChannelStatusEnabled, UsedQuota: usedQuota,
 	}
-	if err := model.DecreaseChannelUsedQuota(task.ChannelId, quota); err != nil {
-		return err
-	}
-	// quota_data 看板同步(若 #4560 有)
-	// ...
-	return nil
+	require.NoError(t, model.DB.Create(channel).Error)
 }
 ```
 
-> **注意:** `model.DecreaseUserUsedQuota`/`DecreaseChannelUsedQuota` 函数需确认是否存在,若 #4560 新增了这些函数,一并摘取。执行时以 #4560 diff 为准。
+同时添加 `getUserUsedQuota`、`getUserRequestCount`、`getChannelUsedQuota`。`TestMain` 的 AutoMigrate 添加 `&model.QuotaData{}`，`truncate` 清空 `quota_data` 和同步清空 `model.CacheQuotaData`。
 
-- [ ] **Step 5: 运行,验证通过**
+- [ ] **Step 2: 写失败的不变量测试**
 
-Run: `go test ./service/ -run TestRefundTaskQuotaDecrementsUsedQuota -v`
-Expected: PASS
+测试钱包和订阅两类资金来源：
 
-- [ ] **Step 6: 补 RecalculateTaskQuota 的守恒测试(差额结算场景)**
+- 全额失败退款：`Quota + UsedQuota` 总和不变，UsedQuota 和 Channel.UsedQuota 减少，request_count 不变。
+- 正差额：钱包/订阅再扣，UsedQuota 和 Channel.UsedQuota 增加，request_count 不变。
+- 负差额：钱包/订阅退款，UsedQuota 和 Channel.UsedQuota 减少，request_count 不变。
+- 零差额但有 billing tokens：金额不动，`quota_data.token_used` 补齐，count 不变。
+- `quota_data` 的调整命中任务提交小时以及相同 group/token/channel/node key。
 
-类似 Step 2,写一个测试验证 `RecalculateTaskQuota`(事后差额结算)也同步 UsedQuota。具体参考 #4560 的测试用例(`gh pr view 4560 --json files` 找测试文件)。
+直接在同步 `CacheQuotaData` 中断言，不使用 sleep、`Eventually` 或时序比较。
 
-- [ ] **Step 7: Commit**
+Run: `go test ./service -run 'RefundTaskQuota.*Conservation|RecalculateTaskQuota.*Conservation|QuotaData.*Task' -v`
+
+Expected: FAIL。
+
+- [ ] **Step 3: 新增只调整 UsedQuota 的 model API**
+
+在 `model/user.go` 添加：
+
+```go
+func UpdateUserUsedQuotaDelta(id, delta int) {
+	if delta == 0 {
+		return
+	}
+	if common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUsedQuota, id, delta)
+		return
+	}
+	updateUserUsedQuota(id, delta)
+}
+```
+
+它不修改 `request_count`，底层 `used_quota + ?` 同时支持正负值。
+
+- [ ] **Step 4: 新增 `quota_data` 调整 API**
+
+在 `model/usedata.go` 新增 `LogQuotaDataAdjust(params QuotaDataLogParams)`。它复用与 `LogQuotaData` 相同的小时归一化和维度 key，但创建的 `QuotaData.Count` 固定为 0，`Quota`/`TokenUsed` 接受有符号增量。
+
+在 `service/task_billing.go` 新增 `taskAdjustQuotaData(task, quotaDelta, tokenDelta)`：时间优先 `task.SubmitTime`，再回退 `task.CreatedAt` 和当前时间；传入 `task.Group`、`TokenId`、`ChannelId`、`NodeName`，保证与提交日志落在同一桶。
+
+- [ ] **Step 5: 修正 RefundTaskQuota**
+
+资金来源退款成功、token 退款之后执行：
+
+```go
+model.UpdateUserUsedQuotaDelta(task.UserId, -quota)
+if task.ChannelId > 0 {
+	model.UpdateChannelUsedQuota(task.ChannelId, -quota)
+}
+taskAdjustQuotaData(task, -quota, 0)
+```
+
+保持现有函数无返回值和失败日志行为。
+
+- [ ] **Step 6: 修正差额结算**
+
+在内部 `recalculateTaskQuota` 的资金调整和 token 调整成功后，无论 delta 正负都执行：
+
+```go
+model.UpdateUserUsedQuotaDelta(task.UserId, quotaDelta)
+if task.ChannelId > 0 {
+	model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
+}
+taskAdjustQuotaData(task, quotaDelta, billingTokens)
+```
+
+`quotaDelta == 0` 时仍在 `billingTokens > 0` 的情况下调用 `taskAdjustQuotaData(task, 0, billingTokens)`。
+
+- [ ] **Step 7: 防止 dashboard 重复计数**
+
+`model.RecordTaskBillingLog` 仅记录日志，不再自动调用 `LogQuotaData`。当前仓库的调用点只有 `service/task_billing.go`，dashboard 调整由上一步显式完成。新增测试确保正差额不会把 `QuotaData.Count` 从 1 增加到 2。
+
+- [ ] **Step 8: 验证并提交**
+
+Run: `go test ./service -run 'RefundTaskQuota|RecalculateTaskQuota|QuotaData' -v`
+
+Run: `go test ./model -run 'UserUsedQuota|QuotaData' -v`
 
 ```bash
-git add service/task_billing.go service/task_billing_test.go model/*.go
-# 视实际改动文件增减
-git commit -m "fix(task-billing): sync User/Channel UsedQuota on async task refund/settlement (#4560)"
+git add model/user.go model/usedata.go model/log.go service/task_billing.go service/task_billing_test.go
+git commit -m "fix(task-billing): keep async quota statistics conserved"
 ```
 
 ---
 
-## Task 6: 整体回归 + 端到端计费验证
+## Task 5: 全链路回归
 
-- [ ] **Step 1: 运行所有计费相关测试**
+- [ ] **Step 1: doubao 价格和 adaptor 测试**
 
-Run: `go test ./relay/channel/task/doubao/ ./service/ -v -run "Seedance|TaskQuota|Billing"`
-Expected: 全部 PASS
+Run: `go test ./relay/channel/task/doubao -v`
 
-- [ ] **Step 2: 全项目测试无回归**
+- [ ] **Step 2: 任务轮询和计费测试**
 
-Run: `go test ./... 2>&1 | tail -30`
-Expected: 无新增 FAIL
+Run: `go test ./service -run 'Task|Quota|Billing' -v`
 
-- [ ] **Step 3: go vet**
+- [ ] **Step 3: 额度数学回归**
 
-Run: `go vet ./relay/channel/task/doubao/ ./service/`
-Expected: 无 warning
+Run: `go test ./common -run Quota -v`
 
-- [ ] **Step 4: 端到端计费验证(手动,需 ARK 渠道)**
+Run: `go test ./relay/common -run 'Relay|Quota|Billing' -v`
 
-配置 VolcEngine(45)渠道,设 `ModelRatio` 对应基准价(如 2.0 设 46),然后:
+- [ ] **Step 4: 静态检查**
 
-```bash
-# 场景1:2.0 720p 不含视频 → 应按基准(倍率1.0)计费
-# 场景2:2.0 1080p 不含视频 → 应按 51/46 ≈ 1.109 倍率计费
-# 场景3:2.0 4k 含视频 → 应按 16/46 ≈ 0.348 倍率计费
-# 场景4:1.5-pro 有声 → 应按 2.0 倍率计费
-# 场景5:--rs 1080p 旁路 → 请求写 720p 但响应 1080p,应按 1080p 计费(验证防旁路)
+Run: `go vet ./relay/channel/task/doubao ./relay/common ./service ./model ./controller`
+
+- [ ] **Step 5: 全项目测试**
+
+Run: `go test ./...`
+
+- [ ] **Step 6: 手工对账**
+
+使用 ARK 测试渠道验证以下任务，并对比日志中的 `billing_tokens`、倍率和最终 quota：
+
+1. 2.0：720p 无视频、1080p 无视频、4k 有视频。
+2. Fast/Mini：720p 有视频；1080p 在访问上游前返回 400。
+3. 1.5 Pro：默认有声、显式无声、flex、有声 Draft、无声 Draft。
+4. 提示词 `--rs 1080p` 但结构化请求未写 resolution：最终按响应 1080p 档结算。
+5. 成功响应同时返回 completion/total 且数值不同时，最终使用 completion。
+6. 失败退款后用户总额度、渠道 used quota 和提交小时 dashboard 桶守恒。
+
+不使用 `git add -A`，不提交工作区中的无关文件。
+
+## Execution Order
+
+先完成 `2026-07-18-ark-native-compat.md`，再按本计划 Task 1-4 实施。本计划完成的判定条件是自动测试证明预扣、终态结算、退款、正差额和负差额均保持额度与统计不变量；仅手工观察日志不能替代这些测试。
+
+## Project Module Reference
+
+以下 new-api 项目模块路径属于受保护项目身份，实施时保持不变：
+
+```go
+"github.com/QuantumNous/new-api/model"
 ```
-
-每个场景后查日志的 quota 扣减是否符合预期倍率。
-
-- [ ] **Step 5: 最终 Commit**
-
-```bash
-git status
-git add -A
-git commit -m "test(seedance-billing): full regression + e2e billing verification"
-```
-
----
-
-## Self-Review
-
-### Spec 覆盖核对(对照 ark-video-price.md)
-
-| 官方价格表条目 | 覆盖 Task |
-|---|---|
-| 2.0 480p/720p(46/28) | Task 2 |
-| 2.0 1080p(51/31) | Task 2 |
-| **2.0 4k(26/16)** | Task 2(★ 补全) |
-| 2.0-fast(37/22) | Task 2 |
-| **2.0-mini(23/14)** | Task 2 Step 5(★ 补全,待模型名确认) |
-| **1.5-pro 声音维度(16/8)** | Task 4(★ 修正两个 PR 的错误) |
-| 1.0-pro/1.0-pro-fast 单价 | 未纳入倍率表(管理员配 ModelRatio 全额计费,与现有一致) |
-| 响应分辨率结算(防旁路) | Task 3 |
-| 退款额度守恒 | Task 5 |
-| 仅成功计费 | 现有逻辑(FAILURE 状态走 RefundTaskQuota) |
-
-### 待确认项(执行时核实)
-
-1. **`doubao-seedance-2.0-mini` 实际模型名**(Task 2 Step 5):官方文档未给日期后缀,需查 ARK 模型列表
-2. **`TaskBillingContext` 字段添加位置**(Task 3 Step 7):grep `model/task.go` 确认现有定义
-3. **`BillingContext` 构造时设 `HasVideoInput`**(Task 3 Step 7):grep `BillingContext{` 找所有构造点
-4. **`model.DecreaseUserUsedQuota` 等函数**(Task 5 Step 4):若不存在需从 #4560 摘取定义
-5. **1.5-pro 响应是否返回音频信息**(Task 4):若响应能反推是否有声,可在 AdjustBillingOnComplete 用响应值;否则保持请求侧判断
-
-### 类型一致性
-
-- `GetVideoBillingRatio(modelName, resolution string, hasVideo bool) (float64, bool)` 在 Task 2 定义,Task 3 Step 7 调用 ✓
-- `GetSeedance15ProAudioRatio(hasAudio bool) (float64, bool)` 在 Task 4 定义并同 Task 调用 ✓
-- `AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int` 符合 `TaskAdaptor` 接口(`taskcommon.BaseBilling` 的方法签名)✓
-- `TaskInfo.Resolution` 在 Task 1 定义,Task 3 Step 3 填充 ✓
-- `TaskBillingContext.HasVideoInput/Resolution/TotalTokens` 在 Task 3 Step 7 定义并使用 ✓
-
-无类型不一致问题。
-
----
-
-## 与原生入口计划的协调
-
-本计划(计费)与 `2026-07-18-ark-native-compat.md`(原生入口)都改:
-- `relay/channel/task/doubao/adaptor.go`(`ParseTaskResult`/`EstimateBilling`)
-
-**协调建议:**
-1. 先执行原生入口计划(它改 adaptor 的 Validate/BuildRequest/DoResponse + ParseTaskResult 加状态)
-2. 再执行本计划(它在 ParseTaskResult 加 Resolution 回填 + 新增 AdjustBillingOnComplete)
-3. 两者的 `ParseTaskResult` 改动不冲突:原生入口加 `expired/cancelled` case,本计划在 `succeeded` case 加一行,位置不同
-
-**独立 PR 策略:** 两个计划产出两个独立 PR,分别 review/merge,降低冲突面。
-
----
-
-## Execution Handoff
-
-Plan complete and saved to `docs/superpowers/plans/2026-07-18-seedance-billing.md`. 见对话中的执行选项(subagent-driven vs inline)。

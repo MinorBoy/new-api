@@ -171,6 +171,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if err := helper.ModelMappedHelper(c, info, nil); err != nil {
 		return nil, service.TaskErrorWrapperLocal(err, "model_mapping_failed", http.StatusBadRequest)
 	}
+	if validator, ok := adaptor.(channel.TaskBillingRequestValidator); ok {
+		if taskErr := validator.ValidateBillingRequest(c, info); taskErr != nil {
+			return nil, taskErr
+		}
+	}
 
 	// 3. 预生成公开 task ID（仅首次）
 	if info.PublicTaskID == "" {
@@ -223,7 +228,8 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	if resp != nil && resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		_ = resp.Body.Close()
+		return nil, arkTaskErrorFromResponse(responseBody, resp.StatusCode)
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
@@ -257,6 +263,24 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func arkTaskErrorFromResponse(responseBody []byte, statusCode int) *dto.TaskError {
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := common.Unmarshal(responseBody, &response); err == nil && response.Error.Code != "" && response.Error.Message != "" {
+		return &dto.TaskError{
+			Code:       response.Error.Code,
+			Message:    response.Error.Message,
+			StatusCode: statusCode,
+			Error:      errors.New(response.Error.Message),
+		}
+	}
+	return service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", statusCode)
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

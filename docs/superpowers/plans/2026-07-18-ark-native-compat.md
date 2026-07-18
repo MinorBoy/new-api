@@ -2,244 +2,389 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让火山方舟(ARK) SDK 用户把 `base_url` 指向 new-api 即可零改造接入,原样支持 ARK 原生视频生成(`POST/GET /api/v3/contents/generations/tasks`)和图像生成(`POST /api/v3/images/generations`)两类 API 的请求与响应格式。
+**Goal:** 让火山方舟（ARK）SDK 用户仅把 `base_url` 从官方地址替换为 `https://<new-api-host>/api/v3`，即可使用视频任务提交、单任务查询、任务列表查询和图像生成接口，同时保留 new-api 的鉴权、渠道模型映射、计费校验和公开任务 ID 隔离。
 
-**Architecture:** 双向 Impersonation Pattern——一个 `SeedanceRequestConvert` 中间件把 `/seedance/api/v3/*` 原生入口改写为内部统一的 `/v1/*` 端点进入标准 pipeline,再通过 context 标记 `KeySeedanceOfficialAPI` 在 adaptor/relay 出口处把响应还原成 ARK 原生格式。视频部分以社区 PR #5737 为基线(已实现视频提交/查询/列表),本计划在其基础上:(1) 修复 CodeRabbit 指出的两个 review 问题,(2) 补齐图像原生入口(两 PR 都未覆盖)。
+**Architecture:** 原生路由只负责标记请求和把提交路径改写到现有统一 relay pipeline。视频 adaptor 读取并验证 ARK 原生请求，转发时只改写模型映射字段；客户端始终看到 new-api 生成的公开 `task_*` ID，上游任务 ID 只保存在 `Task.PrivateData.UpstreamTaskID`。查询响应基于已落库的上游响应恢复 ARK 结构，列表查询通过 SQL 分页或有界批量扫描完成，禁止一次性加载七天内全部任务。
 
-**Tech Stack:** Go 1.22+, Gin, GORM v2, testify(require+assert),JSON 统一走 `common.*`。
+**Tech Stack:** Go 1.22+、Gin、GORM v2、testify（`require` + `assert`）；所有 JSON 编解码调用统一使用 `common.*`。
 
-**参考基线:** [PR #5737](https://github.com/QuantumNous/new-api/pull/5737) `feat/seedance-native-compat` 分支(9 文件 583 行,REVIEW_REQUIRED)。
-
----
-
-## Scope(本计划只做接入,不做计费)
-
-✅ 视频原生入口(基于 #5737,含 review 修复)
-✅ 图像原生入口(新增,#5737 未覆盖)
-❌ 计费精确化(见独立计划 `2026-07-18-seedance-billing.md`)
-❌ chat/embeddings/responses/rerank 入口(用户未选)
-❌ 新增渠道类型(复用 VolcEngine 45)
+**Reference:** [PR #5737](https://github.com/QuantumNous/new-api/pull/5737) 仅作为行为参考，不直接照搬其上游 ID 暴露和无界内存过滤实现；正式契约以 `docs/channel/api-doc-doubao-video-generation.md` 和 `docs/channel/api-doc-doubao-image-generation.md` 为准。
 
 ---
+
+## Review Decisions
+
+本审定版修正原计划中的以下问题，后续实现不得恢复旧方案：
+
+1. `common/gin.go` 已有 `KeyRequestBody` 和 `KeyBodyStorage`，只新增 `KeySeedanceOfficialAPI`，不得重复声明。
+2. 提交响应返回 `info.PublicTaskID`，查询响应返回 `task.TaskID`；`GetUpstreamTaskID()` 仅用于 new-api 到上游的通信。
+3. 原生视频请求仍必须执行时长边界校验；`duration=-1` 可作为 ARK 的智能时长值，其余正值不得超过 `relaycommon.MaxTaskDurationSeconds`。
+4. 原生图像透传必须重写映射后的 `model`，否则渠道 `model_mapping` 会被原始请求体绕过。
+5. 不因 JSON 过滤条件调用无 `LIMIT` 的 `Find`。需要检查 `Task.Data`/`Task.Properties` 时使用固定批大小的 keyset 扫描，只保留当前页结果。
+6. `filter.task_ids` 只匹配公开任务 ID。客户端从未获得上游 ID，因此无需扫描 `private_data`。
+7. 原生任务错误使用 ARK/OpenAI 风格的 `{"error":{"code":...,"message":...}}`，任务不存在返回 404。
+8. 原生视频校验必须按官方模型能力矩阵执行：Mini 的精确 ID 是 `doubao-seedance-2-0-mini-260615`；2.0 Mini/Fast 禁止 1080p，2.0 系列禁止 `service_tier=flex`，纯音频和媒体数量越界在访问上游前返回 400。
+9. 原生图像校验必须按 Seedream 模型能力执行：Pro 禁止组图和流式，Lite/4.5/4.0 才允许 `sequential_image_generation=auto`、`max_images` 和流式；参考图与输出图总数不得超过 15。
+10. 原生图像的实际计费张数只信响应 `usage.generated_images`，该字段缺失时才回退兼容路径；`data.#` 不能作为权威张数，因为组图响应可能包含失败项。本计划只实现接入与协议兼容，计费倍率和视频任务结算在 `2026-07-18-seedance-billing.md` 中实现。
+11. 新增图像资料只确认 Seedream 家族能力，没有给出可安全写入渠道 `ModelList` 的版本化 ID；不得自行臆造 Seedream ID，原生请求按已配置的模型映射透传。
+
+## Scope
+
+- 视频：`POST /api/v3/contents/generations/tasks`
+- 视频：`GET /api/v3/contents/generations/tasks/:task_id`
+- 视频：`GET /api/v3/contents/generations/tasks`
+- 图像：`POST /api/v3/images/generations`
+- 复用渠道类型 `VolcEngine(45)` / `DoubaoVideo(54)`
+- 不增加 chat、embeddings、responses、rerank 原生入口
 
 ## File Structure
 
-| 文件 | 责任 | 来源 |
-|---|---|---|
-| `common/gin.go` | 新增 `KeySeedanceOfficialAPI` context key | #5737 |
-| `middleware/seedance_adapter.go` | `SeedanceRequestConvert()` 请求改写中间件(视频+图像) | #5737 扩展 |
-| `middleware/seedance_adapter_test.go` | 中间件测试 | #5737 + 补图像用例 |
-| `controller/seedance.go` | `RelaySeedanceTask`/`RelaySeedanceTaskFetch` 控制器 | #5737 |
-| `router/video-router.go` | 注册 `/seedance/api/v3/contents/generations/tasks` 视频路由组 | #5737 |
-| `router/relay-router.go` | 注册 `/seedance/api/v3/images/generations` 图像路由组 | 新增 |
-| `relay/seedance_task.go` | `SeedanceTaskFetch` + 响应还原 | #5737 + 性能修复 |
-| `relay/relay_task_seedance_test.go` | relay 层测试 | #5737 |
-| `relay/channel/task/doubao/adaptor.go` | Seedance 分支(Validate/BuildRequest/DoResponse/ParseTaskResult) | #5737 + 模型名回填修复 |
-| `relay/channel/task/doubao/adaptor_test.go` | adaptor 测试 | #5737 |
-| `relay/image_handler.go` | PassThrough 追加 Seedance 入口条件 | 新增(1 行) |
+| 文件 | 责任 |
+|---|---|
+| `common/gin.go` | 新增 ARK 原生入口标记 |
+| `middleware/seedance_adapter.go` | 标记原生入口并改写提交路径 |
+| `middleware/seedance_adapter_test.go` | 路径和 relay mode 契约测试 |
+| `router/video-router.go` | 视频提交、单查、列表路由 |
+| `router/relay-router.go` | 图像生成路由 |
+| `controller/seedance.go` | 原生任务查询控制器 |
+| `controller/relay.go` | 原生任务错误格式分支 |
+| `controller/seedance_test.go` | 错误响应契约测试 |
+| `relay/channel/task/doubao/adaptor.go` | 原生视频校验、请求构建、提交响应和状态映射 |
+| `relay/channel/task/doubao/adaptor_test.go` | adaptor 行为测试 |
+| `relay/seedance_task.go` | 单任务和列表查询、ARK 响应恢复 |
+| `relay/relay_task_seedance_test.go` | 查询响应、分页、归属隔离测试 |
+| `relay/image_handler.go` | 原生图像字段保留并应用模型映射 |
+| `relay/image_handler_test.go` | 图像原生请求重写测试 |
+| `relay/channel/openai/relay_image.go` | 原生图像成功张数解析和流式计费张数收口 |
+| `relay/channel/openai/image_stream_test.go` | 图像流式/失败项张数回归测试 |
+| `dto/openai_response.go` | 公开 usage 中的 `generated_images` / `input_images` 字段 |
 
 ---
 
-## Task 1: 落地 context key(基础设施)
+## Task 1: 请求标记、中间件和路由
 
 **Files:**
-- Modify: `common/gin.go`(在 `KeyBodyStorage` 之后追加)
-
-- [ ] **Step 1: 添加 context key 常量**
-
-修改 `common/gin.go`,在 `const KeyBodyStorage = "key_body_storage"` 之后追加:
-
-```go
-const KeyRequestBody = "key_request_body"
-const KeyBodyStorage = "key_body_storage"
-const KeySeedanceOfficialAPI = "seedance_official_api" // ARK 原生 API 入口标记,触发响应原生格式还原
-```
-
-- [ ] **Step 2: 验证编译**
-
-Run: `go build ./common/`
-Expected: 无输出(成功)
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add common/gin.go
-git commit -m "feat(seedance): add KeySeedanceOfficialAPI context key"
-```
-
----
-
-## Task 2: 实现 `SeedanceRequestConvert` 中间件(视频+图像路径识别)
-
-**Files:**
+- Modify: `common/gin.go`
 - Create: `middleware/seedance_adapter.go`
-- Test: `middleware/seedance_adapter_test.go`
+- Create: `middleware/seedance_adapter_test.go`
+- Modify: `router/video-router.go`
+- Modify: `router/relay-router.go`
 
-- [ ] **Step 1: 写失败测试(视频提交路径改写)**
+- [ ] **Step 1: 先写中间件表驱动测试**
 
-创建 `middleware/seedance_adapter_test.go`:
+测试三个稳定契约：视频 POST 改为 `/v1/video/generations` 和 `RelayModeVideoSubmit`；图像 POST 改为 `/v1/images/generations` 和 `RelayModeImagesGenerations`；视频 GET 保持原路径和 `task_id` 参数。每个场景都断言 `common.KeySeedanceOfficialAPI == true`。
+
+Run: `go test ./middleware -run TestSeedanceRequestConvert -v`
+
+Expected: FAIL with `undefined: SeedanceRequestConvert`。
+
+- [ ] **Step 2: 添加唯一的新 context key**
+
+在 `common/gin.go` 已有两个 body key 后追加：
 
 ```go
-package middleware
-
-import (
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"github.com/QuantumNous/new-api/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/require"
-)
-
-func TestSeedanceRequestConvertVideoSubmit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(SeedanceRequestConvert())
-	router.POST("/seedance/api/v3/contents/generations/tasks", func(c *gin.Context) {
-		require.True(t, c.GetBool(common.KeySeedanceOfficialAPI), "context key must be set")
-		require.Equal(t, "/v1/video/generations", c.Request.URL.Path, "POST video path must be rewritten")
-		require.Equal(t, relayconstant.RelayModeVideoSubmit, c.GetInt("relay_mode"))
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/seedance/api/v3/contents/generations/tasks", nil)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-}
+const KeySeedanceOfficialAPI = "seedance_official_api"
 ```
 
-- [ ] **Step 2: 运行测试,验证失败**
+- [ ] **Step 3: 实现精确路径改写**
 
-Run: `go test ./middleware/ -run TestSeedanceRequestConvertVideoSubmit -v`
-Expected: FAIL with `undefined: SeedanceRequestConvert`
-
-- [ ] **Step 3: 写最小实现**
-
-创建 `middleware/seedance_adapter.go`:
+创建 `middleware/seedance_adapter.go`：
 
 ```go
 package middleware
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
-
 	"github.com/gin-gonic/gin"
 )
 
-// SeedanceRequestConvert 把火山方舟(ARK)原生 API 入口请求改写为内部统一路径,
-// 并标记 KeySeedanceOfficialAPI 供下游 adaptor/relay 还原 ARK 原生响应格式。
-// 入口前缀 /seedance/api/v3/* 与官方 ARK SDK 路径对齐(用户只需把 base_url 指向 new-api/seedance)。
-func SeedanceRequestConvert() func(c *gin.Context) {
+func SeedanceRequestConvert() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(common.KeySeedanceOfficialAPI, true)
-		path := c.Request.URL.Path
 
 		if c.Request.Method == http.MethodPost {
-			switch {
-			case strings.Contains(path, "/contents/generations/tasks"):
-				// 视频任务提交:POST /seedance/api/v3/contents/generations/tasks
+			switch c.Request.URL.Path {
+			case "/api/v3/contents/generations/tasks":
 				c.Request.URL.Path = "/v1/video/generations"
 				c.Set("relay_mode", relayconstant.RelayModeVideoSubmit)
-			case strings.HasSuffix(path, "/images/generations"):
-				// 图像生成:POST /seedance/api/v3/images/generations
+			case "/api/v3/images/generations":
 				c.Request.URL.Path = "/v1/images/generations"
 				c.Set("relay_mode", relayconstant.RelayModeImagesGenerations)
 			}
 		}
+
 		c.Next()
 	}
 }
 ```
 
-- [ ] **Step 4: 运行测试,验证通过**
+使用精确路径而不是 `strings.Contains`，避免以后扩大路由组时误改写其他端点。
 
-Run: `go test ./middleware/ -run TestSeedanceRequestConvertVideoSubmit -v`
-Expected: PASS
+- [ ] **Step 4: 注册视频路由**
 
-- [ ] **Step 5: 追加图像路径测试**
-
-在 `middleware/seedance_adapter_test.go` 末尾追加:
+在 `router/video-router.go` 的 Jimeng 路由前添加：
 
 ```go
-func TestSeedanceRequestConvertImageSubmit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(SeedanceRequestConvert())
-	router.POST("/seedance/api/v3/images/generations", func(c *gin.Context) {
-		require.True(t, c.GetBool(common.KeySeedanceOfficialAPI))
-		require.Equal(t, "/v1/images/generations", c.Request.URL.Path)
-		require.Equal(t, relayconstant.RelayModeImagesGenerations, c.GetInt("relay_mode"))
-		c.Status(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/seedance/api/v3/images/generations", nil)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-}
+	seedanceVideoRouter := router.Group("/api/v3/contents/generations")
+	seedanceVideoRouter.Use(middleware.RouteTag("relay"))
+	seedanceVideoRouter.Use(middleware.SeedanceRequestConvert(), middleware.TokenAuth())
+	{
+		seedanceVideoRouter.POST("/tasks", middleware.Distribute(), controller.RelayTask)
+		seedanceVideoRouter.GET("/tasks", controller.RelaySeedanceTaskFetch)
+		seedanceVideoRouter.GET("/tasks/:task_id", controller.RelaySeedanceTaskFetch)
+	}
 ```
 
-- [ ] **Step 6: 运行新测试**
+POST 直接复用 `controller.RelayTask`；无需只做一次 `c.Set` 的 `RelaySeedanceTask` 包装函数。
 
-Run: `go test ./middleware/ -run TestSeedanceRequestConvertImageSubmit -v`
-Expected: PASS
+- [ ] **Step 5: 注册图像路由且保留标准限流链**
 
-- [ ] **Step 7: 追加查询路径(不改写)测试**
-
-在 `middleware/seedance_adapter_test.go` 追加(验证 GET 路径保持不变,由后续 controller 处理 task_id 提取):
+在 `router/relay-router.go` 的 `SetRelayRouter` 内添加：
 
 ```go
-func TestSeedanceRequestConvertFetchKeepsPath(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(SeedanceRequestConvert())
-	router.GET("/seedance/api/v3/contents/generations/tasks/:task_id", func(c *gin.Context) {
-		require.True(t, c.GetBool(common.KeySeedanceOfficialAPI))
-		// GET 路径不改写,task_id 由 controller.RelaySeedanceTaskFetch 从 c.Param 读取
-		require.Equal(t, "/seedance/api/v3/contents/generations/tasks/task_public", c.Request.URL.Path)
-		require.Equal(t, "task_public", c.Param("task_id"))
-		c.Status(http.StatusNoContent)
+	seedanceImageRouter := router.Group("/api/v3")
+	seedanceImageRouter.Use(middleware.RouteTag("relay"))
+	seedanceImageRouter.Use(middleware.SystemPerformanceCheck())
+	seedanceImageRouter.Use(middleware.SeedanceRequestConvert(), middleware.TokenAuth())
+	seedanceImageRouter.Use(middleware.ModelRequestRateLimit(), middleware.Distribute())
+	seedanceImageRouter.POST("/images/generations", func(c *gin.Context) {
+		controller.Relay(c, types.RelayFormatOpenAIImage)
 	})
-
-	req := httptest.NewRequest(http.MethodGet, "/seedance/api/v3/contents/generations/tasks/task_public", nil)
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusNoContent, recorder.Code)
-}
 ```
 
-- [ ] **Step 8: 运行全部中间件测试**
+- [ ] **Step 6: 验证**
 
-Run: `go test ./middleware/ -run TestSeedance -v`
-Expected: 3 个测试全部 PASS
+Run: `go test ./middleware -run TestSeedanceRequestConvert -v`
 
-- [ ] **Step 9: Commit**
+Run: `go build ./router ./common`
+
+Expected: 全部通过。
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add middleware/seedance_adapter.go middleware/seedance_adapter_test.go
-git commit -m "feat(seedance): add SeedanceRequestConvert middleware for video+image paths"
+git add common/gin.go middleware/seedance_adapter.go middleware/seedance_adapter_test.go router/video-router.go router/relay-router.go
+git commit -m "feat(seedance): register ARK native routes"
 ```
 
 ---
 
-## Task 3: 实现控制器 `RelaySeedanceTask` / `RelaySeedanceTaskFetch`
+## Task 2: 原生视频请求和提交响应
 
 **Files:**
+- Modify: `relay/channel/task/doubao/adaptor.go`
+- Modify: `relay/common/relay_utils.go`
+- Modify: `relay/channel/task/doubao/constants.go`
+- Create: `relay/channel/task/doubao/adaptor_test.go`
+
+- [ ] **Step 1: 写失败测试**
+
+覆盖以下 API 契约：
+
+- `model` 缺失、`content` 为空或类型错误时返回 400。
+- `duration=0`、`duration < -1`、超出 `relaycommon.MaxTaskDurationSeconds` 或超出所选模型官方范围时返回 400；`duration=-1` 只对 1.5 Pro/2.0 系列通过，其他模型拒绝。
+- `frames` 只对 1.0 Pro/1.0 Pro Fast 通过，且满足 `[29,289]` 和 `frames = 25 + 4n`；2.0/1.5 的 `frames` 返回 400。
+- 2.0 多模态参考场景最多 9 张图片、3 个视频、3 个音频，音频没有图片或视频时返回 400；首帧、首尾帧和多模态参考三种场景互斥。
+- `role` 只接受文档定义的 `first_frame`、`last_frame`、`reference_image`、`reference_video`、`reference_audio`，首帧/首尾帧的数量和角色组合错误时返回 400。
+- 2.0/Fast/Mini 的 `resolution`、`service_tier`、`generate_audio`、`draft`、`priority`、`seed`、`camera_fixed` 按模型能力矩阵拒绝不支持组合；`priority` 范围为 0~9，`execution_expires_after` 范围为 3600~259200。
+- 原生 `content` 中 image/video/audio/text 项、显式 `watermark:false` 和未知字段均保留。
+- `info.UpstreamModelName` 非空时，请求体 `model` 被替换为映射后的值；为空时从原始 body 回填。
+- 提交给客户端的 ID 是 `info.PublicTaskID`，adaptor 返回给持久化层的 ID 仍是上游 ID。
+- `expired` / `cancelled` 映射为 `TaskStatusFailure`。
+
+测试 body storage 直接由 `httptest.NewRequest` 提供；`common.GetBodyStorage` 会自行创建缓存，不使用不存在的 `common.NewBytesBodyStorage`。
+
+Run: `go test ./relay/channel/task/doubao -run Seedance -v`
+
+Expected: FAIL。
+
+- [ ] **Step 2: 添加原生请求验证结构**
+
+在 `adaptor.go` 中使用指针标量读取校验字段，避免把显式 `false` / `0` 当成缺失：
+
+```go
+type seedanceNativeRequest struct {
+	Model                 string         `json:"model"`
+	Content               []ContentItem  `json:"content"`
+	ServiceTier           string         `json:"service_tier,omitempty"`
+	ExecutionExpiresAfter *dto.IntValue  `json:"execution_expires_after,omitempty"`
+	GenerateAudio         *dto.BoolValue `json:"generate_audio,omitempty"`
+	Draft                 *dto.BoolValue `json:"draft,omitempty"`
+	Priority               *dto.IntValue  `json:"priority,omitempty"`
+	Resolution             string         `json:"resolution,omitempty"`
+	Ratio                  string         `json:"ratio,omitempty"`
+	Duration               *dto.IntValue  `json:"duration,omitempty"`
+	Frames                 *dto.IntValue  `json:"frames,omitempty"`
+	Seed                   *dto.IntValue  `json:"seed,omitempty"`
+	CameraFixed            *dto.BoolValue `json:"camera_fixed,omitempty"`
+	ReturnLastFrame        *dto.BoolValue `json:"return_last_frame,omitempty"`
+	Watermark              *dto.BoolValue `json:"watermark,omitempty"`
+	Tools                  []struct {
+		Type string `json:"type,omitempty"`
+	} `json:"tools,omitempty"`
+	SafetyIdentifier       string         `json:"safety_identifier,omitempty"`
+}
+```
+
+原生分支调用 `common.UnmarshalBodyReusable`，校验后把完整原始对象存入 `TaskSubmitReq.Metadata`，并把第一个非空 text 内容写入 `TaskSubmitReq.Prompt`。在 `relay/common/relay_utils.go` 的通用 task 校验中，只有 `common.KeySeedanceOfficialAPI` 请求允许 `duration=-1` 通过基础检查；显式 `duration=0` 仍由原生分支拒绝。映射完成后，doubao adaptor 再按以下规则做模型专属校验：
+
+- 2.0（含 `doubao-seedance-2-0-260128` 和 `doubao-seedance-2-0-mini-260615`）支持 480p/720p/1080p/4k，但 Mini 禁止 1080p；Fast/Mini 只支持 480p/720p；4k 只对普通 2.0 通过。
+- 1.5 Pro 支持 480p/720p/1080p；1.0 Pro/1.0 Pro Fast 使用官方默认 1080p，且 Fast 不接受首尾帧角色组合。
+- `duration`：1.0 为 2~12，1.5 为 4~12 或 -1，2.0 为 4~15 或 -1；所有正值同时受 `relaycommon.MaxTaskDurationSeconds` 约束。
+- `frames`：仅 1.0 系列接受 `[29,289]` 中满足 `25+4n` 的值；2.0/1.5 直接返回 400。
+- `service_tier`：仅 1.5 Pro 接受 `default`/`flex`；2.0/Fast/Mini 只接受缺省或 `default`。`generate_audio` 仅 2.0/1.5 支持，缺省按 `true`；`draft` 仅 1.5 支持，且 `draft=true` 必须是 480p、不能 `return_last_frame=true` 或 `service_tier=flex`。
+- `ratio` 只接受 `16:9`、`4:3`、`1:1`、`3:4`、`9:16`、`21:9`、`adaptive`；`adaptive` 仅 2.0/1.5 Pro 的文生或图生场景按文档规则通过。
+- `priority` 仅 2.0 支持且范围 0~9；`execution_expires_after` 范围 3600~259200；2.0 不支持 `seed` 和 `camera_fixed`，其他模型的 `seed` 范围为 -1~`2^32-1`，参考图场景拒绝 `camera_fixed=true`。
+- `tools` 仅 2.0 系列支持且每项 `type` 必须为 `web_search`；`safety_identifier` 提供时必须是长度不超过 64 的英文字符串，未提供时通过。
+- `content` 按 type/role 统计：2.0 多模态参考场景图片 0~9、视频 0~3、音频 0~3，音频必须伴随至少一张图片或一个视频；`first_frame`、`last_frame` 与 `reference_*` 不得混用，且首帧/首尾帧必须分别为 1/2 张图片。
+- 图片/视频/音频 URL、Base64 或 `asset://` 的格式、媒体尺寸、编码和总时长由 ARK 上游校验；new-api 不抓取远程媒体或凭字符串猜测时长，只检查对象结构、URL 非空和可验证的数量/角色约束。
+
+未知字段不丢弃，但不把未知字段中的 `duration`、`frames`、`priority` 等旁路值带入计费上下文；计费 adaptor 只读取已解析的顶层字段。
+
+- [ ] **Step 3: 构建上游请求时保留所有字段并应用模型映射**
+
+原生分支读取 `BodyStorage.Bytes()`，使用 `map[string]json.RawMessage`（`encoding/json` 只作为类型来源）保存未知字段。解析失败必须返回错误，不能把已知无效 JSON 继续发给上游。
+
+```go
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(rawBody, &fields); err != nil {
+		return nil, fmt.Errorf("invalid ARK request body: %w", err)
+	}
+
+	if info.UpstreamModelName == "" {
+		var modelName string
+		if err := common.Unmarshal(fields["model"], &modelName); err != nil {
+			return nil, fmt.Errorf("invalid ARK model: %w", err)
+		}
+		info.UpstreamModelName = modelName
+	}
+	mappedModel, err := common.Marshal(info.UpstreamModelName)
+	if err != nil {
+		return nil, err
+	}
+	fields["model"] = mappedModel
+	data, err := common.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(data), nil
+```
+
+- [ ] **Step 4: 返回公开 ID**
+
+在 `DoResponse` 验证上游 `dResp.ID` 后添加：
+
+```go
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		c.JSON(http.StatusOK, responsePayload{ID: info.PublicTaskID})
+		return dResp.ID, responseBody, nil
+	}
+```
+
+禁止返回 `dResp.ID` 给客户端。
+
+- [ ] **Step 5: 状态映射**
+
+在 `ParseTaskResult` 中把 `expired` 和 `cancelled` 归入失败终态，`Reason` 优先使用上游错误消息，空时使用状态字符串。
+
+- [ ] **Step 6: 验证并提交**
+
+Run: `go test ./relay/channel/task/doubao -run Seedance -v`
+
+Run: `go test ./relay/channel/task/doubao -v`
+
+```bash
+git add relay/channel/task/doubao/adaptor.go relay/channel/task/doubao/constants.go relay/channel/task/doubao/adaptor_test.go relay/common/relay_utils.go
+git commit -m "feat(seedance): preserve ARK video request contract"
+```
+
+---
+
+## Task 3: 单任务和列表查询
+
+**Files:**
+- Create: `relay/seedance_task.go`
+- Create: `relay/relay_task_seedance_test.go`
 - Create: `controller/seedance.go`
 
-- [ ] **Step 1: 写实现(控制器本身较薄,无独立单元测试,依赖 Task 4/6 的集成验证)**
+- [ ] **Step 1: 写失败测试**
 
-创建 `controller/seedance.go`:
+测试至少覆盖：
+
+- 单任务只允许当前 token 用户按公开 `task_*` ID 查询。
+- 查询响应 `id` 始终是 `Task.TaskID`，即使 `Task.Data.id` 和 `PrivateData.UpstreamTaskID` 是上游 ID。
+- 内部 `SUCCESS` / `FAILURE` / `IN_PROGRESS` / `QUEUED` 映射为 `succeeded` / `failed` / `running` / `queued`。
+- 成功任务缺少 `content.video_url` 时由 `PrivateData.ResultURL` 补齐。
+- `filter.task_ids` 支持逗号分隔、重复参数和 `filter.task_ids[]`，并通过 `WHERE task_id IN ?` 下推。
+- 列表仅返回当前用户、平台为 `45` 或 `54`、提交时间在七天窗口内的任务。
+- 需要读取 JSON 的 `filter.model` / `filter.service_tier` 路径使用固定批大小扫描；测试插入超过一个批次的数据，验证分页和 `total` 正确。
+
+测试在 `relay` 包内用 `glebarez/sqlite` 创建独立内存库，保存并在 `t.Cleanup` 恢复原 `model.DB`；不得 `t.Parallel()`。
+
+Run: `go test ./relay -run SeedanceTask -v`
+
+Expected: FAIL。
+
+- [ ] **Step 2: 实现公开 ID 单查**
+
+`seedanceFetchTaskByID` 只调用：
+
+```go
+task, exists, err := model.GetByTaskId(c.GetInt("id"), strings.TrimSpace(c.Param("task_id")))
+```
+
+不扫描 `private_data`，不存在时返回 `http.StatusNotFound`。
+
+- [ ] **Step 3: 实现列表查询**
+
+基础 GORM 条件必须包含：
+
+```go
+query := model.DB.Model(&model.Task{}).
+	Where("user_id = ?", c.GetInt("id")).
+	Where("platform IN ?", []string{
+		strconv.Itoa(constant.ChannelTypeVolcEngine),
+		strconv.Itoa(constant.ChannelTypeDoubaoVideo),
+	}).
+	Where("submit_time >= ?", time.Now().Add(-7*24*time.Hour).Unix())
+```
+
+`status` 和公开 `task_ids` 继续用 `Where` 下推。没有 JSON 过滤时执行 `Count` + `Order("id DESC").Offset(...).Limit(...)`。
+
+存在 `model` 或 `service_tier` 过滤时，按 `id DESC` 每批 200 条做 keyset 扫描（下一批追加 `id < lastID`），每批查询都带 `Limit(200)`；只累计匹配数和保存当前页所需任务。禁止无 `Limit` 的 `Find`，禁止把全部候选任务保存在切片中。
+
+分页参数规则固定为：`page_num` 默认 1、最大 500；`page_size` 默认 20、最大 100。溢出或非法值回退默认值。
+
+- [ ] **Step 4: 恢复 ARK 响应**
+
+先初始化空 map；若 `Task.Data` 非空则用 `common.Unmarshal(task.Data, &response)` 恢复上游字段，再强制覆盖以下字段：
+
+```go
+response["id"] = task.TaskID
+response["status"] = seedanceTaskStatus(task.Status)
+response["model"] = task.Properties.OriginModelName
+if response["model"] == "" {
+	response["model"] = task.Properties.UpstreamModelName
+}
+response["created_at"] = task.SubmitTime
+if task.SubmitTime == 0 {
+	response["created_at"] = task.CreatedAt
+}
+response["updated_at"] = task.UpdatedAt
+```
+
+上游 ID 不得出现在响应中。列表响应固定为：
+
+```json
+{"items": [], "total": 0}
+```
+
+- [ ] **Step 5: 添加查询控制器**
+
+`controller/seedance.go` 只包含查询 handler：
 
 ```go
 package controller
@@ -247,1074 +392,183 @@ package controller
 import (
 	"net/http"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/gin-gonic/gin"
 )
 
-// RelaySeedanceTask 处理 ARK 原生视频任务提交。
-// 设置 KeySeedanceOfficialAPI 标记后委托通用 RelayTask。
-func RelaySeedanceTask(c *gin.Context) {
-	c.Set(common.KeySeedanceOfficialAPI, true)
-	RelayTask(c)
-}
-
-// RelaySeedanceTaskFetch 处理 ARK 原生视频任务查询(单个或列表)。
-// 响应格式由 relay.SeedanceTaskFetch 按 ARK 原生结构组装。
 func RelaySeedanceTaskFetch(c *gin.Context) {
-	c.Set(common.KeySeedanceOfficialAPI, true)
-	respBody, taskErr := relay.SeedanceTaskFetch(c)
+	responseBody, taskErr := relay.SeedanceTaskFetch(c)
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
 		return
 	}
-	c.Data(http.StatusOK, "application/json", respBody)
+	c.Data(http.StatusOK, "application/json", responseBody)
 }
 ```
 
-- [ ] **Step 2: 验证编译(此时 relay.SeedanceTaskFetch 尚未实现,预期编译失败)**
+- [ ] **Step 6: 验证并提交**
 
-Run: `go build ./controller/`
-Expected: FAIL with `undefined: relay.SeedanceTaskFetch`(Task 6 会实现)
+Run: `go test ./relay -run SeedanceTask -v`
 
-- [ ] **Step 3: 暂不 commit,继续 Task 4-6 后统一编译验证**
-
----
-
-## Task 4: 注册视频路由组
-
-**Files:**
-- Modify: `router/video-router.go`(在 klingV1Router 块之后、jimengOfficialGroup 块之前插入)
-
-- [ ] **Step 1: 追加视频路由组**
-
-修改 `router/video-router.go`,在 jimeng 路由组(`// Jimeng official API routes`)之前插入:
-
-```go
-	// Seedance (火山方舟 ARK) 原生 API 路由 - 视频任务
-	// 用户把 ARK SDK 的 base_url 指向 https://your-host/seedance 即可零改造接入
-	// 路径与官方 ARK 视频接口对齐:/api/v3/contents/generations/tasks
-	seedanceOfficialGroup := router.Group("/seedance/api/v3/contents/generations")
-	seedanceOfficialGroup.Use(middleware.RouteTag("relay"))
-	seedanceOfficialGroup.Use(middleware.SeedanceRequestConvert(), middleware.TokenAuth())
-	{
-		// POST 提交任务,Distribute 在 handler 内由 RelayTask 触发
-		seedanceOfficialGroup.POST("/tasks", middleware.Distribute(), controller.RelaySeedanceTask)
-		// GET 查询单个任务 / 列表任务(无 task_id 参数走列表)
-		seedanceOfficialGroup.GET("/tasks", controller.RelaySeedanceTaskFetch)
-		seedanceOfficialGroup.GET("/tasks/:task_id", controller.RelaySeedanceTaskFetch)
-	}
-```
-
-> **注意:** POST 路由的 `middleware.Distribute()` 必须在 `controller.RelaySeedanceTask` 之前(与 jimeng 模式一致:`JimengRequestConvert → TokenAuth → Distribute`)。GET 查询路由不需要 Distribute(任务记录已固化渠道)。
-
-- [ ] **Step 2: 验证编译**
-
-Run: `go build ./router/`
-Expected: 无输出(成功,因为 controller.RelaySeedanceTask 已在 Task 3 创建)
-
-- [ ] **Step 3: Commit(暂不 push,等 Task 6 relay.SeedanceTaskFetch 实现后整体编译通过再 push)**
+Run: `go build ./controller ./router`
 
 ```bash
-git add router/video-router.go controller/seedance.go
-git commit -m "feat(seedance): register ARK native video routes and controllers"
+git add relay/seedance_task.go relay/relay_task_seedance_test.go controller/seedance.go
+git commit -m "feat(seedance): add ARK task lookup and bounded list query"
 ```
 
 ---
 
-## Task 5: doubao adaptor 的 Seedance 分支(请求/响应方向)
+## Task 4: 原生任务错误格式
 
 **Files:**
-- Modify: `relay/channel/task/doubao/adaptor.go`
-- Test: `relay/channel/task/doubao/adaptor_test.go`
+- Modify: `controller/relay.go`
+- Create: `controller/seedance_test.go`
 
-> 此 Task 同时包含 **CodeRabbit 指出的"模型名回填"review 修复**。
+- [ ] **Step 1: 写失败测试**
 
-- [ ] **Step 1: 写失败测试(BuildRequestBody 保留原生 content)**
+调用 `respondTaskError`，分别断言普通任务仍返回现有 `dto.TaskError`，ARK 标记请求返回：
 
-创建 `relay/channel/task/doubao/adaptor_test.go`:
-
-```go
-package doubao
-
-import (
-	"bytes"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"github.com/QuantumNous/new-api/common"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-
-// TestSeedanceBuildRequestBodyPreservesNativeContent 验证 ARK 原生请求体的
-// content[] 多模态结构被原样透传到上游(仅改写 model 字段)。
-// 这是问题1中"9图3视频1音频"场景能否工作的关键不变量。
-func TestSeedanceBuildRequestBodyPreservesNativeContent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set(common.KeySeedanceOfficialAPI, true)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/seedance/api/v3/contents/generations/tasks", bytes.NewBufferString(`{
-		"model":"doubao-seedance-2-0-260128",
-		"content":[
-			{"type":"image_url","image_url":{"url":"https://example.com/a.png"},"role":"first_frame"},
-			{"type":"video_url","video_url":{"url":"https://example.com/ref.mp4"}},
-			{"type":"audio_url","audio_url":{"url":"https://example.com/bg.mp3"}},
-			{"type":"text","text":"镜头缓慢推进"}
-		],
-		"duration":15,
-		"resolution":"720p",
-		"ratio":"16:9",
-		"watermark":false
-	}`))
-	ctx.Request.Header.Set("Content-Type", "application/json")
-
-	// 模拟 common.GetBodyStorage 读取请求体(实际由 middleware 预存)
-	// 这里直接通过 GetBodyStorage 需要 storage middleware,改用更简单的注入方式
-	adaptor := &TaskAdaptor{}
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "upstream-mapped-model"},
-	}
-
-	body, err := adaptor.BuildRequestBody(ctx, info)
-	require.NoError(t, err)
-
-	raw, err := io.ReadAll(body)
-	require.NoError(t, err)
-
-	var payload map[string]any
-	require.NoError(t, common.Unmarshal(raw, &payload))
-
-	// model 字段被渠道模型映射覆盖
-	assert.Equal(t, "upstream-mapped-model", payload["model"])
-
-	// 原生字段全部保留(透传,不丢字段)
-	assert.Equal(t, float64(15), payload["duration"])
-	assert.Equal(t, "720p", payload["resolution"])
-	assert.Equal(t, "16:9", payload["ratio"])
-	assert.Equal(t, false, payload["watermark"])
-
-	// content[] 多模态结构完整保留(4 项:image/video/audio/text)
-	content, ok := payload["content"].([]any)
-	require.True(t, ok, "content must be preserved as array")
-	require.Len(t, content, 4, "all 4 content items must survive")
-
-	first, ok := content[0].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "image_url", first["type"])
-	assert.Equal(t, "first_frame", first["role"])
-}
+```json
+{"error":{"code":"task_not_exist","message":"task_not_exist"}}
 ```
 
-> **注意:** 上面的测试依赖 `common.GetBodyStorage(c)` 能读出请求体。在真实流程中,`middleware.TokenAuth` 之前的 `middleware.Common` 链会通过 `UnmarshalBodyReusable` 把 body 缓存到 storage。**测试中需要手动设置 storage**,否则 `GetBodyStorage` 会报错。在 Step 3 的实现中会处理这个测试 setup。如果测试因 storage 报错,在测试开头加:
-> ```go
-> ctx.Set(common.KeyBodyStorage, common.NewBytesBodyStorage([]byte(`{...}`)))
-> ```
-> (具体 storage 构造函数名需 grep `common/` 确认,执行时核实)
+并保留原 HTTP 状态码。
 
-- [ ] **Step 2: 运行测试,验证失败**
+- [ ] **Step 2: 在统一错误出口添加窄分支**
 
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedanceBuildRequestBody -v`
-Expected: FAIL(当前 BuildRequestBody 无 Seedance 分支,会走默认路径尝试 `relaycommon.GetTaskRequest(c)` 报 "request not found in context")
-
-- [ ] **Step 3: 实现 BuildRequestBody 的 Seedance 分支(含模型名回填修复)**
-
-修改 `relay/channel/task/doubao/adaptor.go`,在 `BuildRequestBody` 函数开头(`req, err := relaycommon.GetTaskRequest(c)` 之前)插入:
+在 `respondTaskError` 的 429 文案处理后、现有 `c.JSON` 前添加：
 
 ```go
-// BuildRequestBody converts request into Doubao specific format.
-func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
-	// ARK 原生入口:原样透传请求体(仅改写 model 字段),保留 content[] 多模态结构
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return nil, err
-		}
-		cachedBody, err := storage.Bytes()
-		if err != nil {
-			return nil, err
-		}
-
-		var bodyMap map[string]interface{}
-		if err := common.Unmarshal(cachedBody, &bodyMap); err != nil {
-			// 解析失败时原样转发(尽量不阻断请求)
-			return bytes.NewReader(cachedBody), nil
-		}
-
-		// 渠道模型映射:若配置了 UpstreamModelName 则覆盖,否则反向回填保证计费归属正确
-		// (CodeRabbit review:修复模型名回填缺失导致的计费归属错误)
-		if info.UpstreamModelName != "" {
-			bodyMap["model"] = info.UpstreamModelName
-		} else if m, _ := bodyMap["model"].(string); m != "" {
-			info.UpstreamModelName = m
-		}
-
-		data, err := common.Marshal(bodyMap)
-		if err != nil {
-			return nil, err
-		}
-		return bytes.NewReader(data), nil
-	}
-
-	req, err := relaycommon.GetTaskRequest(c)
-	// ... 原有逻辑保留 ...
-```
-
-- [ ] **Step 4: 运行测试,验证通过**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedanceBuildRequestBody -v`
-Expected: PASS(如果 storage setup 正确;若报 storage 错误,调整测试 setup 后再跑)
-
-- [ ] **Step 5: 写失败测试(ValidateRequestAndSetAction 的 Seedance 分支)**
-
-在 `adaptor_test.go` 追加:
-
-```go
-// TestSeedanceValidateRejectsMissingModel 验证 ARK 原生请求必须有 model 和 content 字段
-func TestSeedanceValidateRejectsMissingModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set(common.KeySeedanceOfficialAPI, true)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/seedance/api/v3/contents/generations/tasks",
-		bytes.NewBufferString(`{"content":[{"type":"text","text":"hi"}]}`))
-	ctx.Request.Header.Set("Content-Type", "application/json")
-
-	adaptor := &TaskAdaptor{}
-	info := &relaycommon.RelayInfo{}
-	taskErr := adaptor.ValidateRequestAndSetAction(ctx, info)
-
-	require.NotNil(t, taskErr, "missing model must be rejected")
-	assert.Contains(t, taskErr.Code, "missing_model")
-}
-
-func TestSeedanceValidateRejectsMissingContent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set(common.KeySeedanceOfficialAPI, true)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/seedance/api/v3/contents/generations/tasks",
-		bytes.NewBufferString(`{"model":"doubao-seedance-2-0-260128"}`))
-	ctx.Request.Header.Set("Content-Type", "application/json")
-
-	adaptor := &TaskAdaptor{}
-	info := &relaycommon.RelayInfo{}
-	taskErr := adaptor.ValidateRequestAndSetAction(ctx, info)
-
-	require.NotNil(t, taskErr, "missing content must be rejected")
-	assert.Contains(t, taskErr.Code, "missing_content")
-}
-```
-
-- [ ] **Step 6: 运行,验证失败**
-
-Run: `go test ./relay/channel/task/doubao/ -run "TestSeedanceValidate" -v`
-Expected: FAIL(当前 ValidateRequestAndSetAction 无 Seedance 分支)
-
-- [ ] **Step 7: 实现 ValidateRequestAndSetAction 的 Seedance 分支**
-
-修改 `adaptor.go` 的 `ValidateRequestAndSetAction`(`return relaycommon.ValidateBasicTaskRequest(...)` 之前)插入:
-
-```go
-// ValidateRequestAndSetAction parses body, validates fields and sets default action.
-func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
-	// ARK 原生入口:解析原生请求体,提取 model/content,把整个 body 存入 metadata 供 BuildRequestBody 透传
-	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		var body map[string]interface{}
-		if err := common.UnmarshalBodyReusable(c, &body); err != nil {
-			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
-		}
-
-		modelName, _ := body["model"].(string)
-		if strings.TrimSpace(modelName) == "" {
-			return service.TaskErrorWrapperLocal(fmt.Errorf("field model is required"), "missing_model", http.StatusBadRequest)
-		}
-		if _, ok := body["content"]; !ok {
-			return service.TaskErrorWrapperLocal(fmt.Errorf("field content is required"), "missing_content", http.StatusBadRequest)
-		}
-
-		info.Action = constant.TaskActionGenerate
-		// 把整个原生 body 存入 metadata,后续 BuildRequestBody 会从 storage 读原始字节,
-		// 这里设置 task_request 主要是为了填 Prompt 供校验日志
-		c.Set("task_request", relaycommon.TaskSubmitReq{
-			Model:    modelName,
-			Prompt:   seedanceTextPrompt(body),
-			Metadata: body,
+		c.JSON(taskErr.StatusCode, gin.H{
+			"error": gin.H{
+				"code":    taskErr.Code,
+				"message": taskErr.Message,
+			},
 		})
-		return nil
-	}
-
-	// Accept only POST /v1/video/generations as "generate" action.
-	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
-}
-```
-
-并新增 import `"strings"` 和 `"fmt"`(若未导入),以及辅助函数(放在 `convertToRequestPayload` 附近):
-
-```go
-// seedanceTextPrompt 从 ARK 原生 content[] 数组中提取第一个 text 项作为 prompt。
-// 用于校验/日志,不影响 BuildRequestBody 的原始字节透传。
-func seedanceTextPrompt(body map[string]interface{}) string {
-	content, ok := body["content"].([]interface{})
-	if !ok {
-		return ""
-	}
-	for _, item := range content {
-		itemMap, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if itemMap["type"] != "text" {
-			continue
-		}
-		text, _ := itemMap["text"].(string)
-		if strings.TrimSpace(text) != "" {
-			return text
-		}
-	}
-	return ""
-}
-```
-
-- [ ] **Step 8: 运行,验证通过**
-
-Run: `go test ./relay/channel/task/doubao/ -run "TestSeedanceValidate" -v`
-Expected: PASS
-
-- [ ] **Step 9: 写失败测试(DoResponse 返回原生 {id} 格式)**
-
-在 `adaptor_test.go` 追加:
-
-```go
-// TestSeedanceDoResponseReturnsUpstreamTaskID 验证 ARK 原生入口的提交响应是 {id} 而非 OpenAI Video 格式
-func TestSeedanceDoResponseReturnsUpstreamTaskID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set(common.KeySeedanceOfficialAPI, true)
-
-	adaptor := &TaskAdaptor{}
-	resp := &http.Response{
-		Body: io.NopCloser(bytes.NewBufferString(`{"id":"cgt-upstream-123"}`)),
-	}
-	info := &relaycommon.RelayInfo{
-		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"},
-	}
-
-	taskID, taskData, taskErr := adaptor.DoResponse(ctx, resp, info)
-	require.Nil(t, taskErr)
-	assert.Equal(t, "cgt-upstream-123", taskID, "must return upstream task id")
-	assert.JSONEq(t, `{"id":"cgt-upstream-123"}`, string(taskData), "taskData must be original upstream response")
-	assert.JSONEq(t, `{"id":"cgt-upstream-123"}`, recorder.Body.String(), "client must receive ARK native {id} shape")
-}
-```
-
-- [ ] **Step 10: 运行,验证失败**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedanceDoResponse -v`
-Expected: FAIL(当前 DoResponse 总是返回 OpenAIVideo 格式)
-
-- [ ] **Step 11: 实现 DoResponse 的 Seedance 分支**
-
-修改 `adaptor.go` 的 `DoResponse`,在 `if dResp.ID == "" { ... }` 检查之后、`ov := dto.NewOpenAIVideo()` 之前插入:
-
-```go
-	if dResp.ID == "" {
-		taskErr = service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError)
 		return
 	}
-
-	// ARK 原生入口:返回上游原生的 {id} 简洁格式
-	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		c.JSON(http.StatusOK, gin.H{
-			"id": dResp.ID,
-		})
-		return dResp.ID, responseBody, nil
-	}
-
-	ov := dto.NewOpenAIVideo()
-	// ... 原有逻辑保留 ...
 ```
 
-- [ ] **Step 12: 运行,验证通过**
+- [ ] **Step 3: 验证并提交**
 
-Run: `go test ./relay/channel/task/doubao/ -run TestSeedanceDoResponse -v`
-Expected: PASS
-
-- [ ] **Step 13: 写测试(ParseTaskResult 新增 expired/cancelled 状态)**
-
-在 `adaptor_test.go` 追加:
-
-```go
-// TestParseTaskResultMapsExpiredAndCancelled 验证 expired/cancelled 被映射为 FAILURE
-func TestParseTaskResultMapsExpiredAndCancelled(t *testing.T) {
-	adaptor := &TaskAdaptor{}
-
-	for _, status := range []string{`"expired"`, `"cancelled"`} {
-		body := []byte(`{"id":"t1","status":` + status + `}`)
-		result, err := adaptor.ParseTaskResult(body)
-		require.NoError(t, err)
-		assert.Equal(t, model.TaskStatusFailure, result.Status, "status %s must map to FAILURE", status)
-		assert.Equal(t, "100%", result.Progress)
-	}
-}
-```
-
-- [ ] **Step 14: 运行,验证失败**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestParseTaskResultMapsExpiredAndCancelled -v`
-Expected: FAIL(当前 ParseTaskResult 无 expired/cancelled case,落入 default 返回 InProgress)
-
-- [ ] **Step 15: 实现 expired/cancelled 状态映射**
-
-修改 `adaptor.go` 的 `ParseTaskResult`,在 `case "failed":` 之后、`default:` 之前插入:
-
-```go
-	case "failed":
-		taskResult.Status = model.TaskStatusFailure
-		taskResult.Progress = "100%"
-		taskResult.Reason = resTask.Error.Message
-	case "expired", "cancelled":
-		// ARK 原生状态补充:任务过期或被取消,统一映射为 FAILURE
-		taskResult.Status = model.TaskStatusFailure
-		taskResult.Progress = "100%"
-		taskResult.Reason = resTask.Status
-	default:
-```
-
-- [ ] **Step 16: 运行,验证通过**
-
-Run: `go test ./relay/channel/task/doubao/ -run TestParseTaskResultMapsExpiredAndCancelled -v`
-Expected: PASS
-
-- [ ] **Step 17: 运行 doubao 包全部测试**
-
-Run: `go test ./relay/channel/task/doubao/ -v`
-Expected: 全部 PASS
-
-- [ ] **Step 18: Commit**
+Run: `go test ./controller -run Seedance -v`
 
 ```bash
-git add relay/channel/task/doubao/adaptor.go relay/channel/task/doubao/adaptor_test.go
-git commit -m "feat(seedance): doubao adaptor Seedance branches (validate/build/doResponse) + model name backfill fix"
+git add controller/relay.go controller/seedance_test.go
+git commit -m "fix(seedance): return ARK-compatible task errors"
 ```
 
 ---
 
-## Task 6: 实现 `relay.SeedanceTaskFetch`(查询/列表 + 响应还原 + 性能修复)
+## Task 5: 原生图像透传且保留模型映射
 
 **Files:**
-- Create: `relay/seedance_task.go`
-- Test: `relay/relay_task_seedance_test.go`
+- Modify: `controller/relay.go`
+- Modify: `relay/image_handler.go`
+- Modify: `relay/helper/valid_request.go`
+- Create: `relay/image_handler_test.go`
+- Modify: `relay/helper/openai_image_request_test.go`
+- Modify: `relay/channel/openai/relay_image.go`
+- Modify: `relay/channel/openai/image_stream_test.go`
+- Modify: `dto/openai_response.go`
 
-> 此 Task 包含 **CodeRabbit 指出的"列表查询性能"review 修复**:把能下推 SQL 的过滤条件下推到 GORM,避免全量加载到内存。
+- [ ] **Step 1: 写失败测试**
 
-- [ ] **Step 1: 写失败测试(任务 ID 过滤参数解析)**
+为原生图像 body 构造 `model`、多图 `image`、显式 `watermark:false`、`seed:0`、`sequential_image_generation`、`sequential_image_generation_options.max_images` 和未知对象字段。断言：
 
-创建 `relay/relay_task_seedance_test.go`:
+- `model` 等于映射后的 `info.UpstreamModelName`。
+- 其余字段 JSON 语义完全相同，显式零值和 `false` 未丢失。
+- 参考图数量超过 Pro 的 10 或 Lite/4.5/4.0 的 14 时返回 400；`max_images` 必须为 1~15；组图的实际输出上限为 `min(max_images, 15-input_images)`，并将预扣估算的 `request.N` 归一化为该有界输出上限。输入 14 张参考图且 `max_images=15` 应通过并按最多 1 张预扣。
+- Pro 传 `sequential_image_generation=auto` 或 `stream=true` 返回 400；Lite/4.5/4.0 的 `auto`、`max_images` 和 `stream=true` 通过。
+- `sequential_image_generation_options` 仅在 `sequential_image_generation=auto` 时接受；disabled 模式带 options 返回 400，且 Pro 传该字段始终返回 400。
+- 原生响应含失败项时，`usage.generated_images=2` 只把 `n` 计费倍率设为 2，不使用 `data.#=3`；`generated_images=0` 不产生图片额度；字段缺失时保留兼容回退路径。
+- Seedream 非流式响应的 `usage.output_tokens` 映射为 canonical `CompletionTokens`，`total_tokens` 与其一致且不虚构输入 token；Pro 返回的 `input_images` 只保留在响应/usage，不作为图片张数计费。
+- 非原生请求仍走既有 `ConvertImageRequest` 分支。
 
-```go
-package relay
+Run: `go test ./relay -run SeedanceImage -v`
 
-import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
+Expected: FAIL。
 
-	"github.com/QuantumNous/new-api/model"
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
+- [ ] **Step 2: 添加原生 body 重写**
 
-// TestSeedanceTaskIDFilters 验证 filter.task_ids 同时支持逗号分隔和重复参数两种风格
-func TestSeedanceTaskIDFilters(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(
-		http.MethodGet,
-		"/seedance/api/v3/contents/generations/tasks?filter.task_ids=cgt-a,cgt-b&filter.task_ids=task_c&filter.task_ids[]=cgt-d",
-		nil,
-	)
+在 `relay/helper/valid_request.go` 增加稳定函数 `func NormalizeSeedreamNativeImageRequest(c *gin.Context, request *dto.ImageRequest) error`，由 `controller/relay.go` 在 `GenRelayInfo` 后、token 估算和预扣前调用。它读取原始 JSON（只使用 `common.*`），统计 `image` 字符串/数组的参考图数量，验证 `max_images` 1~15，并把 `request.N` 设置为 `disabled=>1` 或 `auto=>min(max_images, 15-input_images)`；当 `input_images >= 15` 时返回 400。该值只作为预扣上限，不改变 outbound body，也不把 OpenAI `n` 当作 ARK 组图数量。
 
-	require.Equal(t, []string{"cgt-a", "cgt-b", "task_c", "cgt-d"}, seedanceTaskIDFilters(ctx))
-}
-```
+控制器只在 `common.KeySeedanceOfficialAPI` 和 `relayFormat == types.RelayFormatOpenAIImage` 时调用该函数；返回错误直接走现有 `invalid_request` 400 分支，确保不发生预扣。普通 OpenAI 图像请求不执行 Seedream 归一化。
 
-- [ ] **Step 2: 运行,验证失败**
+在 `relay/image_handler.go` 的 `ModelMappedHelper` 成功后调用稳定函数 `func ValidateSeedreamNativeModelRequest(c *gin.Context, request *dto.ImageRequest, upstreamModel string) error`，用 `info.UpstreamModelName` 检查模型能力：Pro 只允许单张输出（仍允许最多 10 张参考图），并禁止 `sequential_image_generation`/`stream`；Lite/4.5/4.0 才允许 `auto`、`max_images` 和流式；`output_format` 仅 Pro/Lite，`tools` 仅 Lite，`optimize_prompt_options.mode=fast` 只对 4.0 通过。验证失败使用 400，且发生在上游请求前。
 
-Run: `go test ./relay/ -run TestSeedanceTaskIDFilters -v`
-Expected: FAIL with `undefined: seedanceTaskIDFilters`
+不要仅把 `c.GetBool(common.KeySeedanceOfficialAPI)` 加到现有 pass-through 条件。新增稳定领域函数 `buildSeedanceImageRequestBody(raw []byte, upstreamModel string) ([]byte, error)`，使用 `map[string]json.RawMessage` + `common.Unmarshal` / `common.Marshal`，只替换 `model`；当 `upstreamModel` 为空时保留原始 `model`。构建 outbound body 时沿用 `relaycommon.NewOutboundJSONBody`，更新 `info.UpstreamRequestBodySize`，并正确关闭 closer。
 
-- [ ] **Step 3: 写失败测试(响应还原 ARK 原生格式)**
+在 `ImageHelper` 完成 `ModelMappedHelper` 后优先处理原生分支，并在构建 body 后继续应用 `relaycommon.ApplyParamOverrideWithRelayInfo`。全局/渠道 pass-through 分支保持原行为。
 
-在 `relay_task_seedance_test.go` 追加:
+在 `dto/openai_response.go` 的 `dto.Usage` 增加 `GeneratedImages` 和 `InputImages` 字段。`relay/channel/openai/relay_image.go` 的非流式和流式处理都优先读取原生入口响应 `usage.generated_images`；原生字段存在时允许 0，将负数按 0 处理、超过 15 时记录 `common.SysError` 后截断到 15，再更新 `PriceData` 的 `n` 倍率。普通 OpenAI 图像响应继续使用 `dto.MaxImageN` 的现有上限。成功张数为 0 时通过复制并过滤 `PriceData.OtherRatios()` 后调用 `ReplaceOtherRatios` 移除 `n`（不得写入 0，因为 `AddOtherRatio` 会拒绝非正值），同时将传给计费的 `usage.TotalTokens` 归零，确保按成功张数不扣图片额度；不要在 `relay/image_handler.go` 把 TotalTokens 强制改成 1。字段缺失才使用现有 `data.#`/请求数量兼容路径。所有倍率更新继续经 `PriceData.AddOtherRatio`/`ReplaceOtherRatios`，不得直接写 `OtherRatios`。
 
-```go
-// TestSeedanceTaskResponseUsesUpstreamShape 验证查询响应使用 ARK 原生 responseTask 形态
-// 而非 OpenAI Video 格式(这是 ARK SDK 用户零改造的关键)
-func TestSeedanceTaskResponseUsesUpstreamShape(t *testing.T) {
-	task := &model.Task{
-		TaskID:     "task_public",
-		Status:     model.TaskStatusSuccess,
-		SubmitTime: 1710000000,
-		UpdatedAt:  1710000100,
-		Properties: model.Properties{
-			OriginModelName: "doubao-seedance-2-0-260128",
-		},
-		PrivateData: model.TaskPrivateData{
-			UpstreamTaskID: "cgt-upstream",
-			ResultURL:      "https://example.com/video.mp4",
-		},
-		Data: json.RawMessage(`{"id":"cgt-upstream","status":"running","content":{},"service_tier":"default"}`),
-	}
+`ImageHelper` 的日志数量也优先使用同一个权威 `generated_images` 值（包括 0），只有字段缺失才记录规范化后的请求估算；预扣估算和终态实际张数必须在测试中分别断言。
 
-	resp := seedanceTaskResponse(task)
-	assert.Equal(t, "cgt-upstream", resp["id"], "id must be upstream task id")
-	assert.Equal(t, "doubao-seedance-2-0-260128", resp["model"])
-	assert.Equal(t, "succeeded", resp["status"], "internal SUCCESS must map to ARK 'succeeded'")
-	assert.Equal(t, int64(1710000000), resp["created_at"])
-	assert.Equal(t, int64(1710000100), resp["updated_at"])
+- [ ] **Step 3: 验证并提交**
 
-	content, ok := resp["content"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "https://example.com/video.mp4", content["video_url"], "video_url must be filled from ResultURL")
-}
-```
+Run: `go test ./relay -run SeedanceImage -v`
 
-- [ ] **Step 4: 运行,验证失败**
+Run: `go test ./relay/helper -run 'SeedreamNative|GetAndValidOpenAIImageRequestNBounds' -v`
 
-Run: `go test ./relay/ -run TestSeedanceTaskResponseUsesUpstreamShape -v`
-Expected: FAIL with `undefined: seedanceTaskResponse`
-
-- [ ] **Step 5: 实现核心逻辑(含性能修复)**
-
-创建 `relay/seedance_task.go`:
-
-```go
-package relay
-
-import (
-	"errors"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
-
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
-	"github.com/gin-gonic/gin"
-)
-
-// SeedanceTaskFetch 处理 ARK 原生任务查询入口:有 task_id 走单任务查询,无 task_id 走列表查询。
-func SeedanceTaskFetch(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
-	taskID := strings.TrimSpace(c.Param("task_id"))
-	if taskID != "" {
-		return seedanceFetchTaskByID(c, taskID)
-	}
-	return seedanceFetchTaskList(c)
-}
-
-// seedanceFetchTaskByID 查询单个任务并按 ARK 原生格式返回。
-// 先按公开 task_id 查,未命中再扫近期任务匹配 upstream task_id(ARK SDK 可能用上游 id 查询)。
-func seedanceFetchTaskByID(c *gin.Context, taskID string) (respBody []byte, taskResp *dto.TaskError) {
-	originTask, exist, err := seedanceGetTaskByID(c.GetInt("id"), taskID)
-	if err != nil {
-		taskResp = service.TaskErrorWrapper(err, "get_task_failed", http.StatusInternalServerError)
-		return
-	}
-	if !exist {
-		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
-		return
-	}
-
-	respBody, err = common.Marshal(seedanceTaskResponse(originTask))
-	if err != nil {
-		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
-	}
-	return
-}
-
-// seedanceFetchTaskList 列表查询。
-// 性能修复(CodeRabbit review):user_id/platform/submit_time/status 等可下推 SQL 的条件下推到 GORM,
-// 仅 task_ids(跨公开id+upstream id 匹配)/model/service_tier(涉及 JSON 字段)保留内存过滤。
-func seedanceFetchTaskList(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
-	pageNum := parseSeedancePositiveInt(c.Query("page_num"), 1, 500)
-	pageSize := parseSeedancePositiveInt(c.Query("page_size"), 20, 500)
-	offset := (pageNum - 1) * pageSize
-
-	weekAgo := time.Now().Add(-7 * 24 * time.Hour).Unix()
-	query := model.DB.
-		Where("user_id = ?", c.GetInt("id")).
-		Where("platform in ?", seedanceTaskPlatforms()).
-		Where("submit_time >= ?", weekAgo)
-
-	// status 可下推(内部状态字符串直接对应)
-	statusFilter := strings.TrimSpace(c.Query("filter.status"))
-	if statusFilter != "" {
-		if internalStatus := seedanceStatusToModelStatus(statusFilter); internalStatus != "" {
-			query = query.Where("status = ?", internalStatus)
-		}
-	}
-
-	// 先 Count 拿 total(基于可下推条件)
-	var total int64
-	if err := query.Model(&model.Task{}).Count(&total).Error; err != nil {
-		taskResp = service.TaskErrorWrapper(err, "get_tasks_failed", http.StatusInternalServerError)
-		return
-	}
-
-	// 涉及 JSON 字段或跨字段匹配的过滤保留内存:task_ids / model / service_tier
-	taskIDFilter := seedanceTaskIDFilters(c)
-	modelFilter := strings.TrimSpace(c.Query("filter.model"))
-	serviceTierFilter := strings.TrimSpace(c.Query("filter.service_tier"))
-	needsInMemoryFilter := len(taskIDFilter) > 0 || modelFilter != "" || serviceTierFilter != ""
-
-	var filtered []*model.Task
-	if needsInMemoryFilter {
-		// 需要内存过滤时只能全量加载(但限定 7 天窗口 + 已下推的条件)
-		if err := query.Order("id desc").Find(&filtered).Error; err != nil {
-			taskResp = service.TaskErrorWrapper(err, "get_tasks_failed", http.StatusInternalServerError)
-			return
-		}
-		filtered = seedanceApplyInMemoryFilters(filtered, taskIDFilter, modelFilter, serviceTierFilter)
-		total = int64(len(filtered))
-	} else {
-		// 纯 SQL 路径:直接分页
-		if err := query.Order("id desc").Offset(offset).Limit(pageSize).Find(&filtered).Error; err != nil {
-			taskResp = service.TaskErrorWrapper(err, "get_tasks_failed", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// 内存路径需要分页切片
-	if needsInMemoryFilter {
-		if offset > len(filtered) {
-			filtered = []*model.Task{}
-		} else {
-			end := offset + pageSize
-			if end > len(filtered) {
-				end = len(filtered)
-			}
-			filtered = filtered[offset:end]
-		}
-	}
-
-	items := make([]map[string]any, 0, len(filtered))
-	for _, task := range filtered {
-		items = append(items, seedanceTaskResponse(task))
-	}
-
-	respBody, err := common.Marshal(map[string]any{
-		"items": items,
-		"total": total,
-	})
-	if err != nil {
-		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
-	}
-	return
-}
-
-// seedanceApplyInMemoryFilters 应用无法下推 SQL 的过滤条件
-func seedanceApplyInMemoryFilters(tasks []*model.Task, taskIDs []string, modelFilter, serviceTierFilter string) []*model.Task {
-	filtered := make([]*model.Task, 0, len(tasks))
-	for _, task := range tasks {
-		if len(taskIDs) > 0 && !seedanceTaskMatchesID(task, taskIDs) {
-			continue
-		}
-		if modelFilter != "" && !seedanceTaskMatchesModel(task, modelFilter) {
-			continue
-		}
-		if serviceTierFilter != "" && !seedanceTaskFieldEquals(task, "service_tier", serviceTierFilter) {
-			continue
-		}
-		filtered = append(filtered, task)
-	}
-	return filtered
-}
-
-// seedanceGetTaskByID 先按公开 task_id 查,未命中再扫近期任务匹配 upstream task_id
-func seedanceGetTaskByID(userID int, taskID string) (*model.Task, bool, error) {
-	task, exist, err := model.GetByTaskId(userID, taskID)
-	if err != nil || exist {
-		return task, exist, err
-	}
-
-	// 扫描近期任务匹配 upstream id(低频路径,加 Limit 兜底防极端情况)
-	var tasks []*model.Task
-	err = model.DB.
-		Where("user_id = ?", userID).
-		Where("platform in ?", seedanceTaskPlatforms()).
-		Where("submit_time >= ?", time.Now().Add(-7*24*time.Hour).Unix()).
-		Order("id desc").
-		Limit(500).
-		Find(&tasks).Error
-	if err != nil {
-		return nil, false, err
-	}
-	for _, candidate := range tasks {
-		if candidate.GetUpstreamTaskID() == taskID {
-			return candidate, true, nil
-		}
-	}
-	return nil, false, nil
-}
-
-func seedanceTaskPlatforms() []string {
-	return []string{
-		strconv.Itoa(constant.ChannelTypeVolcEngine),
-		strconv.Itoa(constant.ChannelTypeDoubaoVideo),
-	}
-}
-
-func seedanceTaskIDFilters(c *gin.Context) []string {
-	rawIDs := append(c.QueryArray("filter.task_ids"), c.QueryArray("filter.task_ids[]")...)
-	taskIDs := make([]string, 0, len(rawIDs))
-	for _, rawID := range rawIDs {
-		for _, taskID := range strings.Split(rawID, ",") {
-			taskID = strings.TrimSpace(taskID)
-			if taskID != "" {
-				taskIDs = append(taskIDs, taskID)
-			}
-		}
-	}
-	return taskIDs
-}
-
-func seedanceTaskMatchesID(task *model.Task, taskIDs []string) bool {
-	for _, taskID := range taskIDs {
-		if task.TaskID == taskID || task.GetUpstreamTaskID() == taskID {
-			return true
-		}
-	}
-	return false
-}
-
-func seedanceTaskMatchesModel(task *model.Task, modelName string) bool {
-	if task.Properties.OriginModelName == modelName || task.Properties.UpstreamModelName == modelName {
-		return true
-	}
-	return seedanceTaskFieldEquals(task, "model", modelName)
-}
-
-func seedanceTaskFieldEquals(task *model.Task, field string, value string) bool {
-	var data map[string]any
-	if err := common.Unmarshal(task.Data, &data); err != nil {
-		return false
-	}
-	fieldValue, _ := data[field].(string)
-	return fieldValue == value
-}
-
-func parseSeedancePositiveInt(raw string, fallback, maxValue int) int {
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		value = fallback
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
-}
-
-// seedanceStatusToModelStatus 把 ARK 原生 status 反向映射到内部 model.TaskStatus(用于列表查询 SQL 下推)
-func seedanceStatusToModelStatus(status string) string {
-	switch status {
-	case "succeeded":
-		return string(model.TaskStatusSuccess)
-	case "failed":
-		return string(model.TaskStatusFailure)
-	case "running":
-		return string(model.TaskStatusInProgress)
-	case "queued", "pending":
-		return string(model.TaskStatusQueued)
-	default:
-		return ""
-	}
-}
-
-// seedanceTaskStatus 把内部 model.TaskStatus 映射到 ARK 原生 status 字符串
-func seedanceTaskStatus(status model.TaskStatus) string {
-	switch status {
-	case model.TaskStatusSuccess:
-		return "succeeded"
-	case model.TaskStatusFailure:
-		return "failed"
-	case model.TaskStatusInProgress:
-		return "running"
-	default:
-		return "queued"
-	}
-}
-
-// seedanceTaskResponse 把存储的 Task 还原为 ARK 原生 responseTask 格式。
-// task.Data 已持有完整上游响应(由轮询器写入),这里在其基础上补全 id/model/status/created_at/updated_at/video_url。
-func seedanceTaskResponse(task *model.Task) map[string]any {
-	resp := map[string]any{}
-	_ = common.Unmarshal(task.Data, &resp)
-
-	resp["id"] = task.GetUpstreamTaskID()
-	if modelName := task.Properties.OriginModelName; modelName != "" {
-		resp["model"] = modelName
-	} else if modelName = task.Properties.UpstreamModelName; modelName != "" {
-		resp["model"] = modelName
-	}
-	resp["status"] = seedanceTaskStatus(task.Status)
-
-	if createdAt := task.SubmitTime; createdAt > 0 {
-		resp["created_at"] = createdAt
-	} else if task.CreatedAt > 0 {
-		resp["created_at"] = task.CreatedAt
-	}
-	if task.UpdatedAt > 0 {
-		resp["updated_at"] = task.UpdatedAt
-	}
-
-	// 成功时确保 content.video_url 存在(优先用上游响应里的,缺失则用 ResultURL)
-	if resultURL := task.GetResultURL(); resultURL != "" && task.Status == model.TaskStatusSuccess {
-		content, _ := resp["content"].(map[string]any)
-		if content == nil {
-			content = map[string]any{}
-		}
-		if _, ok := content["video_url"]; !ok {
-			content["video_url"] = resultURL
-		}
-		resp["content"] = content
-	}
-
-	// 失败时确保 error.message 存在
-	if task.Status == model.TaskStatusFailure && resp["error"] == nil && task.FailReason != "" {
-		resp["error"] = map[string]any{
-			"message": task.FailReason,
-		}
-	}
-	return resp
-}
-```
-
-- [ ] **Step 6: 运行两个测试,验证通过**
-
-Run: `go test ./relay/ -run "TestSeedanceTaskIDFilters|TestSeedanceTaskResponseUsesUpstreamShape" -v`
-Expected: 2 个测试 PASS
-
-- [ ] **Step 7: 整体编译验证**
-
-Run: `go build ./...`
-Expected: 无输出(全部编译通过,controller/seedance.go 的依赖闭环完成)
-
-- [ ] **Step 8: 运行 relay 包全部 seedance 测试**
-
-Run: `go test ./relay/ -run Seedance -v`
-Expected: 全部 PASS
-
-- [ ] **Step 9: Commit**
+Run: `go test ./relay/channel/openai -run 'Image.*(Stream|GeneratedImages|Count)' -v`
 
 ```bash
-git add relay/seedance_task.go relay/relay_task_seedance_test.go
-git commit -m "feat(seedance): implement SeedanceTaskFetch with native response shape + SQL pushdown perf fix"
+git add controller/relay.go relay/image_handler.go relay/helper/valid_request.go relay/image_handler_test.go relay/helper/openai_image_request_test.go relay/channel/openai/relay_image.go relay/channel/openai/image_stream_test.go dto/openai_response.go
+git commit -m "feat(seedance): preserve native image fields with model mapping"
 ```
 
 ---
 
-## Task 7: 注册图像路由组 + 强制 PassThrough
+## Task 6: 回归验证
 
-**Files:**
-- Modify: `router/relay-router.go`(新增 `/seedance` 图像路由组)
-- Modify: `relay/image_handler.go`(PassThrough 追加 Seedance 条件)
+- [ ] **Step 1: 新增行为测试**
 
-- [ ] **Step 1: 在 relay-router.go 注册图像路由**
+Run: `go test ./middleware ./controller ./relay ./relay/channel/task/doubao -run Seedance -v`
 
-修改 `router/relay-router.go`,在文件末尾(`SetRelayRouter` 函数结束前)追加:
+- [ ] **Step 2: 相关包全量测试**
 
-```go
-	// Seedance (火山方舟 ARK) 原生 API 路由 - 图像生成
-	// 与视频路由(video-router.go)独立,因为图像走同步 relay 而非 task 流程
-	seedanceImageRouter := router.Group("/seedance")
-	seedanceImageRouter.Use(middleware.RouteTag("relay"))
-	seedanceImageRouter.Use(middleware.SeedanceRequestConvert(), middleware.TokenAuth(), middleware.Distribute())
-	{
-		seedanceImageRouter.POST("/api/v3/images/generations", func(c *gin.Context) {
-			controller.Relay(c, types.RelayFormatOpenAIImage)
-		})
-	}
-```
+Run: `go test ./middleware ./controller ./relay ./relay/channel/task/doubao ./router`
 
-> **注意:** `Distribute()` 在路由组 middleware 链中,会在 `controller.Relay` 之前执行。`SeedanceRequestConvert` 已经把路径改写为 `/v1/images/generations` 并设了 `relay_mode`,Distribute 能正确识别(参照现有 jimeng 模式)。**需核实** `Distribute` 对 `c.GetBool(common.KeySeedanceOfficialAPI)` 时的路径判断顺序——因为路径已改写为 `/v1/images/generations`,`Path2RelayMode` 能识别它为 `RelayModeImagesGenerations`。
+- [ ] **Step 3: 静态检查**
 
-- [ ] **Step 2: 追加 PassThrough 条件**
+Run: `go vet ./middleware ./controller ./relay ./relay/channel/task/doubao ./router`
 
-修改 `relay/image_handler.go:49`,把:
+- [ ] **Step 4: 全项目回归**
 
-```go
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
-```
+Run: `go test ./...`
 
-改为:
+- [ ] **Step 5: 手工端到端验证**
 
-```go
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
-		info.ChannelSetting.PassThroughBodyEnabled ||
-		c.GetBool(common.KeySeedanceOfficialAPI) {
-```
+使用 VolcEngine(45) 测试渠道验证：
 
-> **原理:** ARK 原生图像请求的 content/字段(如多图 `image` 数组、特殊 size 值)需要原样透传到上游。`dto.ImageRequest.MarshalJSON` 的 `Extra` 回写被禁用(注释明示"不能合并 ExtraFields"),开启 PassThrough 后用原始字节转发绕过此限制。计费不受影响(`image_handler.go:121-131` 的 N 计费用 `request.N`,与请求体序列化无关)。
+1. 原生视频提交返回 `task_*`，不返回 `cgt-*`。
+2. 用该 `task_*` 查询成功，响应仍是 ARK 字段结构。
+3. 其他用户 token 查询该 ID 返回 404。
+4. 图像请求配置模型映射后，上游实际收到映射目标模型。
+5. `duration` 超过上限时在访问上游前返回 400。
+6. 2.0 Mini 使用 `doubao-seedance-2-0-mini-260615`，1080p、`service_tier=flex`、纯音频和媒体数量越界均在上游调用前返回 400。
+7. Seedream 组图输入 14 张参考图时最多生成 1 张；响应含失败项时按 `usage.generated_images` 而非 `data.#` 结算；Pro 的 `stream=true` 和 `sequential_image_generation=auto` 返回 400。
 
-- [ ] **Step 3: 验证编译**
+不使用 `git add -A`，不提交工作区中与本计划无关的文件。
 
-Run: `go build ./...`
-Expected: 无输出
+## Execution Order
 
-- [ ] **Step 4: 端到端冒烟测试(手动,需运行实例)**
+先完成本计划 Task 1-5，再执行 `2026-07-18-seedance-billing.md`。两份计划都会修改 doubao adaptor；计费计划以本计划已存在的原生验证分支和公开任务 ID 语义为前提。
 
-启动 new-api 后,配置一个 VolcEngine(45)渠道(填 ARK API Key),然后:
+## Project Module References
 
-```bash
-# 视频提交
-curl -X POST http://localhost:3000/seedance/api/v3/contents/generations/tasks \
-  -H "Authorization: Bearer <new-api-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"一只猫在弹钢琴"}],"duration":5,"resolution":"720p"}'
-# 预期响应: {"id":"cgt-xxx-yyy"}
-
-# 视频查询
-curl http://localhost:3000/seedance/api/v3/contents/generations/tasks/<返回的id> \
-  -H "Authorization: Bearer <new-api-token>"
-# 预期响应: {"id":"cgt-xxx","model":"doubao-seedance-2-0-260128","status":"queued"/"succeeded","content":{"video_url":"..."},...}
-
-# 图像生成
-curl -X POST http://localhost:3000/seedance/api/v3/images/generations \
-  -H "Authorization: Bearer <new-api-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"doubao-seedream-4-0-250828","prompt":"一只猫","size":"1024x1024"}'
-# 预期响应: {"created":...,"data":[{"url":"..."}]}
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add router/relay-router.go relay/image_handler.go
-git commit -m "feat(seedance): add ARK native image route + force passthrough for ARK image requests"
-```
-
----
-
-## Task 8: 数据库索引(性能配套)
-
-**Files:**
-- Modify: `model/main.go`(为 tasks 表加复合索引)
-
-- [ ] **Step 1: 定位 AutoMigrate / 索引声明位置**
-
-Run: `grep -n "AutoMigrate\|tasks.*Index\|CreateIndex" model/main.go | head -20`
-
-找到 Task 模型的 AutoMigrate 调用位置和现有索引声明风格。
-
-- [ ] **Step 2: 追加复合索引**
-
-按项目现有风格(可能是 GORM tag 或显式 `Migrator().CreateIndex`),为 Task 表加复合索引 `(user_id, platform, submit_time)`。若用 GORM tag,在 `model/task.go` 的 Task 结构体字段上加:
+以下项目模块路径属于 new-api 的受保护项目身份，实施时保持不变：
 
 ```go
-type Task struct {
-	// ... 现有字段 ...
-	UserId     int    `json:"user_id" gorm:"index:idx_task_user_platform_time,priority:1"`
-	Platform   constant.TaskPlatform `json:"platform" gorm:"index:idx_task_user_platform_time,priority:2"`
-	SubmitTime int64  `json:"submit_time" gorm:"index:idx_task_user_platform_time,priority:3"`
-	// ... 其他字段 ...
-}
+"github.com/QuantumNous/new-api/common"
+relayconstant "github.com/QuantumNous/new-api/relay/constant"
+"github.com/QuantumNous/new-api/relay"
+relaycommon "github.com/QuantumNous/new-api/relay/common"
+"github.com/QuantumNous/new-api/model"
+"github.com/QuantumNous/new-api/constant"
+"github.com/QuantumNous/new-api/dto"
+"github.com/QuantumNous/new-api/service"
 ```
-
-> **注意:** 需核实 `model/task.go` 中 Task 结构体的实际字段名和现有 index tag,执行时按实际为准。若项目用 `Migrator().CreateIndex` 风格,则按那个风格写。
-
-- [ ] **Step 3: 验证迁移在 SQLite/MySQL/PostgreSQL 都能跑**
-
-Run: `go test ./model/ -run TaskMigrate -v`(若有相关测试)
-或 Run: `go build ./model/`
-
-Expected: 编译通过(三个数据库兼容性由 GORM tag 抽象保证)
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add model/task.go model/main.go
-git commit -m "perf(seedance): add composite index on tasks(user_id, platform, submit_time)"
-```
-
----
-
-## Task 9: 整体回归测试
-
-- [ ] **Step 1: 运行所有新增测试**
-
-Run: `go test ./middleware/ ./relay/ ./relay/channel/task/doubao/ -run Seedance -v`
-Expected: 全部 PASS
-
-- [ ] **Step 2: 运行全项目测试确保无回归**
-
-Run: `go test ./... 2>&1 | tail -50`
-Expected: 无新增 FAIL(原有测试保持原状)
-
-- [ ] **Step 3: go vet 检查**
-
-Run: `go vet ./middleware/ ./relay/ ./relay/channel/task/doubao/ ./controller/ ./router/`
-Expected: 无新增 warning
-
-- [ ] **Step 4: 最终 Commit(若有遗漏的改动)**
-
-```bash
-git status
-# 若有未提交改动:
-git add -A
-git commit -m "test(seedance): full regression pass"
-```
-
----
-
-## Self-Review
-
-### Spec 覆盖核对
-
-| 需求点 | 覆盖 Task |
-|---|---|
-| 视频提交 `POST /api/v3/contents/generations/tasks` | Task 4(路由)+ Task 5(adaptor)+ Task 7(冒烟) |
-| 视频查询 `GET /api/v3/contents/generations/tasks/:id` | Task 4 + Task 6 |
-| 视频列表查询 | Task 6 |
-| 提交响应 `{id}` 格式 | Task 5 Step 9-12 |
-| 查询响应 ARK 原生 responseTask 格式 | Task 6 Step 5 |
-| 多模态 content[] 原样透传 | Task 5 Step 1-4 |
-| 图像 `POST /api/v3/images/generations` | Task 7 |
-| 图像字段不丢失(PassThrough) | Task 7 Step 2 |
-| CodeRabbit review:列表查询性能 | Task 6 Step 5(SQL 下推)+ Task 8(索引) |
-| CodeRabbit review:模型名回填 | Task 5 Step 3 |
-| expired/cancelled 状态 | Task 5 Step 13-16 |
-
-### 待确认项(执行时核实)
-
-1. **`common.GetBodyStorage` 测试 setup**:Task 5 Step 1 的测试需要正确构造 body storage,执行时 grep `common.NewBytesBodyStorage` 或类似构造函数名,确保测试能读出请求体。
-2. **Task 结构体字段名**:Task 8 的索引声明需以 `model/task.go` 实际字段名为准(SubmitTime/CreatedAt 等)。
-3. **Distribute 中间件顺序**:Task 7 Step 1 的 `SeedanceRequestConvert → TokenAuth → Distribute` 顺序需验证 Distribute 能看到改写后的路径(参照 jimeng 模式,应该可以)。
-
-### 类型一致性
-
-- `KeySeedanceOfficialAPI` 在 Task 1 定义,Task 2/5/6/7 全部用 `common.KeySeedanceOfficialAPI` ✓
-- `seedanceTaskResponse` 在 Task 6 Step 5 定义,Task 6 Step 3 测试调用,签名一致 ✓
-- `seedanceTaskIDFilters` 在 Task 6 Step 5 定义,Task 6 Step 1 测试调用,返回 `[]string` ✓
-- `RelaySeedanceTask`/`RelaySeedanceTaskFetch` 在 Task 3 定义,Task 4/7 调用 ✓
-- `seedanceTextPrompt` 在 Task 5 Step 7 定义 ✓
-
-无类型不一致问题。
-
----
-
-## Execution Handoff
-
-Plan complete and saved to `docs/superpowers/plans/2026-07-18-ark-native-compat.md`. 见对话中的执行选项(subagent-driven vs inline)。

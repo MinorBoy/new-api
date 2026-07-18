@@ -417,9 +417,6 @@ type RecordTaskBillingLogParams struct {
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
-	if params.LogType == LogTypeConsume && !common.LogConsumeEnabled {
-		return
-	}
 	username, _ := GetUsernameById(params.UserId, false)
 	tokenName := ""
 	if params.TokenId > 0 {
@@ -442,26 +439,10 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		Group:     params.Group,
 		Other:     common.MapToJsonStr(params.Other),
 	}
-	err := createLog(log)
-	if err != nil {
-		common.SysLog("failed to record task billing log: " + err.Error())
-	}
-	if params.LogType == LogTypeConsume && common.DataExportEnabled {
-		nodeName := params.NodeName
-		if nodeName == "" {
-			nodeName = common.NodeName
+	if params.LogType != LogTypeConsume || common.LogConsumeEnabled {
+		if err := createLog(log); err != nil {
+			common.SysLog("failed to record task billing log: " + err.Error())
 		}
-		LogQuotaData(QuotaDataLogParams{
-			UserID:    params.UserId,
-			Username:  username,
-			ModelName: params.ModelName,
-			Quota:     params.Quota,
-			CreatedAt: createdAt,
-			UseGroup:  params.Group,
-			TokenID:   params.TokenId,
-			ChannelID: params.ChannelId,
-			NodeName:  nodeName,
-		})
 	}
 }
 

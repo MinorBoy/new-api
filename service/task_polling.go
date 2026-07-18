@@ -627,8 +627,7 @@ func truncateBase64(s string) string {
 
 // settleTaskBillingOnComplete 任务完成时的统一计费调整。
 // 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
-//
-//  2. taskResult.TotalTokens > 0 → 按 token 重算
+//  2. 权威 completion_tokens（或兼容回退 total_tokens）→ 按 token 重算
 //  3. 都不满足 → 保持预扣额度不变
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	// 0. 按次计费的任务不做差额结算
@@ -637,14 +636,73 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		return
 	}
 	// 1. 优先让 adaptor 决定最终额度
-	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
+	actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult)
+	tokens, hasTokens, clamp := taskBillingTokensChecked(taskResult)
+	if hasTokens && task.PrivateData.BillingContext != nil {
+		task.PrivateData.BillingContext.BillingTokens = tokens
+	}
+	if actualQuota > 0 {
+		if task.ID > 0 && task.PrivateData.BillingContext != nil {
+			if err := task.Update(); err != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("任务 %s billing token 回写失败: %s", task.TaskID, err.Error()))
+			}
+		}
+		if hasTokens {
+			RecalculateTaskQuotaWithTokens(ctx, task, actualQuota, tokens, "adaptor计费调整", clamp)
+		} else {
+			RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整", clamp)
+		}
 		return
 	}
-	// 2. 回退到 token 重算
-	if taskResult.TotalTokens > 0 {
-		RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
+	// Persist any terminal billing-context normalization (resolution or draft
+	// ratio removal) before the token settlement reads it.
+	if task.ID > 0 && task.PrivateData.BillingContext != nil {
+		if err := task.Update(); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("任务 %s 计费上下文回写失败: %s", task.TaskID, err.Error()))
+		}
+	}
+	// 2. Use completion_tokens when the provider included that field, even when
+	// its explicit value is zero. Otherwise fall back to total_tokens.
+	if hasTokens {
+		RecalculateTaskQuotaByTokens(ctx, task, tokens, clamp)
 		return
 	}
 	// 3. 无调整，保持预扣额度
+}
+
+// taskBillingTokens returns the bounded token count used by task settlement.
+// It preserves the compact helper contract used by existing callers; the
+// checked variant additionally reports field presence and saturation.
+func taskBillingTokens(taskResult *relaycommon.TaskInfo) int {
+	tokens, _, _ := taskBillingTokensChecked(taskResult)
+	return tokens
+}
+
+func taskBillingTokensChecked(taskResult *relaycommon.TaskInfo) (int, bool, *common.QuotaClamp) {
+	if taskResult == nil {
+		return 0, false, nil
+	}
+	tokens := taskResult.TotalTokens
+	if taskResult.CompletionTokensPresent {
+		tokens = taskResult.CompletionTokens
+	} else if tokens == 0 {
+		if taskResult.CompletionTokens > 0 {
+			tokens = taskResult.CompletionTokens
+		} else {
+			return 0, false, nil
+		}
+	}
+	if tokens < 0 {
+		common.SysError("negative async task billing tokens; clamped to zero")
+		clamp := &common.QuotaClamp{Op: "TaskBillingTokens", Kind: common.QuotaClampUnderflow, Original: float64(tokens), Clamped: 0}
+		taskResult.BillingClamp = clamp
+		return 0, true, clamp
+	}
+	if tokens > common.MaxQuota {
+		common.SysError("async task billing tokens exceed quota bound; clamped")
+		clamp := &common.QuotaClamp{Op: "TaskBillingTokens", Kind: common.QuotaClampOverflow, Original: float64(tokens), Clamped: common.MaxQuota}
+		taskResult.BillingClamp = clamp
+		return common.MaxQuota, true, clamp
+	}
+	return tokens, true, nil
 }

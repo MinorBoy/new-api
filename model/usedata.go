@@ -76,6 +76,15 @@ func logQuotaDataCache(quotaData *QuotaData) {
 }
 
 func LogQuotaData(params QuotaDataLogParams) {
+	logQuotaData(params, 1)
+}
+
+// LogQuotaDataAdjust records a correction without incrementing request count.
+func LogQuotaDataAdjust(params QuotaDataLogParams) {
+	logQuotaData(params, 0)
+}
+
+func logQuotaData(params QuotaDataLogParams, count int) {
 	// 只精确到小时
 	createdAt := params.CreatedAt - (params.CreatedAt % 3600)
 	quotaData := &QuotaData{
@@ -87,7 +96,7 @@ func LogQuotaData(params QuotaDataLogParams) {
 		TokenID:   params.TokenID,
 		ChannelID: params.ChannelID,
 		NodeName:  params.NodeName,
-		Count:     1,
+		Count:     count,
 		Quota:     params.Quota,
 		TokenUsed: params.TokenUsed,
 	}

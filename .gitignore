@@ -26,6 +26,10 @@ plans
 .claude
 .cursor
 
+# 例外:保留 docs/superpowers/plans/ 下的实施计划文档(superpowers writing-plans skill 产出)
+!docs/superpowers/
+!docs/superpowers/plans/
+
 electron/node_modules
 electron/dist
 data/

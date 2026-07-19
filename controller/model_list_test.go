@@ -12,8 +12,10 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -119,6 +121,73 @@ func withTieredBillingConfig(t *testing.T, modes map[string]string, exprs map[st
 		"billing_setting.billing_expr": string(exprBytes),
 	}))
 	model.InvalidatePricingCache()
+}
+
+func withDurationBillingConfig(t *testing.T, modes map[string]string, prices map[string]types.DurationPrice) {
+	t.Helper()
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		if strings.HasPrefix(key, "billing_setting.") {
+			saved[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+		model.InvalidatePricingCache()
+	})
+
+	modeBytes, err := common.Marshal(modes)
+	require.NoError(t, err)
+	priceBytes, err := common.Marshal(prices)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":   string(modeBytes),
+		"billing_setting.duration_price": string(priceBytes),
+	}))
+	model.InvalidatePricingCache()
+}
+
+func TestListModelsIncludesDurationBillingModel(t *testing.T) {
+	withSelfUseModeDisabled(t)
+	db := setupModelListControllerTestDB(t)
+
+	const modelName = "duration-visible-model"
+	rule := types.DurationPrice{
+		Price: 0.25, Unit: types.DurationUnitMinute,
+		RoundingStepSeconds: 5, MinimumDurationSeconds: 10,
+	}
+	withDurationBillingConfig(t,
+		map[string]string{modelName: billing_setting.BillingModePerDuration},
+		map[string]types.DurationPrice{modelName: rule},
+	)
+	require.NoError(t, db.Create(&model.User{
+		Id: 1005, Username: "duration-model-user", Password: "password",
+		Group: "default", Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelName, ChannelId: 1, Enabled: true,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1005)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	ids := decodeListModelsResponse(t, recorder)
+	require.Contains(t, ids, modelName)
+	pricing, ok := pricingByModelName(model.GetPricing())[modelName]
+	require.True(t, ok)
+	assert.Equal(t, billing_setting.BillingModePerDuration, pricing.BillingMode)
+	require.NotNil(t, pricing.DurationPrice)
+	assert.Equal(t, rule, *pricing.DurationPrice)
+	assert.Zero(t, pricing.ModelPrice)
+	assert.Zero(t, pricing.ModelRatio)
+	assert.Zero(t, pricing.CompletionRatio)
+	assert.Equal(t, 1, pricing.QuotaType)
 }
 
 func withSelfUseModeDisabled(t *testing.T) {

@@ -35,6 +35,7 @@ type Pricing struct {
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
+	DurationPrice          *types.DurationPrice    `json:"duration_price,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 }
 
@@ -373,8 +374,14 @@ func updatePricing() {
 			pricing.Tags = meta.Tags
 			pricing.VendorID = meta.VendorID
 		}
-		modelPrice, findPrice := ratio_setting.GetModelPrice(model, false)
-		if findPrice {
+		billingMode := billing_setting.GetBillingMode(model)
+		if billingMode == billing_setting.BillingModePerDuration {
+			if durationPrice, ok := billing_setting.GetDurationPrice(model); ok {
+				pricing.BillingMode = billingMode
+				pricing.DurationPrice = &durationPrice
+				pricing.QuotaType = 1
+			}
+		} else if modelPrice, ok := ratio_setting.GetModelPrice(model, false); ok {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
 		} else {
@@ -400,7 +407,7 @@ func updatePricing() {
 			audioCompletionRatio := ratio_setting.GetAudioCompletionRatio(model)
 			pricing.AudioCompletionRatio = &audioCompletionRatio
 		}
-		if billingMode := billing_setting.GetBillingMode(model); billingMode == "tiered_expr" {
+		if billingMode == billing_setting.BillingModeTieredExpr {
 			if expr, ok := billing_setting.GetBillingExpr(model); ok && strings.TrimSpace(expr) != "" {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr

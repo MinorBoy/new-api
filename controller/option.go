@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -81,6 +82,14 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
+		switch k {
+		case "billing_setting.billing_mode":
+			if data, err := common.Marshal(billing_setting.GetBillingModeCopy()); err == nil {
+				value = string(data)
+			}
+		case "billing_setting.duration_price":
+			value = billing_setting.DurationPrice2JSONString()
+		}
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||
@@ -324,6 +333,15 @@ func UpdateOption(c *gin.Context) {
 		}
 	case "console_setting.uptime_kuma_groups":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "UptimeKumaGroups")
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "billing_setting.duration_price":
+		err = billing_setting.ValidateDurationPriceJSONString(option.Value.(string))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

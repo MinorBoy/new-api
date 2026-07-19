@@ -5,26 +5,31 @@ import (
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
 )
 
 const (
-	BillingModeRatio      = "ratio"
-	BillingModeTieredExpr = "tiered_expr"
-	BillingModeField      = "billing_mode"
-	BillingExprField      = "billing_expr"
+	BillingModeRatio       = "ratio"
+	BillingModeTieredExpr  = "tiered_expr"
+	BillingModePerDuration = "per_duration"
+	BillingModeField       = "billing_mode"
+	BillingExprField       = "billing_expr"
+	DurationPriceField     = "duration_price"
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
-// DB keys: billing_setting.billing_mode, billing_setting.billing_expr
+// DB keys: billing_setting.billing_mode, billing_setting.billing_expr, billing_setting.duration_price
 type BillingSetting struct {
-	BillingMode map[string]string `json:"billing_mode"`
-	BillingExpr map[string]string `json:"billing_expr"`
+	BillingMode   map[string]string              `json:"billing_mode"`
+	BillingExpr   map[string]string              `json:"billing_expr"`
+	DurationPrice map[string]types.DurationPrice `json:"duration_price"`
 }
 
 var billingSetting = BillingSetting{
-	BillingMode: make(map[string]string),
-	BillingExpr: make(map[string]string),
+	BillingMode:   make(map[string]string),
+	BillingExpr:   make(map[string]string),
+	DurationPrice: make(map[string]types.DurationPrice),
 }
 
 func init() {
@@ -39,6 +44,9 @@ func GetBillingMode(model string) string {
 	if mode, ok := billingSetting.BillingMode[model]; ok {
 		return mode
 	}
+	if _, ok := defaultDurationPrice[model]; ok {
+		return BillingModePerDuration
+	}
 	return BillingModeRatio
 }
 
@@ -48,7 +56,14 @@ func GetBillingExpr(model string) (string, bool) {
 }
 
 func GetBillingModeCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingMode)
+	modes := make(map[string]string, len(defaultDurationPrice)+len(billingSetting.BillingMode))
+	for model := range defaultDurationPrice {
+		modes[model] = BillingModePerDuration
+	}
+	for model, mode := range billingSetting.BillingMode {
+		modes[model] = mode
+	}
+	return modes
 }
 
 func GetBillingExprCopy() map[string]string {
@@ -56,12 +71,15 @@ func GetBillingExprCopy() map[string]string {
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {
-	extra := make(map[string]any, 2)
+	extra := make(map[string]any, 3)
 	if modes := GetBillingModeCopy(); len(modes) > 0 {
 		extra[BillingModeField] = modes
 	}
 	if exprs := GetBillingExprCopy(); len(exprs) > 0 {
 		extra[BillingExprField] = exprs
+	}
+	if prices := GetDurationPriceCopy(); len(prices) > 0 {
+		extra[DurationPriceField] = prices
 	}
 	return lo.Assign(base, extra)
 }

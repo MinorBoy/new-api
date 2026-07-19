@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -599,18 +600,25 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:        relayInfo.PriceData.ModelPrice,
-			GroupRatio:        relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:        relayInfo.PriceData.ModelRatio,
-			OtherRatios:       relayInfo.PriceData.OtherRatios(),
-			OriginModelName:   relayInfo.OriginModelName,
-			UpstreamModelName: relayInfo.UpstreamModelName,
-			HasVideoInput:     c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
-			GenerateAudio:     generateAudio,
-			Draft:             c.GetBool(string(constant.ContextKeyTaskDraft)),
-			ServiceTier:       c.GetString(string(constant.ContextKeyTaskServiceTier)),
-			Resolution:        c.GetString("task_resolution"),
-			PerCallBilling:    common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			BillingMode:              relayInfo.PriceData.BillingMode,
+			DurationPrice:            relayInfo.PriceData.DurationPrice,
+			DurationSource:           relayInfo.PriceData.DurationSource,
+			RequestedDurationSeconds: relayInfo.PriceData.RequestedDurationSeconds,
+			BillableDurationSeconds:  relayInfo.PriceData.BillableDurationSeconds,
+			ModelPrice:               relayInfo.PriceData.ModelPrice,
+			GroupRatio:               relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:               relayInfo.PriceData.ModelRatio,
+			OtherRatios:              relayInfo.PriceData.OtherRatios(),
+			OriginModelName:          relayInfo.OriginModelName,
+			UpstreamModelName:        relayInfo.UpstreamModelName,
+			HasVideoInput:            c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
+			GenerateAudio:            generateAudio,
+			Draft:                    c.GetBool(string(constant.ContextKeyTaskDraft)),
+			ServiceTier:              c.GetString(string(constant.ContextKeyTaskServiceTier)),
+			Resolution:               c.GetString("task_resolution"),
+			PerCallBilling: common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
+				relayInfo.PriceData.UsePrice ||
+				relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -39,11 +40,24 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other := make(map[string]interface{})
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
-	other["model_price"] = info.PriceData.ModelPrice
+	if info.PriceData.BillingMode != billing_setting.BillingModePerDuration {
+		other["model_price"] = info.PriceData.ModelPrice
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	appendDurationBillingOther(
+		other,
+		info.PriceData.BillingMode,
+		info.PriceData.DurationPrice,
+		info.PriceData.DurationSource,
+		info.PriceData.RequestedDurationSeconds,
+		info.PriceData.BillableDurationSeconds,
+	)
+	if resolutionRatio, ok := info.PriceData.OtherRatios()["resolution"]; ok {
+		other["resolution_ratio"] = resolutionRatio
+	}
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
@@ -122,13 +136,20 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
 	if bc := task.PrivateData.BillingContext; bc != nil {
-		other["model_price"] = bc.ModelPrice
+		if bc.BillingMode != billing_setting.BillingModePerDuration {
+			other["model_price"] = bc.ModelPrice
+		}
 		if bc.ModelRatio > 0 {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
+		appendDurationBillingOther(other, bc.BillingMode, bc.DurationPrice, bc.DurationSource, bc.RequestedDurationSeconds, bc.BillableDurationSeconds)
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
+				if k == "resolution" {
+					other["resolution_ratio"] = v
+					continue
+				}
 				other[k] = v
 			}
 		}
@@ -154,6 +175,20 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
 	return other
+}
+
+func appendDurationBillingOther(other map[string]interface{}, mode string, price *types.DurationPrice, source string, requested, billable int) {
+	if mode != billing_setting.BillingModePerDuration || price == nil {
+		return
+	}
+	other["billing_mode"] = mode
+	other["duration_price"] = price.Price
+	other["duration_unit"] = price.Unit
+	other["rounding_step_seconds"] = price.RoundingStepSeconds
+	other["minimum_duration_seconds"] = price.MinimumDurationSeconds
+	other["duration_source"] = source
+	other["requested_duration_seconds"] = requested
+	other["billable_duration_seconds"] = billable
 }
 
 func taskBillingContextPriceData(bc *model.TaskBillingContext) *types.PriceData {

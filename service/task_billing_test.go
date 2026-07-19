@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -12,7 +13,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -169,6 +172,25 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 	}
 }
 
+func setDurationBillingContext(task *model.Task) {
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		BillingMode: billing_setting.BillingModePerDuration,
+		DurationPrice: &types.DurationPrice{
+			Price: 0.1, Unit: types.DurationUnitSecond,
+			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+		},
+		DurationSource:           types.DurationSourceRequest,
+		RequestedDurationSeconds: 6,
+		BillableDurationSeconds:  6,
+		GroupRatio:               1,
+		OtherRatios:              map[string]float64{"resolution": 2.5},
+		OriginModelName:          "test-model",
+		UpstreamModelName:        "jimeng-video-seedance-2.0-vip",
+		Resolution:               "1080p",
+		PerCallBilling:           true,
+	}
+}
+
 func resetQuotaDataCache() {
 	model.CacheQuotaDataLock.Lock()
 	defer model.CacheQuotaDataLock.Unlock()
@@ -254,6 +276,77 @@ func TestTaskBillingOtherFiltersHistoricalOtherRatios(t *testing.T) {
 	assert.NotContains(t, other, "negative")
 	assert.NotContains(t, other, "nan")
 	assert.NotContains(t, other, "inf")
+}
+
+func TestTaskBillingOtherIncludesDurationSnapshot(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	setDurationBillingContext(task)
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, billing_setting.BillingModePerDuration, other["billing_mode"])
+	assert.Equal(t, 0.1, other["duration_price"])
+	assert.Equal(t, types.DurationUnitSecond, other["duration_unit"])
+	assert.Equal(t, 1, other["rounding_step_seconds"])
+	assert.Equal(t, 4, other["minimum_duration_seconds"])
+	assert.Equal(t, types.DurationSourceRequest, other["duration_source"])
+	assert.Equal(t, 6, other["requested_duration_seconds"])
+	assert.Equal(t, 6, other["billable_duration_seconds"])
+	assert.Equal(t, 2.5, other["resolution_ratio"])
+	assert.Equal(t, "1080p", other["resolution"])
+	assert.NotContains(t, other, "model_price")
+}
+
+func TestLogTaskConsumptionIncludesDurationSnapshot(t *testing.T) {
+	truncate(t)
+	const userID, channelID, quota = 41, 41, 750_000
+	seedUser(t, userID, 10_000_000)
+	seedChannel(t, channelID)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", nil)
+	c.Set("token_name", "duration-token")
+	rule := types.DurationPrice{
+		Price: 0.1, Unit: types.DurationUnitSecond,
+		RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+	}
+	priceData := types.PriceData{
+		BillingMode:              billing_setting.BillingModePerDuration,
+		DurationPrice:            &rule,
+		DurationSource:           types.DurationSourceRequest,
+		RequestedDurationSeconds: 6,
+		BillableDurationSeconds:  6,
+		Quota:                    quota,
+		GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 1},
+	}
+	priceData.AddOtherRatio("resolution", 2.5)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		OriginModelName: "test-model",
+		UsingGroup:      "default",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "generate"},
+		PriceData:       priceData,
+	}
+
+	LogTaskConsumption(c, info)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, billing_setting.BillingModePerDuration, other["billing_mode"])
+	assert.Equal(t, 0.1, other["duration_price"])
+	assert.Equal(t, types.DurationUnitSecond, other["duration_unit"])
+	assert.Equal(t, float64(1), other["rounding_step_seconds"])
+	assert.Equal(t, float64(4), other["minimum_duration_seconds"])
+	assert.Equal(t, types.DurationSourceRequest, other["duration_source"])
+	assert.Equal(t, float64(6), other["requested_duration_seconds"])
+	assert.Equal(t, float64(6), other["billable_duration_seconds"])
+	assert.Equal(t, 2.5, other["resolution_ratio"])
+	assert.NotContains(t, other, "model_price")
+	assert.Equal(t, quota, getUserUsedQuota(t, userID))
+	assert.Equal(t, int64(quota), getChannelUsedQuota(t, channelID))
 }
 
 func TestTaskBillingOtherPreservesServiceTierRatio(t *testing.T) {
@@ -428,6 +521,7 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	seedChannelWithUsage(t, channelID, preConsumed)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	setDurationBillingContext(task)
 	seedTaskQuotaData(t, task)
 
 	RefundTaskQuota(ctx, task, "task failed: upstream error")
@@ -451,6 +545,16 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, billing_setting.BillingModePerDuration, other["billing_mode"])
+	assert.Equal(t, 0.1, other["duration_price"])
+	assert.Equal(t, types.DurationUnitSecond, other["duration_unit"])
+	assert.Equal(t, float64(6), other["requested_duration_seconds"])
+	assert.Equal(t, float64(6), other["billable_duration_seconds"])
+	assert.Equal(t, 2.5, other["resolution_ratio"])
+	assert.Equal(t, "1080p", other["resolution"])
+	assert.NotContains(t, other, "model_price")
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -968,7 +1072,7 @@ func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {
 	seedChannel(t, channelID)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.PrivateData.BillingContext.PerCallBilling = true
+	setDurationBillingContext(task)
 
 	adaptor := &mockAdaptor{adjustReturn: 2000}
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
@@ -979,6 +1083,7 @@ func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, preConsumed, task.Quota)
+	assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
 	assert.Equal(t, int64(0), countLogs(t))
 }
 

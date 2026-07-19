@@ -349,6 +349,14 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 	if !priceData.ReplaceOtherRatios(ratios) {
 		return 0, false
 	}
+	if priceData.BillingMode == billing_setting.BillingModePerDuration {
+		quota, _, clamp, err := taskDurationQuota(priceData, priceData.RequestedDurationSeconds)
+		if err != nil {
+			return 0, false
+		}
+		noteTaskQuotaClamp(info, clamp)
+		return quota, true
+	}
 	quota, clamp := taskQuotaWithOtherRatios(priceData)
 	noteTaskQuotaClamp(info, clamp)
 	return quota, true

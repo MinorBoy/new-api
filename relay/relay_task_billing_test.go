@@ -223,3 +223,26 @@ func TestTaskRecalcQuotaFromRatiosUsesRawBase(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskRecalcQuotaFromRatiosPreservesPerDurationPricing(t *testing.T) {
+	rule := types.DurationPrice{
+		Price:                  0.1,
+		Unit:                   types.DurationUnitSecond,
+		RoundingStepSeconds:    1,
+		MinimumDurationSeconds: 4,
+	}
+	info := &relaycommon.RelayInfo{PriceData: types.PriceData{
+		BillingMode:              "per_duration",
+		DurationPrice:            &rule,
+		RequestedDurationSeconds: 6,
+		BillableDurationSeconds:  6,
+		Quota:                    300_000,
+		GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 1},
+	}}
+	info.PriceData.AddOtherRatio("estimated_resolution", 1)
+
+	quota, ok := recalcQuotaFromRatios(info, map[string]float64{"resolution": 2.5})
+
+	require.True(t, ok)
+	assert.Equal(t, 750_000, quota)
+}

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { RatioType } from '../types'
+import type { RatioType, RatioValue } from '../types'
 import {
   MODELS_DEV_PRESET_ID,
   MODELS_DEV_PRESET_NAME,
@@ -24,10 +24,11 @@ import {
   OFFICIAL_CHANNEL_NAME,
   RATIO_TYPE_OPTIONS,
 } from './constants'
+import type { DurationPrice } from './model-pricing-core'
 
 export type RatioDifferenceEntry = {
-  current: number | string | null
-  upstreams: Record<string, number | string | 'same'>
+  current: RatioValue | null
+  upstreams: Record<string, RatioValue | 'same'>
   confidence: Record<string, boolean>
 }
 
@@ -38,12 +39,12 @@ export type ModelRow = {
   billingConflict: boolean
 }
 
-export type ResolutionsMap = Record<string, Record<string, number | string>>
+export type ResolutionsMap = Record<string, Record<string, RatioValue>>
 
 export type ResolutionSelection = {
   model: string
   ratioType: RatioType
-  value: number | string
+  value: RatioValue
   sourceName: string
 }
 
@@ -73,12 +74,21 @@ export const SYNC_FIELD_ORDER: RatioType[] = [
   'model_price',
   'billing_mode',
   'billing_expr',
+  'duration_price',
 ]
 
 export const NUMERIC_SYNC_FIELDS = new Set<string>([
   ...RATIO_SYNC_FIELDS,
   'model_price',
 ])
+
+const DURATION_COMPATIBLE_SYNC_FIELDS = new Set<RatioType>(
+  RATIO_SYNC_FIELDS.filter((ratioType) => ratioType !== 'model_ratio')
+)
+
+function isDurationCompatibleSyncField(ratioType: string): boolean {
+  return DURATION_COMPATIBLE_SYNC_FIELDS.has(ratioType as RatioType)
+}
 
 export function getSyncFieldLabel(
   ratioType: string,
@@ -116,6 +126,14 @@ export function getPreferredSyncField(
   ) {
     return 'billing_expr'
   }
+  const durationValue = ratioTypes.duration_price?.upstreams?.[sourceName]
+  if (
+    ratioType !== 'duration_price' &&
+    !isDurationCompatibleSyncField(ratioType) &&
+    isSelectableUpstreamValue(durationValue)
+  ) {
+    return 'duration_price'
+  }
   return ratioType
 }
 
@@ -150,8 +168,9 @@ export function getAlignedRatioTypes(
 
 export function getBillingCategory(
   ratioType: string
-): 'price' | 'ratio' | 'tiered' {
+): 'price' | 'ratio' | 'duration' | 'tiered' {
   if (ratioType === 'model_price') return 'price'
+  if (ratioType === 'duration_price') return 'duration'
   if (ratioType === 'billing_mode' || ratioType === 'billing_expr') {
     return 'tiered'
   }
@@ -159,8 +178,8 @@ export function getBillingCategory(
 }
 
 export function isSelectableUpstreamValue(
-  value: number | string | 'same' | null | undefined
-): boolean {
+  value: RatioValue | 'same' | null | undefined
+): value is RatioValue {
   return value !== null && value !== undefined && value !== 'same'
 }
 
@@ -183,7 +202,7 @@ export function isSelectedResolutionValue(
   resolutions: ResolutionsMap,
   model: string,
   ratioType: RatioType,
-  upstreamValue: number | string | 'same' | null | undefined
+  upstreamValue: RatioValue | 'same' | null | undefined
 ): boolean {
   if (!isSelectableUpstreamValue(upstreamValue)) return false
 
@@ -200,6 +219,9 @@ export function isSelectedResolutionValue(
     )
   }
 
+  if (typeof selectedValue === 'object' || typeof upstreamValue === 'object') {
+    return JSON.stringify(selectedValue) === JSON.stringify(upstreamValue)
+  }
   return selectedValue === upstreamValue
 }
 
@@ -212,10 +234,10 @@ export function deleteResolutionField(
 }
 
 function getDraftModelResolution(
-  drafts: Map<string, Record<string, number | string>>,
+  drafts: Map<string, Record<string, RatioValue>>,
   resolutions: ResolutionsMap,
   model: string
-): Record<string, number | string> {
+): Record<string, RatioValue> {
   const existingDraft = drafts.get(model)
   if (existingDraft) return existingDraft
 
@@ -225,7 +247,7 @@ function getDraftModelResolution(
 }
 
 function applyResolutionSelectionToDraft(
-  drafts: Map<string, Record<string, number | string>>,
+  drafts: Map<string, Record<string, RatioValue>>,
   resolutions: ResolutionsMap,
   differences: Record<string, Partial<Record<RatioType, RatioDifferenceEntry>>>,
   selection: ResolutionSelection
@@ -243,15 +265,24 @@ function applyResolutionSelectionToDraft(
         selection.value)
 
   const finalType = preferredType
-  const finalValue = preferredValue as number | string
+  const finalValue = preferredValue as RatioValue
   const category = getBillingCategory(finalType)
   const newModelRes = getDraftModelResolution(
     drafts,
     resolutions,
     selection.model
   )
+  const isAuxiliaryRatioSelection =
+    category === 'ratio' && isDurationCompatibleSyncField(finalType)
 
   Object.keys(newModelRes).forEach((rt) => {
+    if (isAuxiliaryRatioSelection) return
+    if (category === 'duration') {
+      if (rt === 'model_price' || rt === 'model_ratio') {
+        delete newModelRes[rt]
+      }
+      return
+    }
     if (
       category !== 'tiered' &&
       getBillingCategory(rt) !== 'tiered' &&
@@ -260,6 +291,19 @@ function applyResolutionSelectionToDraft(
       delete newModelRes[rt]
     }
   })
+
+  if (
+    category === 'price' ||
+    (category === 'ratio' && !isAuxiliaryRatioSelection)
+  ) {
+    delete newModelRes['billing_expr']
+    delete newModelRes['duration_price']
+    newModelRes['billing_mode'] = 'ratio'
+  } else if (category === 'duration') {
+    delete newModelRes['billing_expr']
+  } else if (category === 'tiered') {
+    delete newModelRes['duration_price']
+  }
 
   newModelRes[finalType] = finalValue
 
@@ -273,6 +317,14 @@ function applyResolutionSelectionToDraft(
     }
     if (exprVal !== undefined && exprVal !== null && exprVal !== 'same') {
       newModelRes['billing_expr'] = exprVal
+    }
+  }
+  if (category === 'duration' && modelDiffs) {
+    newModelRes['billing_mode'] = 'per_duration'
+    const durationValue =
+      modelDiffs.duration_price?.upstreams?.[selection.sourceName]
+    if (isSelectableUpstreamValue(durationValue)) {
+      newModelRes['duration_price'] = durationValue
     }
   }
 }
@@ -296,7 +348,7 @@ export function resolveResolutionSelection(
   return {
     ...selection,
     ratioType: preferredType,
-    value: preferredValue as number | string,
+    value: preferredValue as RatioValue,
   }
 }
 
@@ -312,10 +364,16 @@ export function getEffectiveResolutionSelections(
 
     if (category !== 'tiered') {
       for (const [key, existing] of effectiveByKey) {
+        const durationCompatible =
+          (resolved.ratioType === 'duration_price' &&
+            isDurationCompatibleSyncField(existing.ratioType)) ||
+          (existing.ratioType === 'duration_price' &&
+            isDurationCompatibleSyncField(resolved.ratioType))
         if (
           existing.model === resolved.model &&
           getBillingCategory(existing.ratioType) !== 'tiered' &&
-          getBillingCategory(existing.ratioType) !== category
+          getBillingCategory(existing.ratioType) !== category &&
+          !durationCompatible
         ) {
           effectiveByKey.delete(key)
         }
@@ -336,7 +394,7 @@ export function applyResolutionSelections(
   if (selections.length === 0) return resolutions
 
   const next = { ...resolutions }
-  const drafts = new Map<string, Record<string, number | string>>()
+  const drafts = new Map<string, Record<string, RatioValue>>()
 
   selections.forEach((selection) => {
     applyResolutionSelectionToDraft(drafts, resolutions, differences, selection)
@@ -396,8 +454,17 @@ export function applyResolutionRemovalPlan(
     ratioTypes.forEach((ratioType) => {
       delete draft[ratioType]
       if (ratioType === 'billing_expr') delete draft['billing_mode']
-      if (ratioType === 'billing_mode') delete draft['billing_expr']
+      if (ratioType === 'duration_price') delete draft['billing_mode']
+      if (ratioType === 'billing_mode') {
+        delete draft['billing_expr']
+        delete draft['duration_price']
+      }
     })
+    const hasBasePricing =
+      draft['model_price'] !== undefined || draft['model_ratio'] !== undefined
+    if (!hasBasePricing && draft['billing_mode'] === 'ratio') {
+      delete draft['billing_mode']
+    }
     if (Object.keys(draft).length === 0) {
       delete next[model]
     } else {
@@ -406,4 +473,23 @@ export function applyResolutionRemovalPlan(
   })
 
   return next
+}
+
+export function isDurationPrice(value: unknown): value is DurationPrice {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<DurationPrice>
+  return (
+    typeof candidate.price === 'number' &&
+    (candidate.unit === 'second' || candidate.unit === 'minute') &&
+    typeof candidate.rounding_step_seconds === 'number' &&
+    typeof candidate.minimum_duration_seconds === 'number'
+  )
+}
+
+export function formatSyncValue(
+  value: RatioValue,
+  t: (key: string) => string
+): string {
+  if (!isDurationPrice(value)) return String(value)
+  return `$${value.price} / ${t(value.unit)} · ${t('Rounding step')}: ${value.rounding_step_seconds}s · ${t('Minimum billable duration')}: ${value.minimum_duration_seconds}s`
 }

@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { DurationPrice } from './models/model-pricing-core'
+
 export type SystemOption = {
   key: string
   value: string
@@ -214,9 +216,11 @@ export type ModelSettings = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  DurationPrice: string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.duration_price': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -268,9 +272,11 @@ export type BillingSettings = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  DurationPrice: string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.duration_price': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -401,10 +407,13 @@ export type RatioType =
   | 'model_price'
   | 'billing_mode'
   | 'billing_expr'
+  | 'duration_price'
+
+export type RatioValue = number | string | DurationPrice
 
 export type RatioDifference = {
-  current: number | string | null
-  upstreams: Record<string, number | string | 'same'>
+  current: RatioValue | null
+  upstreams: Record<string, RatioValue | 'same'>
   confidence: Record<string, boolean>
 }
 

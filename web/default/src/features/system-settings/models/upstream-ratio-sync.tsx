@@ -32,6 +32,7 @@ import {
 import type {
   DifferencesMap,
   RatioType,
+  RatioValue,
   UpstreamChannel,
   UpstreamConfig,
 } from '../types'
@@ -49,6 +50,7 @@ import {
   OPENROUTER_CHANNEL_TYPE,
   OPENROUTER_ENDPOINT,
 } from './constants'
+import type { DurationPrice } from './model-pricing-core'
 import {
   NUMERIC_SYNC_FIELDS,
   RATIO_SYNC_FIELDS,
@@ -56,6 +58,8 @@ import {
   applyResolutionSelection,
   applyResolutionSelections,
   deleteResolutionField,
+  formatSyncValue,
+  isDurationPrice,
   type ResolutionRemovalPlan,
   type ResolutionSelection,
   type ResolutionsMap,
@@ -78,6 +82,7 @@ type UpstreamRatioSyncProps = {
     AudioCompletionRatio: string
     'billing_setting.billing_mode': string
     'billing_setting.billing_expr': string
+    'billing_setting.duration_price': string
   }
 }
 
@@ -99,6 +104,7 @@ function optionKeyBySyncField(ratioType: string): string {
   const explicit: Record<string, string> = {
     billing_mode: 'billing_setting.billing_mode',
     billing_expr: 'billing_setting.billing_expr',
+    duration_price: 'billing_setting.duration_price',
   }
   if (explicit[ratioType]) return explicit[ratioType]
   return ratioType
@@ -252,7 +258,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
     (
       model: string,
       ratioType: RatioType,
-      value: number | string,
+      value: RatioValue,
       sourceName: string
     ) => {
       setResolutions((prev) =>
@@ -307,6 +313,9 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       'billing_setting.billing_expr': parseJsonRecord<string>(
         modelRatios['billing_setting.billing_expr']
       ),
+      'billing_setting.duration_price': parseJsonRecord<DurationPrice>(
+        modelRatios['billing_setting.duration_price']
+      ),
     }
   }, [modelRatios])
 
@@ -315,7 +324,13 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
   const getLocalBillingCategory = (
     model: string,
     currentRatios: ParsedRatios
-  ): 'price' | 'ratio' | null => {
+  ): 'price' | 'ratio' | 'duration' | null => {
+    if (
+      currentRatios['billing_setting.billing_mode'][model] === 'per_duration' &&
+      isDurationPrice(currentRatios['billing_setting.duration_price'][model])
+    ) {
+      return 'duration'
+    }
     if (currentRatios.ModelPrice[model] !== undefined) return 'price'
     if (
       currentRatios.ModelRatio[model] !== undefined ||
@@ -333,7 +348,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
 
   const performSync = useCallback(
     async (currentRatios: ParsedRatios): Promise<boolean> => {
-      const finalRatios: Record<string, Record<string, number | string>> = {
+      const finalRatios: Record<string, Record<string, RatioValue>> = {
         ModelRatio: { ...currentRatios.ModelRatio },
         CompletionRatio: { ...currentRatios.CompletionRatio },
         CacheRatio: { ...currentRatios.CacheRatio },
@@ -348,14 +363,19 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         'billing_setting.billing_expr': {
           ...currentRatios['billing_setting.billing_expr'],
         },
+        'billing_setting.duration_price': {
+          ...currentRatios['billing_setting.duration_price'],
+        },
       }
 
       Object.entries(resolutions).forEach(([model, ratios]) => {
         const selectedTypes = Object.keys(ratios)
         const hasPrice = selectedTypes.includes('model_price')
-        const hasRatio = selectedTypes.some((rt) =>
-          RATIO_SYNC_FIELDS.includes(rt as RatioType)
-        )
+        const hasBaseRatio = selectedTypes.includes('model_ratio')
+        const hasDuration = selectedTypes.includes('duration_price')
+        const hasTiered =
+          ratios.billing_mode === 'tiered_expr' ||
+          selectedTypes.includes('billing_expr')
 
         if (hasPrice) {
           delete finalRatios.ModelRatio[model]
@@ -366,8 +386,21 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
           delete finalRatios.AudioRatio[model]
           delete finalRatios.AudioCompletionRatio[model]
         }
-        if (hasRatio) {
+        if (hasBaseRatio || hasDuration) {
           delete finalRatios.ModelPrice[model]
+        }
+        if (hasDuration) {
+          delete finalRatios.ModelRatio[model]
+        }
+        if (hasPrice || hasBaseRatio) {
+          delete finalRatios['billing_setting.duration_price'][model]
+          delete finalRatios['billing_setting.billing_expr'][model]
+          finalRatios['billing_setting.billing_mode'][model] = 'ratio'
+        } else if (hasDuration) {
+          delete finalRatios['billing_setting.billing_expr'][model]
+          finalRatios['billing_setting.billing_mode'][model] = 'per_duration'
+        } else if (hasTiered) {
+          delete finalRatios['billing_setting.duration_price'][model]
         }
 
         Object.entries(ratios).forEach(([ratioType, value]) => {
@@ -396,11 +429,16 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
   const findSourceChannel = (
     model: string,
     ratioType: RatioType,
-    value: number | string
+    value: RatioValue
   ): string => {
     const upMap = differences[model]?.[ratioType]?.upstreams
     if (!upMap) return 'Unknown'
-    const entry = Object.entries(upMap).find(([, v]) => v === value)
+    const entry = Object.entries(upMap).find(([, upstreamValue]) => {
+      if (typeof upstreamValue === 'object' || typeof value === 'object') {
+        return JSON.stringify(upstreamValue) === JSON.stringify(value)
+      }
+      return upstreamValue === value
+    })
     return entry ? entry[0] : 'Unknown'
   }
 
@@ -411,29 +449,54 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
     const fixedPriceLabel = t('Fixed price')
     const modelRatioLabel = t('Model ratio')
     const completionRatioLabel = t('Completion ratio')
+    const durationPriceLabel = t('Duration price')
 
     Object.entries(resolutions).forEach(([model, ratios]) => {
       const localCat = getLocalBillingCategory(model, currentRatios)
       const selectedTypes = Object.keys(ratios)
-      let newCat: 'price' | 'ratio' | 'tiered'
-      if ('model_price' in ratios) {
+      let newCat: 'price' | 'ratio' | 'duration' | 'auxiliary' | 'tiered'
+      if ('duration_price' in ratios) {
+        newCat = 'duration'
+      } else if ('model_price' in ratios) {
         newCat = 'price'
-      } else if (RATIO_SYNC_FIELDS.some((rt) => selectedTypes.includes(rt))) {
+      } else if ('model_ratio' in ratios) {
         newCat = 'ratio'
+      } else if (RATIO_SYNC_FIELDS.some((rt) => selectedTypes.includes(rt))) {
+        newCat = 'auxiliary'
       } else {
         newCat = 'tiered'
       }
 
-      if (localCat && newCat !== 'tiered' && localCat !== newCat) {
-        const currentDesc =
-          localCat === 'price'
-            ? `${fixedPriceLabel}: ${currentRatios.ModelPrice[model]}`
-            : `${modelRatioLabel}: ${currentRatios.ModelRatio[model] ?? '-'}\n${completionRatioLabel}: ${currentRatios.CompletionRatio[model] ?? '-'}`
+      if (
+        localCat &&
+        newCat !== 'tiered' &&
+        newCat !== 'auxiliary' &&
+        localCat !== newCat
+      ) {
+        let currentDesc: string
+        if (localCat === 'price') {
+          currentDesc = `${fixedPriceLabel}: ${currentRatios.ModelPrice[model]}`
+        } else if (localCat === 'duration') {
+          const currentDuration =
+            currentRatios['billing_setting.duration_price'][model]
+          currentDesc = isDurationPrice(currentDuration)
+            ? `${durationPriceLabel}: ${formatSyncValue(currentDuration, t)}`
+            : `${durationPriceLabel}: -`
+        } else {
+          currentDesc = `${modelRatioLabel}: ${currentRatios.ModelRatio[model] ?? '-'}\n${completionRatioLabel}: ${currentRatios.CompletionRatio[model] ?? '-'}`
+        }
 
-        const newDesc =
-          newCat === 'price'
-            ? `${fixedPriceLabel}: ${ratios.model_price}`
-            : `${modelRatioLabel}: ${ratios.model_ratio ?? '-'}\n${completionRatioLabel}: ${ratios.completion_ratio ?? '-'}`
+        let newDesc: string
+        if (newCat === 'price') {
+          newDesc = `${fixedPriceLabel}: ${ratios.model_price}`
+        } else if (
+          newCat === 'duration' &&
+          isDurationPrice(ratios.duration_price)
+        ) {
+          newDesc = `${durationPriceLabel}: ${formatSyncValue(ratios.duration_price, t)}`
+        } else {
+          newDesc = `${modelRatioLabel}: ${ratios.model_ratio ?? '-'}\n${completionRatioLabel}: ${ratios.completion_ratio ?? '-'}`
+        }
 
         const channelNames = selectedTypes
           .map((rt) => findSourceChannel(model, rt as RatioType, ratios[rt]))

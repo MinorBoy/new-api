@@ -39,7 +39,20 @@ export type ModelPricingFormValues = z.infer<
   ReturnType<typeof createModelPricingSchema>
 >
 
-export type PricingMode = 'per-token' | 'per-request' | 'tiered_expr'
+export type DurationUnit = 'second' | 'minute'
+
+export type DurationPrice = {
+  price: number
+  unit: DurationUnit
+  rounding_step_seconds: number
+  minimum_duration_seconds: number
+}
+
+export type PricingMode =
+  | 'per-token'
+  | 'per-request'
+  | 'per_duration'
+  | 'tiered_expr'
 
 export type LaneKey =
   | 'completion'
@@ -62,6 +75,7 @@ export type ModelRatioData = {
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
+  durationPrice?: DurationPrice
 }
 
 export type PreviewRow = {

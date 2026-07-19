@@ -56,6 +56,7 @@ type ModelFormValues = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  DurationPrice: string
   ExposeRatioEnabled: boolean
   BillingMode: string
   BillingExpr: string
@@ -80,6 +81,7 @@ type ModelJsonFieldName =
   | 'ImageRatio'
   | 'AudioRatio'
   | 'AudioCompletionRatio'
+  | 'DurationPrice'
 
 const modelJsonFields: Array<{
   name: ModelJsonFieldName
@@ -129,6 +131,12 @@ const modelJsonFields: Array<{
     name: 'AudioCompletionRatio',
     labelKey: 'Audio completion ratio',
     descriptionKey: 'Ratio applied to audio completions for streaming models.',
+  },
+  {
+    name: 'DurationPrice',
+    labelKey: 'Duration price',
+    descriptionKey:
+      'JSON map of model to duration price, unit, rounding step, and minimum duration.',
   },
 ]
 
@@ -270,6 +278,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedImageRatio={savedValues.ImageRatio}
               savedAudioRatio={savedValues.AudioRatio}
               savedAudioCompletionRatio={savedValues.AudioCompletionRatio}
+              savedDurationPrice={savedValues.DurationPrice}
               savedBillingMode={savedValues.BillingMode}
               savedBillingExpr={savedValues.BillingExpr}
               modelPrice={form.watch('ModelPrice')}
@@ -280,6 +289,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               imageRatio={form.watch('ImageRatio')}
               audioRatio={form.watch('AudioRatio')}
               audioCompletionRatio={form.watch('AudioCompletionRatio')}
+              durationPrice={form.watch('DurationPrice')}
               billingMode={form.watch('BillingMode')}
               billingExpr={form.watch('BillingExpr')}
               candidateModelNames={
@@ -295,6 +305,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                 const fieldMap: Record<string, keyof ModelFormValues> = {
                   'billing_setting.billing_mode': 'BillingMode',
                   'billing_setting.billing_expr': 'BillingExpr',
+                  'billing_setting.duration_price': 'DurationPrice',
                 }
                 const formField =
                   fieldMap[field] || (field as keyof ModelFormValues)

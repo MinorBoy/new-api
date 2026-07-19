@@ -16,9 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-expr'
+import {
+  combineBillingExpr,
+  splitBillingExprAndRequestRules,
+} from '@/features/pricing/lib/billing-expr'
 
 import { safeJsonParse } from '../utils/json-parser'
+import type { DurationPrice, ModelRatioData } from './model-pricing-core'
 import { formatPricingNumber } from './pricing-format'
 
 export type ModelPricingSnapshotInput = {
@@ -32,6 +36,7 @@ export type ModelPricingSnapshotInput = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  durationPrice: string
 }
 
 export type ModelPricingSnapshot = {
@@ -47,6 +52,7 @@ export type ModelPricingSnapshot = {
   billingMode?: string
   billingExpr?: string
   requestRuleExpr?: string
+  durationPrice?: DurationPrice
   hasConflict: boolean
 }
 
@@ -64,6 +70,7 @@ export const hasPricingValue = (value?: string) =>
 export const isBasePricingUnset = (snapshot?: ModelPricingSnapshot) =>
   !snapshot ||
   (snapshot.billingMode !== 'tiered_expr' &&
+    snapshot.billingMode !== 'per_duration' &&
     !hasPricingValue(snapshot.price) &&
     !hasPricingValue(snapshot.ratio))
 
@@ -82,6 +89,7 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 
 export const getModeLabel = (mode?: string) => {
   if (mode === 'per-request') return 'Per-request'
+  if (mode === 'per_duration') return 'Per-duration'
   if (mode === 'tiered_expr') return 'Expression'
   return 'Per-token'
 }
@@ -90,6 +98,7 @@ export const getModeVariant = (
   mode?: string
 ): 'warning' | 'info' | 'success' => {
   if (mode === 'per-request') return 'warning'
+  if (mode === 'per_duration') return 'success'
   if (mode === 'tiered_expr') return 'info'
   return 'success'
 }
@@ -114,6 +123,10 @@ export const getPriceSummary = (
   }
   if (row.billingMode === 'per-request') {
     return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+  }
+  if (row.billingMode === 'per_duration') {
+    const rule = row.durationPrice
+    return rule ? `$${rule.price} / ${t(rule.unit)}` : t('Unset price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -174,6 +187,7 @@ export const buildModelSnapshots = ({
   audioCompletionRatio,
   billingMode,
   billingExpr,
+  durationPrice,
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -215,6 +229,10 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'billing expression',
   })
+  const durationPriceMap = safeJsonParse<Record<string, DurationPrice>>(
+    durationPrice,
+    { fallback: {}, context: 'duration prices' }
+  )
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
@@ -227,9 +245,10 @@ export const buildModelSnapshots = ({
     ...Object.keys(audioCompletionMap),
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
+    ...Object.keys(durationPriceMap),
   ])
 
-  return Array.from(modelNames).map((name) => {
+  return [...modelNames].map((name) => {
     const price = priceMap[name]?.toString() || ''
     const ratio = ratioMap[name]?.toString() || ''
     const cache = cacheMap[name]?.toString() || ''
@@ -240,6 +259,23 @@ export const buildModelSnapshots = ({
     const audioCompletion = audioCompletionMap[name]?.toString() || ''
 
     const modeForModel = billingModeMap[name]
+    const durationRule = durationPriceMap[name]
+    if (modeForModel === 'per_duration' && durationRule) {
+      return {
+        name,
+        billingMode: 'per_duration',
+        durationPrice: durationRule,
+        price,
+        ratio,
+        cacheRatio: cache,
+        createCacheRatio: createCache,
+        completionRatio: completion,
+        imageRatio: image,
+        audioRatio: audio,
+        audioCompletionRatio: audioCompletion,
+        hasConflict: false,
+      }
+    }
     if (modeForModel === 'tiered_expr') {
       const fullExpr = billingExprMap[name] || ''
       const { billingExpr: pureExpr, requestRuleExpr } =
@@ -299,5 +335,163 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     billingMode: snapshot.billingMode || 'per-token',
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',
+    durationPrice: snapshot.durationPrice || null,
   })
+}
+
+type PricingMaps = {
+  price: Record<string, number>
+  ratio: Record<string, number>
+  cache: Record<string, number>
+  createCache: Record<string, number>
+  completion: Record<string, number>
+  image: Record<string, number>
+  audio: Record<string, number>
+  audioCompletion: Record<string, number>
+  billingMode: Record<string, string>
+  billingExpr: Record<string, string>
+  durationPrice: Record<string, DurationPrice>
+}
+
+function parsePricingMaps(input: ModelPricingSnapshotInput): PricingMaps {
+  return {
+    price: safeJsonParse(input.modelPrice, { fallback: {}, silent: true }),
+    ratio: safeJsonParse(input.modelRatio, { fallback: {}, silent: true }),
+    cache: safeJsonParse(input.cacheRatio, { fallback: {}, silent: true }),
+    createCache: safeJsonParse(input.createCacheRatio, {
+      fallback: {},
+      silent: true,
+    }),
+    completion: safeJsonParse(input.completionRatio, {
+      fallback: {},
+      silent: true,
+    }),
+    image: safeJsonParse(input.imageRatio, { fallback: {}, silent: true }),
+    audio: safeJsonParse(input.audioRatio, { fallback: {}, silent: true }),
+    audioCompletion: safeJsonParse(input.audioCompletionRatio, {
+      fallback: {},
+      silent: true,
+    }),
+    billingMode: safeJsonParse(input.billingMode, {
+      fallback: {},
+      silent: true,
+    }),
+    billingExpr: safeJsonParse(input.billingExpr, {
+      fallback: {},
+      silent: true,
+    }),
+    durationPrice: safeJsonParse(input.durationPrice, {
+      fallback: {},
+      silent: true,
+    }),
+  }
+}
+
+function serializePricingMaps(maps: PricingMaps): ModelPricingSnapshotInput {
+  return {
+    modelPrice: JSON.stringify(maps.price, null, 2),
+    modelRatio: JSON.stringify(maps.ratio, null, 2),
+    cacheRatio: JSON.stringify(maps.cache, null, 2),
+    createCacheRatio: JSON.stringify(maps.createCache, null, 2),
+    completionRatio: JSON.stringify(maps.completion, null, 2),
+    imageRatio: JSON.stringify(maps.image, null, 2),
+    audioRatio: JSON.stringify(maps.audio, null, 2),
+    audioCompletionRatio: JSON.stringify(maps.audioCompletion, null, 2),
+    billingMode: JSON.stringify(maps.billingMode, null, 2),
+    billingExpr: JSON.stringify(maps.billingExpr, null, 2),
+    durationPrice: JSON.stringify(maps.durationPrice, null, 2),
+  }
+}
+
+function deletePricingMapEntries(maps: PricingMaps, name: string) {
+  delete maps.price[name]
+  delete maps.ratio[name]
+  delete maps.cache[name]
+  delete maps.createCache[name]
+  delete maps.completion[name]
+  delete maps.image[name]
+  delete maps.audio[name]
+  delete maps.audioCompletion[name]
+  delete maps.billingMode[name]
+  delete maps.billingExpr[name]
+  delete maps.durationPrice[name]
+}
+
+function setNumericPricingValue(
+  target: Record<string, number>,
+  name: string,
+  value?: string
+) {
+  if (!value) return
+  const parsed = Number(value)
+  if (Number.isFinite(parsed)) target[name] = parsed
+}
+
+export function updateModelPricingMaps(
+  input: ModelPricingSnapshotInput,
+  data: ModelRatioData,
+  targetNames: string[] = [data.name]
+): ModelPricingSnapshotInput {
+  const maps = parsePricingMaps(input)
+
+  targetNames.forEach((name) => {
+    deletePricingMapEntries(maps, name)
+
+    if (data.billingMode === 'per_duration' && data.durationPrice) {
+      maps.billingMode[name] = 'per_duration'
+      maps.durationPrice[name] = data.durationPrice
+      return
+    }
+
+    if (data.billingMode === 'tiered_expr') {
+      maps.billingMode[name] = 'tiered_expr'
+      const combined = combineBillingExpr(
+        data.billingExpr || '',
+        data.requestRuleExpr || ''
+      )
+      if (combined) maps.billingExpr[name] = combined
+      setNumericPricingValue(maps.price, name, data.price)
+      setNumericPricingValue(maps.ratio, name, data.ratio)
+      setNumericPricingValue(maps.cache, name, data.cacheRatio)
+      setNumericPricingValue(maps.createCache, name, data.createCacheRatio)
+      setNumericPricingValue(maps.completion, name, data.completionRatio)
+      setNumericPricingValue(maps.image, name, data.imageRatio)
+      setNumericPricingValue(maps.audio, name, data.audioRatio)
+      setNumericPricingValue(
+        maps.audioCompletion,
+        name,
+        data.audioCompletionRatio
+      )
+      return
+    }
+
+    maps.billingMode[name] = 'ratio'
+    if (data.billingMode === 'per-request') {
+      setNumericPricingValue(maps.price, name, data.price)
+      return
+    }
+
+    setNumericPricingValue(maps.ratio, name, data.ratio)
+    setNumericPricingValue(maps.cache, name, data.cacheRatio)
+    setNumericPricingValue(maps.createCache, name, data.createCacheRatio)
+    setNumericPricingValue(maps.completion, name, data.completionRatio)
+    setNumericPricingValue(maps.image, name, data.imageRatio)
+    setNumericPricingValue(maps.audio, name, data.audioRatio)
+    setNumericPricingValue(
+      maps.audioCompletion,
+      name,
+      data.audioCompletionRatio
+    )
+  })
+
+  return serializePricingMaps(maps)
+}
+
+export function deleteModelPricingFromMaps(
+  input: ModelPricingSnapshotInput,
+  name: string
+): ModelPricingSnapshotInput {
+  const maps = parsePricingMaps(input)
+  deletePricingMapEntries(maps, name)
+  return serializePricingMaps(maps)
 }

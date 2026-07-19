@@ -13,8 +13,47 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestModelPriceHelperPerCallBuildsDurationPriceData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{"duration-alias":"per_duration"}`,
+		"billing_setting.duration_price":  `{"duration-alias":{"price":0.1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4}}`,
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "duration-alias",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+
+	priceData, err := ModelPriceHelperPerCall(ctx, info)
+
+	require.NoError(t, err)
+	assert.Equal(t, billing_setting.BillingModePerDuration, priceData.BillingMode)
+	assert.NotNil(t, priceData.DurationPrice)
+	assert.Equal(t, 0.1, priceData.DurationPrice.Price)
+	assert.Equal(t, 0.0, priceData.ModelPrice)
+	assert.False(t, priceData.UsePrice)
+	assert.Equal(t, types.DurationSourceRequest, priceData.DurationSource)
+	assert.True(t, HasModelBillingConfig("duration-alias"))
+}
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -19,8 +19,10 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 type TaskSubmitResult struct {
@@ -191,13 +193,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
-	priceInfo := info
-	if info.ChannelType == constant.ChannelTypeDimensio && info.UpstreamModelName != "" {
-		mappedInfo := *info
-		mappedInfo.OriginModelName = info.UpstreamModelName
-		priceInfo = &mappedInfo
-	}
-	priceData, err := helper.ModelPriceHelperPerCall(c, priceInfo)
+	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 	}
@@ -212,8 +208,26 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
-	// 6. 将 OtherRatios 应用到基础额度（饱和转换，防止溢出成负数）
-	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+	// 6. per_duration delegates requested duration extraction to the adaptor and
+	// calculates the charge centrally. Legacy task billing remains unchanged.
+	if info.PriceData.BillingMode == billing_setting.BillingModePerDuration {
+		estimator, ok := adaptor.(channel.TaskDurationEstimator)
+		if !ok {
+			return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task adaptor %s does not support duration billing", adaptor.GetChannelName()), "duration_billing_not_supported", http.StatusBadRequest)
+		}
+		requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
+		if taskErr != nil {
+			return nil, taskErr
+		}
+		quota, billableSeconds, clamp, err := taskDurationQuota(info.PriceData, requestedSeconds)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "duration_billing_error", http.StatusBadRequest)
+		}
+		info.PriceData.RequestedDurationSeconds = requestedSeconds
+		info.PriceData.BillableDurationSeconds = billableSeconds
+		info.PriceData.Quota = quota
+		noteTaskQuotaClamp(info, clamp)
+	} else if !common.StringsContains(constant.TaskPricePatches, modelName) {
 		quota, clamp := taskQuotaWithOtherRatios(info.PriceData)
 		info.PriceData.Quota = quota
 		noteTaskQuotaClamp(info, clamp)
@@ -304,6 +318,29 @@ func taskQuotaWithOtherRatios(priceData types.PriceData) (int, *common.QuotaClam
 		baseQuota = priceData.ModelPrice * common.QuotaPerUnit * priceData.GroupRatioInfo.GroupRatio
 	}
 	return common.QuotaFromFloatChecked(priceData.ApplyOtherRatiosToFloat(baseQuota))
+}
+
+func taskDurationQuota(priceData types.PriceData, requestedSeconds int) (int, int, *common.QuotaClamp, error) {
+	if priceData.DurationPrice == nil {
+		return 0, 0, nil, fmt.Errorf("duration price is not configured")
+	}
+	if priceData.HasOtherRatio("seconds") || priceData.HasOtherRatio("duration") {
+		return 0, 0, nil, fmt.Errorf("reserved duration ratio is not allowed for per_duration billing")
+	}
+
+	billableSeconds, err := priceData.DurationPrice.BillableSeconds(requestedSeconds, relaycommon.MaxTaskDurationSeconds)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+
+	quotaDecimal := decimal.NewFromFloat(priceData.DurationPrice.Price).
+		Mul(decimal.NewFromInt(int64(billableSeconds))).
+		Div(decimal.NewFromInt(int64(priceData.DurationPrice.UnitSeconds()))).
+		Mul(decimal.NewFromInt(int64(common.QuotaPerUnit))).
+		Mul(decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio))
+	quotaDecimal = priceData.ApplyOtherRatiosToDecimal(quotaDecimal)
+	quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
+	return quota, billableSeconds, clamp, nil
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

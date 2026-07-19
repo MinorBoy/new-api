@@ -84,6 +84,12 @@ type TaskBillingRequestValidator interface {
 	ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError
 }
 
+// TaskDurationEstimator is implemented by task adaptors that can provide a
+// validated requested duration for central per-duration billing.
+type TaskDurationEstimator interface {
+	EstimateDurationSeconds(c *gin.Context, info *relaycommon.RelayInfo) (int, *dto.TaskError)
+}
+
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }

@@ -185,6 +185,27 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 // ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
+	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModePerDuration {
+		durationPrice, ok := billing_setting.GetDurationPrice(info.OriginModelName)
+		if !ok {
+			return types.PriceData{}, fmt.Errorf("model %s is configured as per_duration but has no duration price", info.OriginModelName)
+		}
+		if err := durationPrice.Validate(relaycommon.MaxTaskDurationSeconds); err != nil {
+			return types.PriceData{}, fmt.Errorf("model %s has invalid duration price: %w", info.OriginModelName, err)
+		}
+
+		freeModel := false
+		if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && (durationPrice.Price == 0 || groupRatioInfo.GroupRatio == 0) {
+			freeModel = true
+		}
+		return types.PriceData{
+			FreeModel:      freeModel,
+			BillingMode:    billing_setting.BillingModePerDuration,
+			DurationPrice:  &durationPrice,
+			DurationSource: types.DurationSourceRequest,
+			GroupRatioInfo: groupRatioInfo,
+		}, nil
+	}
 
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
 	usePrice := success
@@ -252,6 +273,10 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 }
 
 func HasModelBillingConfig(modelName string) bool {
+	if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModePerDuration {
+		durationPrice, ok := billing_setting.GetDurationPrice(modelName)
+		return ok && durationPrice.Validate(relaycommon.MaxTaskDurationSeconds) == nil
+	}
 	if _, ok := ratio_setting.GetModelPrice(modelName, false); ok {
 		return true
 	}

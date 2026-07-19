@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type TFunction } from 'i18next'
+import type { TFunction } from 'i18next'
 
 import type { TokenUnit } from './types'
 
@@ -48,6 +48,7 @@ export const FILTER_ALL = 'all'
 export const QUOTA_TYPES = {
   ALL: 'all',
   TOKEN: 'token',
+  DURATION: 'duration',
   REQUEST: 'request',
 } as const
 
@@ -60,6 +61,7 @@ export function getQuotaTypeLabels(
   return {
     [QUOTA_TYPES.ALL]: t('All Models'),
     [QUOTA_TYPES.TOKEN]: t('Token-based'),
+    [QUOTA_TYPES.DURATION]: t('Duration-based'),
     [QUOTA_TYPES.REQUEST]: t('Per Request'),
   }
 }

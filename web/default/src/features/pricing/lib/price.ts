@@ -20,7 +20,11 @@ import { formatCurrencyFromUSD } from '@/lib/currency'
 
 import { QUOTA_TYPE_VALUES, TOKEN_UNIT_DIVISORS } from '../constants'
 import type { PricingModel, TokenUnit, PriceType } from '../types'
-import { getConfiguredGroupRatio, getDisplayGroupRatio } from './model-helpers'
+import {
+  getConfiguredGroupRatio,
+  getDisplayGroupRatio,
+  isDurationBasedModel,
+} from './model-helpers'
 
 // ----------------------------------------------------------------------------
 // Price Calculation Utilities
@@ -139,6 +143,33 @@ function applyRechargeRate(
 }
 
 /**
+ * Format the unit price for a duration-based model.
+ */
+export function formatDurationPrice(
+  model: PricingModel,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  selectedGroup?: string
+): string {
+  if (!model.duration_price) return '-'
+
+  const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
+  const priceInUSD = applyRechargeRate(
+    model.duration_price.price * displayGroupRatio,
+    showWithRecharge,
+    priceRate,
+    usdExchangeRate
+  )
+
+  return formatCurrencyFromUSD(priceInUSD, {
+    digitsLarge: 4,
+    digitsSmall: 6,
+    abbreviate: false,
+  })
+}
+
+/**
  * Format token-based price for display
  */
 export function formatPrice(
@@ -218,7 +249,10 @@ export function formatFixedPrice(
   usdExchangeRate = 1,
   groupRatio: Record<string, number>
 ): string {
-  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
+  if (
+    model.quota_type !== QUOTA_TYPE_VALUES.REQUEST ||
+    isDurationBasedModel(model)
+  ) {
     return '-'
   }
 
@@ -249,7 +283,10 @@ export function formatRequestPrice(
   usdExchangeRate = 1,
   selectedGroup?: string
 ): string {
-  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
+  if (
+    model.quota_type !== QUOTA_TYPE_VALUES.REQUEST ||
+    isDurationBasedModel(model)
+  ) {
     return '-'
   }
 

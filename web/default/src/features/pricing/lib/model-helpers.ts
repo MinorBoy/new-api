@@ -107,3 +107,10 @@ export function replaceModelInPath(path: string, modelName: string): string {
 export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
 }
+
+/**
+ * Check if model uses duration-based pricing with a structured rule.
+ */
+export function isDurationBasedModel(model: PricingModel): boolean {
+  return model.billing_mode === 'per_duration' && Boolean(model.duration_price)
+}

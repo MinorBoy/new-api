@@ -34,7 +34,10 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
-import { StaticDataTable } from '@/components/data-table'
+import {
+  StaticDataTable,
+  type StaticDataTableColumn,
+} from '@/components/data-table'
 import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { GroupBadge } from '@/components/group-badge'
 import { PublicLayout } from '@/components/layout'
@@ -67,8 +70,16 @@ import {
   isDynamicPricingModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
-import { formatFixedPrice, formatGroupPrice } from '../lib/price'
+import {
+  getAvailableGroups,
+  isDurationBasedModel,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
+import {
+  formatDurationPrice,
+  formatFixedPrice,
+  formatGroupPrice,
+} from '../lib/price'
 import type {
   ModelCapability,
   PriceType,
@@ -574,8 +585,34 @@ function PriceSection(props: {
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
+  const isDurationBased = isDurationBasedModel(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
+
+  if (isDurationBased && props.model.duration_price) {
+    return (
+      <section>
+        <SectionTitle>{t('Base Price')}</SectionTitle>
+        <div className='flex items-baseline justify-between'>
+          <span className='text-muted-foreground text-sm'>
+            {t('Duration-based')}
+          </span>
+          <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
+            {formatDurationPrice(
+              props.model,
+              props.showRechargePrice,
+              props.priceRate,
+              props.usdExchangeRate
+            )}{' '}
+            <span className='text-muted-foreground/40 text-xs font-normal'>
+              / {t(props.model.duration_price.unit)}
+            </span>
+          </span>
+        </div>
+      </section>
+    )
+  }
+
   const baseGroupKey = '_base'
   const baseGroupRatioMap = { [baseGroupKey]: 1 }
   const dynamicSummary = getDynamicPricingSummary(props.model, {
@@ -867,6 +904,7 @@ function GroupPricingSection(props: {
     [props.model, props.usableGroup]
   )
 
+  const isDurationBased = isDurationBasedModel(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
 
@@ -1042,6 +1080,67 @@ function GroupPricingSection(props: {
       props.groupRatio
     )
 
+  let priceColumns: StaticDataTableColumn<string>[]
+  if (isDurationBased && props.model.duration_price) {
+    const durationUnit = props.model.duration_price.unit
+    priceColumns = [
+      {
+        id: 'price',
+        header: t('Price'),
+        className: `${thClass} text-right`,
+        cellClassName: 'py-2.5 text-right font-mono',
+        cell: (group) => (
+          <>
+            {formatDurationPrice(
+              props.model,
+              showRechargePrice,
+              props.priceRate,
+              props.usdExchangeRate,
+              group
+            )}{' '}
+            <span className='text-muted-foreground/40 text-xs font-normal'>
+              / {t(durationUnit)}
+            </span>
+          </>
+        ),
+      },
+    ]
+  } else if (isTokenBased) {
+    priceColumns = [
+      {
+        id: 'input',
+        header: t('Input'),
+        className: `${thClass} text-right`,
+        cellClassName: 'py-2.5 text-right font-mono',
+        cell: (group) => renderGroupPrice(group, 'input'),
+      },
+      {
+        id: 'output',
+        header: t('Output'),
+        className: `${thClass} text-right`,
+        cellClassName: 'py-2.5 text-right font-mono',
+        cell: (group) => renderGroupPrice(group, 'output'),
+      },
+      ...extraPriceTypes.map((extraPriceType) => ({
+        id: extraPriceType.type,
+        header: extraPriceType.label,
+        className: `${thClass} text-right`,
+        cellClassName: 'py-2.5 text-right font-mono',
+        cell: (group: string) => renderGroupPrice(group, extraPriceType.type),
+      })),
+    ]
+  } else {
+    priceColumns = [
+      {
+        id: 'price',
+        header: t('Price'),
+        className: `${thClass} text-right`,
+        cellClassName: 'py-2.5 text-right font-mono',
+        cell: renderFixedGroupPrice,
+      },
+    ]
+  }
+
   return (
     <section>
       <SectionTitle>{t('Pricing by Group')}</SectionTitle>
@@ -1067,39 +1166,7 @@ function GroupPricingSection(props: {
             cellClassName: 'text-muted-foreground py-2.5 font-mono',
             cell: (group) => `${props.groupRatio[group] || 1}x`,
           },
-          ...(isTokenBased
-            ? [
-                {
-                  id: 'input',
-                  header: t('Input'),
-                  className: `${thClass} text-right`,
-                  cellClassName: 'py-2.5 text-right font-mono',
-                  cell: (group: string) => renderGroupPrice(group, 'input'),
-                },
-                {
-                  id: 'output',
-                  header: t('Output'),
-                  className: `${thClass} text-right`,
-                  cellClassName: 'py-2.5 text-right font-mono',
-                  cell: (group: string) => renderGroupPrice(group, 'output'),
-                },
-                ...extraPriceTypes.map((ep) => ({
-                  id: ep.type,
-                  header: ep.label,
-                  className: `${thClass} text-right`,
-                  cellClassName: 'py-2.5 text-right font-mono',
-                  cell: (group: string) => renderGroupPrice(group, ep.type),
-                })),
-              ]
-            : [
-                {
-                  id: 'price',
-                  header: t('Price'),
-                  className: `${thClass} text-right`,
-                  cellClassName: 'py-2.5 text-right font-mono',
-                  cell: renderFixedGroupPrice,
-                },
-              ]),
+          ...priceColumns,
         ]}
       />
       <div className='-mx-4 sm:mx-0'>

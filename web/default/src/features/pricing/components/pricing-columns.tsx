@@ -34,8 +34,9 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import { isDurationBasedModel, isTokenBasedModel } from '../lib/model-helpers'
 import {
+  formatDurationPrice,
   formatPrice,
   formatRequestPrice,
   stripTrailingZeros,
@@ -114,6 +115,25 @@ export function usePricingColumns(
       ),
       cell: ({ row }) => {
         const model = row.original
+        if (isDurationBasedModel(model) && model.duration_price) {
+          return (
+            <div className='max-w-full min-w-0'>
+              <span className='font-mono text-sm tabular-nums'>
+                {formatDurationPrice(
+                  model,
+                  showRechargePrice,
+                  priceRate,
+                  usdExchangeRate,
+                  selectedGroup
+                )}
+              </span>
+              <div className='text-muted-foreground/50 text-[10px]'>
+                / {t(model.duration_price.unit)}
+              </div>
+            </div>
+          )
+        }
+
         const dynamicSummary = getDynamicPricingSummary(model, {
           tokenUnit,
           showRechargePrice,

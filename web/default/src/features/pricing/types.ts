@@ -54,6 +54,13 @@ export type PricingModel = {
   billing_mode?: string
   /** Raw expression describing dynamic / tiered billing */
   billing_expr?: string
+  /** Structured pricing rule for duration-based models */
+  duration_price?: {
+    price: number
+    unit: 'second' | 'minute'
+    rounding_step_seconds: number
+    minimum_duration_seconds: number
+  }
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
   /**

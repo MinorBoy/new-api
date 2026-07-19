@@ -87,3 +87,11 @@ type TaskBillingRequestValidator interface {
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }
+
+type ArkVideoTaskConverter interface {
+	ConvertToArkVideoTask(originTask *model.Task) ([]byte, error)
+}
+
+type TaskErrorParser interface {
+	ParseTaskError(body []byte, statusCode int) *dto.TaskError
+}

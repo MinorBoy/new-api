@@ -774,6 +774,7 @@ type TaskInfo struct {
 	TaskID                  string             `json:"task_id"`
 	Status                  string             `json:"status"`
 	Reason                  string             `json:"reason,omitempty"`
+	ErrorCode               string             `json:"error_code,omitempty"`
 	Url                     string             `json:"url,omitempty"`
 	RemoteUrl               string             `json:"remote_url,omitempty"`
 	Progress                string             `json:"progress,omitempty"`

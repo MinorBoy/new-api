@@ -69,6 +69,72 @@ func TestSeedanceTaskFetchUsesPublicIDAndOwner(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, taskErr.StatusCode)
 }
 
+func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := model.Task{
+		TaskID: "task_public", Platform: constant.TaskPlatform("59"), UserId: 7,
+		Status: model.TaskStatusSuccess, SubmitTime: 111, UpdatedAt: 222,
+		Properties:  model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "dim-upstream"},
+		Data:        json.RawMessage(`{"task_id":"dim-upstream","status":"completed","result":{"url":"https://x/video.mp4"}}`),
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_public", nil)
+	c.Params = gin.Params{{Key: "task_id", Value: "task_public"}}
+	c.Set("id", 7)
+	body, taskErr := SeedanceTaskFetch(c)
+	require.Nil(t, taskErr)
+	assert.NotContains(t, string(body), "dim-upstream")
+	var response map[string]interface{}
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "task_public", response["id"])
+	assert.Equal(t, "succeeded", response["status"])
+	assert.Equal(t, "https://x/video.mp4", response["content"].(map[string]interface{})["video_url"])
+}
+
+func TestDimensioTaskFetchPreservesProviderTimestampsAndErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := model.Task{
+		TaskID: "task_failed", Platform: constant.TaskPlatform("59"), UserId: 7,
+		Status: model.TaskStatusFailure, SubmitTime: 111, UpdatedAt: 222,
+		Properties: model.Properties{OriginModelName: "alias"},
+		Data:       json.RawMessage(`{"task_id":"dim-upstream","status":"failed","error":"审核不通过","error_code":"2043","created_at":333,"updated_at":444}`),
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_failed", nil)
+	c.Params = gin.Params{{Key: "task_id", Value: "task_failed"}}
+	c.Set("id", 7)
+	body, taskErr := SeedanceTaskFetch(c)
+	require.Nil(t, taskErr)
+	var response struct {
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		CreatedAt int64  `json:"created_at"`
+		UpdatedAt int64  `json:"updated_at"`
+		Error     struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "task_failed", response.ID)
+	assert.Equal(t, "failed", response.Status)
+	assert.Equal(t, int64(333), response.CreatedAt)
+	assert.Equal(t, int64(444), response.UpdatedAt)
+	assert.Equal(t, "2043", response.Error.Code)
+	assert.Equal(t, "审核不通过", response.Error.Message)
+}
+
+func TestDimensioTaskAdaptorIsTaskOnly(t *testing.T) {
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("59")))
+	_, success := common.ChannelType2APIType(constant.ChannelTypeDimensio)
+	require.False(t, success)
+}
+
 func TestSeedanceTaskFetchPreservesOfficialFailedTaskFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)

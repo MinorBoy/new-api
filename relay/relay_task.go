@@ -144,6 +144,12 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 // 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
 // 控制器负责 defer Refund 和成功后 Settle。
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+	if info == nil {
+		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("relay info is nil"), "invalid_request", http.StatusInternalServerError)
+	}
+	if info.TaskRelayInfo == nil {
+		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
+	}
 	info.InitChannelMeta(c)
 
 	// 1. 确定 platform → 创建适配器 → 验证请求
@@ -185,7 +191,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
-	priceData, err := helper.ModelPriceHelperPerCall(c, info)
+	priceInfo := info
+	if info.ChannelType == constant.ChannelTypeDimensio && info.UpstreamModelName != "" {
+		mappedInfo := *info
+		mappedInfo.OriginModelName = info.UpstreamModelName
+		priceInfo = &mappedInfo
+	}
+	priceData, err := helper.ModelPriceHelperPerCall(c, priceInfo)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 	}
@@ -226,9 +238,12 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 	}
-	if resp != nil && resp.StatusCode != http.StatusOK {
+	if resp != nil && (resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices) {
 		responseBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		if parser, ok := adaptor.(channel.TaskErrorParser); ok {
+			return nil, parser.ParseTaskError(responseBody, resp.StatusCode)
+		}
 		return nil, arkTaskErrorFromResponse(responseBody, resp.StatusCode)
 	}
 
@@ -438,6 +453,18 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		}
 		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
 		return
+	}
+	if originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)) {
+		adaptor := GetTaskAdaptor(originTask.Platform)
+		if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
+			converted, err := converter.ConvertToArkVideoTask(originTask)
+			if err != nil {
+				taskResp = service.TaskErrorWrapper(err, "convert_to_ark_video_failed", http.StatusInternalServerError)
+				return
+			}
+			respBody = converted
+			return
+		}
 	}
 
 	// 通用 TaskDto 格式

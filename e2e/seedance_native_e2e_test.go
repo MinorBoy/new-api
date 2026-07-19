@@ -35,6 +35,7 @@ const (
 	seedance20MultimodalRequestBody = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"全程使用视频1的第一视角构图，全程使用音频1作为背景音乐。第一人称视角果茶宣传广告，seedance牌「苹苹安安」苹果果茶限定款。"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-1.jpg"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-2.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"}],"generate_audio":true,"ratio":"16:9","duration":11,"watermark":true}`
 	successUpstreamTaskResponse     = `{"id":"cgt-mock-seedance-2-0","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"},"usage":{"completion_tokens":108900,"total_tokens":108900},"created_at":1779348818,"updated_at":1779348874,"seed":78674,"resolution":"720p","ratio":"16:9","duration":5,"framespersecond":24,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
 	failedUpstreamTaskResponse      = `{"id":"cgt-20260717171624-cr2n9","model":"doubao-seedance-2-0-260128","status":"failed","error":{"code":"OutputVideoSensitiveContentDetected.PolicyViolation","message":"The request failed because the output video may be related to copyright restrictions. Request id: 02178427978698300000000000000000000ffffac1923a9fc42b8"},"created_at":1784279786,"updated_at":1784280145,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
+	dimensioMultimodalRequestBody   = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://mock.example/reference-image.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"},{"type":"text","text":"参考图中主体、参考视频动作和参考音频节奏，镜头缓慢向前推进"}],"ratio":"16:9","duration":6,"resolution":"720p","intelligent_ratio":false,"face_grid":true}`
 )
 
 type mockArkRequest struct {
@@ -51,6 +52,38 @@ type mockArkServer struct {
 	terminalResponse string
 	submitStatus     int
 	submitResponse   string
+}
+
+type mockDimensioServer struct {
+	mu               sync.Mutex
+	requests         []mockArkRequest
+	terminalResponse string
+}
+
+func (m *mockDimensioServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	m.mu.Lock()
+	m.requests = append(m.requests, mockArkRequest{
+		Method: r.Method, Path: r.URL.Path, Authorization: r.Header.Get("Authorization"), Body: append([]byte(nil), body...),
+	})
+	m.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/generations":
+		_, _ = w.Write([]byte(`{"created":1709123456,"task_id":"dim-upstream","status":"pending"}`))
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/tasks/dim-upstream":
+		_, _ = w.Write([]byte(m.terminalResponse))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (m *mockDimensioServer) snapshot() []mockArkRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	requests := make([]mockArkRequest, len(m.requests))
+	copy(requests, m.requests)
+	return requests
 }
 
 func (m *mockArkServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +173,9 @@ func setupSeedanceE2EDB(t *testing.T) {
 	ratio_setting.InitRatioSettings()
 	prices := ratio_setting.GetModelRatioCopy()
 	prices["doubao-seedance-2-0-260128"] = 0.1
+	prices["jimeng-video-seedance-2.0-fast-vip"] = 0.088
+	prices["jimeng-video-seedance-2.0-mini"] = 0.072
+	prices["jimeng-video-seedance-2.0-vip"] = 0.112
 	priceJSON, err := common.Marshal(prices)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(priceJSON)))
@@ -260,6 +296,24 @@ func seedSecondSeedanceE2EChannel(t *testing.T, upstreamURL string) {
 	require.NoError(t, secondChannel.Insert())
 }
 
+func seedDimensioE2EData(t *testing.T, upstreamURL, upstreamModel string) {
+	t.Helper()
+	seedSeedanceE2EData(t, upstreamURL)
+	ratios := ratio_setting.GetModelRatioCopy()
+	delete(ratios, "doubao-seedance-2-0-260128")
+	ratioJSON, err := common.Marshal(ratios)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(ratioJSON)))
+	channel, err := model.GetChannelById(e2eChannelID, true)
+	require.NoError(t, err)
+	mapping := `{"doubao-seedance-2-0-260128":"` + upstreamModel + `"}`
+	channel.Type = constant.ChannelTypeDimensio
+	channel.Key = "mock-dimensio-key"
+	channel.Name = "dimensio-e2e-mock"
+	channel.ModelMapping = &mapping
+	require.NoError(t, channel.Update())
+}
+
 func seedanceE2ERouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
@@ -277,6 +331,140 @@ func performJSONRequest(t *testing.T, engine http.Handler, method, path, authori
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, req)
 	return recorder.Code, recorder.Body.Bytes()
+}
+
+func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
+	models := []struct {
+		name, upstreamModel, resolution string
+		resolutionRatio                 float64
+		expectedQuota                   int
+	}{
+		{"fast_vip_720p", "jimeng-video-seedance-2.0-fast-vip", "720p", 1, 132000},
+		{"mini_720p", "jimeng-video-seedance-2.0-mini", "720p", 1, 108000},
+		{"vip_1080p", "jimeng-video-seedance-2.0-vip", "1080p", 2.5, 420000},
+	}
+	terminalCases := []struct {
+		name, response, arkStatus, errorCode, errorMessage string
+		failure                                            bool
+		retryable                                          bool
+	}{
+		{name: "success", response: `{"task_id":"dim-upstream","status":"completed","progress":100,"result":{"url":"https://mock.dimensio/video.mp4"}}`, arkStatus: "succeeded"},
+		{name: "failure", response: `{"task_id":"dim-upstream","status":"failed","error":"视频安全审核不通过，请重试","error_code":"2043"}`, arkStatus: "failed", errorCode: "2043", errorMessage: "视频安全审核不通过，请重试", failure: true},
+		{name: "request_error", response: `{"code":-2011,"message":"task expired","data":null}`, arkStatus: "failed", errorCode: "-2011", errorMessage: "task expired", failure: true},
+		{name: "rate_limit", response: `{"code":1057,"message":"request too frequent","data":null}`, arkStatus: "queued", retryable: true},
+	}
+
+	for _, modelCase := range models {
+		for _, terminalCase := range terminalCases {
+			t.Run(modelCase.name+"/"+terminalCase.name, func(t *testing.T) {
+				setupSeedanceE2EDB(t)
+				mock := &mockDimensioServer{terminalResponse: terminalCase.response}
+				mockServer := httptest.NewServer(mock)
+				t.Cleanup(mockServer.Close)
+				seedDimensioE2EData(t, mockServer.URL, modelCase.upstreamModel)
+				engine := seedanceE2ERouter()
+				service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
+					return relay.GetTaskAdaptor(platform)
+				}
+				t.Cleanup(func() { service.GetTaskAdaptorFunc = nil })
+
+				requestBody := strings.Replace(dimensioMultimodalRequestBody, `"resolution":"720p"`, `"resolution":"`+modelCase.resolution+`"`, 1)
+				status, submitResponse := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
+				require.Equal(t, http.StatusOK, status, string(submitResponse))
+				var submitFields map[string]interface{}
+				require.NoError(t, common.Unmarshal(submitResponse, &submitFields))
+				publicID, ok := submitFields["id"].(string)
+				require.True(t, ok)
+				assert.True(t, strings.HasPrefix(publicID, "task_"))
+				assert.NotContains(t, string(submitResponse), "dim-upstream")
+
+				requests := mock.snapshot()
+				require.Len(t, requests, 1)
+				assert.Equal(t, "/v1/videos/generations", requests[0].Path)
+				assert.Equal(t, "Bearer mock-dimensio-key", requests[0].Authorization)
+				var upstreamRequest map[string]interface{}
+				require.NoError(t, common.Unmarshal(requests[0].Body, &upstreamRequest))
+				assert.Equal(t, modelCase.upstreamModel, upstreamRequest["model"])
+				assert.Equal(t, "omni_reference", upstreamRequest["functionMode"])
+				assert.Equal(t, "https://mock.example/reference-image.jpg", upstreamRequest["image_file_1"])
+				assert.Equal(t, "https://mock.example/reference-video.mp4", upstreamRequest["video_file_1"])
+				assert.Equal(t, "https://mock.example/reference-audio.mp3", upstreamRequest["audio_file_1"])
+				assert.Equal(t, float64(6), upstreamRequest["duration"])
+				assert.Equal(t, modelCase.resolution, upstreamRequest["resolution"])
+
+				var task model.Task
+				require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
+				assert.Equal(t, constant.TaskPlatform("59"), task.Platform)
+				assert.Equal(t, "dim-upstream", task.PrivateData.UpstreamTaskID)
+				require.NotNil(t, task.PrivateData.BillingContext)
+				assert.Equal(t, modelCase.upstreamModel, task.PrivateData.BillingContext.UpstreamModelName)
+				assert.Equal(t, 6.0, task.PrivateData.BillingContext.OtherRatios["seconds"])
+				assert.Equal(t, modelCase.resolutionRatio, task.PrivateData.BillingContext.OtherRatios["resolution"])
+				preConsumedQuota := task.Quota
+				assert.Equal(t, modelCase.expectedQuota, preConsumedQuota)
+
+				summary := service.RunTaskPollingOnce(context.Background(), nil)
+				assert.Equal(t, 1, summary.UnfinishedTasks)
+				requests = mock.snapshot()
+				require.Len(t, requests, 2)
+				assert.Equal(t, "/v1/videos/tasks/dim-upstream", requests[1].Path)
+
+				status, queryResponse := performJSONRequest(t, engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+publicID, "Bearer e2e-1", "")
+				require.Equal(t, http.StatusOK, status, string(queryResponse))
+				assert.NotContains(t, string(queryResponse), "dim-upstream")
+				var arkResponse map[string]interface{}
+				require.NoError(t, common.Unmarshal(queryResponse, &arkResponse))
+				assert.Equal(t, publicID, arkResponse["id"])
+				assert.Equal(t, terminalCase.arkStatus, arkResponse["status"])
+
+				require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
+				if terminalCase.retryable {
+					assert.NotEqual(t, model.TaskStatusFailure, task.Status)
+					assert.NotEqual(t, model.TaskStatusSuccess, task.Status)
+					assert.Equal(t, preConsumedQuota, task.Quota)
+					var user model.User
+					var channel model.Channel
+					var token model.Token
+					require.NoError(t, model.DB.First(&user, e2eUserID).Error)
+					require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
+					require.NoError(t, model.DB.First(&token, 1).Error)
+					assert.Equal(t, preConsumedQuota, user.UsedQuota)
+					assert.Equal(t, int64(preConsumedQuota), channel.UsedQuota)
+					assert.Equal(t, preConsumedQuota, token.UsedQuota)
+				} else if terminalCase.failure {
+					errorFields := arkResponse["error"].(map[string]interface{})
+					assert.Equal(t, terminalCase.errorCode, errorFields["code"])
+					assert.Equal(t, terminalCase.errorMessage, errorFields["message"])
+					var user model.User
+					var channel model.Channel
+					var token model.Token
+					require.NoError(t, model.DB.First(&user, e2eUserID).Error)
+					require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
+					require.NoError(t, model.DB.First(&token, 1).Error)
+					assert.Zero(t, user.UsedQuota)
+					assert.Zero(t, channel.UsedQuota)
+					assert.Zero(t, token.UsedQuota)
+				} else {
+					content := arkResponse["content"].(map[string]interface{})
+					assert.Equal(t, "https://mock.dimensio/video.mp4", content["video_url"])
+					assert.Equal(t, preConsumedQuota, task.Quota)
+					var user model.User
+					var channel model.Channel
+					var token model.Token
+					require.NoError(t, model.DB.First(&user, e2eUserID).Error)
+					require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
+					require.NoError(t, model.DB.First(&token, 1).Error)
+					assert.Equal(t, preConsumedQuota, user.UsedQuota)
+					assert.Equal(t, int64(preConsumedQuota), channel.UsedQuota)
+					assert.Equal(t, preConsumedQuota, token.UsedQuota)
+				}
+				t.Logf("ARK SDK request: %s", requestBody)
+				t.Logf("Dimensio request: %s", requests[0].Body)
+				t.Logf("Dimensio response: %s", terminalCase.response)
+				t.Logf("ARK SDK response: %s", queryResponse)
+			})
+		}
+	}
 }
 
 func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {

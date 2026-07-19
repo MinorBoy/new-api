@@ -56,7 +56,8 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeAdvancedCustom = 58
-	ChannelTypeDummy          // this one is only for count, do not add any channel after this
+	ChannelTypeDimensio       = 59 // dimensio 视频生成(ARK v3 协议翻译网关)
+	ChannelTypeDummy          = 60 // this one is only for count, do not add any channel after this
 
 )
 
@@ -120,6 +121,7 @@ var ChannelBaseURLs = []string{
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
 	"",                                          //58
+	"https://jimeng.dimensio.cn",                //59 Dimensio
 }
 
 var ChannelTypeNames = map[int]string{
@@ -178,6 +180,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeAdvancedCustom: "Advanced Custom",
+	ChannelTypeDimensio:       "Dimensio",
 }
 
 func GetChannelTypeName(channelType int) string {

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -71,7 +72,7 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 	pageSize := boundedSeedancePage(c.Query("page_size"), 20, 100, 20)
 	query := model.DB.Model(&model.Task{}).
 		Where("user_id = ?", c.GetInt("id")).
-		Where("platform IN ?", []string{strconv.Itoa(constant.ChannelTypeVolcEngine), strconv.Itoa(constant.ChannelTypeDoubaoVideo)}).
+		Where("platform IN ?", []string{strconv.Itoa(constant.ChannelTypeVolcEngine), strconv.Itoa(constant.ChannelTypeDoubaoVideo), strconv.Itoa(constant.ChannelTypeDimensio)}).
 		Where("submit_time >= ?", time.Now().Add(-7*24*time.Hour).Unix())
 
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
@@ -200,7 +201,16 @@ func seedanceTaskMatchesJSONFilter(task *model.Task, modelFilter, serviceTierFil
 
 func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 	response := make(map[string]interface{})
-	if len(task.Data) > 0 {
+	adaptor := GetTaskAdaptor(task.Platform)
+	if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
+		converted, err := converter.ConvertToArkVideoTask(task)
+		if err != nil {
+			return nil, err
+		}
+		if err := common.Unmarshal(converted, &response); err != nil {
+			return nil, fmt.Errorf("unmarshal converted task data: %w", err)
+		}
+	} else if len(task.Data) > 0 {
 		if err := common.Unmarshal(task.Data, &response); err != nil {
 			return nil, fmt.Errorf("unmarshal task data: %w", err)
 		}
@@ -214,7 +224,7 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 		}
 	}
 	response["status"] = publicStatus
-	if _, exists := response["model"]; !exists {
+	if modelValue, exists := response["model"]; !exists || modelValue == "" {
 		modelName := task.Properties.OriginModelName
 		if modelName == "" {
 			modelName = task.Properties.UpstreamModelName

@@ -25,7 +25,7 @@ var defaultDurationPrice = map[string]types.DurationPrice{
 }
 
 func GetDurationPrice(model string) (types.DurationPrice, bool) {
-	if price, ok := billingSetting.DurationPrice[model]; ok {
+	if price, ok := billingSetting.DurationPrice.Get(model); ok {
 		return price, true
 	}
 	price, ok := defaultDurationPrice[model]
@@ -33,11 +33,12 @@ func GetDurationPrice(model string) (types.DurationPrice, bool) {
 }
 
 func GetDurationPriceCopy() map[string]types.DurationPrice {
-	prices := make(map[string]types.DurationPrice, len(defaultDurationPrice)+len(billingSetting.DurationPrice))
+	configuredPrices := billingSetting.DurationPrice.ReadAll()
+	prices := make(map[string]types.DurationPrice, len(defaultDurationPrice)+len(configuredPrices))
 	for model, price := range defaultDurationPrice {
 		prices[model] = price
 	}
-	for model, price := range billingSetting.DurationPrice {
+	for model, price := range configuredPrices {
 		prices[model] = price
 	}
 	return prices

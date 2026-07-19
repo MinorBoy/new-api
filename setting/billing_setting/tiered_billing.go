@@ -21,15 +21,15 @@ const (
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr, billing_setting.duration_price
 type BillingSetting struct {
-	BillingMode   map[string]string              `json:"billing_mode"`
-	BillingExpr   map[string]string              `json:"billing_expr"`
-	DurationPrice map[string]types.DurationPrice `json:"duration_price"`
+	BillingMode   *types.RWMap[string, string]              `json:"billing_mode"`
+	BillingExpr   *types.RWMap[string, string]              `json:"billing_expr"`
+	DurationPrice *types.RWMap[string, types.DurationPrice] `json:"duration_price"`
 }
 
 var billingSetting = BillingSetting{
-	BillingMode:   make(map[string]string),
-	BillingExpr:   make(map[string]string),
-	DurationPrice: make(map[string]types.DurationPrice),
+	BillingMode:   types.NewRWMap[string, string](),
+	BillingExpr:   types.NewRWMap[string, string](),
+	DurationPrice: types.NewRWMap[string, types.DurationPrice](),
 }
 
 func init() {
@@ -41,7 +41,7 @@ func init() {
 // ---------------------------------------------------------------------------
 
 func GetBillingMode(model string) string {
-	if mode, ok := billingSetting.BillingMode[model]; ok {
+	if mode, ok := billingSetting.BillingMode.Get(model); ok {
 		return mode
 	}
 	if _, ok := defaultDurationPrice[model]; ok {
@@ -51,23 +51,23 @@ func GetBillingMode(model string) string {
 }
 
 func GetBillingExpr(model string) (string, bool) {
-	expr, ok := billingSetting.BillingExpr[model]
-	return expr, ok
+	return billingSetting.BillingExpr.Get(model)
 }
 
 func GetBillingModeCopy() map[string]string {
-	modes := make(map[string]string, len(defaultDurationPrice)+len(billingSetting.BillingMode))
+	configuredModes := billingSetting.BillingMode.ReadAll()
+	modes := make(map[string]string, len(defaultDurationPrice)+len(configuredModes))
 	for model := range defaultDurationPrice {
 		modes[model] = BillingModePerDuration
 	}
-	for model, mode := range billingSetting.BillingMode {
+	for model, mode := range configuredModes {
 		modes[model] = mode
 	}
 	return modes
 }
 
 func GetBillingExprCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingExpr)
+	return billingSetting.BillingExpr.ReadAll()
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {

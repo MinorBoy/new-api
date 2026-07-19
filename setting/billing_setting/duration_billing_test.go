@@ -35,12 +35,12 @@ func TestDurationPriceConfiguredRuleOverridesDefault(t *testing.T) {
 		billingSetting.DurationPrice = originalPrices
 	})
 
-	billingSetting.BillingMode = map[string]string{modelName: BillingModeRatio}
-	billingSetting.DurationPrice = map[string]types.DurationPrice{
-		modelName: {
-			Price: 9, Unit: types.DurationUnitMinute, RoundingStepSeconds: 60,
-		},
-	}
+	billingSetting.BillingMode = types.NewRWMap[string, string]()
+	billingSetting.BillingMode.Set(modelName, BillingModeRatio)
+	billingSetting.DurationPrice = types.NewRWMap[string, types.DurationPrice]()
+	billingSetting.DurationPrice.Set(modelName, types.DurationPrice{
+		Price: 9, Unit: types.DurationUnitMinute, RoundingStepSeconds: 60,
+	})
 
 	assert.Equal(t, BillingModeRatio, GetBillingMode(modelName))
 	rule, ok := GetDurationPrice(modelName)

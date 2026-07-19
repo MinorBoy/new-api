@@ -109,6 +109,36 @@ func TestValidateNativeRequest(t *testing.T) {
 	}
 }
 
+func TestValidateNativeRequestMalformedBooleanUsesStableARKError(t *testing.T) {
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "generate_audio string",
+			body: `{"model":"doubao-seedance-1-5-pro-251215","content":[{"type":"text","text":"malformed boolean"}],"generate_audio":"not-a-bool"}`,
+		},
+		{
+			name: "draft object",
+			body: `{"model":"doubao-seedance-1-5-pro-251215","content":[{"type":"text","text":"malformed boolean"}],"draft":{"value":true}}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			c := newNativeTaskContext(t, testCase.body)
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+			taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+			require.NotNil(t, taskErr)
+			require.Equal(t, "InvalidParameter", taskErr.Code)
+			require.Equal(t, "request body contains invalid parameters", taskErr.Message)
+			for _, internalDetail := range []string{"json:", "cannot unmarshal", "Go struct field", "Go value"} {
+				require.NotContains(t, taskErr.Message, internalDetail)
+			}
+		})
+	}
+}
+
 func TestBuildNativeRequestBodyAppliesMappedModel(t *testing.T) {
 	c := newNativeTaskContext(t, `{"model":"alias","content":[{"type":"text","text":"a cat"}],"watermark":false,"duration":0,"unknown_field":{"preserve":true}}`)
 	// Use a valid request for validation; the body rewrite itself must preserve

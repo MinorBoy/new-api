@@ -57,7 +57,7 @@ func (a *TaskAdaptor) validateNativeRequest(c *gin.Context, info *relaycommon.Re
 
 	var request seedanceNativeRequest
 	if err := common.UnmarshalBodyReusable(c, &request); err != nil {
-		return nativeTaskError(err.Error(), "InvalidParameter")
+		return nativeTaskError("request body contains invalid parameters", "InvalidParameter")
 	}
 	if strings.TrimSpace(request.Model) == "" {
 		return nativeTaskError("model is required", "MissingParameter.model")

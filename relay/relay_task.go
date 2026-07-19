@@ -19,6 +19,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -201,8 +202,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 6. 将 OtherRatios 应用到基础额度（饱和转换，防止溢出成负数）
 	if !common.StringsContains(constant.TaskPricePatches, modelName) {
-		quotaWithRatios := info.PriceData.ApplyOtherRatiosToFloat(float64(info.PriceData.Quota))
-		quota, clamp := common.QuotaFromFloatChecked(quotaWithRatios)
+		quota, clamp := taskQuotaWithOtherRatios(info.PriceData)
 		info.PriceData.Quota = quota
 		noteTaskQuotaClamp(info, clamp)
 	}
@@ -283,18 +283,21 @@ func arkTaskErrorFromResponse(responseBody []byte, statusCode int) *dto.TaskErro
 	return service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", statusCode)
 }
 
+func taskQuotaWithOtherRatios(priceData types.PriceData) (int, *common.QuotaClamp) {
+	baseQuota := priceData.ModelRatio / 2 * common.QuotaPerUnit * priceData.GroupRatioInfo.GroupRatio
+	if priceData.UsePrice {
+		baseQuota = priceData.ModelPrice * common.QuotaPerUnit * priceData.GroupRatioInfo.GroupRatio
+	}
+	return common.QuotaFromFloatChecked(priceData.ApplyOtherRatiosToFloat(baseQuota))
+}
+
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
-// 公式: baseQuota × ∏(ratio) — 其中 baseQuota 是不含 OtherRatios 的基础额度。
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) (int, bool) {
-	// 从 PriceData 获取不含 OtherRatios 的基础价格
-	baseQuota := info.PriceData.RemoveOtherRatiosFromFloat(float64(info.PriceData.Quota))
 	priceData := info.PriceData
 	if !priceData.ReplaceOtherRatios(ratios) {
 		return 0, false
 	}
-	// 应用新的 ratios
-	result := priceData.ApplyOtherRatiosToFloat(baseQuota)
-	quota, clamp := common.QuotaFromFloatChecked(result)
+	quota, clamp := taskQuotaWithOtherRatios(priceData)
 	noteTaskQuotaClamp(info, clamp)
 	return quota, true
 }

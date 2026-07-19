@@ -256,6 +256,27 @@ func TestTaskBillingOtherFiltersHistoricalOtherRatios(t *testing.T) {
 	assert.NotContains(t, other, "inf")
 }
 
+func TestTaskBillingOtherPreservesServiceTierRatio(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.OtherRatios = map[string]float64{"service_tier": 0.5}
+	task.PrivateData.BillingContext.ServiceTier = "flex"
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, 0.5, other["service_tier"])
+	assert.Equal(t, "flex", other["service_tier_value"])
+}
+
+func TestTaskBillingOtherStoresDefaultServiceTierWithoutRatio(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ServiceTier = "default"
+
+	other := taskBillingOther(task)
+
+	assert.NotContains(t, other, "service_tier")
+	assert.Equal(t, "default", other["service_tier_value"])
+}
+
 func TestTaskBillingContextPriceDataFiltersMultiplier(t *testing.T) {
 	priceData := taskBillingContextPriceData(&model.TaskBillingContext{
 		OtherRatios: map[string]float64{
@@ -529,6 +550,7 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	seedChannelWithUsage(t, channelID, preConsumed)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
 	seedTaskQuotaData(t, task)
 
 	RecalculateTaskQuotaWithTokens(ctx, task, actualQuota, 1234, "adaptor adjustment")
@@ -548,6 +570,9 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 
 	// task.Quota should be updated to actualQuota
 	assert.Equal(t, actualQuota, task.Quota)
+	var persistedTask model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", task.TaskID).First(&persistedTask).Error)
+	assert.Equal(t, actualQuota, persistedTask.Quota)
 
 	// Log type should be Consume (additional charge)
 	log := getLastLog(t)
@@ -571,6 +596,7 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	seedChannelWithUsage(t, channelID, preConsumed)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
 	seedTaskQuotaData(t, task)
 
 	RecalculateTaskQuotaWithTokens(ctx, task, actualQuota, 987, "adaptor adjustment")
@@ -590,6 +616,9 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 
 	// task.Quota updated
 	assert.Equal(t, actualQuota, task.Quota)
+	var persistedTask model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", task.TaskID).First(&persistedTask).Error)
+	assert.Equal(t, actualQuota, persistedTask.Quota)
 
 	// Log type should be Refund
 	log := getLastLog(t)
@@ -603,13 +632,16 @@ func TestRecalculate_ZeroDelta(t *testing.T) {
 	enableTaskQuotaData(t)
 	ctx := context.Background()
 
-	const userID = 12
+	const userID, tokenID = 12, 12
 	const initQuota, preConsumed = 10000, 3000
+	const tokenRemain = 5000
 
 	seedUserWithUsage(t, userID, initQuota, preConsumed, 6)
+	seedToken(t, tokenID, userID, "sk-recalc-zero", tokenRemain)
 
 	seedChannelWithUsage(t, userID, preConsumed)
-	task := makeTask(userID, userID, preConsumed, 0, BillingSourceWallet, 0)
+	task := makeTask(userID, userID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
 	seedTaskQuotaData(t, task)
 
 	RecalculateTaskQuotaWithTokens(ctx, task, preConsumed, 777, "exact match")
@@ -618,11 +650,16 @@ func TestRecalculate_ZeroDelta(t *testing.T) {
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 	assert.Equal(t, preConsumed, getUserUsedQuota(t, userID))
 	assert.Equal(t, 6, getUserRequestCount(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, task.PrivateData.TokenId))
+	assert.Equal(t, 0, getTokenUsedQuota(t, task.PrivateData.TokenId))
 	assert.Equal(t, int64(preConsumed), getChannelUsedQuota(t, userID))
 	quotaData := getTaskQuotaData(t, task)
 	assert.Equal(t, 1, quotaData.Count)
 	assert.Equal(t, preConsumed, quotaData.Quota)
 	assert.Equal(t, 777, quotaData.TokenUsed)
+	var persistedTask model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", task.TaskID).First(&persistedTask).Error)
+	assert.Equal(t, preConsumed, persistedTask.Quota)
 
 	// No log created (delta is zero)
 	assert.Equal(t, int64(0), countLogs(t))

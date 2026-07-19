@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
@@ -32,7 +33,9 @@ func TestIsResponsesEventStreamContentType(t *testing.T) {
 func TestRecalcQuotaFromRatiosIgnoresInvalidMultipliers(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		PriceData: types.PriceData{
-			Quota: 100,
+			Quota:          100,
+			ModelRatio:     100 / common.QuotaPerUnit,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 		},
 	}
 	info.PriceData.AddOtherRatio("duration", 2)
@@ -53,7 +56,9 @@ func TestRecalcQuotaFromRatiosIgnoresInvalidMultipliers(t *testing.T) {
 func TestRecalcQuotaFromRatiosRejectsAllInvalidAdjustedRatios(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		PriceData: types.PriceData{
-			Quota: 100,
+			Quota:          100,
+			ModelRatio:     100 / common.QuotaPerUnit,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 		},
 	}
 	info.PriceData.AddOtherRatio("duration", 2)

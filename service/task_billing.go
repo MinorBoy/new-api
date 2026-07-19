@@ -140,7 +140,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["resolution"] = bc.Resolution
 		}
 		if bc.ServiceTier != "" {
-			other["service_tier"] = bc.ServiceTier
+			other["service_tier_value"] = bc.ServiceTier
 		}
 		if bc.GenerateAudio != nil {
 			other["generate_audio"] = *bc.GenerateAudio

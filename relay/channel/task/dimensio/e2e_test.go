@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,6 +74,19 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 					"intelligent_ratio":false,
 					"face_grid":true
 				}`, originModel, prompt, modelCase.resolution)
+				var parsedArkRequest ArkRequest
+				require.NoError(t, common.UnmarshalJsonStr(arkRequest, &parsedArkRequest))
+				assert.Equal(t, originModel, parsedArkRequest.Model)
+				require.Len(t, parsedArkRequest.Content, 4)
+				require.NotNil(t, parsedArkRequest.Content[0].ImageURL)
+				require.NotNil(t, parsedArkRequest.Content[1].VideoURL)
+				require.NotNil(t, parsedArkRequest.Content[2].AudioURL)
+				assert.Equal(t, "https://assets.example/reference.jpg", parsedArkRequest.Content[0].ImageURL.URL)
+				assert.Equal(t, "https://assets.example/reference.mp4", parsedArkRequest.Content[1].VideoURL.URL)
+				assert.Equal(t, "https://assets.example/reference.mp3", parsedArkRequest.Content[2].AudioURL.URL)
+				assert.Equal(t, prompt, parsedArkRequest.Content[3].Text)
+				require.NotNil(t, parsedArkRequest.Duration)
+				assert.Equal(t, 6, *parsedArkRequest.Duration)
 
 				var capturedSubmitBody []byte
 				mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +145,20 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 				assert.Equal(t, upstreamTaskID, returnedUpstreamID)
 				assert.JSONEq(t, `{"id":"task_public"}`, recorder.Body.String())
 				assert.NotContains(t, recorder.Body.String(), upstreamTaskID)
+				assert.JSONEq(t, `{"created":1709123456,"task_id":"dim-upstream","status":"pending"}`, string(submitData))
+				assert.JSONEq(t, fmt.Sprintf(`{
+					"model":%q,
+					"prompt":%q,
+					"functionMode":"omni_reference",
+					"image_file_1":"https://assets.example/reference.jpg",
+					"video_file_1":"https://assets.example/reference.mp4",
+					"audio_file_1":"https://assets.example/reference.mp3",
+					"duration":6,
+					"resolution":%q,
+					"ratio":"16:9",
+					"intelligent_ratio":false,
+					"face_grid":true
+				}`, modelCase.upstreamModel, prompt, modelCase.resolution), string(capturedSubmitBody))
 
 				var upstreamRequest map[string]interface{}
 				require.NoError(t, common.Unmarshal(capturedSubmitBody, &upstreamRequest))
@@ -153,13 +182,34 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 				require.NoError(t, fetchResponse.Body.Close())
 				parsedResult, err := adaptor.ParseTaskResult(queryData)
 				require.NoError(t, err)
+				assert.JSONEq(t, terminalCase.dimensioBody, string(queryData))
+				var queryFields map[string]interface{}
+				require.NoError(t, common.Unmarshal(queryData, &queryFields))
+				assert.NotContains(t, queryFields, "duration")
 
 				task := &model.Task{
-					TaskID: publicTaskID, SubmitTime: 1709123456, UpdatedAt: 1709123556,
-					Properties:  model.Properties{OriginModelName: originModel, UpstreamModelName: modelCase.upstreamModel},
-					PrivateData: model.TaskPrivateData{UpstreamTaskID: upstreamTaskID},
+					TaskID: publicTaskID, Status: model.TaskStatus(parsedResult.Status), Progress: parsedResult.Progress,
+					SubmitTime: 1709123456, UpdatedAt: 1709123556,
+					Properties: model.Properties{OriginModelName: originModel, UpstreamModelName: modelCase.upstreamModel},
+					PrivateData: model.TaskPrivateData{
+						UpstreamTaskID: upstreamTaskID,
+						BillingContext: &model.TaskBillingContext{
+							BillingMode:              billing_setting.BillingModePerDuration,
+							DurationSource:           types.DurationSourceRequest,
+							RequestedDurationSeconds: requested,
+							BillableDurationSeconds:  requested,
+							OtherRatios:              map[string]float64{"resolution": modelCase.resolutionRatio},
+						},
+					},
 				}
 				task.Data = queryData
+				assert.JSONEq(t, terminalCase.dimensioBody, string(task.Data))
+				assert.Equal(t, parsedResult.Status, string(task.Status))
+				require.NotNil(t, task.PrivateData.BillingContext)
+				assert.Equal(t, types.DurationSourceRequest, task.PrivateData.BillingContext.DurationSource)
+				assert.Equal(t, 6, task.PrivateData.BillingContext.RequestedDurationSeconds)
+				assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
+				assert.Equal(t, map[string]float64{"resolution": modelCase.resolutionRatio}, task.PrivateData.BillingContext.OtherRatios)
 				arkResponseData, err := adaptor.ConvertToArkVideoTask(task)
 				require.NoError(t, err)
 				assert.NotContains(t, string(arkResponseData), upstreamTaskID)
@@ -169,16 +219,39 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 				assert.Equal(t, originModel, arkResponse.Model)
 				assert.Equal(t, terminalCase.expectedState, arkResponse.Status)
 				assert.Zero(t, adaptor.AdjustBillingOnComplete(task, parsedResult))
+				assert.Equal(t, 6, task.PrivateData.BillingContext.RequestedDurationSeconds)
+				assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
+				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "seconds")
+				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "duration")
 
 				if terminalCase.name == "success" {
 					assert.Equal(t, model.TaskStatusSuccess, parsedResult.Status)
 					assert.Equal(t, "https://mock.dimensio/video.mp4", arkResponse.Content.VideoURL)
 					assert.Nil(t, arkResponse.Error)
+					assert.JSONEq(t, `{
+						"id":"task_public",
+						"model":"doubao-seedance-2-0-260128",
+						"status":"succeeded",
+						"content":{"video_url":"https://mock.dimensio/video.mp4"},
+						"usage":{},
+						"created_at":1709123456,
+						"updated_at":1709123556
+					}`, string(arkResponseData))
 				} else {
 					assert.Equal(t, model.TaskStatusFailure, parsedResult.Status)
 					require.NotNil(t, arkResponse.Error)
 					assert.Equal(t, "2043", arkResponse.Error.Code)
 					assert.Equal(t, "视频安全审核不通过，请重试", arkResponse.Error.Message)
+					assert.JSONEq(t, `{
+						"id":"task_public",
+						"model":"doubao-seedance-2-0-260128",
+						"status":"failed",
+						"content":{},
+						"usage":{},
+						"error":{"code":"2043","message":"视频安全审核不通过，请重试"},
+						"created_at":1709123456,
+						"updated_at":1709123556
+					}`, string(arkResponseData))
 				}
 
 				var normalizedSubmit map[string]interface{}

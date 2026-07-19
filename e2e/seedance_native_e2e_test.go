@@ -19,8 +19,12 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -173,9 +177,6 @@ func setupSeedanceE2EDB(t *testing.T) {
 	ratio_setting.InitRatioSettings()
 	prices := ratio_setting.GetModelRatioCopy()
 	prices["doubao-seedance-2-0-260128"] = 0.1
-	prices["jimeng-video-seedance-2.0-fast-vip"] = 0.088
-	prices["jimeng-video-seedance-2.0-mini"] = 0.072
-	prices["jimeng-video-seedance-2.0-vip"] = 0.112
 	priceJSON, err := common.Marshal(prices)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(priceJSON)))
@@ -296,11 +297,37 @@ func seedSecondSeedanceE2EChannel(t *testing.T, upstreamURL string) {
 	require.NoError(t, secondChannel.Insert())
 }
 
-func seedDimensioE2EData(t *testing.T, upstreamURL, upstreamModel string) {
+func seedDimensioE2EData(t *testing.T, upstreamURL, upstreamModel string, pricePerSecond float64) {
 	t.Helper()
 	seedSeedanceE2EData(t, upstreamURL)
+	billingConfig := config.GlobalConfig.Get("billing_setting")
+	originalBillingConfig, err := config.ConfigToMap(billingConfig)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(billingConfig, originalBillingConfig))
+	})
+	durationRule := types.DurationPrice{
+		Price:                  pricePerSecond,
+		Unit:                   types.DurationUnitSecond,
+		RoundingStepSeconds:    1,
+		MinimumDurationSeconds: 4,
+	}
+	modeJSON, err := common.Marshal(map[string]string{
+		"doubao-seedance-2-0-260128": billing_setting.BillingModePerDuration,
+	})
+	require.NoError(t, err)
+	priceJSON, err := common.Marshal(map[string]types.DurationPrice{
+		"doubao-seedance-2-0-260128": durationRule,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.UpdateConfigFromMap(billingConfig, map[string]string{
+		billing_setting.BillingModeField:   string(modeJSON),
+		billing_setting.DurationPriceField: string(priceJSON),
+	}))
+
 	ratios := ratio_setting.GetModelRatioCopy()
 	delete(ratios, "doubao-seedance-2-0-260128")
+	delete(ratios, upstreamModel)
 	ratioJSON, err := common.Marshal(ratios)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(ratioJSON)))
@@ -337,31 +364,35 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 	models := []struct {
 		name, upstreamModel, resolution string
 		resolutionRatio                 float64
-		expectedQuota                   int
+		pricePerSecond                  float64
 	}{
-		{"fast_vip_720p", "jimeng-video-seedance-2.0-fast-vip", "720p", 1, 132000},
-		{"mini_720p", "jimeng-video-seedance-2.0-mini", "720p", 1, 108000},
-		{"vip_1080p", "jimeng-video-seedance-2.0-vip", "1080p", 2.5, 420000},
+		{"fast_vip_720p", "jimeng-video-seedance-2.0-fast-vip", "720p", 1, 0.48 / 7.3},
+		{"mini_720p", "jimeng-video-seedance-2.0-mini", "720p", 1, 0.39 / 7.3},
+		{"vip_1080p", "jimeng-video-seedance-2.0-vip", "1080p", 2.5, 0.62 / 7.3},
 	}
 	terminalCases := []struct {
 		name, response, arkStatus, errorCode, errorMessage string
 		failure                                            bool
 		retryable                                          bool
 	}{
-		{name: "success", response: `{"task_id":"dim-upstream","status":"completed","progress":100,"result":{"url":"https://mock.dimensio/video.mp4"}}`, arkStatus: "succeeded"},
-		{name: "failure", response: `{"task_id":"dim-upstream","status":"failed","error":"视频安全审核不通过，请重试","error_code":"2043"}`, arkStatus: "failed", errorCode: "2043", errorMessage: "视频安全审核不通过，请重试", failure: true},
-		{name: "request_error", response: `{"code":-2011,"message":"task expired","data":null}`, arkStatus: "failed", errorCode: "-2011", errorMessage: "task expired", failure: true},
-		{name: "rate_limit", response: `{"code":1057,"message":"request too frequent","data":null}`, arkStatus: "queued", retryable: true},
+		{name: "completed", response: `{"task_id":"dim-upstream","status":"completed","progress":100,"result":{"url":"https://mock.dimensio/video.mp4"}}`, arkStatus: "succeeded"},
+		{name: "failed", response: `{"task_id":"dim-upstream","status":"failed","error":"视频安全审核不通过，请重试","error_code":"2043"}`, arkStatus: "failed", errorCode: "2043", errorMessage: "视频安全审核不通过，请重试", failure: true},
+		{name: "-2011", response: `{"code":-2011,"message":"task expired","data":null}`, arkStatus: "failed", errorCode: "-2011", errorMessage: "task expired", failure: true},
+		{name: "1057", response: `{"code":1057,"message":"request too frequent","data":null}`, arkStatus: "queued", retryable: true},
 	}
 
 	for _, modelCase := range models {
 		for _, terminalCase := range terminalCases {
 			t.Run(modelCase.name+"/"+terminalCase.name, func(t *testing.T) {
+				expectedQuota := common.QuotaFromDecimal(decimal.NewFromFloat(modelCase.pricePerSecond).
+					Mul(decimal.NewFromInt(6)).
+					Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+					Mul(decimal.NewFromFloat(modelCase.resolutionRatio)))
 				setupSeedanceE2EDB(t)
 				mock := &mockDimensioServer{terminalResponse: terminalCase.response}
 				mockServer := httptest.NewServer(mock)
 				t.Cleanup(mockServer.Close)
-				seedDimensioE2EData(t, mockServer.URL, modelCase.upstreamModel)
+				seedDimensioE2EData(t, mockServer.URL, modelCase.upstreamModel, modelCase.pricePerSecond)
 				engine := seedanceE2ERouter()
 				service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 					return relay.GetTaskAdaptor(platform)
@@ -384,13 +415,19 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 				assert.Equal(t, "Bearer mock-dimensio-key", requests[0].Authorization)
 				var upstreamRequest map[string]interface{}
 				require.NoError(t, common.Unmarshal(requests[0].Body, &upstreamRequest))
-				assert.Equal(t, modelCase.upstreamModel, upstreamRequest["model"])
-				assert.Equal(t, "omni_reference", upstreamRequest["functionMode"])
-				assert.Equal(t, "https://mock.example/reference-image.jpg", upstreamRequest["image_file_1"])
-				assert.Equal(t, "https://mock.example/reference-video.mp4", upstreamRequest["video_file_1"])
-				assert.Equal(t, "https://mock.example/reference-audio.mp3", upstreamRequest["audio_file_1"])
-				assert.Equal(t, float64(6), upstreamRequest["duration"])
-				assert.Equal(t, modelCase.resolution, upstreamRequest["resolution"])
+				assert.Equal(t, map[string]interface{}{
+					"model":             modelCase.upstreamModel,
+					"prompt":            "参考图中主体、参考视频动作和参考音频节奏，镜头缓慢向前推进",
+					"functionMode":      "omni_reference",
+					"image_file_1":      "https://mock.example/reference-image.jpg",
+					"video_file_1":      "https://mock.example/reference-video.mp4",
+					"audio_file_1":      "https://mock.example/reference-audio.mp3",
+					"duration":          float64(6),
+					"resolution":        modelCase.resolution,
+					"ratio":             "16:9",
+					"intelligent_ratio": false,
+					"face_grid":         true,
+				}, upstreamRequest)
 
 				var task model.Task
 				require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
@@ -398,10 +435,33 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 				assert.Equal(t, "dim-upstream", task.PrivateData.UpstreamTaskID)
 				require.NotNil(t, task.PrivateData.BillingContext)
 				assert.Equal(t, modelCase.upstreamModel, task.PrivateData.BillingContext.UpstreamModelName)
-				assert.Equal(t, 6.0, task.PrivateData.BillingContext.OtherRatios["seconds"])
-				assert.Equal(t, modelCase.resolutionRatio, task.PrivateData.BillingContext.OtherRatios["resolution"])
+				assert.Equal(t, billing_setting.BillingModePerDuration, task.PrivateData.BillingContext.BillingMode)
+				assert.Equal(t, types.DurationSourceRequest, task.PrivateData.BillingContext.DurationSource)
+				assert.Equal(t, 6, task.PrivateData.BillingContext.RequestedDurationSeconds)
+				assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
+				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "seconds")
+				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "duration")
+				assert.Equal(t, map[string]float64{"resolution": modelCase.resolutionRatio}, task.PrivateData.BillingContext.OtherRatios)
+				require.NotNil(t, task.PrivateData.BillingContext.DurationPrice)
+				assert.Equal(t, types.DurationPrice{
+					Price:                  modelCase.pricePerSecond,
+					Unit:                   types.DurationUnitSecond,
+					RoundingStepSeconds:    1,
+					MinimumDurationSeconds: 4,
+				}, *task.PrivateData.BillingContext.DurationPrice)
 				preConsumedQuota := task.Quota
-				assert.Equal(t, modelCase.expectedQuota, preConsumedQuota)
+				assert.Equal(t, expectedQuota, preConsumedQuota)
+
+				var billedUser model.User
+				var billedChannel model.Channel
+				var billedToken model.Token
+				require.NoError(t, model.DB.First(&billedUser, e2eUserID).Error)
+				require.NoError(t, model.DB.First(&billedChannel, e2eChannelID).Error)
+				require.NoError(t, model.DB.First(&billedToken, 1).Error)
+				assert.Equal(t, 2_000_000_000-preConsumedQuota, billedUser.Quota)
+				assert.Equal(t, preConsumedQuota, billedUser.UsedQuota)
+				assert.Equal(t, int64(preConsumedQuota), billedChannel.UsedQuota)
+				assert.Equal(t, preConsumedQuota, billedToken.UsedQuota)
 
 				summary := service.RunTaskPollingOnce(context.Background(), nil)
 				assert.Equal(t, 1, summary.UnfinishedTasks)
@@ -416,47 +476,81 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 				require.NoError(t, common.Unmarshal(queryResponse, &arkResponse))
 				assert.Equal(t, publicID, arkResponse["id"])
 				assert.Equal(t, terminalCase.arkStatus, arkResponse["status"])
+				require.Len(t, mock.snapshot(), 2)
 
 				require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
+				var user model.User
+				var channel model.Channel
+				var token model.Token
+				require.NoError(t, model.DB.First(&user, e2eUserID).Error)
+				require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
+				require.NoError(t, model.DB.First(&token, 1).Error)
+				assert.Equal(t, 1, user.RequestCount)
+
+				model.CacheQuotaDataLock.Lock()
+				quotaDataSnapshot := make([]model.QuotaData, 0, len(model.CacheQuotaData))
+				for _, quotaData := range model.CacheQuotaData {
+					quotaDataSnapshot = append(quotaDataSnapshot, *quotaData)
+				}
+				model.CacheQuotaDataLock.Unlock()
+				require.Len(t, quotaDataSnapshot, 1)
+				assert.Equal(t, 1, quotaDataSnapshot[0].Count)
+				assert.Zero(t, quotaDataSnapshot[0].TokenUsed)
+
 				if terminalCase.retryable {
 					assert.NotEqual(t, model.TaskStatusFailure, task.Status)
 					assert.NotEqual(t, model.TaskStatusSuccess, task.Status)
 					assert.Equal(t, preConsumedQuota, task.Quota)
-					var user model.User
-					var channel model.Channel
-					var token model.Token
-					require.NoError(t, model.DB.First(&user, e2eUserID).Error)
-					require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
-					require.NoError(t, model.DB.First(&token, 1).Error)
+					assert.Equal(t, 2_000_000_000-preConsumedQuota, user.Quota)
 					assert.Equal(t, preConsumedQuota, user.UsedQuota)
 					assert.Equal(t, int64(preConsumedQuota), channel.UsedQuota)
 					assert.Equal(t, preConsumedQuota, token.UsedQuota)
+					assert.Equal(t, preConsumedQuota, quotaDataSnapshot[0].Quota)
 				} else if terminalCase.failure {
-					errorFields := arkResponse["error"].(map[string]interface{})
+					errorFields, ok := arkResponse["error"].(map[string]interface{})
+					require.True(t, ok)
 					assert.Equal(t, terminalCase.errorCode, errorFields["code"])
 					assert.Equal(t, terminalCase.errorMessage, errorFields["message"])
-					var user model.User
-					var channel model.Channel
-					var token model.Token
-					require.NoError(t, model.DB.First(&user, e2eUserID).Error)
-					require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
-					require.NoError(t, model.DB.First(&token, 1).Error)
+					assert.Equal(t, string(model.TaskStatusFailure), string(task.Status))
+					assert.Equal(t, preConsumedQuota, task.Quota)
+					assert.Equal(t, 2_000_000_000, user.Quota)
 					assert.Zero(t, user.UsedQuota)
 					assert.Zero(t, channel.UsedQuota)
 					assert.Zero(t, token.UsedQuota)
+					assert.Zero(t, quotaDataSnapshot[0].Quota)
+
+					var refundLog model.Log
+					require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeRefund).Order("id DESC").First(&refundLog).Error)
+					assert.Equal(t, preConsumedQuota, refundLog.Quota)
+					assert.Equal(t, "doubao-seedance-2-0-260128", refundLog.ModelName)
+					var refundOther map[string]interface{}
+					require.NoError(t, common.UnmarshalJsonStr(refundLog.Other, &refundOther))
+					assert.Equal(t, billing_setting.BillingModePerDuration, refundOther["billing_mode"])
+					assert.Equal(t, types.DurationSourceRequest, refundOther["duration_source"])
+					assert.Equal(t, float64(6), refundOther["requested_duration_seconds"])
+					assert.Equal(t, float64(6), refundOther["billable_duration_seconds"])
+					assert.Equal(t, modelCase.pricePerSecond, refundOther["duration_price"])
+					assert.Equal(t, modelCase.resolutionRatio, refundOther["resolution_ratio"])
+					assert.NotContains(t, refundOther, "seconds")
+					assert.NotContains(t, refundOther, "duration")
 				} else {
-					content := arkResponse["content"].(map[string]interface{})
+					content, ok := arkResponse["content"].(map[string]interface{})
+					require.True(t, ok)
 					assert.Equal(t, "https://mock.dimensio/video.mp4", content["video_url"])
+					assert.Equal(t, string(model.TaskStatusSuccess), string(task.Status))
 					assert.Equal(t, preConsumedQuota, task.Quota)
-					var user model.User
-					var channel model.Channel
-					var token model.Token
-					require.NoError(t, model.DB.First(&user, e2eUserID).Error)
-					require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
-					require.NoError(t, model.DB.First(&token, 1).Error)
+					assert.Equal(t, 2_000_000_000-preConsumedQuota, user.Quota)
 					assert.Equal(t, preConsumedQuota, user.UsedQuota)
 					assert.Equal(t, int64(preConsumedQuota), channel.UsedQuota)
 					assert.Equal(t, preConsumedQuota, token.UsedQuota)
+					assert.Equal(t, preConsumedQuota, quotaDataSnapshot[0].Quota)
+				}
+				var refundLogCount int64
+				require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeRefund).Count(&refundLogCount).Error)
+				if terminalCase.failure {
+					assert.Equal(t, int64(1), refundLogCount)
+				} else {
+					assert.Zero(t, refundLogCount)
 				}
 				t.Logf("ARK SDK request: %s", requestBody)
 				t.Logf("Dimensio request: %s", requests[0].Body)

@@ -1,52 +1,47 @@
-# Dimensio Seedance 2.0 自动化 E2E 验收报告
+# Dimensio Seedance 2.0 per-duration 自动化 E2E 验收报告
 
-## 1. 验收结论
+## 1. 验收结论与边界
 
-Dimensio 渠道已经通过协议级和应用级自动化 E2E 验收。测试没有请求真实 `jimeng.dimensio.cn`，Dimensio 提交和查询接口均由本地 `httptest` mock 提供，因此没有产生上游积分成本。
+Dimensio 渠道的协议翻译、源模型时长计费、任务快照和终态账本通过 mock 自动化验收。应用 E2E 完整执行 3 个模型 × 4 个终态，共 12 个场景；协议 E2E 另外执行 3 个模型 × 成功/失败转换。
 
-覆盖的开放模型和结果矩阵：
-
-| 模型 | 分辨率 | 成功任务 | 失败任务 | `-2011` 终态错误 | `1057` 可重试错误 |
-|---|---:|---:|---:|---:|---:|
-| `jimeng-video-seedance-2.0-fast-vip` | 720p | 通过 | 通过 | 通过 | 通过 |
-| `jimeng-video-seedance-2.0-mini` | 720p | 通过 | 通过 | 通过 | 通过 |
-| `jimeng-video-seedance-2.0-vip` | 1080p | 通过 | 通过 | 通过 | 通过 |
-
-每个场景都使用完整多模态输入：提示词、参考图、参考视频和参考音频。
+所有 Dimensio 提交和查询都指向测试进程内的 `httptest` server。每个应用场景精确捕获 2 次请求（1 次提交、1 次查询），公开任务查询不会再次访问上游。测试未连接 `https://jimeng.dimensio.cn`，没有使用真实 API Key，也没有消耗任何上游积分。
 
 ## 2. 验收清单
 
-- [x] ARK SDK 标准入口为 `POST /api/v3/contents/generations/tasks`。
-- [x] ARK 客户端模型通过渠道映射转换为三个 Dimensio Seedance 2.0 模型。
-- [x] 映射后的目标模型严格限制为文档列出的三个开放模型。
-- [x] fast-vip/mini 仅接受 720p；只有 vip 接受 1080p。
-- [x] 请求使用 Dimensio Bearer API Key，客户端 Token 不会转发给上游。
-- [x] `reference_image` 转换为顶层 `image_file_1`。
-- [x] `reference_video` 转换为顶层 `video_file_1`。
-- [x] `reference_audio` 转换为顶层 `audio_file_1`。
-- [x] 提示词转换为顶层 `prompt`，完整多模态模式转换为 `functionMode=omni_reference`。
-- [x] 上游请求不发送内部兼容字段 `file_paths`。
-- [x] `duration`、`resolution`、`ratio`、`intelligent_ratio` 和 `face_grid` 保持预期语义。
-- [x] 720p 计费倍率为 `seconds=6,resolution=1`。
-- [x] VIP 1080p 计费倍率为 `seconds=6,resolution=2.5`。
-- [x] 提交响应只返回 new-api 公开 `task_*` ID，不泄漏 Dimensio `task_id`。
-- [x] 轮询使用内部 Dimensio `task_id` 和 `GET /v1/videos/tasks/:taskId`。
-- [x] Dimensio `completed/result.url` 转换为 ARK `succeeded/content.video_url`。
-- [x] Dimensio `failed/error/error_code` 转换为 ARK `failed/error.message/error.code`。
-- [x] Dimensio `{code:-2011,message}` 请求级错误转换为可查询的 ARK 失败终态，而不是查询 500。
-- [x] 任意 2xx 中的正数业务错误码（如 `1006`）保留为供应商错误并规范化为 502，不退化成 `invalid_response` 或错误的 2xx 响应。
-- [x] 查询限流码 `1057/121101` 保持任务未完成和预扣额度，允许后续继续轮询，不触发退款。
-- [x] 单查响应不泄漏 Dimensio 上游任务 ID。
-- [x] 成功任务保持提交阶段按请求参数计算的预扣额度。
-- [x] 失败任务退还用户、渠道和 Token 三个账本的预扣额度。
-- [x] 查询响应未定义的 `duration` 扩展字段不能覆盖提交阶段计费快照。
-- [x] 请求参数、媒体数量、角色组合和错误响应的单元/回归测试通过。
+### 后端计费、配置和公开 API
 
-## 3. 实际协议样本
+- [x] `ratio`、`tiered_expr`、`per_duration` 三种 billing mode 可区分，Dimensio 销售规则使用 `BillingModePerDuration`。
+- [x] `DurationPrice` 包含 USD 单价、`second` 单位、1 秒步长和 4 秒最低计费时长。
+- [x] 计费按客户端源模型 `doubao-seedance-2-0-260128` 查找；映射后的三个 Dimensio 目标模型没有测试 `ModelRatio` 夹具。
+- [x] 配置通过 `billing_setting.billing_mode` / `billing_setting.duration_price` 更新，模型列表 API 暴露结构化时长价格。
+- [x] `TaskBillingContext` 冻结 billing mode、duration rule、`duration_source=request`、请求时长、计费时长和分辨率倍率。
+- [x] `seconds` 与 `duration` 是 `per_duration` 保留倍率名，不进入 `OtherRatios`。
+- [x] quota 用 `shopspring/decimal` 组成乘积并通过 `common.QuotaFromDecimal` 转换，没有裸 `int` 转换。
+- [x] completed 保留精确预扣；failed 与 `-2011` 退回钱包、用户已用、渠道、Token 和 quota-data；`1057` 保持任务与预扣。
+- [x] failed 与 `-2011` 退款日志保留完整 duration snapshot 和 `resolution_ratio`。
 
-以下 JSON 来自自动化测试实际捕获值。示例使用 VIP 1080p；另外两个 720p 模型执行相同字段断言。
+### 前端编辑器与公开价格目录
 
-### 3.1 ARK SDK 请求
+- [x] 管理端模型价格编辑器支持 `Per-duration`，可编辑 price/unit/rounding step/minimum duration，并能在 mode 切换时保持规则一致性。实现与回归测试由 `56effb89c` 及后续修复提交覆盖。
+- [x] 六个前端 locale 包含时长计费文案。
+- [x] 公开模型 API 返回 `billing_mode=per_duration` 与 `duration_price`，由 `09eb6531a` 的 controller 回归测试覆盖。
+- [x] 公开价格目录单独展示 `Duration-based` 与 `/ second` 或 `/ minute`，不会误标 `/ request`；过滤、排序、卡片、表格和详情由 `e3147f15b`、`e47572aa4` 及其测试覆盖。
+
+### Dimensio 协议
+
+- [x] ARK 标准入口为 `POST /api/v3/contents/generations/tasks`，提交只返回公开 `task_*` ID。
+- [x] `doubao-seedance-2-0-260128` 经渠道映射变为三个允许的 Dimensio 模型。
+- [x] 每个应用场景都提交 prompt + reference image + reference video + reference audio。
+- [x] 参考素材转换为 `image_file_1`、`video_file_1`、`audio_file_1`，模式为 `omni_reference`。
+- [x] `duration=6`、resolution、`ratio=16:9`、`intelligent_ratio=false`、`face_grid=true` 精确传递。
+- [x] fast-vip/mini 只支持 720p；VIP 1080p 使用 `resolution=2.5`。
+- [x] completed、failed、`-2011`、`1057` mock 结构按当前协议处理。
+- [x] Dimensio 查询响应不包含 `duration`；提交时已校验的请求时长是唯一权威计费时长。
+- [x] completed/failed 查询转换为精确 ARK success/error 结构，公开响应不泄漏 `dim-upstream`。
+
+## 3. 精确 ARK SDK 请求
+
+应用 E2E 的请求体如下。三个模型场景只替换渠道映射目标和 `resolution`（VIP 场景为 `1080p`）；客户端始终使用 Doubao 源模型。
 
 ```json
 {
@@ -54,18 +49,18 @@ Dimensio 渠道已经通过协议级和应用级自动化 E2E 验收。测试没
   "content": [
     {
       "type": "image_url",
-      "role": "reference_image",
-      "image_url": {"url": "https://mock.example/reference-image.jpg"}
+      "image_url": {"url": "https://mock.example/reference-image.jpg"},
+      "role": "reference_image"
     },
     {
       "type": "video_url",
-      "role": "reference_video",
-      "video_url": {"url": "https://mock.example/reference-video.mp4"}
+      "video_url": {"url": "https://mock.example/reference-video.mp4"},
+      "role": "reference_video"
     },
     {
       "type": "audio_url",
-      "role": "reference_audio",
-      "audio_url": {"url": "https://mock.example/reference-audio.mp3"}
+      "audio_url": {"url": "https://mock.example/reference-audio.mp3"},
+      "role": "reference_audio"
     },
     {
       "type": "text",
@@ -80,7 +75,9 @@ Dimensio 渠道已经通过协议级和应用级自动化 E2E 验收。测试没
 }
 ```
 
-### 3.2 转换后的 Dimensio 提交请求
+## 4. 精确 Dimensio 提交结构
+
+VIP 1080p 场景实际捕获的 JSON body：
 
 ```json
 {
@@ -98,67 +95,62 @@ Dimensio 渠道已经通过协议级和应用级自动化 E2E 验收。测试没
 }
 ```
 
-请求目标与认证：
+请求边界和 mock 提交响应：
 
 ```text
 POST /v1/videos/generations
 Authorization: Bearer mock-dimensio-key
 ```
 
-Mock 提交响应：
-
 ```json
-{
-  "created": 1709123456,
-  "task_id": "dim-upstream",
-  "status": "pending"
-}
+{"created": 1709123456, "task_id": "dim-upstream", "status": "pending"}
 ```
 
-对 ARK SDK 的提交响应：
+ARK 提交响应只包含公开 ID：
 
 ```json
-{
-  "id": "task_<new-api-public-id>"
-}
+{"id": "task_<new-api-public-id>"}
 ```
 
-## 4. 成功任务结构
+## 5. Mock 查询和任务结构
 
-Mock Dimensio 查询响应严格使用渠道 API 文档定义的完成结构：
+### completed
 
 ```json
 {
   "task_id": "dim-upstream",
   "status": "completed",
   "progress": 100,
-  "result": {
-    "url": "https://mock.dimensio/video.mp4"
+  "result": {"url": "https://mock.dimensio/video.mp4"}
+}
+```
+
+内部任务保留公开/上游 ID 隔离、成功状态、原始查询数据和提交时计费快照：
+
+```json
+{
+  "task_id": "task_public",
+  "status": "SUCCESS",
+  "private_data": {
+    "upstream_task_id": "dim-upstream",
+    "billing_context": {
+      "billing_mode": "per_duration",
+      "duration_source": "request",
+      "requested_duration_seconds": 6,
+      "billable_duration_seconds": 6,
+      "other_ratios": {"resolution": 2.5}
+    }
+  },
+  "data": {
+    "task_id": "dim-upstream",
+    "status": "completed",
+    "progress": 100,
+    "result": {"url": "https://mock.dimensio/video.mp4"}
   }
 }
 ```
 
-转换后的 ARK SDK 响应：
-
-```json
-{
-  "content": {
-    "video_url": "https://mock.dimensio/video.mp4"
-  },
-  "created_at": 1784449698,
-  "id": "task_<new-api-public-id>",
-  "model": "doubao-seedance-2-0-260128",
-  "status": "succeeded",
-  "updated_at": 1784449698,
-  "usage": {}
-}
-```
-
-验收点：公开响应不包含 `dim-upstream`；视频 URL 位于 `content.video_url`。
-
-## 5. 失败任务结构
-
-Mock Dimensio 查询响应：
+### failed
 
 ```json
 {
@@ -169,37 +161,61 @@ Mock Dimensio 查询响应：
 }
 ```
 
-转换后的 ARK SDK 响应：
+失败任务保持相同的 duration snapshot，内部状态为 `FAILURE`，并保存上面的完整失败查询 JSON 供 ARK 转换。
+
+### `-2011` 资源过期
+
+```json
+{"code": -2011, "message": "task expired", "data": null}
+```
+
+该结构是失败终态并触发公共退款路径。
+
+### `1057` 可重试限流
+
+```json
+{"code": 1057, "message": "request too frequent", "data": null}
+```
+
+该结构不结束任务、不退款，公开状态保持 `queued`，后续轮询可以继续。
+
+以上四种查询结构均没有 `duration`。网关不从查询结果读取、推断或重算时长。
+
+## 6. 精确 ARK 查询转换
+
+协议 E2E 使用固定公开 ID 和时间戳，成功响应精确为：
 
 ```json
 {
+  "id": "task_public",
+  "model": "doubao-seedance-2-0-260128",
+  "status": "succeeded",
+  "content": {"video_url": "https://mock.dimensio/video.mp4"},
+  "usage": {},
+  "created_at": 1709123456,
+  "updated_at": 1709123556
+}
+```
+
+普通失败响应精确为：
+
+```json
+{
+  "id": "task_public",
+  "model": "doubao-seedance-2-0-260128",
+  "status": "failed",
   "content": {},
-  "created_at": 1784449698,
+  "usage": {},
   "error": {
     "code": "2043",
     "message": "视频安全审核不通过，请重试"
   },
-  "id": "task_<new-api-public-id>",
-  "model": "doubao-seedance-2-0-260128",
-  "status": "failed",
-  "updated_at": 1784449698,
-  "usage": {}
+  "created_at": 1709123456,
+  "updated_at": 1709123556
 }
 ```
 
-验收点：失败码和消息保持，公开响应不包含上游任务 ID，用户/渠道/Token 的已用额度均回到 0。
-
-请求级资源过期响应也执行了完整 E2E：
-
-```json
-{
-  "code": -2011,
-  "message": "task expired",
-  "data": null
-}
-```
-
-对应的 ARK 终态为：
+应用 E2E 对 `-2011` 的公开错误结构为：
 
 ```json
 {
@@ -208,72 +224,142 @@ Mock Dimensio 查询响应：
   "status": "failed",
   "content": {},
   "usage": {},
-  "error": {
-    "code": "-2011",
-    "message": "task expired"
-  }
+  "error": {"code": "-2011", "message": "task expired"}
 }
 ```
 
-查询返回 `1057/121101` 限流码时不是终态。自动化 E2E 验证一次轮询后公开状态仍为 `queued`，任务继续留在未完成集合，用户、渠道和 Token 保持原预扣金额。
+`1057` 查询后的公开结构为非终态：
 
-## 6. 计费验收
-
-本次测试删除了客户端别名 `doubao-seedance-2-0-260128` 的价格，只给映射后的三个目标模型配置不同的 `ModelRatio`，从而证明计费查价使用目标模型。分组倍率为 `1`，任务使用 6 秒时长：
-
-这些 `ModelRatio` 是验收夹具，用于产生互不相同且可精确断言的额度，不是代码内置的生产价格；生产值仍由管理员按业务定价配置。
-
-| 场景 | ModelRatio | OtherRatios | 预扣 quota | 终态处理 |
-|---|---:|---|---:|---|
-| fast-vip 720p | 0.088 | `seconds=6,resolution=1` | 132000 | 成功保持；失败全退；限流保持 |
-| mini 720p | 0.072 | `seconds=6,resolution=1` | 108000 | 成功保持；失败全退；限流保持 |
-| vip 1080p | 0.112 | `seconds=6,resolution=2.5` | 420000 | 成功保持；失败全退；限流保持 |
-
-计费公式：
-
-```text
-baseQuota = ModelRatio / 2 * QuotaPerUnit * GroupRatio
-quota = baseQuota * seconds * resolutionRatio
+```json
+{
+  "id": "task_<new-api-public-id>",
+  "model": "doubao-seedance-2-0-260128",
+  "status": "queued",
+  "content": {},
+  "usage": {}
+}
 ```
 
-渠道文档的查询响应没有实际 `duration` 字段，因此终态不能按上游实际时长重算。系统以提交时经过 4-15 秒校验的请求时长计费，并把 `seconds`、`resolution` 保存到 `TaskBillingContext.OtherRatios`。
+所有公开结构均不包含 `dim-upstream`。
 
-## 7. 自动化测试证据
+## 7. 成本、售价和计费公式
 
-协议级 E2E：
+供应商最新成本口径：
+
+| Dimensio 模型 | 720p | 1080p |
+|---|---:|---:|
+| `jimeng-video-seedance-2.0-fast-vip` | 48 points/s | 不支持 |
+| `jimeng-video-seedance-2.0-mini` | 39 points/s | 不支持 |
+| `jimeng-video-seedance-2.0-vip` | 62 points/s | 155 points/s |
+
+`1 point = CNY 0.01`。供应商以实际生成时长消耗 points；但查询 API 不返回实际 `duration`，系统销售计费明确冻结请求时长：
 
 ```text
-go test ./relay/channel/task/dimensio/ -run 'TestDimensioSeedance20ProtocolE2E|TestParseTaskResultDoesNotAdjustRequestBasedBilling' -count=1 -v
-PASS: 7 个测试/子场景
+billing_mode = per_duration
+duration_source = request
+requested_duration_seconds = 6
+billable_duration_seconds = 6
+OtherRatios = {resolution: 1 or 2.5}
+OtherRatios does not contain seconds or duration
 ```
 
-应用级 E2E：
+以默认 `CNY/USD = 7.3` 将 720p 成本换成用户销售 USD/秒基价：
+
+| 模型 | CNY/s | USD/s `DurationPrice` | resolution ratio |
+|---|---:|---:|---:|
+| fast-vip 720p | 0.48 | `0.48 / 7.3 = 0.06575342465753424` | 1 |
+| mini 720p | 0.39 | `0.39 / 7.3 = 0.05342465753424658` | 1 |
+| vip 1080p | 720p base 0.62 | `0.62 / 7.3 = 0.08493150684931507` | 2.5 |
+
+测试组倍率为 1，`common.QuotaPerUnit = 500000`：
 
 ```text
+chargeUSD = duration_price * billable_duration_seconds * resolution_ratio * group_ratio
+quotaDecimal = chargeUSD * QuotaPerUnit
+quota = common.QuotaFromDecimal(quotaDecimal)
+```
+
+因此精确 quota 为 fast-vip `197260`、mini `160274`、VIP 1080p `636986`。
+
+## 8. 12 场景应用 E2E 矩阵
+
+初始钱包为 `2000000000`。`used/channel/token/quota-data` 列依次表示用户已用额度、渠道已用额度、Token 已用额度和 quota-data quota。失败退款后任务记录仍保留原预扣 `task.quota`，用于审计。
+
+| 模型 | resolution | base USD/s | ratio | quota | 终态 | final wallet | used/channel/token/quota-data | refund log |
+|---|---:|---:|---:|---:|---|---:|---|---:|
+| fast-vip | 720p | 0.06575342465753424 | 1 | 197260 | completed | 1999802740 | 197260 / 197260 / 197260 / 197260 | 0 |
+| fast-vip | 720p | 0.06575342465753424 | 1 | 197260 | failed | 2000000000 | 0 / 0 / 0 / 0 | 197260 |
+| fast-vip | 720p | 0.06575342465753424 | 1 | 197260 | -2011 | 2000000000 | 0 / 0 / 0 / 0 | 197260 |
+| fast-vip | 720p | 0.06575342465753424 | 1 | 197260 | 1057 queued | 1999802740 | 197260 / 197260 / 197260 / 197260 | 0 |
+| mini | 720p | 0.05342465753424658 | 1 | 160274 | completed | 1999839726 | 160274 / 160274 / 160274 / 160274 | 0 |
+| mini | 720p | 0.05342465753424658 | 1 | 160274 | failed | 2000000000 | 0 / 0 / 0 / 0 | 160274 |
+| mini | 720p | 0.05342465753424658 | 1 | 160274 | -2011 | 2000000000 | 0 / 0 / 0 / 0 | 160274 |
+| mini | 720p | 0.05342465753424658 | 1 | 160274 | 1057 queued | 1999839726 | 160274 / 160274 / 160274 / 160274 | 0 |
+| vip | 1080p | 0.08493150684931507 | 2.5 | 636986 | completed | 1999363014 | 636986 / 636986 / 636986 / 636986 | 0 |
+| vip | 1080p | 0.08493150684931507 | 2.5 | 636986 | failed | 2000000000 | 0 / 0 / 0 / 0 | 636986 |
+| vip | 1080p | 0.08493150684931507 | 2.5 | 636986 | -2011 | 2000000000 | 0 / 0 / 0 / 0 | 636986 |
+| vip | 1080p | 0.08493150684931507 | 2.5 | 636986 | 1057 queued | 1999363014 | 636986 / 636986 / 636986 / 636986 | 0 |
+
+每个场景还断言 request count 为 1、quota-data count 为 1、mock call count 为 2。failed 与 `-2011` 的退款日志包含：
+
+```json
+{
+  "billing_mode": "per_duration",
+  "duration_source": "request",
+  "requested_duration_seconds": 6,
+  "billable_duration_seconds": 6,
+  "duration_unit": "second",
+  "rounding_step_seconds": 1,
+  "minimum_duration_seconds": 4,
+  "resolution_ratio": 1
+}
+```
+
+VIP 1080p 的 `resolution_ratio` 为 `2.5`。
+
+## 9. 实际执行命令与结果
+
+TDD RED：先替换时长计费断言、保留 legacy fixture，确认测试在正确边界失败。
+
+```text
+go test ./e2e -run 'TestDimensioSeedance20MultimodalLifecycleE2E/fast_vip_720p/success' -count=1 -v
+FAIL: HTTP 400 model_price_error; origin model doubao-seedance-2-0-260128 had no duration pricing fixture
+```
+
+补入源模型 `config.UpdateConfigFromMap` fixture 后：
+
+```text
+go test ./relay/channel/task/dimensio -run 'TestDimensioSeedance20ProtocolE2E|TestDurationBillingUsesValidatedRequestDuration' -count=1 -v
+PASS: 1 duration contract + 6 protocol model/outcome subtests
+
 go test ./e2e -run TestDimensioSeedance20MultimodalLifecycleE2E -count=1 -v
-PASS: 12 个模型/状态组合
+PASS: 12/12 application model/outcome scenarios
+
+go test ./setting/billing_setting ./relay ./service ./controller -run 'TestDimensioDurationPriceDefaults|TestDimensioDurationBillingUsesOriginModelPrice|TestTaskBillingOtherIncludesDurationSnapshot|TestListModelsIncludesDurationBillingModel' -count=1 -v
+PASS: all 4 focused backend contracts
+
+gofmt -w e2e/seedance_native_e2e_test.go relay/channel/task/dimensio/e2e_test.go
+PASS: exit 0
+
+go vet ./relay/channel/task/dimensio ./e2e
+PASS: exit 0, no output
+
+git diff --check
+PASS: exit 0, no whitespace errors
 ```
 
-相关出口回归：
+前端定向测试尝试结果：
 
 ```text
-go test ./relay ./controller ./constant -run 'Dimensio|SeedanceTask|SeedanceTaskError' -count=1 -v
-PASS
+bun test src/features/system-settings/models/model-pricing-duration.test.ts src/features/pricing/lib/duration-pricing.test.ts src/features/pricing/components/model-card-duration.test.tsx
+NOT RUN: bun executable is not installed or available on PATH in this environment
 ```
 
-全项目回归与静态验证：
+本报告不把未执行的前端命令记录为 PASS。前端验收项的证据来自已提交的实现及对应测试文件；完整重新执行留给具备 Bun 的前端验证环境。
 
-```text
-go test ./...                                                        PASS
-go vet ./relay/channel/task/dimensio/ ./relay ./controller ./constant ./e2e
-                                                                     PASS
-go build ./...                                                       PASS
-git diff --check                                                    PASS
-```
+## 10. 剩余风险
 
-## 8. Mock 边界与剩余风险
-
-- 本次没有连接真实 `https://jimeng.dimensio.cn`，未验证真实 API Key、网络、上游媒体抓取和生成质量。
-- 参考视频总时长不超过 15 秒属于媒体内容属性；当前请求仅携带 URL，网关无法在不下载媒体的前提下验证时长，该限制由 Dimensio 上游执行。
-- `result.url` 的真实有效期和重复查询刷新行为没有进行时间型测试。
-- 渠道文档没有在完成响应中提供实际生成秒数，计费按请求时长冻结。这是契约限制，不是测试缺口。
+- 未调用真实 Dimensio，因此真实 API Key、网络、媒体抓取、生成质量和 points 结算未验证。
+- 参考视频总时长属于远端媒体属性；网关不下载媒体时由上游执行该限制。
+- `result.url` 的真实有效期和刷新行为未做时间型测试。
+- 查询协议缺少实际生成 `duration`。系统选择请求时长作为明确且可审计的销售计费契约，这不是从查询响应补齐的值。

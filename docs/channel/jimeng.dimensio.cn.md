@@ -27,13 +27,15 @@ https://jimeng.dimensio.cn/v1/videos/tasks/:taskId
 价格
 jimeng-video-seedance-2.0-fast-vip
 720p
-720p: 44 积分/秒
+720p: 48 积分/秒（不支持 1080p）
 jimeng-video-seedance-2.0-mini
 720p
-720p: 36 积分/秒
+720p: 39 积分/秒（不支持 1080p）
 jimeng-video-seedance-2.0-vip
 720p / 1080p
-720p: 56 积分/秒，1080p: 140 积分/秒
+720p: 62 积分/秒，1080p: 155 积分/秒
+
+1 积分 = CNY 0.01。供应商按视频实际生成时长消耗上述积分/秒成本。查询响应不返回 `duration`，因此系统的 `per_duration` 销售计费使用 `duration_source=request`，以提交时已校验的请求 `duration` 作为请求时长和计费时长，不在轮询完成后按查询响应重算。
 
 4. 请求参数
 字段
@@ -222,4 +224,3 @@ curl -X POST https://jimeng.dimensio.cn/v1/videos/generations \
 查询任务
 curl https://jimeng.dimensio.cn/v1/videos/tasks/<TASK_ID> \
   -H "Authorization: Bearer <YOUR_API_KEY>"
-  

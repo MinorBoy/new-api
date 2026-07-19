@@ -52,3 +52,5 @@ docker-compose*.yml
 
 nginx*.conf
 nginx*.conf.test
+
+.worktrees/

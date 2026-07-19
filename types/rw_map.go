@@ -12,10 +12,18 @@ type RWMap[K comparable, V any] struct {
 }
 
 func (m *RWMap[K, V]) UnmarshalJSON(b []byte) error {
+	data := make(map[K]V)
+	if err := common.Unmarshal(b, &data); err != nil {
+		return err
+	}
+	if data == nil {
+		data = make(map[K]V)
+	}
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.data = make(map[K]V)
-	return common.Unmarshal(b, &m.data)
+	m.data = data
+	return nil
 }
 
 func (m *RWMap[K, V]) MarshalJSON() ([]byte, error) {

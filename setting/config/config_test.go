@@ -2,6 +2,10 @@ package config
 
 import (
 	"testing"
+
+	"github.com/QuantumNous/new-api/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testConfigWithMap struct {
@@ -93,4 +97,58 @@ func TestUpdateConfigFromMap_ScalarFieldsUnchanged(t *testing.T) {
 	if cfg.Modes["m"] != "v" {
 		t.Errorf("Modes should be unchanged, got %v", cfg.Modes)
 	}
+}
+
+type testConfigWithRWMap struct {
+	Values *types.RWMap[string, string] `json:"values"`
+}
+
+func TestUpdateConfigFromMap_CustomUnmarshalerPointer(t *testing.T) {
+	t.Run("valid object initializes nil pointer", func(t *testing.T) {
+		cfg := &testConfigWithRWMap{}
+
+		require.NoError(t, UpdateConfigFromMap(cfg, map[string]string{
+			"values": `{"model":"ratio"}`,
+		}))
+
+		require.NotNil(t, cfg.Values)
+		value, ok := cfg.Values.Get("model")
+		require.True(t, ok)
+		assert.Equal(t, "ratio", value)
+	})
+
+	t.Run("null initializes nil pointer as empty map", func(t *testing.T) {
+		cfg := &testConfigWithRWMap{}
+
+		require.NoError(t, UpdateConfigFromMap(cfg, map[string]string{"values": `null`}))
+
+		require.NotNil(t, cfg.Values)
+		assert.Empty(t, cfg.Values.ReadAll())
+	})
+
+	t.Run("null clears existing pointer without replacing it", func(t *testing.T) {
+		values := types.NewRWMap[string, string]()
+		values.Set("old", "value")
+		cfg := &testConfigWithRWMap{Values: values}
+
+		require.NoError(t, UpdateConfigFromMap(cfg, map[string]string{"values": `null`}))
+
+		require.Same(t, values, cfg.Values)
+		assert.Empty(t, cfg.Values.ReadAll())
+	})
+
+	t.Run("invalid JSON preserves existing values", func(t *testing.T) {
+		values := types.NewRWMap[string, string]()
+		values.Set("stable", "value")
+		cfg := &testConfigWithRWMap{Values: values}
+
+		require.NoError(t, UpdateConfigFromMap(cfg, map[string]string{
+			"values": `[]`,
+		}))
+
+		require.Same(t, values, cfg.Values)
+		value, ok := cfg.Values.Get("stable")
+		require.True(t, ok)
+		assert.Equal(t, "value", value)
+	})
 }

@@ -174,6 +174,7 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 	}
 
 	typ := val.Type()
+	jsonUnmarshalerType := reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 	for i := 0; i < val.NumField(); i++ {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
@@ -239,6 +240,20 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 			field.SetFloat(floatValue)
 		case reflect.Ptr:
 			// 处理指针类型
+			if field.Type().Implements(jsonUnmarshalerType) {
+				target := field
+				setTarget := field.IsNil()
+				if setTarget {
+					target = reflect.New(field.Type().Elem())
+				}
+				if err := common.Unmarshal([]byte(strValue), target.Interface()); err != nil {
+					continue
+				}
+				if setTarget {
+					field.Set(target)
+				}
+				continue
+			}
 			if strValue == "null" {
 				field.Set(reflect.Zero(field.Type()))
 			} else {

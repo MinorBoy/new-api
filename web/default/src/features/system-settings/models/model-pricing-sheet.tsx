@@ -54,6 +54,14 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -66,14 +74,19 @@ import { cn } from '@/lib/utils'
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
+  buildModelPricingSubmitData,
   buildPreviewRows,
   createInitialLaneState,
+  createModelPricingFormValues,
   createModelPricingSchema,
+  getInitialPricingMode,
   hasValue,
   laneConfigs,
   numericDraftRegex,
   ratioFieldByLane,
   toNumberOrNull,
+  validateDurationPricingValues,
+  type DurationUnit,
   type LaneKey,
   type ModelPricingFormValues,
   type ModelRatioData,
@@ -160,56 +173,19 @@ export const ModelPricingEditorPanel = forwardRef<
 
   const form = useForm<ModelPricingFormValues>({
     resolver: zodResolver(createModelPricingSchema(t)),
-    defaultValues: {
-      name: '',
-      price: '',
-      ratio: '',
-      cacheRatio: '',
-      createCacheRatio: '',
-      completionRatio: '',
-      imageRatio: '',
-      audioRatio: '',
-      audioCompletionRatio: '',
-    },
+    defaultValues: createModelPricingFormValues(),
   })
 
   useEffect(() => {
     const nextLaneState = createInitialLaneState(editData)
 
+    form.reset(createModelPricingFormValues(editData))
+    setPricingMode(getInitialPricingMode(editData))
+
     if (editData) {
-      form.reset({
-        name: editData.name,
-        price: editData.price || '',
-        ratio: editData.ratio || '',
-        cacheRatio: editData.cacheRatio || '',
-        createCacheRatio: editData.createCacheRatio || '',
-        completionRatio: editData.completionRatio || '',
-        imageRatio: editData.imageRatio || '',
-        audioRatio: editData.audioRatio || '',
-        audioCompletionRatio: editData.audioCompletionRatio || '',
-      })
-      setPricingMode(
-        editData.billingMode === 'tiered_expr'
-          ? 'tiered_expr'
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
     } else {
-      form.reset({
-        name: '',
-        price: '',
-        ratio: '',
-        cacheRatio: '',
-        createCacheRatio: '',
-        completionRatio: '',
-        imageRatio: '',
-        audioRatio: '',
-        audioCompletionRatio: '',
-      })
-      setPricingMode('per-token')
       setBillingExpr('')
       setRequestRuleExpr('')
     }
@@ -340,6 +316,14 @@ export const ModelPricingEditorPanel = forwardRef<
     }
   }
 
+  const durationUnitItems = useMemo(
+    () => [
+      { value: 'second' as DurationUnit, label: t('Second') },
+      { value: 'minute' as DurationUnit, label: t('Minute') },
+    ],
+    [t]
+  )
+
   const watchedValues = form.watch()
   const previewRows = useMemo(
     () =>
@@ -411,6 +395,33 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
+    if (pricingMode === 'per_duration') {
+      const durationErrors = validateDurationPricingValues(form.getValues(), t)
+      form.clearErrors([
+        'durationPrice',
+        'roundingStepSeconds',
+        'minimumDurationSeconds',
+      ])
+
+      if (durationErrors.durationPrice) {
+        form.setError('durationPrice', {
+          message: durationErrors.durationPrice,
+        })
+      }
+      if (durationErrors.roundingStepSeconds) {
+        form.setError('roundingStepSeconds', {
+          message: durationErrors.roundingStepSeconds,
+        })
+      }
+      if (durationErrors.minimumDurationSeconds) {
+        form.setError('minimumDurationSeconds', {
+          message: durationErrors.minimumDurationSeconds,
+        })
+      }
+
+      if (Object.keys(durationErrors).length > 0) return false
+    }
+
     if (
       pricingMode === 'per-token' &&
       toNumberOrNull(promptPrice) === null &&
@@ -439,27 +450,13 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [form, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const buildSubmitData = useCallback(
-    (values: ModelPricingFormValues) => {
-      const data: ModelRatioData = {
-        name: values.name.trim(),
-        billingMode: pricingMode,
-        price: values.price || '',
-        ratio: values.ratio || '',
-        cacheRatio: values.cacheRatio || '',
-        createCacheRatio: values.createCacheRatio || '',
-        completionRatio: values.completionRatio || '',
-        imageRatio: values.imageRatio || '',
-        audioRatio: values.audioRatio || '',
-        audioCompletionRatio: values.audioCompletionRatio || '',
-      }
-
-      if (pricingMode === 'tiered_expr') {
-        data.billingExpr = billingExpr
-        data.requestRuleExpr = requestRuleExpr
-      }
-
-      return data
-    },
+    (values: ModelPricingFormValues) =>
+      buildModelPricingSubmitData(
+        values,
+        pricingMode,
+        billingExpr,
+        requestRuleExpr
+      ),
     [billingExpr, pricingMode, requestRuleExpr]
   )
 
@@ -544,12 +541,15 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-3'>
+                  <TabsList className='grid w-full grid-cols-2 sm:grid-cols-4'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
                     <TabsTrigger value='per-request'>
                       {t('Per-request')}
+                    </TabsTrigger>
+                    <TabsTrigger value='per_duration'>
+                      {t('Per-duration')}
                     </TabsTrigger>
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
@@ -636,6 +636,140 @@ export const ModelPricingEditorPanel = forwardRef<
                           </FormItem>
                         )}
                       />
+                    </FieldGroup>
+                  </TabsContent>
+
+                  <TabsContent value='per_duration' className='pt-0'>
+                    <FieldGroup className='gap-5'>
+                      <div className='grid gap-5 sm:grid-cols-2'>
+                        <FormField
+                          control={form.control}
+                          name='durationPrice'
+                          render={({ field }) => (
+                            <FormItem className='contents'>
+                              <Field>
+                                <FormLabel>{t('Duration price')}</FormLabel>
+                                <FormControl>
+                                  <InputGroup>
+                                    <InputGroupAddon>$</InputGroupAddon>
+                                    <InputGroupInput
+                                      inputMode='decimal'
+                                      placeholder='0.01'
+                                      {...field}
+                                      onChange={(event) => {
+                                        const value = event.target.value
+                                        if (numericDraftRegex.test(value)) {
+                                          field.onChange(value)
+                                        }
+                                      }}
+                                    />
+                                  </InputGroup>
+                                </FormControl>
+                                <FormDescription>
+                                  {t('USD price per duration unit.')}
+                                </FormDescription>
+                                <FormMessage />
+                              </Field>
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='durationUnit'
+                          render={({ field }) => (
+                            <FormItem className='contents'>
+                              <Field>
+                                <FormLabel>{t('Duration unit')}</FormLabel>
+                                <Select
+                                  items={durationUnitItems}
+                                  value={field.value}
+                                  onValueChange={(value) => {
+                                    if (
+                                      value === 'second' ||
+                                      value === 'minute'
+                                    ) {
+                                      field.onChange(value)
+                                    }
+                                  }}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger className='w-full'>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      {durationUnitItems.map((item) => (
+                                        <SelectItem
+                                          key={item.value}
+                                          value={item.value}
+                                        >
+                                          {item.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                              </Field>
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='roundingStepSeconds'
+                          render={({ field }) => (
+                            <FormItem className='contents'>
+                              <Field>
+                                <FormLabel>{t('Rounding step')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    inputMode='numeric'
+                                    min={1}
+                                    max={3600}
+                                    step={1}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t('Rounding step in seconds.')}
+                                </FormDescription>
+                                <FormMessage />
+                              </Field>
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='minimumDurationSeconds'
+                          render={({ field }) => (
+                            <FormItem className='contents'>
+                              <Field>
+                                <FormLabel>
+                                  {t('Minimum billable duration')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    inputMode='numeric'
+                                    min={0}
+                                    max={3600}
+                                    step={1}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t('Minimum billable duration in seconds.')}
+                                </FormDescription>
+                                <FormMessage />
+                              </Field>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
                     </FieldGroup>
                   </TabsContent>
 

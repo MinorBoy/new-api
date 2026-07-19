@@ -127,16 +127,23 @@ export function buildModelRatioColumns({
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title={t('Price summary')} />
       ),
-      cell: ({ row }) => (
-        <div className='flex min-w-0 flex-col gap-1'>
-          <span className='truncate font-medium'>
-            {getPriceSummary(row.original, t)}
-          </span>
-          <span className='text-muted-foreground truncate text-xs'>
-            {getPriceDetail(row.original, t)}
-          </span>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const durationRule = row.original.durationPrice
+        const priceDetail = durationRule
+          ? `${t('Duration-based')} · ${t('Rounding step')}: ${durationRule.rounding_step_seconds} ${t('second')} · ${t('Minimum billable duration')}: ${durationRule.minimum_duration_seconds} ${t('second')}`
+          : getPriceDetail(row.original, t)
+
+        return (
+          <div className='flex min-w-0 flex-col gap-1'>
+            <span className='truncate font-medium'>
+              {getPriceSummary(row.original, t)}
+            </span>
+            <span className='text-muted-foreground truncate text-xs'>
+              {priceDetail}
+            </span>
+          </div>
+        )
+      },
       sortingFn: (rowA, rowB) =>
         getPriceSummary(rowA.original, t).localeCompare(
           getPriceSummary(rowB.original, t)

@@ -33,6 +33,10 @@ export const createModelPricingSchema = (t: (key: string) => string) =>
     imageRatio: z.string().optional(),
     audioRatio: z.string().optional(),
     audioCompletionRatio: z.string().optional(),
+    durationPrice: z.string().optional(),
+    durationUnit: z.enum(['second', 'minute']).optional(),
+    roundingStepSeconds: z.string().optional(),
+    minimumDurationSeconds: z.string().optional(),
   })
 
 export type ModelPricingFormValues = z.infer<
@@ -83,6 +87,134 @@ export type PreviewRow = {
   label: string
   value: string
   multiline?: boolean
+}
+
+const DEFAULT_DURATION_UNIT: DurationUnit = 'second'
+const DEFAULT_ROUNDING_STEP_SECONDS = '1'
+const DEFAULT_MINIMUM_DURATION_SECONDS = '0'
+
+export function createModelPricingFormValues(
+  data?: ModelRatioData | null
+): ModelPricingFormValues {
+  const durationRule = data?.durationPrice
+  return {
+    name: data?.name || '',
+    price: data?.price || '',
+    ratio: data?.ratio || '',
+    cacheRatio: data?.cacheRatio || '',
+    createCacheRatio: data?.createCacheRatio || '',
+    completionRatio: data?.completionRatio || '',
+    imageRatio: data?.imageRatio || '',
+    audioRatio: data?.audioRatio || '',
+    audioCompletionRatio: data?.audioCompletionRatio || '',
+    durationPrice:
+      durationRule && Number.isFinite(durationRule.price)
+        ? String(durationRule.price)
+        : '',
+    durationUnit: durationRule?.unit || DEFAULT_DURATION_UNIT,
+    roundingStepSeconds:
+      durationRule && Number.isFinite(durationRule.rounding_step_seconds)
+        ? String(durationRule.rounding_step_seconds)
+        : DEFAULT_ROUNDING_STEP_SECONDS,
+    minimumDurationSeconds:
+      durationRule && Number.isFinite(durationRule.minimum_duration_seconds)
+        ? String(durationRule.minimum_duration_seconds)
+        : DEFAULT_MINIMUM_DURATION_SECONDS,
+  }
+}
+
+export function getInitialPricingMode(
+  data?: ModelRatioData | null
+): PricingMode {
+  if (data?.billingMode === 'per_duration' && data.durationPrice) {
+    return 'per_duration'
+  }
+  if (data?.billingMode === 'tiered_expr') return 'tiered_expr'
+  return data?.price ? 'per-request' : 'per-token'
+}
+
+type DurationValidationField =
+  | 'durationPrice'
+  | 'roundingStepSeconds'
+  | 'minimumDurationSeconds'
+
+export type DurationValidationErrors = Partial<
+  Record<DurationValidationField, string>
+>
+
+const isStrictInteger = (value: string, minimum: number, maximum: number) => {
+  if (!/^\d+$/.test(value)) return false
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+}
+
+export function validateDurationPricingValues(
+  values: ModelPricingFormValues,
+  t: (key: string) => string
+): DurationValidationErrors {
+  const errors: DurationValidationErrors = {}
+  const durationPrice = values.durationPrice || ''
+  const roundingStepSeconds = values.roundingStepSeconds || ''
+  const minimumDurationSeconds = values.minimumDurationSeconds || ''
+
+  if (!durationPrice.trim()) {
+    errors.durationPrice = t('Duration price is required.')
+  } else {
+    const parsed = Number(durationPrice)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      errors.durationPrice = t('Duration price must be zero or greater.')
+    }
+  }
+
+  if (!isStrictInteger(roundingStepSeconds, 1, 3600)) {
+    errors.roundingStepSeconds = t(
+      'Rounding step must be an integer between 1 and 3600.'
+    )
+  }
+
+  if (!isStrictInteger(minimumDurationSeconds, 0, 3600)) {
+    errors.minimumDurationSeconds = t(
+      'Minimum billable duration must be an integer between 0 and 3600.'
+    )
+  }
+
+  return errors
+}
+
+export function buildModelPricingSubmitData(
+  values: ModelPricingFormValues,
+  pricingMode: PricingMode,
+  billingExpr: string,
+  requestRuleExpr: string
+): ModelRatioData {
+  const data: ModelRatioData = {
+    name: values.name.trim(),
+    billingMode: pricingMode,
+    price: values.price || '',
+    ratio: values.ratio || '',
+    cacheRatio: values.cacheRatio || '',
+    createCacheRatio: values.createCacheRatio || '',
+    completionRatio: values.completionRatio || '',
+    imageRatio: values.imageRatio || '',
+    audioRatio: values.audioRatio || '',
+    audioCompletionRatio: values.audioCompletionRatio || '',
+  }
+
+  if (pricingMode === 'per_duration') {
+    data.durationPrice = {
+      price: Number(values.durationPrice),
+      unit: values.durationUnit || DEFAULT_DURATION_UNIT,
+      rounding_step_seconds: Number(values.roundingStepSeconds),
+      minimum_duration_seconds: Number(values.minimumDurationSeconds),
+    }
+  }
+
+  if (pricingMode === 'tiered_expr') {
+    data.billingExpr = billingExpr
+    data.requestRuleExpr = requestRuleExpr
+  }
+
+  return data
 }
 
 export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?$/
@@ -250,6 +382,34 @@ export function buildPreviewRows(
         key: 'price',
         label: 'ModelPrice',
         value: values.price || t('Empty'),
+      },
+    ]
+  }
+
+  if (mode === 'per_duration') {
+    const durationUnit = values.durationUnit || DEFAULT_DURATION_UNIT
+    return [
+      { key: 'mode', label: t('Mode'), value: t('Duration-based') },
+      {
+        key: 'durationPrice',
+        label: t('Duration price'),
+        value: hasValue(values.durationPrice)
+          ? `$${values.durationPrice} / ${t(durationUnit)}`
+          : t('Empty'),
+      },
+      {
+        key: 'roundingStep',
+        label: t('Rounding step'),
+        value: hasValue(values.roundingStepSeconds)
+          ? `${values.roundingStepSeconds} ${t('second')}`
+          : t('Empty'),
+      },
+      {
+        key: 'minimumDuration',
+        label: t('Minimum billable duration'),
+        value: hasValue(values.minimumDurationSeconds)
+          ? `${values.minimumDurationSeconds} ${t('second')}`
+          : t('Empty'),
       },
     ]
   }

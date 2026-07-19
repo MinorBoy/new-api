@@ -20,6 +20,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildModelPricingSubmitData,
+  buildPreviewRows,
+  createModelPricingFormValues,
+  getInitialPricingMode,
+  validateDurationPricingValues,
+  type LaneKey,
+  type ModelPricingFormValues,
+  type PricingMode,
+} from './model-pricing-core'
+import {
   buildModelSnapshots,
   deleteModelPricingFromMaps,
   getPriceDetail,
@@ -51,6 +61,182 @@ const emptyInput: ModelPricingSnapshotInput = {
   billingExpr: '{}',
   durationPrice: '{}',
 }
+
+const emptyLanePrices: Record<LaneKey, string> = {
+  completion: '',
+  cache: '',
+  createCache: '',
+  image: '',
+  audioInput: '',
+  audioOutput: '',
+}
+
+const disabledLanes: Record<LaneKey, boolean> = {
+  completion: false,
+  cache: false,
+  createCache: false,
+  image: false,
+  audioInput: false,
+  audioOutput: false,
+}
+
+const durationFormValues: ModelPricingFormValues = {
+  name: 'video',
+  price: '',
+  ratio: '',
+  cacheRatio: '',
+  createCacheRatio: '',
+  completionRatio: '',
+  imageRatio: '',
+  audioRatio: '',
+  audioCompletionRatio: '',
+  durationPrice: '0.25',
+  durationUnit: 'minute',
+  roundingStepSeconds: '5',
+  minimumDurationSeconds: '10',
+}
+
+test('hydrates all duration editor fields and selects duration mode', () => {
+  const values = createModelPricingFormValues({
+    name: 'video',
+    billingMode: 'per_duration',
+    durationPrice: rule,
+  })
+
+  assert.equal(
+    getInitialPricingMode({
+      name: 'video',
+      billingMode: 'per_duration',
+      durationPrice: rule,
+    }),
+    'per_duration'
+  )
+  assert.equal(values.durationPrice, '0.25')
+  assert.equal(values.durationUnit, 'minute')
+  assert.equal(values.roundingStepSeconds, '5')
+  assert.equal(values.minimumDurationSeconds, '10')
+})
+
+test('uses safe duration defaults for a new pricing rule', () => {
+  const values = createModelPricingFormValues()
+
+  assert.equal(values.durationPrice, '')
+  assert.equal(values.durationUnit, 'second')
+  assert.equal(values.roundingStepSeconds, '1')
+  assert.equal(values.minimumDurationSeconds, '0')
+})
+
+test('validates duration price and strict integer duration fields', () => {
+  const cases: Array<{
+    field: 'durationPrice' | 'roundingStepSeconds' | 'minimumDurationSeconds'
+    value: string
+    expected: string
+  }> = [
+    {
+      field: 'durationPrice',
+      value: ' ',
+      expected: 'Duration price is required.',
+    },
+    {
+      field: 'durationPrice',
+      value: 'Infinity',
+      expected: 'Duration price must be zero or greater.',
+    },
+    {
+      field: 'durationPrice',
+      value: '-0.01',
+      expected: 'Duration price must be zero or greater.',
+    },
+    {
+      field: 'roundingStepSeconds',
+      value: '1.5',
+      expected: 'Rounding step must be an integer between 1 and 3600.',
+    },
+    {
+      field: 'roundingStepSeconds',
+      value: '3601',
+      expected: 'Rounding step must be an integer between 1 and 3600.',
+    },
+    {
+      field: 'minimumDurationSeconds',
+      value: ' 1',
+      expected:
+        'Minimum billable duration must be an integer between 0 and 3600.',
+    },
+    {
+      field: 'minimumDurationSeconds',
+      value: '-1',
+      expected:
+        'Minimum billable duration must be an integer between 0 and 3600.',
+    },
+  ]
+
+  for (const testCase of cases) {
+    const errors = validateDurationPricingValues(
+      { ...durationFormValues, [testCase.field]: testCase.value },
+      (key) => key
+    )
+    assert.equal(errors[testCase.field], testCase.expected)
+  }
+
+  assert.deepEqual(
+    validateDurationPricingValues(durationFormValues, (key) => key),
+    {}
+  )
+})
+
+test('builds the complete duration rule only in duration mode', () => {
+  const durationData = buildModelPricingSubmitData(
+    durationFormValues,
+    'per_duration',
+    '',
+    ''
+  )
+
+  assert.deepEqual(durationData.durationPrice, rule)
+
+  for (const mode of [
+    'per-token',
+    'per-request',
+    'tiered_expr',
+  ] satisfies PricingMode[]) {
+    const data = buildModelPricingSubmitData(
+      durationFormValues,
+      mode,
+      'tier("base", 1)',
+      ''
+    )
+    assert.equal(data.durationPrice, undefined)
+  }
+})
+
+test('previews the complete duration rule', () => {
+  const rows = buildPreviewRows(
+    durationFormValues,
+    'per_duration',
+    '',
+    '',
+    '',
+    emptyLanePrices,
+    disabledLanes,
+    (key) => key
+  )
+
+  assert.deepEqual(rows, [
+    { key: 'mode', label: 'Mode', value: 'Duration-based' },
+    {
+      key: 'durationPrice',
+      label: 'Duration price',
+      value: '$0.25 / minute',
+    },
+    { key: 'roundingStep', label: 'Rounding step', value: '5 second' },
+    {
+      key: 'minimumDuration',
+      label: 'Minimum billable duration',
+      value: '10 second',
+    },
+  ])
+})
 
 test('builds and summarizes a per-duration snapshot', () => {
   const rows = buildModelSnapshots({

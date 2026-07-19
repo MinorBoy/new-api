@@ -336,7 +336,7 @@ func taskDurationQuota(priceData types.PriceData, requestedSeconds int) (int, in
 	quotaDecimal := decimal.NewFromFloat(priceData.DurationPrice.Price).
 		Mul(decimal.NewFromInt(int64(billableSeconds))).
 		Div(decimal.NewFromInt(int64(priceData.DurationPrice.UnitSeconds()))).
-		Mul(decimal.NewFromInt(int64(common.QuotaPerUnit))).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
 		Mul(decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio))
 	quotaDecimal = priceData.ApplyOtherRatiosToDecimal(quotaDecimal)
 	quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)

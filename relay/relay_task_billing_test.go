@@ -99,6 +99,30 @@ func TestTaskDurationQuotaSaturatesFinitePrice(t *testing.T) {
 	assert.Same(t, clamp, info.QuotaClamp)
 }
 
+func TestTaskDurationQuotaPreservesFractionalQuotaPerUnit(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1.5
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+	})
+
+	rule := types.DurationPrice{
+		Price:               2,
+		Unit:                types.DurationUnitSecond,
+		RoundingStepSeconds: 1,
+	}
+	priceData := types.PriceData{
+		DurationPrice:  &rule,
+		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+	}
+
+	quota, _, clamp, err := taskDurationQuota(priceData, 1)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, quota)
+	assert.Nil(t, clamp)
+}
+
 func TestTaskQuotaWithOtherRatiosUsesRawBase(t *testing.T) {
 	tests := []struct {
 		name      string

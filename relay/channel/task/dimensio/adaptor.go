@@ -119,19 +119,22 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 }
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
+	if strings.EqualFold(strings.TrimSpace(c.GetString("task_resolution")), "1080p") {
+		return map[string]float64{"resolution": 2.5}
+	}
+	return map[string]float64{"resolution": 1}
+}
+
+func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.RelayInfo) (int, *dto.TaskError) {
 	v, ok := c.Get("dimensio_ark_request")
 	if !ok {
-		return nil
+		return 0, service.TaskErrorWrapperLocal(fmt.Errorf("dimensio request is missing"), "invalid_duration", http.StatusBadRequest)
 	}
 	req, ok := v.(ArkRequest)
 	if !ok || req.Duration == nil || *req.Duration < 4 || *req.Duration > 15 || *req.Duration > relaycommon.MaxTaskDurationSeconds {
-		return nil
+		return 0, service.TaskErrorWrapperLocal(fmt.Errorf("duration must be between 4 and 15 seconds"), "invalid_duration", http.StatusBadRequest)
 	}
-	ratios := map[string]float64{"seconds": float64(*req.Duration), "resolution": 1}
-	if req.Resolution == "1080p" {
-		ratios["resolution"] = 2.5
-	}
-	return ratios
+	return *req.Duration, nil
 }
 
 func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {

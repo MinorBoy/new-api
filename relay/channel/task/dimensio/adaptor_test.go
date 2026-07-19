@@ -150,13 +150,49 @@ func TestConvertToOpenAIVideoMapsProviderErrorEnvelope(t *testing.T) {
 	assert.Equal(t, "task expired", response.Error.Message)
 }
 
-func TestEstimateBillingUsesSecondsAndResolution(t *testing.T) {
+func TestDurationBillingUsesValidatedRequestDuration(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	req := ArkRequest{Duration: common.GetPointer(7), Resolution: "1080p"}
 	c.Set("dimensio_ark_request", req)
+	c.Set("task_resolution", "1080p")
+
+	requested, taskErr := (&TaskAdaptor{}).EstimateDurationSeconds(c, nil)
+	require.Nil(t, taskErr)
+	assert.Equal(t, 7, requested)
+
 	ratio := (&TaskAdaptor{}).EstimateBilling(c, nil)
-	assert.Equal(t, 7.0, ratio["seconds"])
-	assert.Equal(t, 2.5, ratio["resolution"])
+	assert.Equal(t, map[string]float64{"resolution": 2.5}, ratio)
+	assert.NotContains(t, ratio, "seconds")
+}
+
+func TestEstimateDurationSecondsRejectsInvalidContext(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		set   bool
+	}{
+		{name: "missing"},
+		{name: "wrong type", value: "not-an-ark-request", set: true},
+		{name: "missing duration", value: ArkRequest{}, set: true},
+		{name: "below provider minimum", value: ArkRequest{Duration: common.GetPointer(3)}, set: true},
+		{name: "above provider maximum", value: ArkRequest{Duration: common.GetPointer(16)}, set: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if test.set {
+				c.Set("dimensio_ark_request", test.value)
+			}
+
+			requested, taskErr := (&TaskAdaptor{}).EstimateDurationSeconds(c, nil)
+
+			assert.Zero(t, requested)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, "invalid_duration", taskErr.Code)
+			assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+		})
+	}
 }
 
 func TestValidateBillingRequestEnforcesDocumentedModelResolutionMatrix(t *testing.T) {

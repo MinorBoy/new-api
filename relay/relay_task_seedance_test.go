@@ -1,22 +1,189 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type seedanceTaskTestBilling struct{}
+
+func (seedanceTaskTestBilling) Settle(int) error         { return nil }
+func (seedanceTaskTestBilling) Refund(*gin.Context)      {}
+func (seedanceTaskTestBilling) NeedsRefund() bool        { return false }
+func (seedanceTaskTestBilling) GetPreConsumedQuota() int { return 0 }
+func (seedanceTaskTestBilling) Reserve(int) error        { return nil }
+
+func configureSeedanceDurationPricing(t *testing.T, prices map[string]types.DurationPrice) {
+	t.Helper()
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+
+	modes := make(map[string]string, len(prices))
+	for modelName := range prices {
+		modes[modelName] = billing_setting.BillingModePerDuration
+	}
+	modeJSON, err := common.Marshal(modes)
+	require.NoError(t, err)
+	priceJSON, err := common.Marshal(prices)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    string(modeJSON),
+		"billing_setting.duration_price":  string(priceJSON),
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+}
+
+func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+
+	const originModel = "client-seedance-vip"
+	const upstreamModel = "jimeng-video-seedance-2.0-vip"
+	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
+		originModel: {
+			Price: 0.1, Unit: types.DurationUnitSecond,
+			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+		},
+		upstreamModel: {
+			Price: 9, Unit: types.DurationUnitSecond,
+			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+		},
+	})
+
+	var upstreamCalls atomic.Int32
+	capturedBodyCh := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		body, err := io.ReadAll(r.Body)
+		if !assert.NoError(t, err) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		capturedBodyCh <- body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1,"task_id":"dim-upstream","status":"pending"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", bytes.NewBufferString(`{
+		"model":"client-seedance-vip",
+		"content":[{"type":"text","text":"generate a video"}],
+		"duration":6,
+		"resolution":"720p"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeDimensio)
+	c.Set(string(constant.ContextKeyChannelBaseUrl), server.URL)
+	c.Set(string(constant.ContextKeyChannelKey), "mock-key")
+	c.Set("model_mapping", `{"client-seedance-vip":"jimeng-video-seedance-2.0-vip"}`)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: originModel,
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		Billing:         seedanceTaskTestBilling{},
+	}
+
+	result, taskErr := RelayTaskSubmit(c, info)
+
+	require.Nil(t, taskErr)
+	require.NotNil(t, result)
+	assert.Equal(t, int32(1), upstreamCalls.Load())
+	assert.Equal(t, 300_000, result.Quota)
+	assert.Equal(t, originModel, info.OriginModelName)
+	assert.Equal(t, upstreamModel, info.UpstreamModelName)
+	assert.Equal(t, billing_setting.BillingModePerDuration, info.PriceData.BillingMode)
+	assert.Equal(t, 6, info.PriceData.RequestedDurationSeconds)
+	assert.Equal(t, 6, info.PriceData.BillableDurationSeconds)
+	assert.NotContains(t, info.PriceData.OtherRatios(), "seconds")
+	var upstreamRequest map[string]interface{}
+	capturedBody := <-capturedBodyCh
+	require.NoError(t, common.Unmarshal(capturedBody, &upstreamRequest))
+	assert.Equal(t, upstreamModel, upstreamRequest["model"])
+}
+
+func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+
+	const originModel = "client-seedance-overflow"
+	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
+		originModel: {
+			Price: math.MaxFloat64, Unit: types.DurationUnitSecond,
+			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+		},
+	})
+
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", bytes.NewBufferString(`{
+		"model":"client-seedance-overflow",
+		"content":[{"type":"text","text":"generate a video"}],
+		"duration":6,
+		"resolution":"720p"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeDimensio)
+	c.Set(string(constant.ContextKeyChannelBaseUrl), server.URL)
+	c.Set(string(constant.ContextKeyChannelKey), "mock-key")
+	c.Set("model_mapping", `{"client-seedance-overflow":"jimeng-video-seedance-2.0-vip"}`)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: originModel,
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+	}
+
+	result, taskErr := RelayTaskSubmit(c, info)
+
+	assert.Nil(t, result)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, int32(0), upstreamCalls.Load())
+	assert.Equal(t, common.MaxQuota, info.PriceData.Quota)
+	assert.GreaterOrEqual(t, info.PriceData.Quota, 0)
+	require.NotNil(t, info.QuotaClamp)
+	assert.Equal(t, common.QuotaClampOverflow, info.QuotaClamp.Kind)
+}
 
 func setupSeedanceTaskDB(t *testing.T) {
 	t.Helper()

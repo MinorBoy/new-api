@@ -114,9 +114,12 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 				require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
 				info.UpstreamModelName = modelCase.upstreamModel
 				require.Nil(t, adaptor.ValidateBillingRequest(c, info))
+				requested, durationErr := adaptor.EstimateDurationSeconds(c, info)
+				require.Nil(t, durationErr)
+				assert.Equal(t, 6, requested)
 				ratios := adaptor.EstimateBilling(c, info)
-				assert.Equal(t, 6.0, ratios["seconds"])
 				assert.Equal(t, modelCase.resolutionRatio, ratios["resolution"])
+				assert.NotContains(t, ratios, "seconds")
 
 				requestBody, err := adaptor.BuildRequestBody(c, info)
 				require.NoError(t, err)

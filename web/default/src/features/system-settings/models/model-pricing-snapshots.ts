@@ -158,6 +158,9 @@ export const getPriceDetail = (
   if (row.billingMode === 'per-request') {
     return t('Fixed request price')
   }
+  if (row.billingMode === 'per_duration') {
+    return t('Duration-based')
+  }
 
   const inputPrice = ratioToPrice(row.ratio)
   if (!inputPrice) return t('No base input price')
@@ -454,12 +457,14 @@ export function updateModelPricingMaps(
     }
 
     if (data.billingMode === 'tiered_expr') {
-      maps.billingMode[name] = 'tiered_expr'
       const combined = combineBillingExpr(
         data.billingExpr || '',
         data.requestRuleExpr || ''
       )
-      if (combined) maps.billingExpr[name] = combined
+      if (combined) {
+        maps.billingMode[name] = 'tiered_expr'
+        maps.billingExpr[name] = combined
+      }
       setNumericPricingValue(maps.price, name, data.price)
       setNumericPricingValue(maps.ratio, name, data.ratio)
       setNumericPricingValue(maps.cache, name, data.cacheRatio)

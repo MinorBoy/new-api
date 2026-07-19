@@ -22,6 +22,7 @@ import test from 'node:test'
 import {
   buildModelSnapshots,
   deleteModelPricingFromMaps,
+  getPriceDetail,
   getPriceSummary,
   getSnapshotSignature,
   isBasePricingUnset,
@@ -65,6 +66,10 @@ test('builds and summarizes a per-duration snapshot', () => {
     '$0.25 / minute'
   )
   assert.equal(isBasePricingUnset(rows[0]), false)
+  assert.equal(
+    getPriceDetail(rows[0], (key) => key),
+    'Duration-based'
+  )
 })
 
 test('does not activate duration mode without a structured rule', () => {
@@ -123,6 +128,27 @@ test('deletion removes the duration rule and explicit mode', () => {
   assert.deepEqual(JSON.parse(deleted.durationPrice), {})
   assert.deepEqual(JSON.parse(deleted.billingMode), {})
   assert.deepEqual(buildModelSnapshots(deleted), [])
+})
+
+test('empty tiered expressions do not leave a tiered mode behind', () => {
+  const updated = updateModelPricingMaps(
+    {
+      ...emptyInput,
+      billingMode: '{"video":"per-token"}',
+      billingExpr: '{"video":"old"}',
+    },
+    {
+      name: 'video',
+      billingMode: 'tiered_expr',
+      billingExpr: '',
+      requestRuleExpr: '',
+      ratio: '2',
+    }
+  )
+
+  assert.deepEqual(JSON.parse(updated.billingMode), {})
+  assert.deepEqual(JSON.parse(updated.billingExpr), {})
+  assert.deepEqual(JSON.parse(updated.modelRatio), { video: 2 })
 })
 
 test('duration save preserves auxiliary ratios and clears base conflicts', () => {

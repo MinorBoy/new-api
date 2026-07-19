@@ -130,7 +130,7 @@ export function buildModelRatioColumns({
       cell: ({ row }) => {
         const durationRule = row.original.durationPrice
         const priceDetail = durationRule
-          ? `${t('Duration-based')} · ${t('Rounding step')}: ${durationRule.rounding_step_seconds} ${t('second')} · ${t('Minimum billable duration')}: ${durationRule.minimum_duration_seconds} ${t('second')}`
+          ? `${t('Duration-based')} · ${t('Rounding step')}: ${durationRule.rounding_step_seconds} s · ${t('Minimum billable duration')}: ${durationRule.minimum_duration_seconds} s`
           : getPriceDetail(row.original, t)
 
         return (
@@ -138,7 +138,7 @@ export function buildModelRatioColumns({
             <span className='truncate font-medium'>
               {getPriceSummary(row.original, t)}
             </span>
-            <span className='text-muted-foreground truncate text-xs'>
+            <span className='text-muted-foreground text-xs leading-5 break-words whitespace-normal'>
               {priceDetail}
             </span>
           </div>

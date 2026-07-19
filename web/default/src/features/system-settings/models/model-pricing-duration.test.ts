@@ -250,11 +250,11 @@ test('previews the complete duration rule', () => {
       label: 'Duration price',
       value: '$0.25 / minute',
     },
-    { key: 'roundingStep', label: 'Rounding step', value: '5 second' },
+    { key: 'roundingStep', label: 'Rounding step', value: '5 s' },
     {
       key: 'minimumDuration',
       label: 'Minimum billable duration',
-      value: '10 second',
+      value: '10 s',
     },
   ])
 })

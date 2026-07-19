@@ -465,7 +465,8 @@ export const ModelPricingEditorPanel = forwardRef<
     () => ({
       commitDraft: async () => {
         const isValid = await form.trigger()
-        if (!isValid || !validatePricingValues()) return null
+        const arePricingValuesValid = validatePricingValues()
+        if (!isValid || !arePricingValuesValid) return null
         return buildSubmitData(form.getValues())
       },
     }),
@@ -541,7 +542,7 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-2 sm:grid-cols-4'>
+                  <TabsList className='grid w-full grid-cols-2 grid-rows-[repeat(2,2rem)] group-data-horizontal/tabs:h-auto sm:grid-cols-4 sm:grid-rows-[2rem]'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>

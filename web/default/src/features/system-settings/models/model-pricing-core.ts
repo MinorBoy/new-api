@@ -401,14 +401,14 @@ export function buildPreviewRows(
         key: 'roundingStep',
         label: t('Rounding step'),
         value: hasValue(values.roundingStepSeconds)
-          ? `${values.roundingStepSeconds} ${t('second')}`
+          ? `${values.roundingStepSeconds} s`
           : t('Empty'),
       },
       {
         key: 'minimumDuration',
         label: t('Minimum billable duration'),
         value: hasValue(values.minimumDurationSeconds)
-          ? `${values.minimumDurationSeconds} ${t('second')}`
+          ? `${values.minimumDurationSeconds} s`
           : t('Empty'),
       },
     ]

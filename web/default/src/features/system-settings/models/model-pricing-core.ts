@@ -161,7 +161,7 @@ export function validateDurationPricingValues(
     errors.durationPrice = t('Duration price is required.')
   } else {
     const parsed = Number(durationPrice)
-    if (!Number.isFinite(parsed) || parsed < 0) {
+    if (/\s/.test(durationPrice) || !Number.isFinite(parsed) || parsed < 0) {
       errors.durationPrice = t('Duration price must be zero or greater.')
     }
   }

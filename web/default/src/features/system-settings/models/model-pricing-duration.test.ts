@@ -185,6 +185,27 @@ test('validates duration price and strict integer duration fields', () => {
   )
 })
 
+test('rejects whitespace in duration prices without rejecting valid numbers', () => {
+  for (const durationPrice of [' 1', '1 ', '1 0']) {
+    const errors = validateDurationPricingValues(
+      { ...durationFormValues, durationPrice },
+      (key) => key
+    )
+    assert.equal(
+      errors.durationPrice,
+      'Duration price must be zero or greater.'
+    )
+  }
+
+  for (const durationPrice of ['0', '0.25']) {
+    const errors = validateDurationPricingValues(
+      { ...durationFormValues, durationPrice },
+      (key) => key
+    )
+    assert.equal(errors.durationPrice, undefined)
+  }
+})
+
 test('builds the complete duration rule only in duration mode', () => {
   const durationData = buildModelPricingSubmitData(
     durationFormValues,

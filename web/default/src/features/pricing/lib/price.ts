@@ -16,19 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { formatCurrencyFromUSD } from '@/lib/currency'
+import {
+  formatBillingCurrencyFromUSD,
+  formatCurrencyFromUSD,
+} from '@/lib/currency'
 
 import { QUOTA_TYPE_VALUES, TOKEN_UNIT_DIVISORS } from '../constants'
 import type { PricingModel, TokenUnit, PriceType } from '../types'
 import {
   getConfiguredGroupRatio,
   getDisplayGroupRatio,
-  isDurationBasedModel,
+  getDurationPriceRule,
+  isDurationPricingMode,
 } from './model-helpers'
 
 // ----------------------------------------------------------------------------
 // Price Calculation Utilities
 // ----------------------------------------------------------------------------
+
+export interface DurationPriceFormatOptions {
+  groupRatioOverride?: number
+}
 
 /**
  * Strip trailing zeros from formatted price string while preserving currency symbols
@@ -150,19 +158,25 @@ export function formatDurationPrice(
   showWithRecharge = false,
   priceRate = 1,
   usdExchangeRate = 1,
-  selectedGroup?: string
+  selectedGroup?: string,
+  options: DurationPriceFormatOptions = {}
 ): string {
-  if (!model.duration_price) return '-'
+  const durationPrice = getDurationPriceRule(model)
+  if (!durationPrice) return '-'
 
-  const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
+  const displayGroupRatio =
+    typeof options.groupRatioOverride === 'number' &&
+    Number.isFinite(options.groupRatioOverride)
+      ? options.groupRatioOverride
+      : getDisplayGroupRatio(model, selectedGroup)
   const priceInUSD = applyRechargeRate(
-    model.duration_price.price * displayGroupRatio,
+    durationPrice.price * displayGroupRatio,
     showWithRecharge,
     priceRate,
     usdExchangeRate
   )
 
-  return formatCurrencyFromUSD(priceInUSD, {
+  return formatBillingCurrencyFromUSD(priceInUSD, {
     digitsLarge: 4,
     digitsSmall: 6,
     abbreviate: false,
@@ -251,7 +265,7 @@ export function formatFixedPrice(
 ): string {
   if (
     model.quota_type !== QUOTA_TYPE_VALUES.REQUEST ||
-    isDurationBasedModel(model)
+    isDurationPricingMode(model)
   ) {
     return '-'
   }
@@ -285,7 +299,7 @@ export function formatRequestPrice(
 ): string {
   if (
     model.quota_type !== QUOTA_TYPE_VALUES.REQUEST ||
-    isDurationBasedModel(model)
+    isDurationPricingMode(model)
   ) {
     return '-'
   }

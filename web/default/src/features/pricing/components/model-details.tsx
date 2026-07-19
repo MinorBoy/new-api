@@ -72,7 +72,9 @@ import {
 import { parseTags } from '../lib/filters'
 import {
   getAvailableGroups,
-  isDurationBasedModel,
+  getConfiguredGroupRatio,
+  getDurationPriceRule,
+  isDurationPricingMode,
   isTokenBasedModel,
 } from '../lib/model-helpers'
 import {
@@ -585,11 +587,12 @@ function PriceSection(props: {
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
-  const isDurationBased = isDurationBasedModel(props.model)
+  const isDurationMode = isDurationPricingMode(props.model)
+  const durationPrice = getDurationPriceRule(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
 
-  if (isDurationBased && props.model.duration_price) {
+  if (isDurationMode) {
     return (
       <section>
         <SectionTitle>{t('Base Price')}</SectionTitle>
@@ -602,11 +605,15 @@ function PriceSection(props: {
               props.model,
               props.showRechargePrice,
               props.priceRate,
-              props.usdExchangeRate
-            )}{' '}
-            <span className='text-muted-foreground/40 text-xs font-normal'>
-              / {t(props.model.duration_price.unit)}
-            </span>
+              props.usdExchangeRate,
+              undefined,
+              { groupRatioOverride: 1 }
+            )}
+            {durationPrice ? (
+              <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
+                / {t(durationPrice.unit)}
+              </span>
+            ) : null}
           </span>
         </div>
       </section>
@@ -904,7 +911,8 @@ function GroupPricingSection(props: {
     [props.model, props.usableGroup]
   )
 
-  const isDurationBased = isDurationBasedModel(props.model)
+  const isDurationMode = isDurationPricingMode(props.model)
+  const durationPrice = getDurationPriceRule(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
 
@@ -987,7 +995,7 @@ function GroupPricingSection(props: {
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] || 1
+        const ratio = getConfiguredGroupRatio(props.groupRatio, group)
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -1007,7 +1015,7 @@ function GroupPricingSection(props: {
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] || 1
+            const ratio = getConfiguredGroupRatio(props.groupRatio, group)
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
@@ -1081,8 +1089,7 @@ function GroupPricingSection(props: {
     )
 
   let priceColumns: StaticDataTableColumn<string>[]
-  if (isDurationBased && props.model.duration_price) {
-    const durationUnit = props.model.duration_price.unit
+  if (isDurationMode) {
     priceColumns = [
       {
         id: 'price',
@@ -1097,10 +1104,12 @@ function GroupPricingSection(props: {
               props.priceRate,
               props.usdExchangeRate,
               group
-            )}{' '}
-            <span className='text-muted-foreground/40 text-xs font-normal'>
-              / {t(durationUnit)}
-            </span>
+            )}
+            {durationPrice ? (
+              <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
+                / {t(durationPrice.unit)}
+              </span>
+            ) : null}
           </>
         ),
       },
@@ -1164,13 +1173,14 @@ function GroupPricingSection(props: {
             header: t('Ratio'),
             className: thClass,
             cellClassName: 'text-muted-foreground py-2.5 font-mono',
-            cell: (group) => `${props.groupRatio[group] || 1}x`,
+            cell: (group) =>
+              `${getConfiguredGroupRatio(props.groupRatio, group)}x`,
           },
           ...priceColumns,
         ]}
       />
       <div className='-mx-4 sm:mx-0'>
-        {isTokenBased && (
+        {isTokenBased && !isDurationMode && (
           <p className='text-muted-foreground/40 mt-1.5 px-4 text-[10px] sm:px-0'>
             {t('Prices shown per')} {tokenUnitLabel} tokens
           </p>

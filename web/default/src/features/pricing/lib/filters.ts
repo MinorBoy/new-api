@@ -24,7 +24,11 @@ import {
   ENDPOINT_TYPES,
 } from '../constants'
 import type { PricingModel } from '../types'
-import { isDurationBasedModel } from './model-helpers'
+import {
+  getDurationPriceRule,
+  isDurationBasedModel,
+  isDurationPricingMode,
+} from './model-helpers'
 
 // ----------------------------------------------------------------------------
 // Filter Utilities
@@ -89,7 +93,7 @@ export function filterByQuotaType(
   return models.filter(
     (model) =>
       model.quota_type === targetType &&
-      (quotaType !== QUOTA_TYPES.REQUEST || !isDurationBasedModel(model))
+      (quotaType !== QUOTA_TYPES.REQUEST || !isDurationPricingMode(model))
   )
 }
 
@@ -110,7 +114,12 @@ export function filterByEndpointType(
  * Get model price for sorting
  */
 function getModelPrice(model: PricingModel): number {
-  if (isDurationBasedModel(model)) return model.duration_price?.price ?? 0
+  const durationPrice = getDurationPriceRule(model)
+  if (isDurationPricingMode(model) && durationPrice) {
+    return durationPrice.unit === 'minute'
+      ? durationPrice.price / 60
+      : durationPrice.price
+  }
   return model.quota_type === 0 ? model.model_ratio : model.model_price || 0
 }
 

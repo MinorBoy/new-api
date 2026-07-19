@@ -34,7 +34,11 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isDurationBasedModel, isTokenBasedModel } from '../lib/model-helpers'
+import {
+  getDurationPriceRule,
+  isDurationPricingMode,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
 import {
   formatDurationPrice,
   formatPrice,
@@ -115,7 +119,8 @@ export function usePricingColumns(
       ),
       cell: ({ row }) => {
         const model = row.original
-        if (isDurationBasedModel(model) && model.duration_price) {
+        if (isDurationPricingMode(model)) {
+          const durationPrice = getDurationPriceRule(model)
           return (
             <div className='max-w-full min-w-0'>
               <span className='font-mono text-sm tabular-nums'>
@@ -127,9 +132,11 @@ export function usePricingColumns(
                   selectedGroup
                 )}
               </span>
-              <div className='text-muted-foreground/50 text-[10px]'>
-                / {t(model.duration_price.unit)}
-              </div>
+              {durationPrice ? (
+                <div className='text-muted-foreground/50 text-[10px]'>
+                  / {t(durationPrice.unit)}
+                </div>
+              ) : null}
             </div>
           )
         }

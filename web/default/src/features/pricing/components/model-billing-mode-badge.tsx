@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 
 import { isDynamicPricingModel } from '../lib/dynamic-price'
-import { isDurationBasedModel, isTokenBasedModel } from '../lib/model-helpers'
+import { isDurationPricingMode, isTokenBasedModel } from '../lib/model-helpers'
 import type { PricingModel } from '../types'
 
 interface ModelBillingModeBadgeProps {
@@ -34,7 +34,7 @@ export function ModelBillingModeBadge(props: ModelBillingModeBadgeProps) {
   let label = t('Per Request')
   let variant: StatusVariant = 'purple'
 
-  if (isDurationBasedModel(props.model)) {
+  if (isDurationPricingMode(props.model)) {
     label = t('Duration-based')
     variant = 'success'
   } else if (isDynamicPricingModel(props.model)) {

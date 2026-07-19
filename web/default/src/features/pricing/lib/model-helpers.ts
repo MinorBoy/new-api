@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { EXCLUDED_GROUPS, FILTER_ALL, QUOTA_TYPE_VALUES } from '../constants'
-import type { PricingModel } from '../types'
+import type { DurationPrice, PricingModel } from '../types'
 
 // ----------------------------------------------------------------------------
 // Model Helper Utilities
@@ -109,8 +109,49 @@ export function isTokenBasedModel(model: PricingModel): boolean {
 }
 
 /**
+ * Check the configured billing mode without assuming its rule is valid.
+ */
+export function isDurationPricingMode(model: PricingModel): boolean {
+  return model.billing_mode === 'per_duration'
+}
+
+/**
+ * Validate duration pricing data received from the public pricing API.
+ */
+export function isDurationPriceRule(value: unknown): value is DurationPrice {
+  if (!value || typeof value !== 'object') return false
+
+  const rule = value as Record<string, unknown>
+  return (
+    typeof rule.price === 'number' &&
+    Number.isFinite(rule.price) &&
+    rule.price >= 0 &&
+    (rule.unit === 'second' || rule.unit === 'minute') &&
+    typeof rule.rounding_step_seconds === 'number' &&
+    Number.isInteger(rule.rounding_step_seconds) &&
+    rule.rounding_step_seconds >= 1 &&
+    rule.rounding_step_seconds <= 3600 &&
+    typeof rule.minimum_duration_seconds === 'number' &&
+    Number.isInteger(rule.minimum_duration_seconds) &&
+    rule.minimum_duration_seconds >= 0 &&
+    rule.minimum_duration_seconds <= 3600
+  )
+}
+
+/**
+ * Return the validated duration price rule for a model, if present.
+ */
+export function getDurationPriceRule(
+  model: PricingModel
+): DurationPrice | undefined {
+  return isDurationPriceRule(model.duration_price)
+    ? model.duration_price
+    : undefined
+}
+
+/**
  * Check if model uses duration-based pricing with a structured rule.
  */
 export function isDurationBasedModel(model: PricingModel): boolean {
-  return model.billing_mode === 'per_duration' && Boolean(model.duration_price)
+  return isDurationPricingMode(model) && Boolean(getDurationPriceRule(model))
 }

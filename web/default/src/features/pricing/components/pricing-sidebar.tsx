@@ -38,7 +38,10 @@ import {
   getQuotaTypeLabels,
 } from '../constants'
 import { parseTags } from '../lib/filters'
-import { isDurationBasedModel } from '../lib/model-helpers'
+import {
+  isDurationBasedModel,
+  isDurationPricingMode,
+} from '../lib/model-helpers'
 import type { PricingModel, PricingVendor } from '../types'
 
 type FilterOption = {
@@ -214,7 +217,7 @@ export function PricingSidebar(props: PricingSidebarProps) {
       label: quotaTypeLabels[QUOTA_TYPES.REQUEST],
       count: countBy(
         props.models,
-        (model) => model.quota_type === 1 && !isDurationBasedModel(model)
+        (model) => model.quota_type === 1 && !isDurationPricingMode(model)
       ),
     },
   ]

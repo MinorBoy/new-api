@@ -30,7 +30,11 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isDurationBasedModel, isTokenBasedModel } from '../lib/model-helpers'
+import {
+  getDurationPriceRule,
+  isDurationPricingMode,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
 import {
   formatDurationPrice,
   formatPrice,
@@ -58,7 +62,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const priceRate = props.priceRate ?? 1
   const usdExchangeRate = props.usdExchangeRate ?? 1
   const showRechargePrice = props.showRechargePrice ?? false
-  const isDurationBased = isDurationBasedModel(props.model)
+  const isDurationMode = isDurationPricingMode(props.model)
+  const durationPrice = getDurationPriceRule(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
   const tags = parseTags(props.model.tags)
@@ -97,9 +102,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   }
 
   let priceSummary: ReactNode
-  if (isDurationBased && props.model.duration_price) {
+  if (isDurationMode) {
     priceSummary = (
-      <span className='text-muted-foreground whitespace-nowrap'>
+      <span className='text-muted-foreground min-w-0 break-words'>
         <span className='text-foreground font-mono font-semibold'>
           {formatDurationPrice(
             props.model,
@@ -108,8 +113,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             usdExchangeRate,
             props.selectedGroup
           )}
-        </span>{' '}
-        / {t(props.model.duration_price.unit)}
+        </span>
+        {durationPrice ? ` / ${t(durationPrice.unit)}` : null}
       </span>
     )
   } else if (dynamicSummary) {
@@ -283,9 +288,11 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               {item}
             </span>
           ))}
-          <span className='text-muted-foreground/50 text-xs'>
-            {tokenUnitLabel}
-          </span>
+          {isDurationMode ? null : (
+            <span className='text-muted-foreground/50 text-xs'>
+              {tokenUnitLabel}
+            </span>
+          )}
           {hiddenCount > 0 && (
             <span className='text-muted-foreground/40 text-xs'>
               +{hiddenCount}

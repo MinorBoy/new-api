@@ -553,7 +553,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     count: modeCounts['per-request'],
                   },
                   {
-                    label: 'Per-duration',
+                    label: t('Per-duration'),
                     value: 'per_duration',
                     count: modeCounts.per_duration,
                   },

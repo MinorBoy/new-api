@@ -125,6 +125,38 @@ test('deletion removes the duration rule and explicit mode', () => {
   assert.deepEqual(buildModelSnapshots(deleted), [])
 })
 
+test('duration save preserves auxiliary ratios and clears base conflicts', () => {
+  const updated = updateModelPricingMaps(
+    {
+      ...emptyInput,
+      modelPrice: '{"video":9}',
+      modelRatio: '{"video":4}',
+      billingExpr: '{"video":"tier(\\"base\\", 1)"}',
+    },
+    {
+      name: 'video',
+      billingMode: 'per_duration',
+      durationPrice: rule,
+      cacheRatio: '0.1',
+      createCacheRatio: '0.2',
+      completionRatio: '0.3',
+      imageRatio: '1.5',
+      audioRatio: '2.5',
+      audioCompletionRatio: '0.4',
+    }
+  )
+
+  assert.deepEqual(JSON.parse(updated.cacheRatio), { video: 0.1 })
+  assert.deepEqual(JSON.parse(updated.createCacheRatio), { video: 0.2 })
+  assert.deepEqual(JSON.parse(updated.completionRatio), { video: 0.3 })
+  assert.deepEqual(JSON.parse(updated.imageRatio), { video: 1.5 })
+  assert.deepEqual(JSON.parse(updated.audioRatio), { video: 2.5 })
+  assert.deepEqual(JSON.parse(updated.audioCompletionRatio), { video: 0.4 })
+  assert.deepEqual(JSON.parse(updated.modelPrice), {})
+  assert.deepEqual(JSON.parse(updated.modelRatio), {})
+  assert.deepEqual(JSON.parse(updated.billingExpr), {})
+})
+
 test('batch copy carries the full duration rule to every target', () => {
   const updated = updateModelPricingMaps(
     emptyInput,
@@ -145,6 +177,52 @@ test('batch copy carries the full duration rule to every target', () => {
       ['copy-b', 'per_duration', rule],
     ]
   )
+})
+
+test('batch copy preserves duration auxiliary ratios for every target', () => {
+  const updated = updateModelPricingMaps(
+    {
+      ...emptyInput,
+      modelPrice: '{"source":9,"copy-a":9,"copy-b":9}',
+      modelRatio: '{"source":4,"copy-a":4,"copy-b":4}',
+      billingExpr: '{"source":"old","copy-a":"old","copy-b":"old"}',
+    },
+    {
+      name: 'source',
+      billingMode: 'per_duration',
+      durationPrice: rule,
+      cacheRatio: '0.1',
+      createCacheRatio: '0.2',
+      completionRatio: '0.3',
+      imageRatio: '1.5',
+      audioRatio: '2.5',
+      audioCompletionRatio: '0.4',
+    },
+    ['source', 'copy-a', 'copy-b']
+  )
+  const expectedCache = { source: 0.1, 'copy-a': 0.1, 'copy-b': 0.1 }
+  const expectedCreateCache = { source: 0.2, 'copy-a': 0.2, 'copy-b': 0.2 }
+  const expectedCompletion = { source: 0.3, 'copy-a': 0.3, 'copy-b': 0.3 }
+  const expectedImage = { source: 1.5, 'copy-a': 1.5, 'copy-b': 1.5 }
+  const expectedAudio = { source: 2.5, 'copy-a': 2.5, 'copy-b': 2.5 }
+  const expectedAudioCompletion = {
+    source: 0.4,
+    'copy-a': 0.4,
+    'copy-b': 0.4,
+  }
+
+  assert.deepEqual(JSON.parse(updated.cacheRatio), expectedCache)
+  assert.deepEqual(JSON.parse(updated.createCacheRatio), expectedCreateCache)
+  assert.deepEqual(JSON.parse(updated.completionRatio), expectedCompletion)
+  assert.deepEqual(JSON.parse(updated.imageRatio), expectedImage)
+  assert.deepEqual(JSON.parse(updated.audioRatio), expectedAudio)
+  assert.deepEqual(
+    JSON.parse(updated.audioCompletionRatio),
+    expectedAudioCompletion
+  )
+  assert.deepEqual(JSON.parse(updated.modelPrice), {})
+  assert.deepEqual(JSON.parse(updated.modelRatio), {})
+  assert.deepEqual(JSON.parse(updated.billingExpr), {})
 })
 
 test('fixed-price sync clears duration state with an explicit ratio mode', () => {

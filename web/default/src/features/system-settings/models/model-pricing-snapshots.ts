@@ -440,6 +440,16 @@ export function updateModelPricingMaps(
     if (data.billingMode === 'per_duration' && data.durationPrice) {
       maps.billingMode[name] = 'per_duration'
       maps.durationPrice[name] = data.durationPrice
+      setNumericPricingValue(maps.cache, name, data.cacheRatio)
+      setNumericPricingValue(maps.createCache, name, data.createCacheRatio)
+      setNumericPricingValue(maps.completion, name, data.completionRatio)
+      setNumericPricingValue(maps.image, name, data.imageRatio)
+      setNumericPricingValue(maps.audio, name, data.audioRatio)
+      setNumericPricingValue(
+        maps.audioCompletion,
+        name,
+        data.audioCompletionRatio
+      )
       return
     }
 

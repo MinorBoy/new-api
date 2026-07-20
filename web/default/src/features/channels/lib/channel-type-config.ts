@@ -144,6 +144,23 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models exposed by this channel',
     },
   },
+  59: {
+    id: 59,
+    name: CHANNEL_TYPES[59],
+    icon: 'Dimensio',
+    defaultBaseUrl: 'https://jimeng.dimensio.cn',
+    supportedModels: [
+      'jimeng-video-seedance-2.0-fast-vip',
+      'jimeng-video-seedance-2.0-mini',
+      'jimeng-video-seedance-2.0-vip',
+    ],
+    hints: {
+      baseUrl: 'Default: https://jimeng.dimensio.cn',
+      key: 'Enter the raw API key issued by Dimensio',
+      models:
+        'Supported upstream models: jimeng-video-seedance-2.0-fast-vip, jimeng-video-seedance-2.0-mini, jimeng-video-seedance-2.0-vip',
+    },
+  },
 }
 
 /**

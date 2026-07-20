@@ -4,10 +4,12 @@ import {
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_WARNINGS,
   CHANNEL_TYPES,
+  GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES,
   MODEL_FETCHABLE_TYPES,
   TYPE_TO_KEY_PROMPT,
 } from '../src/features/channels/constants'
 import {
+  getBaseUrlOnChannelTypeChange,
   getChannelTypeConfig,
   getChannelTypeHints,
   getDefaultBaseUrl,
@@ -53,5 +55,32 @@ describe('Dimensio channel configuration', () => {
 
   test('does not enable generic model fetching for Dimensio', () => {
     expect(MODEL_FETCHABLE_TYPES.has(59)).toBe(false)
+  })
+
+  test('replaces provider URLs but preserves administrator URLs', () => {
+    expect(
+      getBaseUrlOnChannelTypeChange(
+        59,
+        'https://ark.cn-beijing.volces.com',
+        false
+      )
+    ).toBe('https://jimeng.dimensio.cn')
+    expect(
+      getBaseUrlOnChannelTypeChange(
+        59,
+        'https://ark.ap-southeast.bytepluses.com',
+        false
+      )
+    ).toBe('https://jimeng.dimensio.cn')
+    expect(
+      getBaseUrlOnChannelTypeChange(59, 'https://proxy.example.com', true)
+    ).toBe('https://proxy.example.com')
+    expect(
+      getBaseUrlOnChannelTypeChange(59, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+
+  test('disables generic channel testing for task-only Dimensio', () => {
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(59)).toBe(true)
   })
 })

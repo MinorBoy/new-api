@@ -163,6 +163,14 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   },
 }
 
+const KNOWN_PROVIDER_BASE_URLS = new Set([
+  ...Object.values(CHANNEL_TYPE_CONFIGS)
+    .map((config) => config.defaultBaseUrl)
+    .filter((baseUrl): baseUrl is string => Boolean(baseUrl)),
+  'https://ark.cn-beijing.volces.com',
+  'https://ark.ap-southeast.bytepluses.com',
+])
+
 /**
  * Get configuration for a channel type
  */
@@ -195,6 +203,19 @@ export function requiresRegion(type: number): boolean {
  */
 export function getDefaultBaseUrl(type: number): string {
   return CHANNEL_TYPE_CONFIGS[type]?.defaultBaseUrl || ''
+}
+
+export function getBaseUrlOnChannelTypeChange(
+  type: number,
+  currentBaseUrl: string,
+  isDirty: boolean
+): string {
+  const defaultBaseUrl = getDefaultBaseUrl(type)
+  if (isDirty || !defaultBaseUrl) return currentBaseUrl
+  if (currentBaseUrl && !KNOWN_PROVIDER_BASE_URLS.has(currentBaseUrl)) {
+    return currentBaseUrl
+  }
+  return defaultBaseUrl
 }
 
 /**

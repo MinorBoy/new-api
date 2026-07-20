@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -82,6 +83,11 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 2, userID)
+}
+
+func TestSupportsGenericChannelTestRejectsDimensio(t *testing.T) {
+	require.False(t, supportsGenericChannelTest(constant.ChannelTypeDimensio))
+	require.True(t, supportsGenericChannelTest(constant.ChannelTypeOpenAI))
 }
 
 func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {

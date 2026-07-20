@@ -72,12 +72,8 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	tik := time.Now()
-	var unsupportedTestChannelTypes = []int{
+func supportsGenericChannelTest(channelType int) bool {
+	unsupportedChannelTypes := []int{
 		constant.ChannelTypeMidjourney,
 		constant.ChannelTypeMidjourneyPlus,
 		constant.ChannelTypeSunoAPI,
@@ -85,8 +81,17 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		constant.ChannelTypeJimeng,
 		constant.ChannelTypeDoubaoVideo,
 		constant.ChannelTypeVidu,
+		constant.ChannelTypeDimensio,
 	}
-	if lo.Contains(unsupportedTestChannelTypes, channel.Type) {
+	return !lo.Contains(unsupportedChannelTypes, channelType)
+}
+
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tik := time.Now()
+	if !supportsGenericChannelTest(channel.Type) {
 		channelTypeName := constant.GetChannelTypeName(channel.Type)
 		return testResult{
 			localErr: fmt.Errorf("%s channel test is not supported", channelTypeName),

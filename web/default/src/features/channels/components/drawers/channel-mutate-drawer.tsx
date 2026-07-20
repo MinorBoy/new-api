@@ -143,6 +143,7 @@ import {
   ERROR_MESSAGES,
   FIELD_DESCRIPTIONS,
   FIELD_PLACEHOLDERS,
+  GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
 import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
@@ -161,8 +162,8 @@ import {
   formatModelsArray,
   extractRedirectModels,
   extractMappingSourceModels,
+  getBaseUrlOnChannelTypeChange,
   getChannelTypeHints,
-  getDefaultBaseUrl,
   hasModelConfigChanged,
   findMissingModelsInMapping,
   validateModelMappingJson,
@@ -1261,20 +1262,25 @@ export function ChannelMutateDrawer({
 
   // Handle type change - set default values for specific types
   useEffect(() => {
-    if (isEditing) return // Don't auto-set defaults when editing
+    if (currentType === 59) {
+      const currentBaseUrlValue = form.getValues('base_url')
+      const nextBaseUrl = getBaseUrlOnChannelTypeChange(
+        currentType,
+        currentBaseUrlValue ?? '',
+        form.getFieldState('base_url').isDirty
+      )
+      if (nextBaseUrl !== currentBaseUrlValue) {
+        form.setValue('base_url', nextBaseUrl)
+      }
+    }
+
+    if (isEditing) return // Don't auto-set creation defaults when editing
 
     // Type 45 (VolcEngine) - set default base_url
     if (currentType === 45) {
       const currentBaseUrlValue = form.getValues('base_url')
       if (!currentBaseUrlValue || currentBaseUrlValue === '') {
         form.setValue('base_url', 'https://ark.cn-beijing.volces.com')
-      }
-    }
-
-    if (currentType === 59) {
-      const currentBaseUrlValue = form.getValues('base_url')
-      if (!currentBaseUrlValue) {
-        form.setValue('base_url', getDefaultBaseUrl(currentType))
       }
     }
 
@@ -3678,27 +3684,31 @@ export function ChannelMutateDrawer({
                               />
                             </div>
 
-                            <FormField
-                              control={form.control}
-                              name='test_model'
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>{t('Test Model')}</FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      placeholder={t(
-                                        FIELD_PLACEHOLDERS.TEST_MODEL
-                                      )}
-                                      {...field}
-                                    />
-                                  </FormControl>
-                                  <FormDescription>
-                                    {t(FIELD_DESCRIPTIONS.TEST_MODEL)}
-                                  </FormDescription>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
+                            {!GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(
+                              currentType
+                            ) && (
+                              <FormField
+                                control={form.control}
+                                name='test_model'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>{t('Test Model')}</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        placeholder={t(
+                                          FIELD_PLACEHOLDERS.TEST_MODEL
+                                        )}
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t(FIELD_DESCRIPTIONS.TEST_MODEL)}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            )}
 
                             <FormField
                               control={form.control}

@@ -59,7 +59,10 @@ import {
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { MODEL_FETCHABLE_TYPES } from '../constants'
+import {
+  GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES,
+  MODEL_FETCHABLE_TYPES,
+} from '../constants'
 import {
   channelsQueryKeys,
   handleDeleteChannel,
@@ -90,6 +93,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
+  const supportsGenericTest = !GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(
+    channel.type
+  )
   const canEditSensitive = hasPermission(
     currentUser,
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
@@ -185,28 +191,30 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </Tooltip>
       )}
 
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant='ghost'
-              size='icon-sm'
-              onClick={handleDirectTest}
-              disabled={isTesting}
-              aria-label={t('Test Connection')}
-            />
-          }
-        >
-          {isTesting ? (
-            <Loader2 className='size-4 animate-spin' />
-          ) : (
-            <Gauge className='size-4' />
-          )}
-        </TooltipTrigger>
-        <TooltipContent>{t('Test Connection')}</TooltipContent>
-      </Tooltip>
+      {supportsGenericTest && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={handleDirectTest}
+                disabled={isTesting}
+                aria-label={t('Test Connection')}
+              />
+            }
+          >
+            {isTesting ? (
+              <Loader2 className='size-4 animate-spin' />
+            ) : (
+              <Gauge className='size-4' />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>{t('Test Connection')}</TooltipContent>
+        </Tooltip>
+      )}
 
-      {layout === 'card' && (
+      {layout === 'card' && supportsGenericTest && (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -273,13 +281,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             </DropdownMenuItem>
           )}
 
-          {/* Test Connection */}
-          <DropdownMenuItem onClick={handleTest}>
-            {t('Test Connection')}
-            <DropdownMenuShortcut>
-              <PlugZap size={16} />
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
+          {supportsGenericTest && (
+            <DropdownMenuItem onClick={handleTest}>
+              {t('Test Connection')}
+              <DropdownMenuShortcut>
+                <PlugZap size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
 
           {/* Query Balance */}
           <DropdownMenuItem onClick={handleQueryBalance}>

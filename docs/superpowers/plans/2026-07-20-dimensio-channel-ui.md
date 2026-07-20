@@ -13,7 +13,7 @@
 ### Task 1: Add a failing Dimensio channel configuration test
 
 **Files:**
-- Create: `web/default/src/features/channels/lib/channel-type-config.test.ts`
+- Create: `web/default/tests/channel-type-config.test.ts`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -26,13 +26,13 @@ import {
   CHANNEL_TYPES,
   MODEL_FETCHABLE_TYPES,
   TYPE_TO_KEY_PROMPT,
-} from '../constants'
+} from '../src/features/channels/constants'
 import {
   getChannelTypeConfig,
   getChannelTypeHints,
   getDefaultBaseUrl,
-} from './channel-type-config'
-import { getChannelTypeIcon } from './channel-utils'
+} from '../src/features/channels/lib/channel-type-config'
+import { getChannelTypeIcon } from '../src/features/channels/lib/channel-utils'
 
 describe('Dimensio channel configuration', () => {
   test('registers type 59 in the standard channel options', () => {
@@ -79,7 +79,7 @@ describe('Dimensio channel configuration', () => {
 Run from `web/default/`:
 
 ```bash
-bun test src/features/channels/lib/channel-type-config.test.ts
+bun test tests/channel-type-config.test.ts
 ```
 
 Expected: FAIL because type `59` and its configuration are absent.
@@ -90,7 +90,7 @@ Expected: FAIL because type `59` and its configuration are absent.
 - Modify: `web/default/src/features/channels/constants.ts`
 - Modify: `web/default/src/features/channels/lib/channel-type-config.ts`
 - Modify: `web/default/src/features/channels/lib/channel-utils.ts`
-- Test: `web/default/src/features/channels/lib/channel-type-config.test.ts`
+- Test: `web/default/tests/channel-type-config.test.ts`
 
 - [ ] **Step 1: Register type `59`, its display order, prompt, and warning**
 
@@ -143,7 +143,7 @@ Add `59: 'Dimensio'` to `TYPE_TO_ICON` in `getChannelTypeIcon`. The current icon
 Run from `web/default/`:
 
 ```bash
-bun test src/features/channels/lib/channel-type-config.test.ts
+bun test tests/channel-type-config.test.ts
 ```
 
 Expected: 3 tests pass.
@@ -151,7 +151,7 @@ Expected: 3 tests pass.
 - [ ] **Step 5: Commit the tested provider registry**
 
 ```bash
-git add web/default/src/features/channels/constants.ts web/default/src/features/channels/lib/channel-type-config.ts web/default/src/features/channels/lib/channel-utils.ts web/default/src/features/channels/lib/channel-type-config.test.ts
+git add web/default/src/features/channels/constants.ts web/default/src/features/channels/lib/channel-type-config.ts web/default/src/features/channels/lib/channel-utils.ts web/default/tests/channel-type-config.test.ts
 git commit -m "feat(channels): register Dimensio provider"
 ```
 
@@ -159,7 +159,7 @@ git commit -m "feat(channels): register Dimensio provider"
 
 **Files:**
 - Modify: `web/default/src/features/channels/components/drawers/channel-mutate-drawer.tsx`
-- Test: `web/default/src/features/channels/lib/channel-type-config.test.ts`
+- Test: `web/default/tests/channel-type-config.test.ts`
 
 - [ ] **Step 1: Read the selected provider configuration in the drawer**
 
@@ -202,7 +202,7 @@ The existing `CHANNEL_TYPE_WARNINGS[currentType]` alert will render the ARK `/ap
 Run from `web/default/`:
 
 ```bash
-bun test src/features/channels/lib/channel-type-config.test.ts
+bun test tests/channel-type-config.test.ts
 ```
 
 Expected: 3 tests pass.
@@ -309,7 +309,7 @@ git commit -m "feat(channels): configure Dimensio form guidance"
 
 ```bash
 cd web/default
-bun test src/features/channels/lib/channel-type-config.test.ts
+bun test tests/channel-type-config.test.ts
 ```
 
 Expected: 3 tests pass and 0 fail.
@@ -325,7 +325,7 @@ Expected: exit code 0.
 - [ ] **Step 3: Lint the changed TypeScript files**
 
 ```bash
-bunx oxlint -c .oxlintrc.json src/features/channels/constants.ts src/features/channels/lib/channel-type-config.ts src/features/channels/lib/channel-utils.ts src/features/channels/lib/channel-type-config.test.ts src/features/channels/components/drawers/channel-mutate-drawer.tsx
+bunx oxlint -c .oxlintrc.json src/features/channels/constants.ts src/features/channels/lib/channel-type-config.ts src/features/channels/lib/channel-utils.ts tests/channel-type-config.test.ts src/features/channels/components/drawers/channel-mutate-drawer.tsx
 ```
 
 Expected: 0 errors.

@@ -15,7 +15,7 @@
 **Files:**
 - Create: `docker-compose.local.yml`
 
-- [ ] **Step 1: Verify the configuration does not exist yet**
+- [x] **Step 1: Verify the configuration does not exist yet**
 
 Run:
 
@@ -25,7 +25,7 @@ docker compose -f docker-compose.local.yml config --quiet
 
 Expected: FAIL because `docker-compose.local.yml` does not exist.
 
-- [ ] **Step 2: Create the complete local stack**
+- [x] **Step 2: Create the complete local stack**
 
 Create `docker-compose.local.yml` with this content:
 
@@ -101,7 +101,7 @@ volumes:
   local_mysql_data:
 ```
 
-- [ ] **Step 3: Validate the rendered Compose model**
+- [x] **Step 3: Validate the rendered Compose model**
 
 Run:
 
@@ -111,7 +111,7 @@ docker compose -f docker-compose.local.yml config --quiet
 
 Expected: PASS with exit code 0 and no output.
 
-- [ ] **Step 4: Inspect the rendered build and dependency settings**
+- [x] **Step 4: Inspect the rendered build and dependency settings**
 
 Run:
 
@@ -121,7 +121,7 @@ docker compose -f docker-compose.local.yml config
 
 Expected: the `new-api` service contains `build.context`, image `new-api:local`, loopback-only port `3000`, both bind mounts, and healthy dependency conditions for `mysql` and `redis`.
 
-- [ ] **Step 5: Commit the Compose configuration**
+- [x] **Step 5: Commit the Compose configuration**
 
 ```powershell
 git add docker-compose.local.yml
@@ -134,7 +134,7 @@ git commit -m "chore: add local compose build"
 - Verify: `docker-compose.local.yml`
 - Verify: `Dockerfile`
 
-- [ ] **Step 1: Build the complete application image**
+- [x] **Step 1: Build the complete application image**
 
 Run:
 
@@ -144,7 +144,7 @@ docker compose -f docker-compose.local.yml build new-api
 
 Expected: Docker completes the frontend and Go build stages and tags the final image as `new-api:local`.
 
-- [ ] **Step 2: Start the stack**
+- [x] **Step 2: Start the stack**
 
 Run:
 
@@ -154,7 +154,7 @@ docker compose -f docker-compose.local.yml up -d
 
 Expected: Compose starts `mysql`, `redis`, and `new-api`; the application starts after both dependencies report healthy.
 
-- [ ] **Step 3: Check service health**
+- [x] **Step 3: Check service health**
 
 Run:
 
@@ -164,7 +164,7 @@ docker compose -f docker-compose.local.yml ps
 
 Expected: all three services are running, and services with health checks report `healthy` after startup completes.
 
-- [ ] **Step 4: Verify the public application endpoint**
+- [x] **Step 4: Verify the public application endpoint**
 
 Run:
 
@@ -176,7 +176,7 @@ $response.success
 
 Expected: `True`.
 
-- [ ] **Step 5: Confirm the local image exists**
+- [x] **Step 5: Confirm the local image exists**
 
 Run:
 
@@ -186,7 +186,7 @@ docker image inspect new-api:local --format '{{.RepoTags}}'
 
 Expected: output contains `new-api:local`.
 
-- [ ] **Step 6: Leave the verified stack running for local use**
+- [x] **Step 6: Leave the verified stack running for local use**
 
 The application remains available at `http://localhost:3000`. To stop it later, run:
 

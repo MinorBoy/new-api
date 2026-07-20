@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Run one real Dimensio video-task acceptance test through new-api."""
 
+import argparse
 import json
 import os
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,20 +19,112 @@ from uuid import uuid4
 BASE_URL = "http://127.0.0.1:3000"
 API_KEY = "replace-with-new-api-key"
 
-FIXED_PAYLOAD = {
-    "model": "jimeng-video-seedance-2.0-fast-vip",
-    "content": [
-        {
-            "type": "text",
-            "text": (
-                "A calm cinematic shot of morning light moving across a modern "
-                "city skyline, slow camera push forward."
-            ),
-        }
-    ],
-    "ratio": "16:9",
-    "resolution": "720p",
-    "duration": 4,
+DEFAULT_MODE = "image"
+ACCEPTANCE_MODES = ("text", "image", "multimodal")
+
+PUBLIC_MEDIA_URLS = {
+    "image_1": "https://www.w3schools.com/w3images/lights.jpg",
+    "image_2": "https://www.w3schools.com/w3images/nature.jpg",
+    "image_3": "https://www.w3schools.com/w3images/mountains.jpg",
+    "image_4": "https://www.w3schools.com/w3images/forest.jpg",
+    "video_1": (
+        "https://media.githubusercontent.com/media/adilentiq/"
+        "test-images/02f54833d4d08fc33d2090eaeda9f0d2dbf1c7b0/"
+        "video/duration/v1_4s.mp4"
+    ),
+    "audio_1": "https://www.w3schools.com/html/horse.mp3",
+}
+
+MODE_PAYLOADS = {
+    "text": {
+        "model": "jimeng-video-seedance-2.0-fast-vip",
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "A calm cinematic shot of morning light moving across a "
+                    "modern city skyline, slow camera push forward."
+                ),
+            }
+        ],
+        "ratio": "16:9",
+        "resolution": "720p",
+        "duration": 4,
+    },
+    "image": {
+        "model": "jimeng-video-seedance-2.0-fast-vip",
+        "content": [
+            {
+                "type": "image_url",
+                "role": "first_frame",
+                "image_url": {"url": PUBLIC_MEDIA_URLS["image_1"]},
+            },
+            {
+                "type": "image_url",
+                "role": "last_frame",
+                "image_url": {"url": PUBLIC_MEDIA_URLS["image_2"]},
+            },
+            {
+                "type": "text",
+                "text": (
+                    "Create a smooth cinematic transition from @image_file_1 "
+                    "as the first frame to @image_file_2 as the last frame, "
+                    "preserve realistic detail and use a slow forward camera "
+                    "movement."
+                ),
+            },
+        ],
+        "ratio": "16:9",
+        "resolution": "720p",
+        "duration": 4,
+    },
+    "multimodal": {
+        "model": "jimeng-video-seedance-2.0-fast-vip",
+        "content": [
+            {
+                "type": "image_url",
+                "role": "reference_image",
+                "image_url": {"url": PUBLIC_MEDIA_URLS["image_1"]},
+            },
+            {
+                "type": "image_url",
+                "role": "reference_image",
+                "image_url": {"url": PUBLIC_MEDIA_URLS["image_2"]},
+            },
+            {
+                "type": "image_url",
+                "role": "reference_image",
+                "image_url": {"url": PUBLIC_MEDIA_URLS["image_3"]},
+            },
+            {
+                "type": "image_url",
+                "role": "reference_image",
+                "image_url": {"url": PUBLIC_MEDIA_URLS["image_4"]},
+            },
+            {
+                "type": "video_url",
+                "role": "reference_video",
+                "video_url": {"url": PUBLIC_MEDIA_URLS["video_1"]},
+            },
+            {
+                "type": "audio_url",
+                "role": "reference_audio",
+                "audio_url": {"url": PUBLIC_MEDIA_URLS["audio_1"]},
+            },
+            {
+                "type": "text",
+                "text": (
+                    "Use @image_file_1 through @image_file_4 as visual "
+                    "references, follow the motion from @video_file_1 and the "
+                    "rhythm from @audio_file_1, then create a coherent "
+                    "cinematic scene with a slow forward camera movement."
+                ),
+            },
+        ],
+        "ratio": "16:9",
+        "resolution": "720p",
+        "duration": 4,
+    },
 }
 
 OUTPUT_ROOT = Path("output") / "dimensio-client-acceptance"
@@ -48,6 +142,30 @@ class AcceptanceError(Exception):
         super().__init__(message)
         self.category = category
         self.details = details or {}
+
+
+def build_payload(mode: str) -> dict[str, Any]:
+    payload = MODE_PAYLOADS.get(mode)
+    if payload is None:
+        raise AcceptanceError(
+            "config",
+            "mode must be one of: " + ", ".join(ACCEPTANCE_MODES),
+            {"mode": mode},
+        )
+    return deepcopy(payload)
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run one real Dimensio video acceptance task through new-api."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=ACCEPTANCE_MODES,
+        default=DEFAULT_MODE,
+        help="video generation mode (default: image)",
+    )
+    return parser.parse_args(argv)
 
 
 def _iso_now() -> str:
@@ -226,6 +344,7 @@ def _write_report(report: dict[str, Any], path: Path, api_key: str) -> None:
 
 def run_acceptance(
     *,
+    mode: str = DEFAULT_MODE,
     base_url: str = BASE_URL,
     api_key: str = API_KEY,
     output_root: Path = OUTPUT_ROOT,
@@ -238,9 +357,10 @@ def run_acceptance(
     report: dict[str, Any] = {
         "result": "failed",
         "api_key_hint": _api_key_hint(api_key),
+        "mode": mode,
         "request": {
             "base_url": base_url,
-            "payload": FIXED_PAYLOAD,
+            "payload": None,
         },
         "task_id": None,
         "status_history": [],
@@ -259,6 +379,8 @@ def run_acceptance(
         normalized_base_url, normalized_api_key = _validate_config(
             base_url, api_key
         )
+        payload = build_payload(mode)
+        report["request"]["payload"] = payload
         submit_url = (
             normalized_base_url + "/api/v3/contents/generations/tasks"
         )
@@ -266,7 +388,7 @@ def run_acceptance(
         report["request"]["submit_url"] = submit_url
 
         submit_response = _request_json(
-            "POST", submit_url, normalized_api_key, FIXED_PAYLOAD
+            "POST", submit_url, normalized_api_key, payload
         )
         report["submit_response"] = submit_response
         task_id = submit_response.get("id")
@@ -383,8 +505,9 @@ def run_acceptance(
     return exit_code, run_dir
 
 
-def main() -> int:
-    exit_code, _ = run_acceptance()
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    exit_code, _ = run_acceptance(mode=args.mode)
     return exit_code
 
 

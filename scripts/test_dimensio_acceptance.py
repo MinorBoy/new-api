@@ -1,9 +1,10 @@
 import json
 import threading
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -95,6 +96,96 @@ def serve(state: MockState):
         thread.join(timeout=5)
 
 
+class DimensioModePayloadTest(unittest.TestCase):
+    def test_cli_defaults_to_image_and_accepts_all_modes(self) -> None:
+        self.assertEqual(acceptance._parse_args([]).mode, "image")
+        for mode in ("text", "image", "multimodal"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    acceptance._parse_args(["--mode", mode]).mode, mode
+                )
+
+        with patch.object(
+            acceptance,
+            "run_acceptance",
+            return_value=(0, Path(".")),
+        ) as run_acceptance:
+            self.assertEqual(acceptance.main([]), 0)
+            run_acceptance.assert_called_once_with(mode="image")
+
+    def test_cli_rejects_unknown_mode_with_exit_code_2(self) -> None:
+        with redirect_stderr(StringIO()), self.assertRaises(
+            SystemExit
+        ) as raised:
+            acceptance._parse_args(["--mode", "unknown"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_build_payload_returns_exact_mode_shapes(self) -> None:
+        text_payload = acceptance.build_payload("text")
+        image_payload = acceptance.build_payload("image")
+        multimodal_payload = acceptance.build_payload("multimodal")
+
+        for payload in (text_payload, image_payload, multimodal_payload):
+            self.assertEqual(
+                {
+                    "model": payload["model"],
+                    "ratio": payload["ratio"],
+                    "resolution": payload["resolution"],
+                    "duration": payload["duration"],
+                },
+                {
+                    "model": "jimeng-video-seedance-2.0-fast-vip",
+                    "ratio": "16:9",
+                    "resolution": "720p",
+                    "duration": 4,
+                },
+            )
+
+        self.assertEqual(
+            [item["type"] for item in text_payload["content"]], ["text"]
+        )
+        self.assertEqual(
+            [
+                (item["type"], item.get("role"))
+                for item in image_payload["content"]
+            ],
+            [
+                ("image_url", "first_frame"),
+                ("image_url", "last_frame"),
+                ("text", None),
+            ],
+        )
+        self.assertEqual(
+            [
+                (item["type"], item.get("role"))
+                for item in multimodal_payload["content"]
+            ],
+            [
+                ("image_url", "reference_image"),
+                ("image_url", "reference_image"),
+                ("image_url", "reference_image"),
+                ("image_url", "reference_image"),
+                ("video_url", "reference_video"),
+                ("audio_url", "reference_audio"),
+                ("text", None),
+            ],
+        )
+        self.assertEqual(
+            multimodal_payload["content"][4]["video_url"]["url"],
+            (
+                "https://media.githubusercontent.com/media/adilentiq/"
+                "test-images/02f54833d4d08fc33d2090eaeda9f0d2dbf1c7b0/"
+                "video/duration/v1_4s.mp4"
+            ),
+        )
+
+    def test_build_payload_returns_independent_objects(self) -> None:
+        first = acceptance.build_payload("image")
+        second = acceptance.build_payload("image")
+        first["content"][0]["role"] = "changed"
+        self.assertEqual(second["content"][0]["role"], "first_frame")
+
+
 class DimensioAcceptanceTest(unittest.TestCase):
     def read_report(self, run_dir: Path) -> tuple[dict, str]:
         report_text = (run_dir / "report.json").read_text(encoding="utf-8")
@@ -137,7 +228,8 @@ class DimensioAcceptanceTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                state.gateway_requests[0]["json"], acceptance.FIXED_PAYLOAD
+                state.gateway_requests[0]["json"],
+                acceptance.build_payload("image"),
             )
             for request in state.gateway_requests:
                 self.assertEqual(
@@ -161,7 +253,10 @@ class DimensioAcceptanceTest(unittest.TestCase):
                 [item["status"] for item in report["status_history"]],
                 ["queued", "running", "succeeded"],
             )
-            self.assertEqual(report["request"]["payload"], acceptance.FIXED_PAYLOAD)
+            self.assertEqual(
+                report["request"]["payload"],
+                acceptance.build_payload("image"),
+            )
             self.assertEqual(
                 Path(report["video_path"]).read_bytes(), state.video_body
             )

@@ -132,6 +132,7 @@ POLL_INTERVAL_SECONDS = 5
 MAX_WAIT_SECONDS = 15 * 60
 HTTP_TIMEOUT_SECONDS = 30
 DOWNLOAD_TIMEOUT_SECONDS = 120
+ASSET_TIMEOUT_SECONDS = 20
 CHUNK_SIZE = 64 * 1024
 
 
@@ -219,6 +220,156 @@ def _validate_config(base_url: str, api_key: str) -> tuple[str, str]:
             "config", "API_KEY must be replaced with a new-api console token"
         )
     return normalized_base_url, normalized_api_key
+
+
+def _extract_assets(payload: dict[str, Any]) -> list[dict[str, str]]:
+    assets: list[dict[str, str]] = []
+    fields = {
+        "image_url": ("image", "image_url"),
+        "video_url": ("video", "video_url"),
+        "audio_url": ("audio", "audio_url"),
+    }
+    for item in payload.get("content", []):
+        if not isinstance(item, dict):
+            continue
+        field = item.get("type")
+        if field not in fields:
+            continue
+        asset_type, container_name = fields[field]
+        container = item.get(container_name)
+        url = container.get("url") if isinstance(container, dict) else None
+        if not isinstance(url, str) or not url.strip():
+            raise AcceptanceError(
+                "asset",
+                f"{field}.url is required",
+                {"type": asset_type, "role": item.get("role", "")},
+            )
+        assets.append(
+            {
+                "type": asset_type,
+                "role": str(item.get("role") or ""),
+                "url": url.strip(),
+            }
+        )
+    return assets
+
+
+def _preflight_assets(
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    for asset in _extract_assets(payload):
+        url = asset["url"]
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AcceptanceError(
+                "asset",
+                f"{asset['type']} asset must use a complete HTTP(S) URL",
+                {"asset": asset},
+            )
+
+        headers = {
+            "Accept": (
+                "image/*"
+                if asset["type"] == "image"
+                else "audio/*"
+                if asset["type"] == "audio"
+                else "video/mp4,application/octet-stream"
+            ),
+            "User-Agent": "new-api-dimensio-acceptance/1.0",
+        }
+        method = "HEAD"
+        if asset["type"] == "video":
+            if not parsed.path.lower().endswith(".mp4"):
+                raise AcceptanceError(
+                    "asset",
+                    "reference video URL must end with .mp4",
+                    {"asset": asset},
+                )
+            method = "GET"
+            headers["Range"] = "bytes=0-11"
+
+        request = Request(url, headers=headers, method=method)
+        try:
+            with urlopen(
+                request, timeout=ASSET_TIMEOUT_SECONDS
+            ) as response:
+                status = getattr(response, "status", 200)
+                content_type = (
+                    response.headers.get("Content-Type", "")
+                    .split(";", 1)[0]
+                    .strip()
+                    .lower()
+                )
+                if status < 200 or status >= 300:
+                    raise AcceptanceError(
+                        "asset",
+                        (
+                            f"{asset['type']} asset returned "
+                            f"HTTP {status}"
+                        ),
+                        {"asset": asset, "http_status": status},
+                    )
+                header = (
+                    response.read(12)
+                    if asset["type"] == "video"
+                    else b""
+                )
+        except HTTPError as exc:
+            raise AcceptanceError(
+                "asset",
+                f"{asset['type']} asset returned HTTP {exc.code}",
+                {"asset": asset, "http_status": exc.code},
+            ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise AcceptanceError(
+                "asset",
+                f"{asset['type']} asset check failed: {exc}",
+                {"asset": asset},
+            ) from exc
+
+        expected_prefix = {
+            "image": "image/",
+            "audio": "audio/",
+        }.get(asset["type"])
+        if expected_prefix and not content_type.startswith(expected_prefix):
+            raise AcceptanceError(
+                "asset",
+                (
+                    f"{asset['type']} asset returned unexpected "
+                    f"Content-Type: {content_type or 'missing'}"
+                ),
+                {
+                    "asset": asset,
+                    "http_status": status,
+                    "content_type": content_type,
+                },
+            )
+        if asset["type"] == "video" and (
+            len(header) < 8 or header[4:8] != b"ftyp"
+        ):
+            raise AcceptanceError(
+                "asset",
+                "reference video does not have a valid MP4 ftyp box",
+                {
+                    "asset": asset,
+                    "http_status": status,
+                    "content_type": content_type,
+                },
+            )
+
+        checks.append(
+            {
+                **asset,
+                "ok": True,
+                "http_status": status,
+                "content_type": content_type,
+                "mp4_ftyp": (
+                    True if asset["type"] == "video" else None
+                ),
+            }
+        )
+    return checks
 
 
 def _extract_error(payload: object) -> tuple[str, str]:
@@ -362,6 +513,8 @@ def run_acceptance(
             "base_url": base_url,
             "payload": None,
         },
+        "assets": [],
+        "asset_checks": [],
         "task_id": None,
         "status_history": [],
         "submit_response": None,
@@ -381,6 +534,8 @@ def run_acceptance(
         )
         payload = build_payload(mode)
         report["request"]["payload"] = payload
+        report["assets"] = _extract_assets(payload)
+        report["asset_checks"] = _preflight_assets(payload)
         submit_url = (
             normalized_base_url + "/api/v3/contents/generations/tasks"
         )

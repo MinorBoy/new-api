@@ -21,6 +21,10 @@ class MockState:
     video_body: bytes = b"mock-mp4-bytes"
     gateway_requests: list[dict] = field(default_factory=list)
     video_requests: list[dict] = field(default_factory=list)
+    asset_responses: dict[str, tuple[int, str, bytes]] = field(
+        default_factory=dict
+    )
+    asset_requests: list[dict] = field(default_factory=list)
 
 
 class MockHandler(BaseHTTPRequestHandler):
@@ -34,6 +38,36 @@ class MockHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_asset(
+        self,
+        status: int,
+        content_type: str,
+        body: bytes,
+        *,
+        include_body: bool,
+    ) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if include_body:
+            self.wfile.write(body)
+
+    def do_HEAD(self) -> None:
+        state = self.server.state
+        path = urlsplit(self.path).path
+        state.asset_requests.append(
+            {
+                "method": "HEAD",
+                "path": path,
+                "headers": self._headers(),
+            }
+        )
+        status, content_type, body = state.asset_responses[path]
+        self._send_asset(
+            status, content_type, body, include_body=False
+        )
 
     def do_POST(self) -> None:
         state = self.server.state
@@ -57,6 +91,13 @@ class MockHandler(BaseHTTPRequestHandler):
             "path": path,
             "headers": self._headers(),
         }
+        if path in state.asset_responses:
+            state.asset_requests.append(request)
+            status, content_type, body = state.asset_responses[path]
+            self._send_asset(
+                status, content_type, body, include_body=True
+            )
+            return
         if path == "/video.mp4":
             state.video_requests.append(request)
             self.send_response(200)
@@ -186,6 +227,155 @@ class DimensioModePayloadTest(unittest.TestCase):
         self.assertEqual(second["content"][0]["role"], "first_frame")
 
 
+class DimensioAssetPreflightTest(unittest.TestCase):
+    def test_preflight_validates_image_audio_and_mp4_without_key(self) -> None:
+        mp4_header = b"\x00\x00\x00\x18ftypisom"
+        state = MockState(
+            asset_responses={
+                "/assets/image.jpg": (200, "image/jpeg", b"jpeg"),
+                "/assets/audio.mp3": (200, "audio/mpeg", b"mp3"),
+                "/assets/video.mp4": (
+                    200,
+                    "application/octet-stream",
+                    mp4_header,
+                ),
+            }
+        )
+        with serve(state) as base_url:
+            payload = {
+                "content": [
+                    {
+                        "type": "image_url",
+                        "role": "reference_image",
+                        "image_url": {
+                            "url": f"{base_url}/assets/image.jpg"
+                        },
+                    },
+                    {
+                        "type": "audio_url",
+                        "role": "reference_audio",
+                        "audio_url": {
+                            "url": f"{base_url}/assets/audio.mp3"
+                        },
+                    },
+                    {
+                        "type": "video_url",
+                        "role": "reference_video",
+                        "video_url": {
+                            "url": f"{base_url}/assets/video.mp4"
+                        },
+                    },
+                ]
+            }
+            checks = acceptance._preflight_assets(payload)
+
+        self.assertEqual(
+            [check["type"] for check in checks],
+            ["image", "audio", "video"],
+        )
+        self.assertTrue(all(check["ok"] for check in checks))
+        self.assertEqual(
+            [request["method"] for request in state.asset_requests],
+            ["HEAD", "HEAD", "GET"],
+        )
+        for request in state.asset_requests:
+            self.assertNotIn("authorization", request["headers"])
+
+    def test_preflight_rejects_http_type_and_mp4_errors(self) -> None:
+        cases = [
+            (
+                "http",
+                "/assets/bad.jpg",
+                {
+                    "type": "image_url",
+                    "image_url": {"url": ""},
+                },
+                (503, "image/jpeg", b""),
+            ),
+            (
+                "image_type",
+                "/assets/bad.jpg",
+                {
+                    "type": "image_url",
+                    "image_url": {"url": ""},
+                },
+                (200, "text/plain", b"not-image"),
+            ),
+            (
+                "audio_type",
+                "/assets/bad.mp3",
+                {
+                    "type": "audio_url",
+                    "audio_url": {"url": ""},
+                },
+                (200, "text/plain", b"not-audio"),
+            ),
+            (
+                "mp4_header",
+                "/assets/bad.mp4",
+                {
+                    "type": "video_url",
+                    "video_url": {"url": ""},
+                },
+                (200, "application/octet-stream", b"not-an-mp4!"),
+            ),
+        ]
+        for label, path, item, response in cases:
+            with self.subTest(label=label):
+                state = MockState(asset_responses={path: response})
+                with serve(state) as base_url:
+                    item[item["type"]]["url"] = base_url + path
+                    with self.assertRaises(
+                        acceptance.AcceptanceError
+                    ) as raised:
+                        acceptance._preflight_assets(
+                            {"content": [item]}
+                        )
+                self.assertEqual(raised.exception.category, "asset")
+
+    def test_asset_failure_writes_report_before_gateway_submission(self) -> None:
+        state = MockState(
+            asset_responses={
+                "/assets/missing.jpg": (404, "image/jpeg", b"")
+            }
+        )
+        with TemporaryDirectory() as temp_dir, serve(state) as base_url:
+            payload = {
+                "model": "jimeng-video-seedance-2.0-fast-vip",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "role": "first_frame",
+                        "image_url": {
+                            "url": f"{base_url}/assets/missing.jpg"
+                        },
+                    },
+                    {"type": "text", "text": "test"},
+                ],
+                "ratio": "16:9",
+                "resolution": "720p",
+                "duration": 4,
+            }
+            with patch.object(
+                acceptance, "build_payload", return_value=payload
+            ):
+                exit_code, run_dir = acceptance.run_acceptance(
+                    mode="image",
+                    base_url=base_url,
+                    api_key="test-secret-1234",
+                    output_root=Path(temp_dir),
+                    poll_interval_seconds=0,
+                    max_wait_seconds=5,
+                )
+
+            report = json.loads(
+                (run_dir / "report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(report["error"]["category"], "asset")
+            self.assertEqual(state.gateway_requests, [])
+
+
 class DimensioAcceptanceTest(unittest.TestCase):
     def read_report(self, run_dir: Path) -> tuple[dict, str]:
         report_text = (run_dir / "report.json").read_text(encoding="utf-8")
@@ -194,7 +384,11 @@ class DimensioAcceptanceTest(unittest.TestCase):
     def test_successful_lifecycle_downloads_video_and_redacts_key(self) -> None:
         state = MockState()
         api_key = "test-secret-1234"
-        with TemporaryDirectory() as temp_dir, serve(state) as base_url:
+        with TemporaryDirectory() as temp_dir, serve(
+            state
+        ) as base_url, patch.object(
+            acceptance, "_preflight_assets", return_value=[]
+        ):
             state.polls = [
                 (200, {"id": "public-task-1", "status": "queued"}),
                 (200, {"id": "public-task-1", "status": "running"}),
@@ -262,6 +456,46 @@ class DimensioAcceptanceTest(unittest.TestCase):
             )
             self.assertNotIn(api_key, report_text)
 
+    def test_each_mode_submits_its_exact_payload(self) -> None:
+        for mode in acceptance.ACCEPTANCE_MODES:
+            with self.subTest(mode=mode), TemporaryDirectory() as temp_dir:
+                state = MockState()
+                with serve(state) as base_url, patch.object(
+                    acceptance, "_preflight_assets", return_value=[]
+                ):
+                    state.polls = [
+                        (
+                            200,
+                            {
+                                "id": "public-task-1",
+                                "status": "succeeded",
+                                "content": {
+                                    "video_url": f"{base_url}/video.mp4"
+                                },
+                            },
+                        )
+                    ]
+                    exit_code, run_dir = acceptance.run_acceptance(
+                        mode=mode,
+                        base_url=base_url,
+                        api_key="test-secret-1234",
+                        output_root=Path(temp_dir),
+                        poll_interval_seconds=0,
+                        max_wait_seconds=5,
+                    )
+
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(
+                    state.gateway_requests[0]["json"],
+                    acceptance.build_payload(mode),
+                )
+                report, _ = self.read_report(run_dir)
+                self.assertEqual(report["mode"], mode)
+                self.assertEqual(
+                    report["request"]["payload"],
+                    acceptance.build_payload(mode),
+                )
+
     def test_failed_task_reports_error_and_does_not_download(self) -> None:
         state = MockState(
             polls=[
@@ -280,6 +514,7 @@ class DimensioAcceptanceTest(unittest.TestCase):
         )
         with TemporaryDirectory() as temp_dir, serve(state) as base_url:
             exit_code, run_dir = acceptance.run_acceptance(
+                mode="text",
                 base_url=base_url,
                 api_key="test-secret-5678",
                 output_root=Path(temp_dir),
@@ -317,6 +552,7 @@ class DimensioAcceptanceTest(unittest.TestCase):
                 state = MockState(submit_status=429, submit_body=response)
                 with serve(state) as base_url:
                     exit_code, run_dir = acceptance.run_acceptance(
+                        mode="text",
                         base_url=base_url,
                         api_key="test-secret-9012",
                         output_root=Path(temp_dir),
@@ -350,6 +586,7 @@ class DimensioAcceptanceTest(unittest.TestCase):
             for label, base_url, api_key in cases:
                 with self.subTest(label=label):
                     exit_code, run_dir = acceptance.run_acceptance(
+                        mode="text",
                         base_url=base_url,
                         api_key=api_key,
                         output_root=Path(temp_dir) / label,

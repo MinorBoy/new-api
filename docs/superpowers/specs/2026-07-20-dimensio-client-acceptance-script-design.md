@@ -50,9 +50,9 @@ Accept: application/json
 
 ## 运行流程
 
-1. 校验 `BASE_URL` 是 HTTP(S) 地址，且 `API_KEY` 已替换占位值。
-2. 规范化 `BASE_URL`，避免用户填写末尾 `/` 时生成双斜线。
-3. 创建带时间戳的 `output/dimensio-client-acceptance/<run-id>/` 目录。
+1. 创建带时间戳的 `output/dimensio-client-acceptance/<run-id>/` 目录，使配置失败也能写入报告。
+2. 校验 `BASE_URL` 是 HTTP(S) 地址，且 `API_KEY` 已替换占位值。
+3. 规范化 `BASE_URL`，避免用户填写末尾 `/` 时生成双斜线。
 4. 提交任务并要求响应含非空公开 `id`；保存提交响应。
 5. 每 5 秒查询一次任务，最长等待 15 分钟：
    - `queued`、`running`：继续轮询；

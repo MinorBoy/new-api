@@ -17,7 +17,10 @@ import { getChannelTypeIcon } from '../src/features/channels/lib/channel-utils'
 describe('Dimensio channel configuration', () => {
   test('registers type 59 in the standard channel options', () => {
     expect(CHANNEL_TYPES[59]).toBe('Dimensio')
-    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 59, label: 'Dimensio' })
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 59,
+      label: 'Dimensio',
+    })
     expect(getChannelTypeIcon(59)).toBe('Dimensio')
   })
 

@@ -161,6 +161,8 @@ import {
   formatModelsArray,
   extractRedirectModels,
   extractMappingSourceModels,
+  getChannelTypeHints,
+  getDefaultBaseUrl,
   hasModelConfigChanged,
   findMissingModelsInMapping,
   validateModelMappingJson,
@@ -733,6 +735,10 @@ export function ChannelMutateDrawer({
   const currentTestModel = form.watch('test_model')
   const currentAutoBan = form.watch('auto_ban')
   const currentTag = form.watch('tag')
+  const currentChannelTypeHints = useMemo(
+    () => getChannelTypeHints(currentType),
+    [currentType]
+  )
   const currentRemark = form.watch('remark')
   const currentStatusCodeMapping = form.watch('status_code_mapping')
   const currentParamOverride = form.watch('param_override')
@@ -1262,6 +1268,13 @@ export function ChannelMutateDrawer({
       const currentBaseUrlValue = form.getValues('base_url')
       if (!currentBaseUrlValue || currentBaseUrlValue === '') {
         form.setValue('base_url', 'https://ark.cn-beijing.volces.com')
+      }
+    }
+
+    if (currentType === 59) {
+      const currentBaseUrlValue = form.getValues('base_url')
+      if (!currentBaseUrlValue) {
+        form.setValue('base_url', getDefaultBaseUrl(currentType))
       }
     }
 
@@ -2756,7 +2769,8 @@ export function ChannelMutateDrawer({
                                     </FormControl>
                                     <FormDescription>
                                       {t(
-                                        'Custom API base URL. For official channels, New API has built-in addresses. Only fill this for third-party proxy sites or special endpoints. Do not add /v1 or trailing slash.'
+                                        currentChannelTypeHints.baseUrl ||
+                                          'Custom API base URL. For official channels, New API has built-in addresses. Only fill this for third-party proxy sites or special endpoints. Do not add /v1 or trailing slash.'
                                       )}
                                     </FormDescription>
                                     <FormMessage />
@@ -2928,7 +2942,8 @@ export function ChannelMutateDrawer({
                                   }
 
                                   let keyDescription: ReactNode = t(
-                                    FIELD_DESCRIPTIONS.KEY
+                                    currentChannelTypeHints.key ||
+                                      FIELD_DESCRIPTIONS.KEY
                                   )
                                   if (isEditing) {
                                     let keyModeDescription = t(
@@ -3232,7 +3247,10 @@ export function ChannelMutateDrawer({
                                     <div className='space-y-1'>
                                       <FormLabel>{t('Models *')}</FormLabel>
                                       <FormDescription>
-                                        {t(FIELD_DESCRIPTIONS.MODELS)}
+                                        {t(
+                                          currentChannelTypeHints.models ||
+                                            FIELD_DESCRIPTIONS.MODELS
+                                        )}
                                       </FormDescription>
                                     </div>
                                     <Badge variant='outline' className='w-fit'>

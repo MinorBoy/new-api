@@ -48,6 +48,7 @@ const BRAND_AND_LITERAL_KEYS = new Set([
   'Cloudflare',
   'Cohere',
   'DeepSeek',
+  'Dimensio',
   'Discord',
   'DoubaoVideo',
   'FastGPT',

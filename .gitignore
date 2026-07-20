@@ -54,4 +54,11 @@ docker-compose*.yml
 nginx*.conf
 nginx*.conf.test
 
+examples/
+
+.codex/
+.opencode/
+
 .worktrees/
+.playwright*/
+*.pyc

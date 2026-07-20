@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     command: ["--log-dir", "/app/logs"]
     ports:
-      - "${NEW_API_PORT:-3000}:3000"
+      - "127.0.0.1:${NEW_API_PORT:-3000}:3000"
     volumes:
       - ./data:/data
       - ./logs:/app/logs
@@ -55,7 +55,7 @@ services:
       ERROR_LOG_ENABLED: "true"
       BATCH_UPDATE_ENABLED: "true"
       NODE_NAME: new-api-local-node
-      SESSION_SECRET: "${SESSION_SECRET:-new-api-local-session-secret}"
+      SESSION_SECRET: "${SESSION_SECRET:-}"
     depends_on:
       mysql:
         condition: service_healthy
@@ -82,7 +82,7 @@ services:
     volumes:
       - local_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      test: ["CMD-SHELL", "mysql --protocol=TCP -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" -e \"SELECT 1\""]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -119,7 +119,7 @@ Run:
 docker compose -f docker-compose.local.yml config
 ```
 
-Expected: the `new-api` service contains `build.context`, image `new-api:local`, port `3000`, both bind mounts, and healthy dependency conditions for `mysql` and `redis`.
+Expected: the `new-api` service contains `build.context`, image `new-api:local`, loopback-only port `3000`, both bind mounts, and healthy dependency conditions for `mysql` and `redis`.
 
 - [ ] **Step 5: Commit the Compose configuration**
 

@@ -131,6 +131,7 @@ OUTPUT_ROOT = Path("output") / "dimensio-client-acceptance"
 POLL_INTERVAL_SECONDS = 5
 MAX_WAIT_SECONDS = 15 * 60
 HTTP_TIMEOUT_SECONDS = 30
+SUBMIT_TIMEOUT_SECONDS = 120
 DOWNLOAD_TIMEOUT_SECONDS = 120
 ASSET_TIMEOUT_SECONDS = 20
 CHUNK_SIZE = 64 * 1024
@@ -392,6 +393,7 @@ def _request_json(
     url: str,
     api_key: str,
     payload: dict[str, Any] | None = None,
+    timeout_seconds: float = HTTP_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     body = None
     headers = {
@@ -404,7 +406,7 @@ def _request_json(
 
     request = Request(url, data=body, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             raw_body = response.read()
     except HTTPError as exc:
         raw_body = exc.read()
@@ -543,7 +545,11 @@ def run_acceptance(
         report["request"]["submit_url"] = submit_url
 
         submit_response = _request_json(
-            "POST", submit_url, normalized_api_key, payload
+            "POST",
+            submit_url,
+            normalized_api_key,
+            payload,
+            timeout_seconds=SUBMIT_TIMEOUT_SECONDS,
         )
         report["submit_response"] = submit_response
         task_id = submit_response.get("id")

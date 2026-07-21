@@ -496,6 +496,37 @@ class DimensioAcceptanceTest(unittest.TestCase):
                     acceptance.build_payload(mode),
                 )
 
+    def test_submission_uses_extended_timeout(self) -> None:
+        responses = [
+            {"id": "public-task-1"},
+            {
+                "id": "public-task-1",
+                "status": "succeeded",
+                "content": {"video_url": "https://example.test/video.mp4"},
+            },
+        ]
+        with TemporaryDirectory() as temp_dir, patch.object(
+            acceptance, "_request_json", side_effect=responses
+        ) as request_json, patch.object(
+            acceptance, "_download_video"
+        ):
+            exit_code, _ = acceptance.run_acceptance(
+                mode="text",
+                base_url="http://127.0.0.1:3000",
+                api_key="test-secret-1234",
+                output_root=Path(temp_dir),
+                poll_interval_seconds=0,
+                max_wait_seconds=5,
+            )
+
+        self.assertEqual(exit_code, 0)
+        submit_call, poll_call = request_json.call_args_list
+        self.assertEqual(
+            submit_call.kwargs["timeout_seconds"],
+            acceptance.SUBMIT_TIMEOUT_SECONDS,
+        )
+        self.assertNotIn("timeout_seconds", poll_call.kwargs)
+
     def test_failed_task_reports_error_and_does_not_download(self) -> None:
         state = MockState(
             polls=[

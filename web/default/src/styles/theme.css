@@ -39,6 +39,28 @@ For commercial licensing, please contact support@quantumnous.com
   --font-manrope:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
     'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  /* Geist sans + mono for the Living System landing composition. Registered
+   * as raw font tokens (not swapped into --font-sans/--font-mono) so the
+   * rest of the app keeps Public Sans / default mono. Consumed via
+   * `font-[var(--font-geist)]` or scoped CSS in features/home/components/
+   * living-system. */
+  --font-geist:
+    'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-geist-mono:
+    'Geist Mono Variable', ui-monospace, SFMono-Regular, monospace;
+  /* Instrument Serif — italic-only display face for headline accents in
+   * the Living System landing. */
+  --font-display: 'Instrument Serif', Georgia, serif;
+  /* Raw color palette for the Living System landing ("explosion of
+   * color"). Intentionally NOT semantic tokens — local to the landing
+   * composition, exposed as bg-violet / text-cyan / border-amber etc.
+   * via Tailwind utilities. Per-theme values defined in :root / .dark. */
+  --color-violet: var(--violet);
+  --color-blue: var(--blue);
+  --color-cyan: var(--cyan);
+  --color-emerald: var(--emerald);
+  --color-amber: var(--amber);
+  --color-rose: var(--rose);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -96,6 +118,14 @@ For commercial licensing, please contact support@quantumnous.com
 :root {
   --radius: 1rem;
   --app-header-height: 3rem;
+  /* Living System 6-color palette — light values (deeper saturation
+   * for contrast on light backgrounds). See @theme inline above. */
+  --violet: oklch(0.5 0.24 295);
+  --blue: oklch(0.5 0.21 255);
+  --cyan: oklch(0.5 0.13 205);
+  --emerald: oklch(0.5 0.13 160);
+  --amber: oklch(0.65 0.17 65);
+  --rose: oklch(0.55 0.22 15);
   /* Static build-channel fallback consumed when JS hasn't booted yet. */
   --app-rev: '2k6e8r7p';
   /* Currently active body font. The font axis swaps this between
@@ -177,6 +207,13 @@ For commercial licensing, please contact support@quantumnous.com
 .dark {
   /* OpenAI-like dark mode with a crisp charcoal canvas. */
   --background: oklch(0.235 0 0);
+  /* Living System 6-color palette — dark values (brighter for glow). */
+  --violet: oklch(0.65 0.22 295);
+  --blue: oklch(0.62 0.19 255);
+  --cyan: oklch(0.7 0.14 205);
+  --emerald: oklch(0.7 0.15 160);
+  --amber: oklch(0.78 0.16 65);
+  --rose: oklch(0.65 0.22 15);
   --foreground: oklch(0.965 0 0);
   --card: oklch(0.285 0 0);
   --card-foreground: oklch(0.965 0 0);

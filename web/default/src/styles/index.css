@@ -26,6 +26,14 @@ For commercial licensing, please contact support@quantumnous.com
  * that activates it. Loaded globally so font-switching is instantaneous
  * with no FOUT once the variable is fetched. */
 @import '@fontsource-variable/lora';
+/* Geist (sans + mono) and Instrument Serif back the Living System landing
+ * composition. Registered as raw font tokens (see --font-geist /
+ * --font-geist-mono / --font-display in theme.css) and consumed only by
+ * features/home/components/living-system — the rest of the app keeps
+ * Public Sans / default mono. */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import '@fontsource/instrument-serif';
 
 @import './theme.css';
 @import './theme-presets.css';

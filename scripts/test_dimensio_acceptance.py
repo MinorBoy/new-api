@@ -4,10 +4,11 @@ import unittest
 from contextlib import contextmanager, redirect_stderr
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from urllib.error import URLError
 from urllib.parse import urlsplit
 
 from scripts import dimensio_acceptance as acceptance
@@ -459,6 +460,23 @@ class DimensioAcceptanceTest(unittest.TestCase):
                 Path(report["video_path"]).read_bytes(), state.video_body
             )
             self.assertNotIn(api_key, report_text)
+
+    def test_download_retries_a_transient_network_failure(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "video.mp4"
+            with patch.object(
+                acceptance,
+                "urlopen",
+                side_effect=[URLError("TLS EOF"), BytesIO(b"retried-video")],
+            ) as urlopen, patch.object(acceptance.time, "sleep") as sleep:
+                acceptance._download_video(
+                    "https://example.test/video.mp4", target
+                )
+
+            self.assertEqual(target.read_bytes(), b"retried-video")
+            self.assertEqual(urlopen.call_count, 2)
+            sleep.assert_called_once_with(1)
+            self.assertFalse(target.with_suffix(".mp4.part").exists())
 
     def test_each_mode_submits_its_exact_payload(self) -> None:
         for mode in acceptance.ACCEPTANCE_MODES:

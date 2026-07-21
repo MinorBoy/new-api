@@ -133,6 +133,8 @@ MAX_WAIT_SECONDS = 15 * 60
 HTTP_TIMEOUT_SECONDS = 30
 SUBMIT_TIMEOUT_SECONDS = 120
 DOWNLOAD_TIMEOUT_SECONDS = 120
+DOWNLOAD_MAX_ATTEMPTS = 3
+DOWNLOAD_RETRY_DELAY_SECONDS = 1
 ASSET_TIMEOUT_SECONDS = 20
 CHUNK_SIZE = 64 * 1024
 
@@ -450,7 +452,6 @@ def _download_video(video_url: str, target: Path) -> None:
         )
 
     partial = target.with_suffix(target.suffix + ".part")
-    partial.unlink(missing_ok=True)
     request = Request(
         video_url,
         headers={
@@ -459,30 +460,37 @@ def _download_video(video_url: str, target: Path) -> None:
         },
         method="GET",
     )
-    try:
-        with urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-            with partial.open("wb") as output:
-                total_bytes = 0
-                while True:
-                    chunk = response.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    output.write(chunk)
-                    total_bytes += len(chunk)
-        if total_bytes == 0:
-            raise AcceptanceError("download", "Downloaded video is empty")
-        os.replace(partial, target)
-    except AcceptanceError:
+    for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
         partial.unlink(missing_ok=True)
-        raise
-    except HTTPError as exc:
-        partial.unlink(missing_ok=True)
-        raise AcceptanceError(
-            "download", f"Video download returned HTTP {exc.code}"
-        ) from exc
-    except (URLError, TimeoutError, OSError) as exc:
-        partial.unlink(missing_ok=True)
-        raise AcceptanceError("download", f"Video download failed: {exc}") from exc
+        try:
+            with urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                with partial.open("wb") as output:
+                    total_bytes = 0
+                    while True:
+                        chunk = response.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        total_bytes += len(chunk)
+            if total_bytes == 0:
+                raise AcceptanceError("download", "Downloaded video is empty")
+            os.replace(partial, target)
+            return
+        except AcceptanceError:
+            partial.unlink(missing_ok=True)
+            raise
+        except HTTPError as exc:
+            partial.unlink(missing_ok=True)
+            raise AcceptanceError(
+                "download", f"Video download returned HTTP {exc.code}"
+            ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            partial.unlink(missing_ok=True)
+            if attempt == DOWNLOAD_MAX_ATTEMPTS:
+                raise AcceptanceError(
+                    "download", f"Video download failed: {exc}"
+                ) from exc
+            time.sleep(DOWNLOAD_RETRY_DELAY_SECONDS * attempt)
 
 
 def _write_report(report: dict[str, Any], path: Path, api_key: str) -> None:

@@ -32,7 +32,7 @@ PUBLIC_MEDIA_URLS = {
         "test-images/02f54833d4d08fc33d2090eaeda9f0d2dbf1c7b0/"
         "video/duration/v1_4s.mp4"
     ),
-    "audio_1": "https://www.w3schools.com/html/horse.mp3",
+    "audio_1": "https://download.samplelib.com/mp3/sample-3s.mp3",
 }
 
 MODE_PAYLOADS = {

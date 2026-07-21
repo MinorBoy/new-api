@@ -219,6 +219,10 @@ class DimensioModePayloadTest(unittest.TestCase):
                 "video/duration/v1_4s.mp4"
             ),
         )
+        self.assertEqual(
+            multimodal_payload["content"][5]["audio_url"]["url"],
+            "https://download.samplelib.com/mp3/sample-3s.mp3",
+        )
 
     def test_build_payload_returns_independent_objects(self) -> None:
         first = acceptance.build_payload("image")

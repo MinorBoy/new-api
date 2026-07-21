@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/setting/video_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -354,6 +355,31 @@ func UpdateOption(c *gin.Context) {
 	case "billing_setting.duration_price":
 		err = billing_setting.ValidateDurationPriceJSONString(option.Value.(string))
 		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "video_setting.base64_input_enabled":
+		if option.Value != "true" && option.Value != "false" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "video Base64 input setting must be true or false",
+			})
+			return
+		}
+	case "video_setting.json_request_body_max_mb":
+		trimmed := strings.TrimSpace(option.Value.(string))
+		limit, parseErr := strconv.Atoi(trimmed)
+		if parseErr != nil || strconv.Itoa(limit) != trimmed {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "video JSON request body limit must be an integer between 1 and 128 MB",
+			})
+			return
+		}
+		if err := video_setting.ValidateJSONRequestBodyMaxMB(limit); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),

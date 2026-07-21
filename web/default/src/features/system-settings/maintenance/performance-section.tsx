@@ -71,6 +71,10 @@ import { safeNumberFieldProps } from '../utils/numeric-field'
  * server-side key format right before persisting.
  */
 const perfSchema = z.object({
+  video_setting: z.object({
+    base64_input_enabled: z.boolean(),
+    json_request_body_max_mb: z.coerce.number().int().min(1).max(128),
+  }),
   performance_setting: z.object({
     disk_cache_enabled: z.boolean(),
     disk_cache_threshold_mb: z.coerce.number().min(1),
@@ -87,6 +91,8 @@ type PerfFormInput = z.input<typeof perfSchema>
 type PerfFormValues = z.output<typeof perfSchema>
 
 type FlatPerfDefaults = {
+  'video_setting.base64_input_enabled': boolean
+  'video_setting.json_request_body_max_mb': number
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number
@@ -98,6 +104,11 @@ type FlatPerfDefaults = {
 }
 
 const buildFormDefaults = (defaults: FlatPerfDefaults): PerfFormInput => ({
+  video_setting: {
+    base64_input_enabled: defaults['video_setting.base64_input_enabled'],
+    json_request_body_max_mb:
+      defaults['video_setting.json_request_body_max_mb'],
+  },
   performance_setting: {
     disk_cache_enabled: defaults['performance_setting.disk_cache_enabled'],
     disk_cache_threshold_mb:
@@ -116,6 +127,10 @@ const buildFormDefaults = (defaults: FlatPerfDefaults): PerfFormInput => ({
 })
 
 const normalizeFormValues = (values: PerfFormValues): FlatPerfDefaults => ({
+  'video_setting.base64_input_enabled':
+    values.video_setting.base64_input_enabled,
+  'video_setting.json_request_body_max_mb':
+    values.video_setting.json_request_body_max_mb,
   'performance_setting.disk_cache_enabled':
     values.performance_setting.disk_cache_enabled,
   'performance_setting.disk_cache_threshold_mb':
@@ -320,6 +335,70 @@ export function PerformanceSection(props: Props) {
             onSave={form.handleSubmit(onSubmit)}
             isSaving={updateOption.isPending}
           />
+          <div>
+            <h4 className='font-medium'>{t('Video Request Protection')}</h4>
+            <p className='text-muted-foreground mt-1 text-xs'>
+              {t(
+                'Controls JSON request safeguards for video generation submissions.'
+              )}
+            </p>
+          </div>
+
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='video_setting.base64_input_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>
+                      {t('Allow Base64 reference media for video generation')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'When disabled, clients should use HTTP(S) URLs or supported multipart uploads for reference images and videos.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='video_setting.json_request_body_max_mb'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Video JSON Request Body Limit (MB)')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={1}
+                      max={128}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Applies only to video JSON requests. Base64 input remains subject to this limit when enabled.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <Separator />
+
           {/* Disk Cache Settings */}
           <div>
             <h4 className='font-medium'>{t('Disk Cache Settings')}</h4>

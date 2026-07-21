@@ -107,6 +107,10 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <PerformanceSection
         defaultValues={{
+          'video_setting.base64_input_enabled':
+            settings['video_setting.base64_input_enabled'] ?? false,
+          'video_setting.json_request_body_max_mb':
+            settings['video_setting.json_request_body_max_mb'] ?? 16,
           'performance_setting.disk_cache_enabled':
             settings['performance_setting.disk_cache_enabled'] ?? false,
           'performance_setting.disk_cache_threshold_mb':

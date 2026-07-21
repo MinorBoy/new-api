@@ -26,8 +26,8 @@ import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { CTA, Features, Hero, HowItWorks, Stats } from './components'
-import { useHomePageContent } from './hooks'
+import { CTA, Features, Hero, HowItWorks, LivingSystemHome, Stats } from './components'
+import { useHomePageContent, useHomePageStyle } from './hooks'
 
 export function Home() {
   const { i18n, t } = useTranslation()
@@ -36,6 +36,11 @@ export function Home() {
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
+  // Style is only consulted in the default-home branch below — admin
+  // custom content (URL / HTML / markdown) always wins regardless of
+  // the selected style, so we read it unconditionally here for cache
+  // priming but only branch on it when content is empty.
+  const { style: homeStyle } = useHomePageStyle()
 
   const syncIframePreferences = useCallback(() => {
     try {
@@ -118,6 +123,14 @@ export function Home() {
         </div>
       </PublicLayout>
     )
+  }
+
+  // The admin-configured landing composition. Falls back to the
+  // existing five-section default home for any unknown value so the
+  // option is forward-compatible (a future 'editorial' style would
+  // just need another branch here).
+  if (homeStyle === 'living-system') {
+    return <LivingSystemHome isAuthenticated={isAuthenticated} />
   }
 
   return (

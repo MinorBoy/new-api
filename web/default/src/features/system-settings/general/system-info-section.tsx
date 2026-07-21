@@ -57,6 +57,9 @@ const _systemInfoSchema = z.object({
   theme: z.object({
     frontend: z.enum(['default', 'classic']),
   }),
+  home: z.object({
+    style: z.enum(['default', 'living-system']),
+  }),
   SystemName: z.string().min(1),
   ServerAddress: z.string().optional(),
   Logo: z.string().url().optional().or(z.literal('')),
@@ -89,6 +92,12 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       frontend:
         defaultValues.theme?.frontend === 'classic' ? 'classic' : 'default',
     },
+    home: {
+      style:
+        defaultValues.home?.style === 'living-system'
+          ? 'living-system'
+          : 'default',
+    },
     SystemName: normalizeValue(defaultValues.SystemName),
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
     Logo: normalizeValue(defaultValues.Logo),
@@ -104,6 +113,9 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
   const systemInfoSchemaWithI18n = z.object({
     theme: z.object({
       frontend: z.enum(['default', 'classic']),
+    }),
+    home: z.object({
+      style: z.enum(['default', 'living-system']),
     }),
     SystemName: z.string().min(1, {
       error: () => t('System name is required'),
@@ -228,6 +240,50 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                     <FormDescription>
                       {t(
                         'Switch between the new frontend and the classic frontend. Changes take effect after page reload.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='home.style'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Home Page Style')}</FormLabel>
+                    <Select
+                      items={[
+                        {
+                          value: 'default',
+                          label: t('Default'),
+                        },
+                        {
+                          value: 'living-system',
+                          label: t('Living System'),
+                        },
+                      ]}
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='default'>{t('Default')}</SelectItem>
+                          <SelectItem value='living-system'>
+                            {t('Living System')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {t(
+                        'Choose the public landing page composition. "Living System" is a 2026-trend visual variant with routing animation and a scroll rail.'
                       )}
                     </FormDescription>
                     <FormMessage />

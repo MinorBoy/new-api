@@ -39,6 +39,11 @@ const SITE_SECTIONS = [
           theme: {
             frontend: settings['theme.frontend'] as 'default' | 'classic',
           },
+          home: {
+            style: settings['home.style'] === 'living-system'
+              ? 'living-system'
+              : 'default',
+          },
           SystemName: settings.SystemName,
           Logo: settings.Logo,
           Footer: settings.Footer,

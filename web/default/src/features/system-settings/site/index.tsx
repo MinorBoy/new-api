@@ -26,6 +26,10 @@ import {
 
 const defaultSiteSettings: SiteSettings = {
   'theme.frontend': 'default',
+  // home.style selects the public landing page composition consumed via
+  // GET /api/home_page_style. Parallel to theme.frontend but stays inside
+  // the default frontend (no product swap).
+  'home.style': 'default',
   Notice: '',
   SystemName: 'New API',
   Logo: '',

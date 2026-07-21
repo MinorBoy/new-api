@@ -69,6 +69,10 @@ func InitOptionMap() {
 	common.OptionMap["Notice"] = ""
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
+	// home.style selects which landing page composition the public home
+	// route renders. Mirrors the OptionMap read pattern used by
+	// HomePageContent; consumed by controller.GetHomePageStyle.
+	common.OptionMap["home.style"] = "default"
 	common.OptionMap["Footer"] = common.Footer
 	common.OptionMap["SystemName"] = common.SystemName
 	common.OptionMap["Logo"] = common.Logo

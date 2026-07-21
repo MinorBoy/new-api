@@ -232,6 +232,17 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "home.style":
+		// Whitelist the public home page composition. Mirrors the
+		// theme.frontend pattern so an admin cannot push a bogus value
+		// that the frontend switch would silently fall back from.
+		if option.Value != "default" && option.Value != "living-system" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无效的首页风格，可选值：default（默认首页）、living-system（活力系统首页）",
+			})
+			return
+		}
 	case "GroupRatio":
 		err = ratio_setting.CheckGroupRatio(option.Value.(string))
 		if err != nil {

@@ -233,6 +233,21 @@ func GetHomePageContent(c *gin.Context) {
 	return
 }
 
+// GetHomePageStyle returns the admin-configured home page composition
+// ("default" | "living-system"). Public endpoint consumed by anonymous
+// visitors on the landing route — mirrors GetHomePageContent so the
+// frontend can pick the landing variant without an authenticated call.
+func GetHomePageStyle(c *gin.Context) {
+	common.OptionMapRWMutex.RLock()
+	defer common.OptionMapRWMutex.RUnlock()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    common.OptionMap["home.style"],
+	})
+	return
+}
+
 func SendEmailVerification(c *gin.Context) {
 	email := model.NormalizeEmail(c.Query("email"))
 	if err := common.Validate.Var(email, "required,email"); err != nil {

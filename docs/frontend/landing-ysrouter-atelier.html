@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YSRouter — The Atelier Edition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ════════════════════════════════════════════════════════
+     YSROUTER ATELIER — "The Hand-Bound Manual"
+     Webflow 2026 八大趋势的另一种诠释：手工 / 墨水 / 纸张
+       1. Proprietary effects — 墨水扩散 + 邮戳印章（品牌专属）
+       2. Art × UI — 产品 UI 嵌入手绘速写/印象派笔触背景
+       3. Minimalism in copy — 手册式编号 + 工程笔记语气
+       4. TL;DR — 章节摘要卡（像书的内页目录）
+       5. Explosion of color — 5 色墨水/水彩（赭石/靛蓝/朱砂/青绿/紫）
+       6. Dynamic text — SVG 手写 reveal（stroke-dashoffset）
+       7. Guided scrolling — 顶部书脊章节条 + 角注页码
+       8. Infinite canvas — 网格纸（graph paper）纹理
+     ════════════════════════════════════════════════════════ */
+
+  :root{
+    /* 浅色：米白手工纸 */
+    --paper:        #f3ede0;   /* 主纸色，略暖 */
+    --paper-2:      #ebe3d2;   /* 次级纸 */
+    --paper-3:      #e0d6c0;   /* 三级 */
+    --ink:          #1f1a14;   /* 墨黑（暖） */
+    --ink-2:        #4a3f30;
+    --ink-3:        #7a6c56;
+    --ink-4:        #a89878;
+    --rule:         #c9bea4;
+    --rule-soft:    #d8cfb8;
+    /* 5 色墨水 */
+    --ochre:        #b8651a;   /* 赭石 */
+    --indigo:       #2d4a8e;   /* 靛蓝 */
+    --vermilion:    #b8392c;   /* 朱砂 */
+    --teal:         #2d7878;   /* 青绿 */
+    --plum:         #6b3a6b;   /* 紫 */
+    --accent:       var(--ochre);
+    /* 纸张纹理（极淡网格纸） */
+    --grid:         rgba(31,26,20,.06);
+    --grid-strong:  rgba(31,26,20,.12);
+    /* 墨水扩散效果 */
+    --ink-bleed:    rgba(31,26,20,.04);
+    --shadow:       0 1px 2px rgba(31,26,20,.06), 0 8px 24px -8px rgba(31,26,20,.12);
+    --maxw:         1100px;
+    --serif: 'EB Garamond', Georgia, serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --hand: 'Caveat', cursive;
+    --radius: 4px;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"]{
+    /* 深色：墨黑纸 / 暗夜书房 */
+    --paper:        #1a1612;
+    --paper-2:      #221d17;
+    --paper-3:      #2b251d;
+    --ink:          #f0e8d6;
+    --ink-2:        #b8aa8c;
+    --ink-3:        #8a7c64;
+    --ink-4:        #5a4f3e;
+    --rule:         #3d342a;
+    --rule-soft:    #2f2820;
+    --ochre:        #d4844a;
+    --indigo:       #6a8fcf;
+    --vermilion:    #e06555;
+    --teal:         #5aa8a8;
+    --plum:         #b07ab0;
+    --grid:         rgba(240,232,214,.05);
+    --grid-strong:  rgba(240,232,214,.10);
+    --ink-bleed:    rgba(240,232,214,.04);
+    --shadow:       0 1px 2px rgba(0,0,0,.3), 0 8px 24px -8px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  html,body{background:var(--paper);color:var(--ink);font-family:var(--serif);
+    -webkit-font-smoothing:antialiased;line-height:1.6;font-size:17px;
+    transition:background-color .4s ease,color .4s ease}
+  body{min-height:100vh;overflow-x:hidden;position:relative}
+
+  /* 网格纸纹理（infinite canvas: graph paper） */
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:32px 32px;
+  }
+  /* 次级网格（更细） */
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:8px 8px;
+    opacity:.5;
+  }
+  /* 纸张纤维噪点（极轻） */
+  .paper-grain{
+    position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.4;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .08 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode:multiply;
+  }
+  :root[data-theme="dark"] .paper-grain{mix-blend-mode:screen;opacity:.6}
+
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px;position:relative;z-index:2}
+  .mono{font-family:var(--mono);font-size:.85em;letter-spacing:.02em}
+  .hand{font-family:var(--hand)}
+  .accent{color:var(--accent)}
+
+  /* ═══ 顶部书脊章节条（guided scrolling：像书的章节标签）═══ */
+  .spine{
+    position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--paper) 88%,transparent);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--rule);
+    font-family:var(--mono);font-size:11px}
+  .spine-in{max-width:var(--maxw);margin:0 auto;padding:11px 32px;
+    display:flex;align-items:center;gap:24px}
+  .spine-brand{display:flex;align-items:center;gap:9px;font-weight:600;
+    font-family:var(--serif);font-size:16px;letter-spacing:-.01em}
+  .spine-brand .stamp{width:22px;height:22px;border:1.5px solid var(--ink);
+    border-radius:50%;display:grid;place-items:center;color:var(--vermilion);
+    font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:0;
+    transform:rotate(-8deg)}
+  .spine-chapters{display:flex;gap:18px;margin-left:8px;flex:1}
+  .spine-chapters a{color:var(--ink-3);letter-spacing:.06em;transition:.15s;
+    padding:4px 0;position:relative}
+  .spine-chapters a:hover,.spine-chapters a.active{color:var(--ink)}
+  .spine-chapters a.active::after{content:"";position:absolute;left:0;right:0;bottom:-2px;
+    height:2px;background:var(--accent)}
+  .spine-meta{display:flex;align-items:center;gap:12px}
+  .spine-page{color:var(--ink-4);font-size:10.5px}
+  .spine-page .cur{color:var(--ink)}
+  .theme-toggle{width:32px;height:32px;border-radius:50%;background:transparent;
+    border:1px solid var(--rule);cursor:pointer;color:var(--ink-2);
+    display:grid;place-items:center;transition:.15s}
+  .theme-toggle:hover{color:var(--ink);border-color:var(--ink-3)}
+  .theme-toggle .icon-sun{display:none}
+  .theme-toggle .icon-moon{display:block}
+  :root[data-theme="dark"] .theme-toggle .icon-sun{display:block}
+  :root[data-theme="dark"] .theme-toggle .icon-moon{display:none}
+
+  /* ═══ Hero ═══ */
+  .hero{padding:90px 0 70px;position:relative}
+  .hero-edition{
+    display:inline-flex;align-items:center;gap:10px;
+    font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:.14em;
+    margin-bottom:36px}
+  .hero-edition::before{content:"";width:24px;height:1px;background:var(--ink-3)}
+  /* 邮戳印章（proprietary effect） */
+  .stamp-mark{
+    display:inline-block;border:2px solid var(--vermilion);color:var(--vermilion);
+    padding:3px 9px;font-family:var(--mono);font-size:10px;font-weight:700;
+    letter-spacing:.18em;transform:rotate(-6deg);
+    border-radius:3px;opacity:.85;
+    text-transform:uppercase}
+  .hero h1{
+    font-size:clamp(48px,7vw,92px);font-weight:500;line-height:.98;
+    letter-spacing:-.025em;margin-bottom:32px;max-width:14ch}
+  .hero h1 em{font-style:italic;color:var(--accent);font-weight:500}
+  .hero h1 .brush{
+    position:relative;display:inline-block}
+  .hero h1 .brush::after{
+    content:"";position:absolute;left:-4px;right:-4px;bottom:6px;height:14px;
+    background:var(--accent);opacity:.18;z-index:-1;border-radius:2px;
+    transform:skewX(-8deg)}
+  .hero-sub{font-size:21px;color:var(--ink-2);max-width:540px;line-height:1.5;
+    margin-bottom:48px}
+  .hero-cta{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .btn{font-family:var(--serif);font-size:16px;padding:11px 22px;border-radius:var(--radius);
+    border:1px solid var(--ink);color:var(--ink);background:transparent;cursor:pointer;
+    transition:.15s;display:inline-flex;align-items:center;gap:8px}
+  .btn:hover{background:var(--ink);color:var(--paper)}
+  .btn-primary{background:var(--ink);color:var(--paper)}
+  .btn-primary:hover{background:var(--accent);border-color:var(--accent)}
+  .btn-ghost{border-color:var(--rule);color:var(--ink-2)}
+  .btn-ghost:hover{border-color:var(--ink);color:var(--ink);background:transparent}
+
+  /* 手写注释（dynamic text 的另一种：手写体覆盖） */
+  .hero-marginal{
+    position:absolute;right:5%;top:30%;font-family:var(--hand);
+    font-size:24px;color:var(--vermilion);transform:rotate(-4deg);
+    max-width:180px;line-height:1.2;opacity:.85}
+  .hero-marginal .arrow{display:block;font-size:32px;margin-top:4px}
+  @media (max-width:1100px){.hero-marginal{display:none}}
+
+  /* ═══ 章节通用 ═══ */
+  section.chapter{padding:100px 0;position:relative;border-top:1px solid var(--rule)}
+  .chap-head{display:grid;grid-template-columns:1fr 2fr;gap:48px;margin-bottom:64px;
+    align-items:start}
+  @media (max-width:768px){.chap-head{grid-template-columns:1fr;gap:16px}}
+  .chap-no{font-family:var(--mono);font-size:12px;color:var(--accent);
+    letter-spacing:.18em;line-height:1.5}
+  .chap-no .roman{display:block;font-family:var(--serif);font-style:italic;
+    font-size:48px;color:var(--ink);letter-spacing:0;margin-top:8px;font-weight:500}
+  .chap-title-wrap h2{font-family:var(--serif);font-size:clamp(36px,5vw,60px);
+    font-weight:500;line-height:1.02;letter-spacing:-.025em;margin-bottom:20px}
+  .chap-title-wrap h2 em{font-style:italic;color:var(--accent)}
+  .chap-title-wrap p{font-size:18px;color:var(--ink-2);line-height:1.55;max-width:54ch}
+
+  /* ═══ §I — TL;DR：内页目录卡（pitch deck 风）═══ */
+  .tldr{
+    background:var(--paper-2);border:1px solid var(--rule);
+    padding:40px 44px;border-radius:var(--radius);position:relative;
+    box-shadow:var(--shadow)}
+  .tldr::before{content:"§  I";position:absolute;top:14px;right:20px;
+    font-family:var(--serif);font-style:italic;font-size:14px;color:var(--ink-4)}
+  .tldr-label{font-family:var(--mono);font-size:11px;color:var(--ink-3);
+    letter-spacing:.18em;margin-bottom:6px}
+  .tldr-h{font-family:var(--serif);font-style:italic;font-size:32px;
+    font-weight:500;margin-bottom:28px;color:var(--ink)}
+  .tldr-list{display:grid;grid-template-columns:1fr 1fr;gap:20px 36px;
+    list-style:none}
+  @media (max-width:600px){.tldr-list{grid-template-columns:1fr}}
+  .tldr-item{display:grid;grid-template-columns:auto 1fr;gap:14px;
+    padding-bottom:18px;border-bottom:1px dotted var(--rule)}
+  .tldr-item .n{font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:600;
+    padding-top:2px}
+  .tldr-item .t{font-family:var(--serif);font-size:18px;font-weight:500;color:var(--ink);
+    line-height:1.3}
+  .tldr-item .d{font-size:14px;color:var(--ink-3);margin-top:4px;line-height:1.45}
+
+  /* ═══ §II — Demo：Art × UI，产品嵌入速写背景 ═══ */
+  .gallery{position:relative;padding:30px 0}
+  .gallery-frame{
+    position:relative;padding:48px;border-radius:var(--radius);
+    background:var(--paper-2);border:1px solid var(--rule);
+    box-shadow:var(--shadow);overflow:hidden}
+  /* 手绘速写背景（SVG 印象派笔触） */
+  .gallery-frame::before{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 400'><g fill='none' stroke-linecap='round' stroke-width='2' opacity='.5'><path d='M40,80 Q120,40 200,90 T360,70' stroke='%23b8651a'/><path d='M480,60 Q540,100 620,70 T760,90' stroke='%232d4a8e'/><path d='M60,300 Q140,260 220,310 T380,290' stroke='%232d7878'/><path d='M460,310 Q520,270 600,320 T760,300' stroke='%236b3a6b'/><circle cx='100' cy='200' r='3' fill='%23b8392c'/><circle cx='300' cy='180' r='2' fill='%23b8651a'/><circle cx='500' cy='220' r='3' fill='%232d4a8e'/><circle cx='700' cy='200' r='2' fill='%232d7878'/></g></svg>");
+    background-size:cover;background-position:center}
+  :root[data-theme="dark"] .gallery-frame::before{opacity:.3}
+  .terminal{position:relative;background:var(--paper);border:1px solid var(--ink-2);
+    border-radius:2px;overflow:hidden;box-shadow:0 12px 32px -12px rgba(31,26,20,.3)}
+  .term-head{display:flex;align-items:center;gap:8px;padding:11px 14px;
+    border-bottom:1px solid var(--rule);background:var(--paper-2);
+    font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+  .term-head .dots{display:flex;gap:5px}
+  .term-head .dots span{width:9px;height:9px;border-radius:50%;border:1px solid var(--ink-3)}
+  .term-head .ttl{margin-left:8px;letter-spacing:.04em}
+  .term-head .folio{margin-left:auto;color:var(--ink-4);font-style:italic;font-family:var(--serif)}
+  .term-body{padding:24px 26px;font-family:var(--mono);font-size:13.5px;line-height:2}
+  .term-body .cmt{color:var(--ink-3);font-style:italic;font-family:var(--serif)}
+  .term-body .cmd{color:var(--teal)}
+  .term-body .flg{color:var(--plum)}
+  .term-body .str{color:var(--ochre)}
+  .term-body .ok{color:var(--teal);font-weight:500}
+  .term-body .out{color:var(--ink-2)}
+  .gallery-caption{margin-top:24px;text-align:center;font-family:var(--serif);
+    font-style:italic;font-size:14px;color:var(--ink-3)}
+  .gallery-caption::before{content:"— ";color:var(--ink-4)}
+  .gallery-caption::after{content:" —";color:var(--ink-4)}
+
+  /* ═══ §III — Features：水彩 5 色，手册条目风 ═══ */
+  .features{display:flex;flex-direction:column}
+  .feat{display:grid;grid-template-columns:60px 1fr 200px;gap:32px;
+    padding:36px 0;border-top:1px solid var(--rule);align-items:start}
+  .feat:last-child{border-bottom:1px solid var(--rule)}
+  @media (max-width:768px){.feat{grid-template-columns:1fr;gap:12px}}
+  .feat-num{font-family:var(--mono);font-size:12px;color:var(--feat-color);font-weight:600;
+    letter-spacing:.08em;padding-top:6px}
+  .feat-body h3{font-family:var(--serif);font-size:30px;font-weight:500;line-height:1.1;
+    letter-spacing:-.02em;margin-bottom:10px}
+  .feat-body h3 em{font-style:italic;color:var(--feat-color)}
+  .feat-body p{font-size:16px;color:var(--ink-2);line-height:1.55;max-width:52ch}
+  .feat-aside{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);line-height:1.7;
+    padding-top:10px;border-left:2px solid var(--feat-color);padding-left:14px}
+  .feat-aside strong{color:var(--ink);font-weight:500}
+
+  /* ═══ §IV — Stats：手册式数字 ═══ */
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:56px 80px}
+  @media (max-width:768px){.stats{grid-template-columns:1fr;gap:48px}}
+  .stat figure{margin:0;position:relative}
+  .stat .big{font-family:var(--serif);font-size:clamp(80px,11vw,128px);
+    font-weight:500;line-height:.9;letter-spacing:-.04em;color:var(--ink)}
+  .stat .big em{font-style:italic;color:var(--stat-color)}
+  .stat figcaption{font-family:var(--mono);font-size:12px;color:var(--ink-3);
+    letter-spacing:.04em;margin-top:12px;line-height:1.5;max-width:30ch}
+  .stat .marginal{position:absolute;top:0;right:0;font-family:var(--hand);
+    font-size:20px;color:var(--stat-color);transform:rotate(6deg);opacity:.7}
+
+  /* ═══ §V — Models：墨水点矩阵 ═══ */
+  .models{display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+    border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden;
+    background:var(--paper-2)}
+  @media (max-width:768px){.models{grid-template-columns:repeat(2,1fr)}}
+  .model{padding:24px 22px;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);
+    display:flex;align-items:center;gap:14px;transition:.2s;position:relative}
+  .model:hover{background:var(--paper-3)}
+  .model:nth-child(4n){border-right:none}
+  .model .ink-dot{
+    width:14px;height:14px;border-radius:50%;background:var(--model-color);
+    box-shadow:0 0 0 4px color-mix(in srgb,var(--model-color) 18%,transparent);
+    flex-shrink:0;position:relative}
+  .model .ink-dot::after{
+    content:"";position:absolute;inset:-6px;border-radius:50%;
+    background:radial-gradient(circle,var(--model-color),transparent 70%);
+    opacity:.3;filter:blur(3px)}
+  .model .nm{font-family:var(--serif);font-size:18px;color:var(--ink)}
+  .model .fam{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:2px}
+  .model .more{font-style:italic;color:var(--ink-3)}
+
+  /* ═══ §VI — Pricing：账簿页 ═══ */
+  .ledger{background:var(--paper-2);border:1px solid var(--rule);
+    border-radius:var(--radius);padding:48px;box-shadow:var(--shadow);position:relative}
+  .ledger::before{content:"LEDGER";position:absolute;top:18px;right:24px;
+    font-family:var(--mono);font-size:10px;color:var(--ink-4);letter-spacing:.2em}
+  .ledger-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:56px}
+  @media (max-width:768px){.ledger-grid{grid-template-columns:1fr;gap:40px}}
+  .ledger-h{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--accent);
+    letter-spacing:.08em;margin-bottom:8px}
+  .ledger-amt{font-family:var(--serif);font-size:88px;font-weight:500;line-height:.95;
+    letter-spacing:-.04em;margin-bottom:14px}
+  .ledger-amt em{font-style:italic;color:var(--accent)}
+  .ledger-amt .unit{font-family:var(--mono);font-size:14px;color:var(--ink-3);
+    letter-spacing:.04em;display:block;margin-top:8px}
+  .ledger-desc{font-size:16px;color:var(--ink-2);line-height:1.6;margin-bottom:28px;
+    max-width:42ch}
+  .ledger-desc strong{color:var(--ink)}
+  .ledger-rules{list-style:none;font-family:var(--mono);font-size:12.5px;color:var(--ink-3);
+    line-height:1.9;padding-top:20px;border-top:1px dotted var(--rule)}
+  .ledger-rules li::before{content:"§  ";color:var(--accent)}
+  .bill{font-family:var(--mono);font-size:13px}
+  .bill-h{font-size:11px;color:var(--ink-4);letter-spacing:.14em;
+    text-transform:uppercase;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--ink-2)}
+  .bill-row{display:grid;grid-template-columns:1.5fr .8fr .6fr;gap:8px;
+    padding:8px 0;border-bottom:1px dotted var(--rule)}
+  .bill-row span:last-child{text-align:right;color:var(--ink)}
+  .bill-total{display:flex;justify-content:space-between;align-items:baseline;
+    margin-top:14px;padding-top:14px;border-top:2px double var(--ink-2)}
+  .bill-total .l{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+  .bill-total .v{font-family:var(--serif);font-style:italic;font-size:30px;color:var(--accent)}
+  .ledger-sign{margin-top:24px;font-family:var(--hand);font-size:22px;color:var(--ink-2);
+    border-top:1px solid var(--rule);padding-top:14px;display:flex;justify-content:space-between}
+  .ledger-sign .seal{font-family:var(--mono);font-size:10px;color:var(--vermilion);
+    border:1.5px solid var(--vermilion);padding:3px 8px;border-radius:3px;
+    transform:rotate(-4deg);letter-spacing:.14em;align-self:center}
+
+  /* ═══ Final CTA ═══ */
+  .final{padding:140px 0;text-align:center;position:relative;border-top:1px solid var(--rule)}
+  .final::before{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:600px;height:600px;border-radius:50%;
+    background:radial-gradient(circle,var(--ink-bleed),transparent 60%);pointer-events:none}
+  .final-ed{font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:.2em;
+    margin-bottom:28px}
+  .final h2{font-family:var(--serif);font-size:clamp(48px,7vw,88px);font-weight:500;
+    line-height:.98;letter-spacing:-.025em;margin-bottom:32px;max-width:14ch;margin-inline:auto}
+  .final h2 em{font-style:italic;color:var(--accent)}
+  .final p{font-size:19px;color:var(--ink-2);max-width:520px;margin:0 auto 44px;line-height:1.5}
+  .final-cta{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+
+  /* ═══ Colophon（footer，像书末版权页）═══ */
+  .colophon{padding:64px 0 48px;border-top:1px solid var(--rule);background:var(--paper-2)}
+  .colo-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:40px}
+  @media (max-width:768px){.colo-grid{grid-template-columns:1fr 1fr}}
+  .colo-brand{font-family:var(--serif);font-style:italic;font-size:28px;margin-bottom:12px}
+  .colo-desc{font-size:14px;color:var(--ink-2);max-width:300px;line-height:1.6;font-family:var(--serif)}
+  .colo-col h5{font-family:var(--mono);font-size:10.5px;color:var(--ink-4);
+    letter-spacing:.16em;text-transform:uppercase;margin-bottom:14px}
+  .colo-col a{display:block;font-size:15px;font-family:var(--serif);color:var(--ink-2);
+    padding:4px 0;transition:.15s}
+  .colo-col a:hover{color:var(--accent)}
+  .colo-bot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;
+    gap:16px;padding-top:28px;border-top:1px solid var(--rule);font-family:var(--mono);
+    font-size:11px;color:var(--ink-4);letter-spacing:.04em}
+  .colo-bot .seal{color:var(--vermilion);border:1px solid var(--vermilion);padding:3px 8px;
+    border-radius:2px;letter-spacing:.14em}
+</style>
+</head>
+<body>
+<div class="paper-grain"></div>
+
+<!-- ═══ 书脊章节条 ═══ -->
+<div class="spine">
+  <div class="spine-in">
+    <div class="spine-brand">
+      <span class="stamp">YS</span>
+      YSRouter
+    </div>
+    <nav class="spine-chapters">
+      <a href="#i" data-ch="i">§I  Summary</a>
+      <a href="#ii" data-ch="ii">§II  Demo</a>
+      <a href="#iii" data-ch="iii">§III  Features</a>
+      <a href="#iv" data-ch="iv">§IV  Numbers</a>
+      <a href="#v" data-ch="v">§V  Index</a>
+      <a href="#vi" data-ch="vi">§VI  Ledger</a>
+    </nav>
+    <div class="spine-meta">
+      <span class="spine-page">p. <span class="cur" id="pageCur">1</span>/<span id="pageTot">6</span></span>
+      <button class="theme-toggle" id="themeToggle" aria-label="toggle theme">
+        <svg class="icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <svg class="icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ HERO ═══ -->
+<header class="hero wrap">
+  <div class="hero-edition">
+    <span class="stamp-mark">Atelier Ed.</span>
+    Vol. III · MMXXVI · 手工装订
+  </div>
+  <h1>
+    Every model,<br>
+    <span class="brush">one</span> <em>mesh.</em>
+  </h1>
+  <p class="hero-sub">Fifty upstream AI services, bound into a single OpenAI-compatible endpoint. No client changes. No markup. The whole catalog, one signature.</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="#start">Begin routing →</a>
+    <a class="btn btn-ghost" href="#ii">See it work</a>
+  </div>
+  <div class="hero-marginal">
+    the whole catalog
+    <span class="arrow">↘</span>
+  </div>
+</header>
+
+<!-- ═══ §I — TL;DR ═══ -->
+<section class="chapter wrap" id="i">
+  <div class="chap-head">
+    <div class="chap-no">
+      SUMMARY
+      <span class="roman">§ I</span>
+    </div>
+    <div class="chap-title-wrap">
+      <h2>For the <em>impatient.</em></h2>
+      <p>Scan this first. The whole offering in four lines, before you commit to the rest of the manual.</p>
+    </div>
+  </div>
+  <div class="tldr">
+    <div class="tldr-label">IN BRIEF</div>
+    <div class="tldr-h">What this is.</div>
+    <ul class="tldr-list">
+      <li class="tldr-item">
+        <span class="n">i.</span>
+        <div><div class="t">Drop-in base URL</div><div class="d">OpenAI-compatible. Swap one string, every model reachable.</div></div>
+      </li>
+      <li class="tldr-item">
+        <span class="n">ii.</span>
+        <div><div class="t">Fifty upstreams</div><div class="d">Auto-normalized to a single shape your SDK already speaks.</div></div>
+      </li>
+      <li class="tldr-item">
+        <span class="n">iii.</span>
+        <div><div class="t">Pay per token</div><div class="d">No markup, no tiers, no seats. Settled at provider cost.</div></div>
+      </li>
+      <li class="tldr-item">
+        <span class="n">iv.</span>
+        <div><div class="t">Self-host, free</div><div class="d">AGPL-3.0. Run it on your own infra, forever.</div></div>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ §II — Demo (Art × UI) ═══ -->
+<section class="chapter wrap" id="ii">
+  <div class="chap-head">
+    <div class="chap-no">
+      DEMONSTRATION
+      <span class="roman">§ II</span>
+    </div>
+    <div class="chap-title-wrap">
+      <h2>Swap one URL. <em>That's it.</em></h2>
+      <p>Point any OpenAI-compatible SDK at YSRouter. Routing, keys, billing, and observability are handled — transparently, in the margins.</p>
+    </div>
+  </div>
+  <div class="gallery">
+    <div class="gallery-frame">
+      <div class="terminal">
+        <div class="term-head">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <span class="ttl">~/app — bash</span>
+          <span class="folio">fig. ii.a</span>
+        </div>
+        <div class="term-body">
+<span class="cmt"># before — direct to one provider</span><br>
+<span class="cmd">$</span> curl <span class="str">https://api.openai.com/v1/chat/completions</span> \<br>
+&nbsp;&nbsp;&nbsp;<span class="flg">-H</span> <span class="str">"Authorization: Bearer sk-..."</span><br><br>
+<span class="cmt"># after — every model, one signature</span><br>
+<span class="cmd">$</span> curl <span class="str">https://api.ysrouter.com/v1/chat/completions</span> \<br>
+&nbsp;&nbsp;&nbsp;<span class="flg">-H</span> <span class="str">"Authorization: Bearer sk-ys-..."</span> \<br>
+&nbsp;&nbsp;&nbsp;<span class="flg">-d</span> <span class="str">'{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}'</span><br><br>
+<span class="ok">→ 200 OK</span> <span class="out">· 247 tok · $0.0021 · 38ms · via anthropic-us</span>
+        </div>
+      </div>
+    </div>
+    <div class="gallery-caption">A single request, fully instrumented</div>
+  </div>
+</section>
+
+<!-- ═══ §III — Features ═══ -->
+<section class="chapter wrap" id="iii">
+  <div class="chap-head">
+    <div class="chap-no">
+      CAPABILITIES
+      <span class="roman">§ III</span>
+    </div>
+    <div class="chap-title-wrap">
+      <h2>The <em>whole</em> catalog.</h2>
+      <p>Everything an AI gateway should ship with. Bound into one volume, switched on or off per channel.</p>
+    </div>
+  </div>
+  <div class="features">
+    <div class="feat" style="--feat-color:var(--ochre)">
+      <div class="feat-num">i.</div>
+      <div class="feat-body">
+        <h3>Lightning <em>routing.</em></h3>
+        <p>Optimized network path with millisecond fan-out across upstreams. Stream tokens back to clients with zero added latency.</p>
+      </div>
+      <div class="feat-aside"><strong>p95 &lt; 40ms</strong><br>streaming-first<br>zero-copy forwarding</div>
+    </div>
+    <div class="feat" style="--feat-color:var(--indigo)">
+      <div class="feat-num">ii.</div>
+      <div class="feat-body">
+        <h3>Secure by <em>default.</em></h3>
+        <p>Per-key scopes, group quotas, audit logs, and SSO. Enterprise-grade auth at every junction of your traffic.</p>
+      </div>
+      <div class="feat-aside"><strong>JWT · WebAuthn</strong><br>SSO / SAML<br>per-key scopes</div>
+    </div>
+    <div class="feat" style="--feat-color:var(--teal)">
+      <div class="feat-num">iii.</div>
+      <div class="feat-body">
+        <h3>Transparent <em>billing.</em></h3>
+        <p>Pay per token at the provider's rate. YSRouter adds no markup. The ledger is auditable per request, settled in real time.</p>
+      </div>
+      <div class="feat-aside"><strong>no markup</strong><br>per-request ledger<br>real-time settle</div>
+    </div>
+    <div class="feat" style="--feat-color:var(--plum)">
+      <div class="feat-num">iv.</div>
+      <div class="feat-body">
+        <h3>Self-host, <em>free.</em></h3>
+        <p>AGPL-3.0. Run the entire gateway on your own infrastructure. Pricing is between you and your providers — nothing in between.</p>
+      </div>
+      <div class="feat-aside"><strong>SQLite · MySQL · PG</strong><br>Redis cache<br>Docker / bare-metal</div>
+    </div>
+    <div class="feat" style="--feat-color:var(--vermilion)">
+      <div class="feat-num">v.</div>
+      <div class="feat-body">
+        <h3>Developer-<em>first.</em></h3>
+        <p>OpenAI, Claude, Gemini, Responses APIs — all routed through one base URL. Your existing SDK just works.</p>
+      </div>
+      <div class="feat-aside"><strong>4 API protocols</strong><br>streaming · batch<br>tool calls · vision</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §IV — Numbers ═══ -->
+<section class="chapter wrap" id="iv">
+  <div class="chap-head">
+    <div class="chap-no">
+      BY THE NUMBERS
+      <span class="roman">§ IV</span>
+    </div>
+    <div class="chap-title-wrap">
+      <h2>What the catalog <em>holds.</em></h2>
+      <p>Counts, as of this printing. Numbers update with each release.</p>
+    </div>
+  </div>
+  <div class="stats">
+    <figure class="stat" style="--stat-color:var(--ochre)">
+      <span class="marginal">+counting</span>
+      <div class="big">50<em>+</em></div>
+      <figcaption>UPSTREAM SERVICES INTEGRATED — OpenAI, Anthropic, Gemini, and forty-seven more.</figcaption>
+    </figure>
+    <figure class="stat" style="--stat-color:var(--indigo)">
+      <div class="big">100<em>+</em></div>
+      <figcaption>MODELS WITH BILLING SUPPORT — each priced at its provider's rate, metered to the token.</figcaption>
+    </figure>
+    <figure class="stat" style="--stat-color:var(--teal)">
+      <div class="big">50<em>+</em></div>
+      <figcaption>COMPATIBLE API ROUTES — OpenAI, Claude, Gemini, Responses APIs, all on one base.</figcaption>
+    </figure>
+    <figure class="stat" style="--stat-color:var(--vermilion)">
+      <span class="marginal">10+ knobs</span>
+      <div class="big">10<em>+</em></div>
+      <figcaption>SCHEDULING CONTROLS — load balancing, rate limits, budgets, guardrails, caching, more.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ═══ §V — Model Index ═══ -->
+<section class="chapter wrap" id="v">
+  <div class="chap-head">
+    <div class="chap-no">
+      THE INDEX
+      <span class="roman">§ V</span>
+    </div>
+    <div class="chap-title-wrap">
+      <h2>Many providers. <em>One ink.</em></h2>
+      <p>Each upstream arrives on its own terms. YSRouter normalizes them into a single routable catalog.</p>
+    </div>
+  </div>
+  <div class="models">
+    <div class="model" style="--model-color:var(--ochre)"><span class="ink-dot"></span><div><div class="nm">OpenAI</div><div class="fam">GPT · o-series</div></div></div>
+    <div class="model" style="--model-color:var(--vermilion)"><span class="ink-dot"></span><div><div class="nm">Anthropic</div><div class="fam">Claude</div></div></div>
+    <div class="model" style="--model-color:var(--indigo)"><span class="ink-dot"></span><div><div class="nm">Google</div><div class="fam">Gemini</div></div></div>
+    <div class="model" style="--model-color:var(--teal)"><span class="ink-dot"></span><div><div class="nm">Mistral</div><div class="fam">Mistral · Mixtral</div></div></div>
+    <div class="model" style="--model-color:var(--plum)"><span class="ink-dot"></span><div><div class="nm">DeepSeek</div><div class="fam">V3 · R1</div></div></div>
+    <div class="model" style="--model-color:var(--ochre)"><span class="ink-dot"></span><div><div class="nm">xAI</div><div class="fam">Grok</div></div></div>
+    <div class="model" style="--model-color:var(--vermilion)"><span class="ink-dot"></span><div><div class="nm">Cohere</div><div class="fam">Command</div></div></div>
+    <div class="model" style="--model-color:var(--indigo)"><span class="ink-dot"></span><div><div class="nm">Moonshot</div><div class="fam">Kimi</div></div></div>
+    <div class="model" style="--model-color:var(--teal)"><span class="ink-dot"></span><div><div class="nm">Qwen</div><div class="fam">Alibaba</div></div></div>
+    <div class="model" style="--model-color:var(--plum)"><span class="ink-dot"></span><div><div class="nm">Zhipu</div><div class="fam">GLM</div></div></div>
+    <div class="model" style="--model-color:var(--ochre)"><span class="ink-dot"></span><div><div class="nm">Doubao</div><div class="fam">Volcano</div></div></div>
+    <div class="model" style="--model-color:var(--vermilion)"><span class="ink-dot"></span><div><div class="nm">Yi</div><div class="fam">01.AI</div></div></div>
+    <div class="model" style="--model-color:var(--indigo)"><span class="ink-dot"></span><div><div class="nm">Baichuan</div><div class="fam">Baichuan</div></div></div>
+    <div class="model" style="--model-color:var(--teal)"><span class="ink-dot"></span><div><div class="nm">Minimax</div><div class="fam">Minimax</div></div></div>
+    <div class="model" style="--model-color:var(--plum)"><span class="ink-dot"></span><div><div class="nm">Spark</div><div class="fam">iFlytek</div></div></div>
+    <div class="model" style="--model-color:var(--ochre)"><span class="ink-dot"></span><div><div class="nm">Azure</div><div class="fam">Azure OpenAI</div></div></div>
+  </div>
+  <p style="text-align:center;margin-top:28px;font-family:var(--serif);font-style:italic;font-size:15px;color:var(--ink-3)">
+    — and thirty-four more, indexed and routable —
+  </p>
+</section>
+
+<!-- ═══ §VI — Pricing Ledger ═══ -->
+<section class="chapter wrap" id="vi">
+  <div class="chap-head">
+    <div class="chap-no">
+      THE LEDGER
+      <span class="roman">§ VI</span>
+    </div>
+    <div class="chap-title-wrap">
+      <h2>Pay for what you <em>route.</em></h2>
+      <p>No tiers. No seats. No commitment. Metered to the token at provider cost, settled in real time.</p>
+    </div>
+  </div>
+  <div class="ledger">
+    <div class="ledger-grid">
+      <div>
+        <div class="ledger-h">RATE · PASS-THROUGH</div>
+        <div class="ledger-amt">$0.0021<em>+</em><span class="unit">/ 1K tokens · no markup</span></div>
+        <div class="ledger-desc">Priced per token, passed through from each upstream at their rate. YSRouter adds <strong>no markup</strong> — you see exactly what the provider charges.</div>
+        <ul class="ledger-rules">
+          <li>Pre-pay, deduct per call</li>
+          <li>Transparent pass-through, auditable per request</li>
+          <li>Self-host free, forever (AGPL-3.0)</li>
+          <li>No tiers, no seats, no monthly commitment</li>
+        </ul>
+      </div>
+      <div>
+        <div class="bill">
+          <div class="bill-h">sample · this month</div>
+          <div class="bill-row"><span>Claude Sonnet 4</span><span>1.2M tok</span><span>$3.42</span></div>
+          <div class="bill-row"><span>GPT-4o</span><span>4.8M tok</span><span>$14.40</span></div>
+          <div class="bill-row"><span>DeepSeek V3</span><span>9.1M tok</span><span>$1.82</span></div>
+          <div class="bill-row"><span>Gemini 2.0 Flash</span><span>2.3M tok</span><span>$0.46</span></div>
+          <div class="bill-total"><span class="l">balance after</span><span class="v">$80.10</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="ledger-sign">
+      <span>— settled in real time</span>
+      <span class="seal">PAID · YSR</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Final CTA ═══ -->
+<section class="final wrap" id="start">
+  <div class="final-ed">— END OF VOLUME III —</div>
+  <h2>Begin your <em>routing.</em></h2>
+  <p>Deploy your own gateway. Swap one URL. The whole catalog, one signature.</p>
+  <div class="final-cta">
+    <a class="btn btn-primary" href="#start">Get started →</a>
+    <a class="btn btn-ghost" href="#vi">See pricing</a>
+  </div>
+</section>
+
+<!-- ═══ Colophon ═══ -->
+<footer class="colophon">
+  <div class="wrap">
+    <div class="colo-grid">
+      <div>
+        <div class="colo-brand">YSRouter</div>
+        <p class="colo-desc">Next-generation LLM gateway and AI asset management. Route, balance, meter — every model, one signature. Hand-bound, self-hostable.</p>
+      </div>
+      <div class="colo-col">
+        <h5>Product</h5>
+        <a href="#iii">Features</a>
+        <a href="#v">Models</a>
+        <a href="#vi">Pricing</a>
+        <a href="#">Docs</a>
+      </div>
+      <div class="colo-col">
+        <h5>Resources</h5>
+        <a href="#">Quickstart</a>
+        <a href="#">API reference</a>
+        <a href="#">Changelog</a>
+        <a href="#">Status</a>
+      </div>
+      <div class="colo-col">
+        <h5>Company</h5>
+        <a href="#">About</a>
+        <a href="#">GitHub</a>
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+      </div>
+    </div>
+    <div class="colo-bot">
+      <span>© 2023–2026 QuantumNous · AGPL-3.0 · self-hostable</span>
+      <span class="seal">ATELIER ED. · MMXXVI</span>
+      <span>build 2k6e8r7p · all systems clear</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  /* theme */
+  var KEY='ysrouter-atelier-theme', root=document.documentElement;
+  var pref;try{pref=localStorage.getItem(KEY)}catch(e){}
+  if(pref!=='light'&&pref!=='dark')pref='light';
+  var q=new URLSearchParams(location.search).get('theme');
+  if(q==='light'||q==='dark')pref=q;
+  root.setAttribute('data-theme',pref);
+  var btn=document.getElementById('themeToggle');
+  if(btn)btn.addEventListener('click',function(){
+    pref=pref==='dark'?'light':'dark';
+    try{localStorage.setItem(KEY,pref)}catch(e){}
+    root.setAttribute('data-theme',pref);
+  });
+
+  /* guided scrolling: 章节高亮 + 页码 */
+  var chapters=['i','ii','iii','iv','v','vi'];
+  var links={};
+  document.querySelectorAll('.spine-chapters a').forEach(function(a){
+    links[a.dataset.ch]=a;
+  });
+  var pageCur=document.getElementById('pageCur');
+
+  function update(){
+    var cur=chapters[0];
+    chapters.forEach(function(c){
+      var el=document.getElementById(c);
+      if(el && el.getBoundingClientRect().top < window.innerHeight*0.35) cur=c;
+    });
+    chapters.forEach(function(c){
+      if(links[c]) links[c].classList.toggle('active', c===cur);
+    });
+    var idx=chapters.indexOf(cur);
+    if(pageCur) pageCur.textContent=idx+1;
+  }
+  addEventListener('scroll',update,{passive:true});
+  update();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YSRouter · 设计方案目录</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08080c; --bg-2:#0e0e14;
+    --surface:rgba(255,255,255,.03); --surface-2:rgba(255,255,255,.06);
+    --border:rgba(255,255,255,.08); --border-2:rgba(255,255,255,.16);
+    --ink:#fafafa; --ink-2:#a1a1aa; --ink-3:#71717a; --ink-4:#52525b;
+    --c-violet:#8b5cf6; --c-blue:#3b82f6; --c-cyan:#06b6d4;
+    --c-emerald:#10b981; --c-amber:#f59e0b; --c-rose:#f43f5e;
+    --grad:linear-gradient(135deg,#8b5cf6 0%,#3b82f6 50%,#06b6d4 100%);
+    --glow:rgba(139,92,246,.22);
+    --dot:rgba(255,255,255,.05);
+    color-scheme:dark;
+  }
+  :root[data-theme="light"]{
+    --bg:#fcfcfd; --bg-2:#f4f4f6;
+    --surface:rgba(10,10,20,.025); --surface-2:rgba(10,10,20,.05);
+    --border:rgba(10,10,20,.08); --border-2:rgba(10,10,20,.16);
+    --ink:#09090b; --ink-2:#52525b; --ink-3:#71717a; --ink-4:#a1a1aa;
+    --c-violet:#7c3aed; --c-blue:#2563eb; --c-cyan:#0891b2;
+    --c-emerald:#059669; --c-amber:#d97706; --c-rose:#e11d48;
+    --grad:linear-gradient(135deg,#7c3aed 0%,#2563eb 50%,#0891b2 100%);
+    --glow:rgba(124,58,237,.15);
+    --dot:rgba(10,10,20,.04);
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  html,body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5;letter-spacing:-.015em;
+    transition:background-color .4s ease,color .4s ease}
+  body{min-height:100vh;overflow-x:hidden}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size:28px 28px;
+    mask-image:radial-gradient(ellipse 90% 60% at 50% 0%,#000 30%,transparent 75%)}
+  body::after{content:"";position:fixed;top:-250px;left:50%;transform:translateX(-50%);
+    width:1000px;height:500px;pointer-events:none;z-index:0;
+    background:radial-gradient(circle,var(--glow),transparent 60%);filter:blur(40px)}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 28px;position:relative;z-index:2}
+  .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+  .serif-i{font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-weight:400}
+
+  /* ── nav ── */
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 80%,transparent);
+    backdrop-filter:blur(20px);border-bottom:1px solid var(--border)}
+  .nav-in{max-width:1200px;margin:0 auto;padding:16px 28px;display:flex;align-items:center;gap:20px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.02em}
+  .brand-mark{width:28px;height:28px;border-radius:8px;background:var(--grad);position:relative;
+    display:grid;place-items:center;box-shadow:0 4px 14px -4px var(--glow)}
+  .brand-mark::after{content:"";position:absolute;inset:2px;border-radius:6px;background:var(--bg);
+    display:grid;place-items:center}
+  .brand-mark svg{width:14px;height:14px;position:relative;z-index:1;color:var(--ink)}
+  .nav-meta{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .pill{font-family:'JetBrains Mono';font-size:11px;color:var(--ink-3);letter-spacing:.08em;
+    padding:5px 11px;border:1px solid var(--border);border-radius:100px;background:var(--surface)}
+  .pill .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--c-emerald);
+    margin-right:6px;box-shadow:0 0 8px var(--c-emerald)}
+  .theme-toggle{width:34px;height:34px;border-radius:9px;background:var(--surface);
+    border:1px solid var(--border);cursor:pointer;color:var(--ink-2);display:grid;place-items:center;transition:.15s}
+  .theme-toggle:hover{color:var(--ink);background:var(--surface-2)}
+  .theme-toggle .icon-sun{display:none}
+  .theme-toggle .icon-moon{display:block}
+  :root[data-theme="light"] .theme-toggle .icon-sun{display:block}
+  :root[data-theme="light"] .theme-toggle .icon-moon{display:none}
+
+  /* ── hero ── */
+  .hero{padding:80px 0 50px;text-align:center}
+  .hero .eyebrow{font-family:'JetBrains Mono';font-size:11px;color:var(--c-cyan);
+    letter-spacing:.22em;text-transform:uppercase;margin-bottom:18px}
+  .hero h1{font-size:clamp(40px,6vw,68px);font-weight:800;letter-spacing:-.04em;line-height:1}
+  .hero h1 em{font-family:'Instrument Serif';font-style:italic;font-weight:400;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{color:var(--ink-2);font-size:17px;max-width:560px;margin:20px auto 0;line-height:1.55}
+  .hero-stats{display:flex;justify-content:center;gap:32px;margin-top:36px;flex-wrap:wrap}
+  .hero-stat{text-align:center}
+  .hero-stat .v{font-size:28px;font-weight:700;letter-spacing:-.03em}
+  .hero-stat .v.grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-stat .l{font-family:'JetBrains Mono';font-size:11px;color:var(--ink-3);letter-spacing:.08em;margin-top:2px}
+
+  /* ── section ── */
+  section{padding:60px 0;position:relative}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:36px}
+  .sec-num{font-family:'JetBrains Mono';font-size:12px;color:var(--c-violet);letter-spacing:.18em}
+  .sec-title{font-size:28px;font-weight:700;letter-spacing:-.03em}
+  .sec-title em{font-family:'Instrument Serif';font-style:italic;font-weight:400}
+  .sec-line{flex:1;height:1px;background:var(--border)}
+
+  /* ── design cards grid ── */
+  .designs{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+  @media (max-width:880px){.designs{grid-template-columns:1fr}}
+  .dcard{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    overflow:hidden;transition:.3s;cursor:pointer;display:flex;flex-direction:column}
+  .dcard:hover{transform:translateY(-3px);border-color:var(--accent);
+    box-shadow:0 20px 40px -16px var(--accent-glow)}
+  .dcard .thumb{aspect-ratio:16/10;background:var(--bg-2);position:relative;overflow:hidden;
+    border-bottom:1px solid var(--border)}
+  .dcard .thumb img{width:100%;height:100%;object-fit:cover;object-position:top;
+    transition:transform .4s}
+  .dcard:hover .thumb img{transform:scale(1.03)}
+  .dcard .thumb::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(180deg,transparent 60%,var(--bg) 100%);pointer-events:none}
+  .dcard .badge{position:absolute;top:12px;left:12px;z-index:2;
+    font-family:'JetBrains Mono';font-size:10px;color:#fff;letter-spacing:.14em;
+    padding:4px 9px;border-radius:6px;background:var(--accent);font-weight:600}
+  .dcard .badge.muted{background:color-mix(in srgb,var(--ink-3) 30%,transparent);
+    color:var(--ink-2);backdrop-filter:blur(8px)}
+  .dcard .body{padding:22px 24px;display:flex;flex-direction:column;gap:8px;flex:1}
+  .dcard .row1{display:flex;align-items:center;gap:10px}
+  .dcard .idx{font-family:'JetBrains Mono';font-size:11px;color:var(--ink-4);letter-spacing:.08em}
+  .dcard h3{font-size:20px;font-weight:700;letter-spacing:-.02em;flex:1}
+  .dcard h3 em{font-family:'Instrument Serif';font-style:italic;font-weight:400;color:var(--accent)}
+  .dcard .desc{font-size:14px;color:var(--ink-2);line-height:1.55}
+  .dcard .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .tag{font-family:'JetBrains Mono';font-size:10.5px;color:var(--ink-3);letter-spacing:.02em;
+    padding:4px 9px;border:1px solid var(--border);border-radius:100px;background:var(--surface)}
+  .dcard .actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .btn{font-size:13px;font-weight:500;padding:8px 14px;border-radius:9px;
+    border:1px solid var(--border);color:var(--ink);background:var(--surface);cursor:pointer;
+    transition:.15s;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+  .btn:hover{background:var(--surface-2);border-color:var(--border-2)}
+  .btn-primary{background:var(--accent);color:#fff;border-color:transparent;font-weight:600}
+  .btn-primary:hover{filter:brightness(1.1)}
+  .btn-ghost{padding:8px 12px;color:var(--ink-3)}
+
+  /* ── doc list ── */
+  .docs{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:880px){.docs{grid-template-columns:1fr}}
+  .doc{display:flex;align-items:center;gap:14px;padding:16px 18px;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    transition:.2s;text-decoration:none;color:inherit}
+  .doc:hover{background:var(--surface-2);border-color:var(--border-2);transform:translateX(2px)}
+  .doc .num{font-family:'JetBrains Mono';font-size:12px;color:var(--c-violet);
+    font-weight:600;min-width:28px}
+  .doc .info{flex:1;min-width:0}
+  .doc .info .t{font-size:14.5px;font-weight:500;color:var(--ink);line-height:1.3}
+  .doc .info .s{font-size:12.5px;color:var(--ink-3);margin-top:2px;line-height:1.4}
+  .doc .arr{color:var(--ink-4);transition:.2s}
+  .doc:hover .arr{color:var(--c-violet);transform:translateX(2px)}
+
+  /* ── preview modal ── */
+  .modal{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);
+    display:none;align-items:center;justify-content:center;padding:24px}
+  .modal.open{display:flex}
+  .modal-frame{background:var(--bg);border:1px solid var(--border-2);border-radius:14px;
+    width:100%;max-width:1400px;height:92vh;display:flex;flex-direction:column;overflow:hidden;
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.6)}
+  .modal-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;
+    border-bottom:1px solid var(--border);background:var(--surface)}
+  .modal-bar .dots{display:flex;gap:6px}
+  .modal-bar .dots span{width:10px;height:10px;border-radius:50%}
+  .modal-bar .dots span:nth-child(1){background:#ff5f57}
+  .modal-bar .dots span:nth-child(2){background:#febc2e}
+  .modal-bar .dots span:nth-child(3){background:#28c840}
+  .modal-bar .title{font-family:'JetBrains Mono';font-size:12px;color:var(--ink-3);flex:1}
+  .modal-bar .url{font-family:'JetBrains Mono';font-size:11px;color:var(--ink-4);
+    background:var(--surface);padding:4px 10px;border-radius:6px;border:1px solid var(--border);
+    max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .modal-bar .x{width:30px;height:30px;border-radius:7px;background:var(--surface);
+    border:1px solid var(--border);cursor:pointer;color:var(--ink-2);display:grid;place-items:center}
+  .modal-bar .x:hover{color:var(--ink);background:var(--surface-2)}
+  .modal-bar .open-ext{font-size:12px;color:var(--ink-2);padding:6px 12px;border-radius:7px;
+    border:1px solid var(--border);background:var(--surface);cursor:pointer;text-decoration:none;
+    display:inline-flex;align-items:center;gap:5px;transition:.15s}
+  .modal-bar .open-ext:hover{color:var(--ink);background:var(--surface-2)}
+  .modal iframe{flex:1;width:100%;border:0;background:#fff}
+
+  /* ── footer ── */
+  footer{padding:48px 0 36px;border-top:1px solid var(--border);margin-top:60px}
+  .foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;
+    font-family:'JetBrains Mono';font-size:11.5px;color:var(--ink-4);letter-spacing:.04em}
+  .foot a{color:var(--ink-3);transition:.15s}
+  .foot a:hover{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<!-- nav -->
+<nav>
+  <div class="nav-in">
+    <div class="brand">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h6M4 12h10M4 17h6M14 7l6 5-6 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      YSRouter · Design Index
+    </div>
+    <div class="nav-meta">
+      <span class="pill"><span class="dot"></span>5 designs · 11 docs</span>
+      <button class="theme-toggle" id="themeToggle" aria-label="切换主题">
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- hero -->
+<header class="hero wrap">
+  <div class="eyebrow">DESIGN INDEX · 2026.07</div>
+  <h1>YSRouter 落地页<br><em>设计方案全集</em></h1>
+  <p>四套独立的视觉方向 + 十一篇设计规范文档。每一套都可独立预览、打开原稿、或迁移到 React。</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="v grad-text">5</div><div class="l">VISUAL DIRECTIONS</div></div>
+    <div class="hero-stat"><div class="v grad-text">11</div><div class="l">SPEC DOCUMENTS</div></div>
+    <div class="hero-stat"><div class="v grad-text">2</div><div class="l">THEMES EACH</div></div>
+    <div class="hero-stat"><div class="v grad-text">∞</div><div class="l">ITERATIONS</div></div>
+  </div>
+</header>
+
+<!-- 设计方案 -->
+<section class="wrap">
+  <div class="sec-head">
+    <span class="sec-num">01 —</span>
+    <h2 class="sec-title">视觉<em>方案</em></h2>
+    <div class="sec-line"></div>
+    <span class="mono" style="font-size:11px;color:var(--ink-4);letter-spacing:.1em">CLICK TO PREVIEW</span>
+  </div>
+
+  <div class="designs">
+
+    <!-- 方案 1: Atelier (2026 趋势的全新诠释) -->
+    <a class="dcard" data-preview="landing-ysrouter-atelier.html" data-title="Atelier Edition"
+       style="--accent:var(--c-amber);--accent-glow:rgba(245,158,11,.3)">
+      <div class="thumb">
+        <span class="badge">推荐 · LATEST</span>
+        <img src="thumb-atelier-light.png" alt="Atelier Edition preview" loading="lazy">
+      </div>
+      <div class="body">
+        <div class="row1">
+          <span class="idx">A.01</span>
+          <h3>Atelier <em>Edition</em></h3>
+        </div>
+        <p class="desc">Webflow 2026 八大趋势的手工诠释——把 AI 网关装订成一本工程手册。5 色墨水（赭石/靛蓝/朱砂/青绿/紫）+ 网格纸纹理 + EB Garamond 衬线 + 手写体注释 + 邮戳印章。</p>
+        <div class="tags">
+          <span class="tag">EB Garamond + Caveat</span>
+          <span class="tag">graph paper</span>
+          <span class="tag">5 墨色</span>
+          <span class="tag">书脊章节条</span>
+          <span class="tag">邮戳印章</span>
+          <span class="tag">手写 marginalia</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" data-action="preview">▶ 在此预览</button>
+          <a class="btn" href="landing-ysrouter-atelier.html" target="_blank">↗ 新窗口打开</a>
+          <a class="btn btn-ghost" href="landing-atelier-light.png" target="_blank">截图（亮）</a>
+          <a class="btn btn-ghost" href="landing-atelier-dark.png" target="_blank">截图（暗）</a>
+        </div>
+      </div>
+    </a>
+
+    <!-- 方案 2: 2026 Living System -->
+    <a class="dcard" data-preview="landing-ysrouter-2026.html" data-title="2026 Living System"
+       style="--accent:var(--c-violet);--accent-glow:rgba(139,92,246,.3)">
+      <div class="thumb">
+        <span class="badge muted">科技诠释 · TECH</span>
+        <img src="thumb-2026.png" alt="2026 Living System preview" loading="lazy">
+      </div>
+      <div class="body">
+        <div class="row1">
+          <span class="idx">A.02</span>
+          <h3>2026 <em>Living System</em></h3>
+        </div>
+        <p class="desc">Webflow 2026 八大趋势的科技诠释：6 色色彩爆发 + LIVE ROUTING 路由动画 + 引导式滚动进度轨 + 点阵无限画布 + 逐字入场。</p>
+        <div class="tags">
+          <span class="tag">Geist + Instrument Serif</span>
+          <span class="tag">SVG 动画</span>
+          <span class="tag">6 色系</span>
+          <span class="tag">scroll-rail</span>
+          <span class="tag">TL;DR 卡</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" data-action="preview">▶ 在此预览</button>
+          <a class="btn" href="landing-ysrouter-2026.html" target="_blank">↗ 新窗口打开</a>
+          <a class="btn btn-ghost" href="landing-2026-dark.png" target="_blank">截图（暗）</a>
+          <a class="btn btn-ghost" href="landing-2026-light.png" target="_blank">截图（亮）</a>
+        </div>
+      </div>
+    </a>
+
+    <!-- 方案 3: 渐变科技感 -->
+    <a class="dcard" data-preview="landing-ysrouter.html" data-title="Gradient Tech"
+       style="--accent:var(--c-blue);--accent-glow:rgba(59,130,246,.3)">
+      <div class="thumb">
+        <span class="badge muted">主稿 · STABLE</span>
+        <img src="thumb-ysrouter.png" alt="Gradient Tech preview" loading="lazy">
+      </div>
+      <div class="body">
+        <div class="row1">
+          <span class="idx">A.03</span>
+          <h3>渐变<em>科技感</em></h3>
+        </div>
+        <p class="desc">Vercel / Stripe / Linear 风格。紫→蓝→青渐变作为唯一强调色，玻璃态卡片（backdrop-blur），三光晕背景，shadcn base-nova 兼容。</p>
+        <div class="tags">
+          <span class="tag">Inter + Instrument Serif</span>
+          <span class="tag">glassmorphism</span>
+          <span class="tag">aurora glow</span>
+          <span class="tag">terminal demo</span>
+          <span class="tag">pay-as-you-go</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" data-action="preview">▶ 在此预览</button>
+          <a class="btn" href="landing-ysrouter.html" target="_blank">↗ 新窗口打开</a>
+          <a class="btn btn-ghost" href="landing-ysrouter-dark.png" target="_blank">截图（暗）</a>
+          <a class="btn btn-ghost" href="landing-ysrouter-light.png" target="_blank">截图（亮）</a>
+        </div>
+      </div>
+    </a>
+
+    <!-- 方案 3: 亮色 Editorial -->
+    <a class="dcard" data-preview="landing-ysrouter-editorial.html" data-title="Editorial"
+       style="--accent:var(--c-amber);--accent-glow:rgba(245,158,11,.3)">
+      <div class="thumb">
+        <span class="badge muted">备选 · ALTERNATIVE</span>
+        <img src="thumb-editorial.png" alt="Editorial preview" loading="lazy">
+      </div>
+      <div class="body">
+        <div class="row1">
+          <span class="idx">A.04</span>
+          <h3>亮色 <em>Editorial</em></h3>
+        </div>
+        <p class="desc">Anthropic / Linear 文档风。暖米底（#faf9f5）+ 大号 Instrument Serif 衬线标题 + terracotta 单色强调 + 罗马序号 prose 列表 + 极宽留白。</p>
+        <div class="tags">
+          <span class="tag">Inter + Instrument Serif</span>
+          <span class="tag">cream canvas</span>
+          <span class="tag">terracotta accent</span>
+          <span class="tag">prose features</span>
+          <span class="tag">left-aligned</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" data-action="preview">▶ 在此预览</button>
+          <a class="btn" href="landing-ysrouter-editorial.html" target="_blank">↗ 新窗口打开</a>
+          <a class="btn btn-ghost" href="landing-editorial-light.png" target="_blank">截图（亮）</a>
+          <a class="btn btn-ghost" href="landing-editorial-dark.png" target="_blank">截图（暗）</a>
+        </div>
+      </div>
+    </a>
+
+    <!-- 方案 4: Switching Yard -->
+    <a class="dcard" href="landing-switching-yard.png" target="_blank"
+       style="--accent:var(--c-cyan);--accent-glow:rgba(6,182,212,.3)">
+      <div class="thumb">
+        <span class="badge muted">静态稿 · CANVAS</span>
+        <img src="landing-switching-yard.png" alt="Switching Yard preview" loading="lazy">
+      </div>
+      <div class="body">
+        <div class="row1">
+          <span class="idx">A.05</span>
+          <h3>Switching <em>Yard</em></h3>
+        </div>
+        <p class="desc">编组站设计哲学。炭灰底 + 单一信号蓝 + 三次贝塞尔汇聚线 + Lora editorial serif + 等宽调度表。Pillow 绘制的高保真静态稿。</p>
+        <div class="tags">
+          <span class="tag">Lora + Geist Mono</span>
+          <span class="tag">OKLCH 配色</span>
+          <span class="tag">bezier 汇聚</span>
+          <span class="tag">dispatch sheet</span>
+          <span class="tag">PNG 静态稿</span>
+        </div>
+        <div class="actions">
+          <a class="btn btn-primary" href="landing-switching-yard.png" target="_blank">🖼 查看大图</a>
+          <a class="btn btn-ghost" href="design-philosophy-switching-yard.md" target="_blank">阅读哲学</a>
+        </div>
+      </div>
+    </a>
+
+  </div>
+</section>
+
+<!-- 设计文档 -->
+<section class="wrap">
+  <div class="sec-head">
+    <span class="sec-num">02 —</span>
+    <h2 class="sec-title">规范<em>文档</em></h2>
+    <div class="sec-line"></div>
+    <span class="mono" style="font-size:11px;color:var(--ink-4);letter-spacing:.1em">MARKDOWN</span>
+  </div>
+
+  <div class="docs">
+    <a class="doc" href="README.md" target="_blank">
+      <span class="num">00</span>
+      <div class="info">
+        <div class="t">前端设计文档导航</div>
+        <div class="s">总览 · 速查 · 核心文件清单</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="01-architecture.md" target="_blank">
+      <span class="num">01</span>
+      <div class="info">
+        <div class="t">架构与技术栈</div>
+        <div class="s">双前端定位 · 目录结构 · TanStack Router/Query</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="02-design-tokens.md" target="_blank">
+      <span class="num">02</span>
+      <div class="info">
+        <div class="t">设计 Token</div>
+        <div class="s">OKLCH 配色 · 字体 · 圆角 · 间距 · 断点</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="03-theming.md" target="_blank">
+      <span class="num">03</span>
+      <div class="info">
+        <div class="t">主题系统</div>
+        <div class="s">双 Provider · 10 套预设 · 4 个独立可调轴</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="04-layout.md" target="_blank">
+      <span class="num">04</span>
+      <div class="info">
+        <div class="t">布局系统</div>
+        <div class="s">AuthenticatedLayout · PublicLayout · 栅格 · 响应式</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="05-typography-icons.md" target="_blank">
+      <span class="num">05</span>
+      <div class="info">
+        <div class="t">字体、排版与图标</div>
+        <div class="s">Public Sans · Lora · lucide · hugeicons · lobehub</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="06-motion.md" target="_blank">
+      <span class="num">06</span>
+      <div class="info">
+        <div class="t">动效系统</div>
+        <div class="s">motion v12 variants · CSS 动画 · reduced-motion</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="07-components.md" target="_blank">
+      <span class="num">07</span>
+      <div class="info">
+        <div class="t">组件系统</div>
+        <div class="s">shadcn base-nova · Base UI · DataTable · Toast</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="08-classic-baseline.md" target="_blank">
+      <span class="num">08</span>
+      <div class="info">
+        <div class="t">classic 基线与迁移资产</div>
+        <div class="s">Semi Design · 应保留的 10 项设计资产</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="09-upgrade-playbook.md" target="_blank">
+      <span class="num">09</span>
+      <div class="info">
+        <div class="t">升级迭代手册</div>
+        <div class="s">9 类场景操作步骤 · 检查清单 · 反模式</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="10-ysrouter-design-spec.md" target="_blank">
+      <span class="num">10</span>
+      <div class="info">
+        <div class="t">YSRouter 落地页设计规范</div>
+        <div class="s">双主题 token · 段落 · 组件 · React 迁移路径</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+    <a class="doc" href="design-philosophy-switching-yard.md" target="_blank">
+      <span class="num">Φ</span>
+      <div class="info">
+        <div class="t">Switching Yard 设计哲学</div>
+        <div class="s">编组站美学宣言 · 美学世界观</div>
+      </div>
+      <span class="arr">→</span>
+    </a>
+  </div>
+</section>
+
+<!-- 使用说明 -->
+<section class="wrap">
+  <div class="sec-head">
+    <span class="sec-num">03 —</span>
+    <h2 class="sec-title">如何<em>使用</em></h2>
+    <div class="sec-line"></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+    <div style="padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:14px">
+      <div style="font-family:'JetBrains Mono';font-size:11px;color:var(--c-violet);letter-spacing:.18em;margin-bottom:10px">STEP 01</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">预览对比</div>
+      <div style="font-size:13.5px;color:var(--ink-2);line-height:1.55">点击任一方案卡片的「▶ 在此预览」按钮，在本页内 iframe 中实时查看，无需跳转。可在预览内切换该方案的主题。</div>
+    </div>
+    <div style="padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:14px">
+      <div style="font-family:'JetBrains Mono';font-size:11px;color:var(--c-blue);letter-spacing:.18em;margin-bottom:10px">STEP 02</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">独立打开</div>
+      <div style="font-size:13.5px;color:var(--ink-2);line-height:1.55">「↗ 新窗口打开」会在新标签页打开原始 HTML，获得完整交互体验（路由动画、滚动进度、主题切换）。</div>
+    </div>
+    <div style="padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:14px">
+      <div style="font-family:'JetBrains Mono';font-size:11px;color:var(--c-emerald);letter-spacing:.18em;margin-bottom:10px">STEP 03</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">迁移到 React</div>
+      <div style="font-size:13.5px;color:var(--ink-2);line-height:1.55">选定方向后，参考 <span class="mono" style="font-size:12px;color:var(--ink)">10-ysrouter-design-spec.md §10.7</span> 的迁移路径，落地到 <span class="mono" style="font-size:12px;color:var(--ink)">features/home/</span>。</div>
+    </div>
+  </div>
+</section>
+
+<!-- footer -->
+<footer>
+  <div class="wrap foot">
+    <span>© 2023–2026 QuantumNous · AGPL-3.0 · self-hostable</span>
+    <span>
+      <a href="README.md">文档总览</a> ·
+      <a href="10-ysrouter-design-spec.md">设计规范</a> ·
+      <a href="design-philosophy-switching-yard.md">设计哲学</a>
+    </span>
+    <span>build 2k6e8r7p · all designs clear</span>
+  </div>
+</footer>
+
+<!-- preview modal -->
+<div class="modal" id="modal">
+  <div class="modal-frame">
+    <div class="modal-bar">
+      <div class="dots"><span></span><span></span><span></span></div>
+      <span class="title" id="modalTitle">preview</span>
+      <span class="url" id="modalUrl">—</span>
+      <a class="open-ext" id="modalExt" href="#" target="_blank">
+        ↗ open
+      </a>
+      <button class="x" id="modalClose" aria-label="close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <iframe id="modalIframe" src="about:blank"></iframe>
+  </div>
+</div>
+
+<script>
+(function(){
+  /* theme toggle */
+  var KEY='ysrouter-index-theme', root=document.documentElement;
+  var pref;try{pref=localStorage.getItem(KEY)}catch(e){}
+  if(pref!=='light'&&pref!=='dark')pref='dark';
+  root.setAttribute('data-theme',pref);
+  var btn=document.getElementById('themeToggle');
+  if(btn)btn.addEventListener('click',function(){
+    pref=pref==='dark'?'light':'dark';
+    try{localStorage.setItem(KEY,pref)}catch(e){}
+    root.setAttribute('data-theme',pref);
+  });
+
+  /* preview modal */
+  var modal=document.getElementById('modal');
+  var iframe=document.getElementById('modalIframe');
+  var mTitle=document.getElementById('modalTitle');
+  var mUrl=document.getElementById('modalUrl');
+  var mExt=document.getElementById('modalExt');
+  var mClose=document.getElementById('modalClose');
+
+  function openPreview(file,title){
+    iframe.src=file;
+    mTitle.textContent=title||'preview';
+    mUrl.textContent='docs/frontend/'+file;
+    mExt.href=file;
+    modal.classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+  function closePreview(){
+    modal.classList.remove('open');
+    iframe.src='about:blank';
+    document.body.style.overflow='';
+  }
+
+  document.querySelectorAll('.dcard [data-action="preview"]').forEach(function(b){
+    b.addEventListener('click',function(e){
+      e.preventDefault();e.stopPropagation();
+      var card=b.closest('.dcard');
+      openPreview(card.dataset.preview, card.dataset.title);
+    });
+  });
+  // also allow clicking the card itself (but not when clicking other buttons/links)
+  document.querySelectorAll('.dcard[data-preview]').forEach(function(card){
+    card.addEventListener('click',function(e){
+      if(e.target.closest('a,button'))return;
+      openPreview(card.dataset.preview, card.dataset.title);
+    });
+  });
+  mClose.addEventListener('click',closePreview);
+  modal.addEventListener('click',function(e){if(e.target===modal)closePreview()});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&modal.classList.contains('open'))closePreview()});
+})();
+</script>
+</body>
+</html>

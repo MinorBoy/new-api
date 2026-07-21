@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YSRouter — The AI gateway</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ─── tokens — LIGHT editorial (cream canvas), DARK twin ─── */
+  :root{
+    --bg:        #faf9f5;   /* warm cream */
+    --bg-soft:   #ffffff;
+    --card:      #ffffff;
+    --card-hi:   #f4f2ec;
+    --border:    #e8e4d8;
+    --border-hi: #d4cfc0;
+    --ink:       #1a1815;   /* warm near-black */
+    --ink-2:     #57534e;
+    --ink-3:     #857f74;
+    --ink-4:     #b8b1a1;
+    --accent:    #b8390e;   /* terracotta — single accent */
+    --rule:      #1a1815;
+    --shadow: 0 1px 0 rgba(26,24,21,.04);
+    --radius: 4px;
+    --maxw: 1080px;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+    --serif: 'Instrument Serif', Georgia, serif;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"]{
+    --bg:        #161310;
+    --bg-soft:   #1c1814;
+    --card:      #1c1814;
+    --card-hi:   #25201a;
+    --border:    #2e2820;
+    --border-hi: #443c30;
+    --ink:       #f0ede4;
+    --ink-2:     #a8a193;
+    --ink-3:     #787164;
+    --ink-4:     #4a4438;
+    --accent:    #e85d2c;
+    --rule:      #f0ede4;
+    --shadow: 0 1px 0 rgba(255,255,255,.04);
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;line-height:1.6;letter-spacing:-.005em;
+    transition: background-color .4s ease, color .4s ease}
+  body{overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px}
+  .serif{font-family:var(--serif);font-weight:400;letter-spacing:-.01em}
+  .serif-i{font-family:var(--serif);font-style:italic;font-weight:400;letter-spacing:0}
+  .mono{font-family:var(--mono)}
+  .accent{color:var(--accent)}
+
+  /* ─── nav — minimal, no glass ─── */
+  nav{position:sticky;top:0;z-index:50;background:var(--bg);
+    border-bottom:1px solid var(--border)}
+  .nav-inner{max-width:var(--maxw);margin:0 auto;padding:18px 32px;
+    display:flex;align-items:center;gap:32px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;letter-spacing:-.02em}
+  .brand .mark{width:22px;height:22px;border:1.5px solid var(--ink);border-radius:50%;
+    display:grid;place-items:center}
+  .brand .mark::before{content:"";width:6px;height:6px;background:var(--accent);border-radius:50%}
+  .nav-links{display:flex;gap:24px;margin-left:12px}
+  .nav-links a{font-size:13.5px;color:var(--ink-2);transition:.15s}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-right{margin-left:auto;display:flex;align-items:center;gap:18px}
+  .theme-toggle{background:none;border:none;cursor:pointer;color:var(--ink-2);
+    padding:4px;display:grid;place-items:center;transition:.15s}
+  .theme-toggle:hover{color:var(--ink)}
+  .theme-toggle .icon-sun{display:none}
+  .theme-toggle .icon-moon{display:block}
+  :root[data-theme="dark"] .theme-toggle .icon-sun{display:block}
+  :root[data-theme="dark"] .theme-toggle .icon-moon{display:none}
+  .btn{font-size:13.5px;font-weight:500;padding:8px 0;border-radius:var(--radius);
+    color:var(--ink);background:none;border:none;cursor:pointer;transition:.15s;
+    display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{color:var(--accent)}
+  .btn-primary{padding:9px 18px;background:var(--ink);color:var(--bg);border:1px solid var(--ink)}
+  .btn-primary:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  /* ─── hero — editorial ─── */
+  .hero{padding:140px 0 120px;border-bottom:1px solid var(--border)}
+  .hero-eyebrow{font-family:var(--mono);font-size:12px;color:var(--ink-3);
+    letter-spacing:.08em;margin-bottom:36px;display:flex;align-items:center;gap:12px}
+  .hero-eyebrow::before{content:"";width:32px;height:1px;background:var(--ink-3)}
+  .hero h1{font-family:var(--serif);font-size:clamp(56px,8vw,108px);
+    font-weight:400;line-height:.96;letter-spacing:-.035em;margin-bottom:40px;
+    max-width:14ch}
+  .hero h1 em{font-style:italic;color:var(--accent)}
+  .hero-sub{font-size:21px;color:var(--ink-2);max-width:560px;line-height:1.5;
+    margin-bottom:48px}
+  .hero-cta{display:flex;gap:28px;align-items:center}
+  .hero-arrow{font-family:var(--mono);font-size:13px;color:var(--ink-3)}
+
+  /* ─── section heading ─── */
+  section.block{padding:120px 0;border-bottom:1px solid var(--border)}
+  .sec-num{font-family:var(--mono);font-size:12px;color:var(--accent);
+    letter-spacing:.1em;margin-bottom:20px}
+  .sec-title{font-family:var(--serif);font-size:clamp(40px,5.5vw,68px);
+    font-weight:400;line-height:1;letter-spacing:-.03em;margin-bottom:24px}
+  .sec-title em{font-style:italic;color:var(--accent)}
+  .sec-sub{font-size:18px;color:var(--ink-2);max-width:560px;line-height:1.55;
+    margin-bottom:72px}
+
+  /* ─── logos — text list, no chips ─── */
+  .logos-list{display:flex;flex-wrap:wrap;gap:0;align-items:baseline}
+  .logos-list span{font-family:var(--serif);font-size:24px;color:var(--ink-2);
+    padding:0 28px 12px 0;transition:.2s;cursor:default}
+  .logos-list span:hover{color:var(--ink)}
+  .logos-list .sep{color:var(--ink-4);padding:0 14px 12px}
+
+  /* ─── code — inline editorial block ─── */
+  .code-block{background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radius);padding:32px 36px;font-family:var(--mono);
+    font-size:13.5px;line-height:2;overflow-x:auto}
+  .code-block .ln{color:var(--ink-4);user-select:none;display:inline-block;width:24px}
+  .code-block .cmt{color:var(--ink-3)}
+  .code-block .key{color:var(--accent)}
+  .code-block .str{color:var(--ink)}
+  .code-block .ok{color:var(--accent);font-weight:500}
+
+  /* ─── features — prose list ─── */
+  .feat-list{display:flex;flex-direction:column;gap:0}
+  .feat{display:grid;grid-template-columns:80px 1fr 280px;gap:32px;
+    padding:40px 0;border-top:1px solid var(--border);align-items:start}
+  .feat:last-child{border-bottom:1px solid var(--border)}
+  .feat-num{font-family:var(--mono);font-size:13px;color:var(--ink-3);letter-spacing:.05em}
+  .feat-body h3{font-family:var(--serif);font-size:32px;font-weight:400;
+    line-height:1.1;letter-spacing:-.02em;margin-bottom:12px}
+  .feat-body h3 em{font-style:italic;color:var(--accent)}
+  .feat-body p{font-size:16px;color:var(--ink-2);line-height:1.55;max-width:48ch}
+  .feat-aside{font-family:var(--mono);font-size:12px;color:var(--ink-3);
+    line-height:1.7;padding-top:8px}
+
+  /* ─── stats — large editorial figures ─── */
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:64px 80px}
+  .stat figure{margin:0}
+  .stat .big{font-family:var(--serif);font-size:clamp(80px,11vw,140px);
+    font-weight:400;line-height:.9;letter-spacing:-.04em;color:var(--ink)}
+  .stat .big em{font-style:italic;color:var(--accent)}
+  .stat figcaption{font-family:var(--mono);font-size:13px;color:var(--ink-3);
+    letter-spacing:.05em;margin-top:12px;max-width:24ch;line-height:1.5}
+
+  /* ─── models — index list ─── */
+  .model-index{columns:3;column-gap:48px;font-family:var(--serif);font-size:22px;
+    line-height:1.9}
+  .model-index div{break-inside:avoid;display:flex;align-items:baseline;gap:10px}
+  .model-index div::before{content:"·";color:var(--accent);font-size:28px}
+  .model-index .more{font-family:var(--mono);font-size:13px;color:var(--ink-3);
+    letter-spacing:.05em;font-style:normal}
+  .model-index .more::before{content:"+";font-size:18px}
+
+  /* ─── pricing — editorial ─── */
+  .payg-headline{font-family:var(--serif);font-size:clamp(56px,8vw,96px);
+    font-weight:400;line-height:.95;letter-spacing:-.035em;margin-bottom:32px}
+  .payg-headline em{font-style:italic;color:var(--accent)}
+  .payg-rate{font-family:var(--mono);font-size:14px;color:var(--ink-3);
+    letter-spacing:.04em;margin-bottom:48px}
+  .payg-rate strong{color:var(--ink);font-weight:500}
+  .payg-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px;
+    border-top:1px solid var(--border);padding-top:48px}
+  .payg-col h4{font-family:var(--mono);font-size:12px;color:var(--ink-3);
+    letter-spacing:.12em;text-transform:uppercase;margin-bottom:20px}
+  .payg-col p{font-size:16px;color:var(--ink-2);line-height:1.6;margin-bottom:16px}
+  .payg-col p strong{color:var(--ink);font-weight:500}
+  .payg-bill{font-family:var(--mono);font-size:13px;line-height:2}
+  .payg-bill .row{display:flex;justify-content:space-between;
+    border-bottom:1px dotted var(--border);padding:6px 0}
+  .payg-bill .row span:last-child{color:var(--ink)}
+  .payg-bill .total{display:flex;justify-content:space-between;
+    border-top:1px solid var(--ink);margin-top:12px;padding-top:12px;
+    font-weight:500;color:var(--ink)}
+  .payg-bill .total span:last-child{font-family:var(--serif);font-size:22px}
+
+  /* ─── final CTA ─── */
+  .final{padding:160px 0;text-align:left;border-bottom:1px solid var(--border)}
+  .final h2{font-family:var(--serif);font-size:clamp(56px,8vw,108px);
+    font-weight:400;line-height:.96;letter-spacing:-.035em;margin-bottom:40px}
+  .final h2 em{font-style:italic;color:var(--accent)}
+  .final p{font-size:20px;color:var(--ink-2);max-width:540px;margin-bottom:48px;line-height:1.5}
+  .final-cta{display:flex;gap:28px;align-items:center}
+
+  /* ─── footer ─── */
+  footer{padding:64px 0 48px}
+  .foot-top{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:48px;margin-bottom:56px}
+  .foot-brand{font-family:var(--serif);font-size:28px;margin-bottom:12px}
+  .foot-desc{font-size:14px;color:var(--ink-2);max-width:280px;line-height:1.55}
+  .foot-col h5{font-family:var(--mono);font-size:11px;color:var(--ink-3);
+    letter-spacing:.12em;text-transform:uppercase;margin-bottom:16px}
+  .foot-col a{display:block;font-size:14px;color:var(--ink-2);padding:5px 0;transition:.15s}
+  .foot-col a:hover{color:var(--accent)}
+  .foot-bot{display:flex;justify-content:space-between;align-items:center;
+    padding-top:32px;border-top:1px solid var(--border);
+    font-family:var(--mono);font-size:11.5px;color:var(--ink-3);letter-spacing:.04em}
+
+  /* responsive */
+  @media (max-width:768px){
+    .feat{grid-template-columns:1fr;gap:16px}
+    .stats{grid-template-columns:1fr;gap:48px}
+    .payg-grid{grid-template-columns:1fr;gap:48px}
+    .model-index{columns:2}
+    .foot-top{grid-template-columns:1fr 1fr;gap:32px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ NAV ═══════════════ -->
+<nav>
+  <div class="nav-inner">
+    <div class="brand"><span class="mark"></span>YSRouter</div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#models">Models</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#docs">Docs</a>
+    </div>
+    <div class="nav-right">
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <svg class="icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <a class="btn" href="#signin">Sign in</a>
+      <a class="btn btn-primary" href="#start">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════ HERO ═══════════════ -->
+<header class="hero wrap">
+  <div class="hero-eyebrow">YSROUTER · AI GATEWAY · EST. 2023</div>
+  <h1>One gateway.<br>Every <em>model.</em></h1>
+  <p class="hero-sub">A single OpenAI-compatible endpoint for fifty upstream providers. Route, balance, meter — without changing a line of client code.</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="#start">Start routing →</a>
+    <a class="btn" href="#docs">Read the docs</a>
+  </div>
+</header>
+
+<!-- ═══════════════ LOGOS ═══════════════ -->
+<section class="block wrap">
+  <div class="sec-num">01 — IN GOOD COMPANY</div>
+  <h2 class="sec-title">Trusted by teams<br>building with <em>everything.</em></h2>
+  <div class="logos-list">
+    <span>Cherry Studio</span><span class="sep">/</span>
+    <span>Dify</span><span class="sep">/</span>
+    <span>LobeHub</span><span class="sep">/</span>
+    <span>OpenWebUI</span><span class="sep">/</span>
+    <span>Cline</span><span class="sep">/</span>
+    <span>Aion UI</span><span class="sep">/</span>
+    <span>Peking University</span><span class="sep">/</span>
+    <span>UCloud</span><span class="sep">/</span>
+    <span>Alibaba Cloud</span><span class="sep">/</span>
+    <span>IO.NET</span>
+  </div>
+</section>
+
+<!-- ═══════════════ CODE DEMO ═══════════════ -->
+<section class="block wrap" id="demo">
+  <div class="sec-num">02 — DROP-IN</div>
+  <h2 class="sec-title">Swap one URL.<br><em>That's it.</em></h2>
+  <p class="sec-sub">Point any OpenAI-compatible SDK at YSRouter. Routing, keys, billing, and observability are handled — transparently.</p>
+  <div class="code-block">
+<span class="ln">1</span><span class="cmt"># before — direct to one provider</span><br>
+<span class="ln">2</span>curl <span class="str">https://api.openai.com/v1/chat/completions</span> \<br>
+<span class="ln">3</span>&nbsp;&nbsp;&nbsp;<span class="key">-H</span> <span class="str">"Authorization: Bearer sk-..."</span><br>
+<span class="ln">4</span><br>
+<span class="ln">5</span><span class="cmt"># after — every model, one URL</span><br>
+<span class="ln">6</span>curl <span class="str">https://api.ysrouter.com/v1/chat/completions</span> \<br>
+<span class="ln">7</span>&nbsp;&nbsp;&nbsp;<span class="key">-H</span> <span class="str">"Authorization: Bearer sk-ys-..."</span> \<br>
+<span class="ln">8</span>&nbsp;&nbsp;&nbsp;<span class="key">-d</span> <span class="str">'{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}'</span><br>
+<span class="ln">9</span><br>
+<span class="ln">10</span><span class="ok">→ 200 OK · 247 tokens · $0.0021 · routed via anthropic-us</span>
+  </div>
+</section>
+
+<!-- ═══════════════ FEATURES ═══════════════ -->
+<section class="block wrap" id="features">
+  <div class="sec-num">03 — CAPABILITIES</div>
+  <h2 class="sec-title">A control plane<br>for every <em>token.</em></h2>
+  <p class="sec-sub">Ten operational primitives, one deploy. Switched on or off per channel.</p>
+  <div class="feat-list">
+    <div class="feat">
+      <div class="feat-num">i.</div>
+      <div class="feat-body">
+        <h3>Lightning <em>routing.</em></h3>
+        <p>Optimized network path with millisecond fan-out across upstreams. Stream tokens back to clients with zero added latency.</p>
+      </div>
+      <div class="feat-aside">p95 &lt; 40ms<br>streaming-first<br>zero-copy forwarding</div>
+    </div>
+    <div class="feat">
+      <div class="feat-num">ii.</div>
+      <div class="feat-body">
+        <h3>Secure by <em>default.</em></h3>
+        <p>Per-key scopes, group quotas, audit logs, and SSO. Enterprise-grade auth at every junction of your traffic.</p>
+      </div>
+      <div class="feat-aside">JWT · WebAuthn<br>SSO / SAML<br>per-key scopes</div>
+    </div>
+    <div class="feat">
+      <div class="feat-num">iii.</div>
+      <div class="feat-body">
+        <h3>Transparent <em>billing.</em></h3>
+        <p>Pay per token at the provider's rate. YSRouter adds no markup. The ledger is auditable per request, settled in real time.</p>
+      </div>
+      <div class="feat-aside">no markup<br>per-request ledger<br>real-time settle</div>
+    </div>
+    <div class="feat">
+      <div class="feat-num">iv.</div>
+      <div class="feat-body">
+        <h3>Self-host, <em>free.</em></h3>
+        <p>AGPL-3.0. Run the entire gateway on your own infrastructure. Pricing is between you and your providers — nothing in between.</p>
+      </div>
+      <div class="feat-aside">SQLite · MySQL · PG<br>Redis cache<br>Docker / bare-metal</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ STATS ═══════════════ -->
+<section class="block wrap">
+  <div class="sec-num">04 — BY THE NUMBERS</div>
+  <h2 class="sec-title">What the yard<br>actually <em>holds.</em></h2>
+  <div class="stats" style="margin-top:72px">
+    <figure class="stat">
+      <div class="big">50<em>+</em></div>
+      <figcaption>UPSTREAM SERVICES INTEGRATED — OpenAI, Anthropic, Gemini, and forty-seven more behind one URL.</figcaption>
+    </figure>
+    <figure class="stat">
+      <div class="big">100<em>+</em></div>
+      <figcaption>MODELS WITH BILLING SUPPORT — each priced at its provider's rate, metered to the token.</figcaption>
+    </figure>
+    <figure class="stat">
+      <div class="big">50<em>+</em></div>
+      <figcaption>COMPATIBLE API ROUTES — OpenAI, Claude, Gemini, and Responses APIs, all on one base.</figcaption>
+    </figure>
+    <figure class="stat">
+      <div class="big">10<em>+</em></div>
+      <figcaption>SCHEDULING CONTROLS — load balancing, rate limits, budgets, guardrails, caching, more.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ═══════════════ MODELS ═══════════════ -->
+<section class="block wrap" id="models">
+  <div class="sec-num">05 — THE INDEX</div>
+  <h2 class="sec-title">Many providers.<br>One <em>protocol.</em></h2>
+  <p class="sec-sub">Each upstream arrives on its own terms. YSRouter normalizes them to a single shape your client already speaks.</p>
+  <div class="model-index">
+    <div>OpenAI</div><div>Anthropic</div><div>Google Gemini</div>
+    <div>Mistral</div><div>DeepSeek</div><div>xAI Grok</div>
+    <div>Cohere</div><div>Moonshot Kimi</div><div>Qwen</div>
+    <div>Zhipu GLM</div><div>Doubao</div><div>Yi</div>
+    <div>Baichuan</div><div>Minimax</div><div>iFlytek Spark</div>
+    <div>Azure</div><div>AWS Bedrock</div><div class="more">30 more integrated</div>
+  </div>
+</section>
+
+<!-- ═══════════════ PRICING ═══════════════ -->
+<section class="block wrap" id="pricing">
+  <div class="sec-num">06 — PRICING</div>
+  <div class="payg-headline">Pay for what<br>you <em>route.</em></div>
+  <div class="payg-rate">No tiers. No seats. No commitment. <strong>$0.0021 / 1K tokens</strong> — passed through at provider cost.</div>
+  <div class="payg-grid">
+    <div class="payg-col">
+      <h4>How it works</h4>
+      <p><strong>Pre-pay, deduct per call.</strong> Top up your balance once; every request is metered and deducted to the cent.</p>
+      <p><strong>Transparent pass-through.</strong> Each model's price matches its upstream exactly. No markup, ever.</p>
+      <p><strong>Self-host free, forever.</strong> Run the gateway on your own infra — pricing is between you and your providers.</p>
+    </div>
+    <div class="payg-col">
+      <h4>Sample usage · this month</h4>
+      <div class="payg-bill">
+        <div class="row"><span>Claude Sonnet 4 · 1.2M tok</span><span>$3.42</span></div>
+        <div class="row"><span>GPT-4o · 4.8M tok</span><span>$14.40</span></div>
+        <div class="row"><span>DeepSeek V3 · 9.1M tok</span><span>$1.82</span></div>
+        <div class="row"><span>Gemini 2.0 Flash · 2.3M tok</span><span>$0.46</span></div>
+        <div class="total"><span>balance after</span><span>$80.10</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ FINAL CTA ═══════════════ -->
+<section class="final wrap">
+  <h2>Ready to simplify<br>your AI <em>integration?</em></h2>
+  <p>Deploy your own gateway and start routing requests through configured upstream services in minutes.</p>
+  <div class="final-cta">
+    <a class="btn btn-primary" href="#start">Get started →</a>
+    <a class="btn" href="#pricing">See pricing</a>
+  </div>
+</section>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div>
+        <div class="foot-brand serif">YSRouter</div>
+        <p class="foot-desc">Next-generation LLM gateway and AI asset management. Route, balance, meter — every model, one URL.</p>
+      </div>
+      <div class="foot-col">
+        <h5>Product</h5>
+        <a href="#features">Features</a>
+        <a href="#models">Models</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#docs">Docs</a>
+      </div>
+      <div class="foot-col">
+        <h5>Resources</h5>
+        <a href="#">Quickstart</a>
+        <a href="#">API reference</a>
+        <a href="#">Changelog</a>
+        <a href="#">Status</a>
+      </div>
+      <div class="foot-col">
+        <h5>Company</h5>
+        <a href="#">About</a>
+        <a href="#">GitHub</a>
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <span>© 2023–2026 QuantumNous · AGPL-3.0 · self-hostable</span>
+      <span>build 2k6e8r7p · all systems clear</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var KEY = 'ysrouter-theme';
+  var root = document.documentElement;
+  var mql = window.matchMedia('(prefers-color-scheme: dark)');
+  function resolved(p){ if(p==='system') return mql.matches?'dark':'light'; return p; }
+  function apply(p){ root.setAttribute('data-theme', resolved(p)); }
+  var pref; try{ pref = localStorage.getItem(KEY); }catch(e){}
+  if(pref!=='light'&&pref!=='dark'&&pref!=='system') pref = 'system';
+  var q = new URLSearchParams(location.search).get('theme');
+  if(q==='light'||q==='dark') pref = q;
+  apply(pref);
+  var order = { light:'dark', dark:'system', system:'light' };
+  var btn = document.getElementById('theme-toggle');
+  if(btn){ btn.addEventListener('click', function(){
+    pref = order[pref] || 'dark';
+    try{ localStorage.setItem(KEY, pref); }catch(e){}
+    apply(pref);
+  });}
+  mql.addEventListener('change', function(){ if(pref==='system') apply('system'); });
+})();
+</script>
+</body>
+</html>

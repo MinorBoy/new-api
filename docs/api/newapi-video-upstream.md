@@ -23,7 +23,7 @@
 5. 客户端只看到本地公开任务 ID；上游任务 ID 只用于服务内部通信。
 6. 提交请求保留客户端的全部顶层 JSON 字段，仅替换映射后的 `model`。
 7. 后台使用上游详细查询端点，完整保留响应数据供状态、结果、计费和诊断使用。
-8. 本地同时提供 ARK SDK 入口 `POST/GET /api/v3/contents/generations/tasks*`；对上游已明确支持的图片和音频参考做协议转换，并返回 ARK 风格任务响应。
+8. 本地同时提供 ARK SDK 入口 `POST/GET /api/v3/contents/generations/tasks*`；对上游已明确支持的图片和音频参考做协议转换，并返回包含 token usage 的 ARK 风格任务响应。
 9. 未被上游文档或实测证明支持的 ARK 视频参考、`draft_task`、`draft: true` 和非空 `tools` 首版明确拒绝，不静默丢弃。
 
 ## 2. 上游协议依据
@@ -166,7 +166,7 @@ Authorization: Bearer <API_KEY>
 | 本地 `POST /v1/video/generations` | 支持 |
 | 本地 `GET /v1/video/generations/:task_id` | 支持 |
 | 本地 `POST /api/v3/contents/generations/tasks` | 支持已确认的 ARK 子集 |
-| 本地 `GET /api/v3/contents/generations/tasks/:task_id` | 支持 ARK task response |
+| 本地 `GET /api/v3/contents/generations/tasks/:task_id` | 支持包含 `usage` 的 ARK task response |
 | 本地 `GET /api/v3/contents/generations/tasks` | 支持既有列表协议 |
 | 上游 `POST /v1/video/generations` | 支持 |
 | 上游 `GET /v1/video/generations/:task_id` | 支持 |
@@ -542,6 +542,8 @@ ARK 转换器从 `data.data` 复制以下已知安全字段，并保留显式 `f
 - `framespersecond`、`generate_audio`、`priority`、`ratio`、`resolution`、`seed`、`service_tier`
 - `usage.completion_tokens`、`usage.total_tokens` 和标准 `error.code` / `error.message`
 
+`usage` 是对客户端公开的 ARK 契约，不只是内部计费数据。优先从详细响应的 `data.data.usage` 读取；兼容直接响应的顶层 `usage`。`completion_tokens` 和 `total_tokens` 必须原值返回，显式 `0` 不能被 `omitempty` 或真假值判断丢失。ARK 输出 DTO 必须用指针字段或等价的 presence 标记区分“缺失”和“显式零值”。上游没有返回 usage 时才省略，不能使用外层 `data.quota` 或本地 `Task.Quota` 推导 token。
+
 随后执行强制覆盖：
 
 - `id` 使用本地公开任务 ID，绝不返回 `data.data.id`。
@@ -705,6 +707,7 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 - 验证 token 超限进入现有饱和审计。
 - 验证 queued、in_progress、completed、failed 四种本地 `OpenAIVideo`。
 - 验证 ARK queued/running/succeeded/failed，且完整保留第 9.2 节的 `draft: false`、`priority: 0`、usage 等安全字段。
+- 验证 ARK `usage` 来自 `data.data.usage` 或直接响应的顶层 `usage`，显式零值不丢失，且外层 `data.quota` 不能混入 usage。
 - 验证任何客户端出口都不包含上游任务 ID。
 - 验证 ARK 单查和列表只接受白名单平台，类型 60 走 converter，其他平台不能读取原始 `task.Data`。
 

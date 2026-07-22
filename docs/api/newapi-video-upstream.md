@@ -1,7 +1,7 @@
 # 接入上游 new-api 视频任务协议（设计文档）
 
-> 状态：设计已确认，待实现计划
-> 日期：2026-07-22
+> 状态：根据上游公开文档修订，待确认
+> 日期：2026-07-23
 > 关联分支：`docs/ark-native-compat-plans`
 
 ## 1. 背景与目标
@@ -19,16 +19,40 @@
 1. 新增独立的 `NewAPIVideo` 任务渠道。
 2. 本地客户端通过 `POST /v1/video/generations` 提交任务。
 3. 本地客户端通过 `GET /v1/video/generations/:public_task_id` 查询任务。
-4. 提交和查询均直接返回本项目已有的 `dto.OpenAIVideo` 结构，不使用 `code/data` 包装。
+4. OpenAI Video 入口的提交和查询均直接返回本项目已有的 `dto.OpenAIVideo` 结构，不使用 `code/data` 包装；ARK 入口返回 ARK task response。
 5. 客户端只看到本地公开任务 ID；上游任务 ID 只用于服务内部通信。
 6. 提交请求保留客户端的全部顶层 JSON 字段，仅替换映射后的 `model`。
 7. 后台使用上游详细查询端点，完整保留响应数据供状态、结果、计费和诊断使用。
+8. 本地同时提供 ARK SDK 入口 `POST/GET /api/v3/contents/generations/tasks*`；对上游已明确支持的图片和音频参考做协议转换，并返回 ARK 风格任务响应。
+9. 未被上游文档或实测证明支持的 ARK 视频参考、`draft_task`、`draft: true` 和非空 `tools` 首版明确拒绝，不静默丢弃。
 
-## 2. 实测上游协议
+## 2. 上游协议依据
 
-原设计假定上游使用 `dto.VideoRequest`、`dto.VideoResponse` 和 `dto.VideoTaskResponse`。测试报告证明该假定不成立，这三个 DTO 不作为本次接入契约。
+本设计以两类证据为准：
 
-### 2.1 提交请求
+- 2026-07-22 测试报告：验证文生视频提交、详细轮询响应、状态、结果 URL 和 token usage。
+- 上游当前公开文档：<https://new.seeinglab.top/docs/seedance>，验证图片和音频参考的请求字段。
+
+公开文档的查询示例是精简的 `OpenAIVideo`，实测详细查询则返回 `TaskResponse<TaskDto>`。后台轮询必须兼容两种结构，但以实测详细结构作为完整数据和 token 结算的优先来源；不能根据公开文档的精简示例删减 `data.data`。
+
+原设计假定上游使用 `dto.VideoRequest`、`dto.VideoResponse` 和 `dto.VideoTaskResponse`。现有证据证明该假定不成立，这三个 DTO 不作为本次接入契约。
+
+### 2.1 已确认的媒体能力
+
+| 能力 | 上游请求字段 | 证据强度 | 首版处理 |
+|---|---|---|---|
+| 文生视频 | `prompt` | 已实测 | 支持 |
+| 单张首帧 | `image` | 文档标注已实测 | 支持 |
+| 首尾帧 | `image_with_roles` | 文档标注已实测 | 支持 |
+| 多图/参考图 | `images` | 文档称字段已接入、建议小流量验证 | 支持，但标记为试验能力 |
+| 音频参考 | `content[].audio_url` + `generateAudio` | 文档标注已实测 | 支持 |
+| 视频参考 | 无 | 未确认 | ARK 入口拒绝 |
+| `draft_task` / `draft: true` | 无 | 未确认 | ARK 入口拒绝 |
+| 非空 `tools` | 无 | 未确认 | ARK 入口拒绝 |
+
+轮询响应中的 `data.data` 与 ARK task response 相似，只能证明结果字段存在，不能反向证明同名请求能力。尤其不能据此推断视频参考、draft 或 tools 可用。
+
+### 2.2 提交请求
 
 ```http
 POST /v1/video/generations HTTP/1.1
@@ -49,7 +73,20 @@ Authorization: Bearer <API_KEY>
 
 上游会读取顶层 `prompt`，不读取 Chat Completions 风格的 `messages`。`ratio`、`watermark` 等字段不在当前 `TaskSubmitReq` 或 `dto.VideoRequest` 的完整可表达范围内，因此不能经过这两个结构重建请求。
 
-### 2.2 提交响应
+上游公开文档还声明以下 JSON 形态：
+
+- `image`: 单张首帧，支持 HTTP(S) URL、Base64 和 data URI。
+- `images`: 多张参考图数组。
+- `image_with_roles`: `{url, role}` 数组，角色为 `first_frame` / `last_frame`。
+- `content`: 多模态数组；已确认 `audio_url` + `reference_audio`。
+- `generateAudio`: 是否生成音轨，注意上游字段为 camelCase。
+- `seconds` / `duration`: 可选时长字段。
+- `size`: 部分上游兼容的尺寸字段。
+- `metadata`: 扩展对象，是否生效取决于上游模型。
+
+测试报告另已验证 `ratio`、`duration` 和显式 `watermark: false` 可提交。其他未知顶层字段在 OpenAI Video 入口继续语义透传，但不因此升级为本项目承诺支持的能力。
+
+### 2.3 提交响应
 
 上游实际返回 `OpenAIVideo` 结构：
 
@@ -65,7 +102,7 @@ Authorization: Bearer <API_KEY>
 }
 ```
 
-### 2.3 详细轮询响应
+### 2.4 详细轮询响应
 
 ```http
 GET /v1/video/generations/task_upstream_id HTTP/1.1
@@ -128,13 +165,19 @@ Authorization: Bearer <API_KEY>
 |---|---|
 | 本地 `POST /v1/video/generations` | 支持 |
 | 本地 `GET /v1/video/generations/:task_id` | 支持 |
+| 本地 `POST /api/v3/contents/generations/tasks` | 支持已确认的 ARK 子集 |
+| 本地 `GET /api/v3/contents/generations/tasks/:task_id` | 支持 ARK task response |
+| 本地 `GET /api/v3/contents/generations/tasks` | 支持既有列表协议 |
 | 上游 `POST /v1/video/generations` | 支持 |
 | 上游 `GET /v1/video/generations/:task_id` | 支持 |
 | `application/json` | 支持 |
 | multipart | 不支持 |
 | `POST /v1/videos` | 不支持 |
 | `GET /v1/videos/:task_id` | 不作为首版契约 |
-| ARK `/api/v3/contents/generations/tasks*` | 不支持 |
+| ARK 图片参考 | 单首帧、首尾帧支持；多图参考为试验能力 |
+| ARK 音频参考 | 支持 |
+| ARK 视频参考 | 不支持，返回 400 |
+| ARK draft/tools | 非默认能力不支持，返回 400 |
 | remix | 不支持 |
 
 ## 4. 总体架构
@@ -160,6 +203,18 @@ Authorization: Bearer <API_KEY>
   -> 按用户和公开 ID 查询本地任务
   -> NewAPIVideo.OpenAIVideoConverter
   -> 返回使用本地公开 ID 的 OpenAIVideo
+
+ARK SDK POST /api/v3/contents/generations/tasks
+  -> 校验 ARK 请求和已确认能力边界
+  -> 将 content 图片/音频转换为上游 new-api 字段
+  -> POST {baseURL}/v1/video/generations
+  -> 返回 {"id":"task_local_public_id"}
+
+ARK SDK GET /api/v3/contents/generations/tasks/{public_task_id}
+  -> 按用户和公开 ID 查询本地任务
+  -> NewAPIVideo.ArkVideoTaskConverter
+  -> 合并外层 TaskDto 与 data.data 的安全 ARK 字段
+  -> 返回 ARK task response
 ```
 
 客户端查询只读取本地任务记录，不在请求线程中实时访问上游。网络波动由后台轮询统一处理。
@@ -200,7 +255,7 @@ Authorization: Bearer <API_KEY>
 - 损坏 JSON、数组根节点、标量根节点返回 HTTP 400。
 - 所有 JSON 编解码必须使用 `common.*` 包装方法。
 
-### 6.2 保留请求语义
+### 6.2 OpenAI Video 入口保留请求语义
 
 适配器读取原始 JSON 对象并保留所有顶层字段，只覆盖顶层 `model`。这里的“原样透传”表示字段和值的 JSON 语义不变，不保证空白、缩进和字段顺序不变。
 
@@ -212,21 +267,53 @@ Authorization: Bearer <API_KEY>
 
 不得使用 `TaskSubmitReq -> dto.VideoRequest` 转换，因为它会丢失字段，并且会把小数 `duration` 静默转成零值。
 
-### 6.3 验证规则
+### 6.3 OpenAI Video 入口验证规则
 
 | 字段 | 首版规则 |
 |---|---|
 | `model` | 必填、非空字符串 |
 | `prompt` | 必填、非空字符串 |
 | `duration` | 可省略；存在时必须是有限数值，`> 0` 且不超过 `relaycommon.MaxTaskDurationSeconds`；非 `per_duration` 模式允许小数 |
+| `seconds` | 可省略；接受有限数值或规范数值字符串，边界与 `duration` 相同 |
 | `n` | 可省略；存在时必须是整数 `1` |
 | `watermark` | 存在时必须是布尔值 |
 | `seed` | 存在时必须是整数，显式 `0` 合法 |
 | 其他字段 | 不解释、不修改，由上游协议校验 |
 
-`metadata.duration` 和 `metadata.n` 也必须检查，防止通过 metadata 绕过计费边界。若 metadata 中的值缺少对应顶层字段，或与顶层值冲突，则返回 HTTP 400；首版只认顶层字段为权威计费来源。
+`duration` 与 `seconds` 同时存在时必须数值相等。`metadata.duration`、`metadata.seconds` 和 `metadata.n` 也必须检查，防止通过 metadata 绕过计费边界。若 metadata 中的值缺少对应顶层字段，或与顶层值冲突，则返回 HTTP 400；首版只认顶层字段为权威计费来源。
 
 首版限制 `n = 1`，因为本地任务和 `OpenAIVideo` 只表达一个视频，当前结算不能安全表示一次任务的多个独立视频结果。
+
+### 6.4 ARK 入口转换规则
+
+ARK 请求不能原样发给上游，因为上游要求顶层 `prompt`，图片字段也不是统一的 `content[]`。适配器必须解析、验证并构造新的上游 JSON 对象。
+
+| ARK 输入 | 上游 new-api 输入 | 规则 |
+|---|---|---|
+| `model` | `model` | 使用渠道模型映射后的名称 |
+| 唯一非空 `content[type=text].text` | `prompt` | 必填；同时在音频请求的 `content` 中保留文本项 |
+| 单个 `image_url`，role 缺失或 `first_frame` | `image` | URL/Base64/data URI 原值保留 |
+| `first_frame` + `last_frame` | `image_with_roles` | 转为 `{url, role}` 数组 |
+| `reference_image` | `images` | 可多张；属于试验能力 |
+| `audio_url` + `reference_audio` | `content[].audio_url` | 保留媒体对象和 role |
+| `generate_audio` | `generateAudio` | 显式布尔值保留；音频存在且字段缺失时设为 `true` |
+| `ratio`、`duration`、`watermark` | 同名字段 | 按已实测字段转发 |
+| `resolution` | 不直接转发 | 必须与映射后模型名中的 480p/720p/1080p 档位一致；仅作为本地校验和响应信息 |
+| `service_tier` | 不转发 | 仅接受缺失或 `default` |
+| `draft: false`、空 `tools` | 不转发 | 允许中性默认值，不能宣称支持该能力 |
+
+以下 ARK 请求首版返回 HTTP 400 和 ARK 错误 envelope：
+
+- 任意 `content[type=video_url]`。
+- 任意 `content[type=draft_task]`。
+- 缺少非空 text，或存在多个非空 text。
+- 多于一个音频参考。
+- `draft: true` 或非空 `tools`。
+- 音频参考与显式 `generate_audio: false` 的矛盾组合。
+- 未被映射表声明、且忽略后可能改变请求语义的 ARK 顶层字段，例如 `frames`、`seed`、`camera_fixed`、`return_last_frame`、`priority`、`execution_expires_after` 和 `safety_identifier`。
+- 首尾帧、参考图、音频三种媒体模式互相混合等未被上游文档确认的组合。
+
+ARK 的 `duration` 使用整数秒并受 `relaycommon.MaxTaskDurationSeconds` 约束。音频参考可以只有文本和音频，不套用当前 Doubao 适配器“音频必须同时有图片或视频”的限制，因为目标上游文档已经给出纯音频参考的成功请求形态。
 
 ## 7. 提交流程
 
@@ -236,19 +323,21 @@ Authorization: Bearer <API_KEY>
 - Header：`Authorization: Bearer {apiKey}`
 - Header：`Content-Type: application/json`
 - Header：`Accept: application/json`
-- Body：客户端顶层 JSON 字段加映射后的 `model`
+- OpenAI Video Body：客户端顶层 JSON 字段加映射后的 `model`
+- ARK Body：按 6.4 构造的上游 new-api JSON
 
 ### 7.2 上游响应
 
-提交响应解析为 `dto.OpenAIVideo`：
+上游提交响应统一解析为 `dto.OpenAIVideo` 投影：
 
 1. 优先读取 `task_id`，兼容只返回 `id` 的上游。
 2. `id` 和 `task_id` 同时存在但不一致时，按无效上游响应处理。
 3. 两者均为空时返回无效上游响应错误，不创建本地任务。
 4. 上游任务 ID 返回给任务框架，并以 `Task.PrivateData.UpstreamTaskID` 作为后续通信的权威索引；完整内部响应中可以保留其审计副本。
-5. 客户端响应中的 `id` 和 `task_id` 都替换为 `info.PublicTaskID`。
-6. 客户端响应中的 `model` 替换为 `info.OriginModelName`。
-7. `object` 固定为 `video`，状态、进度和创建时间保留上游已验证语义。
+5. OpenAI Video 客户端响应中的 `id` 和 `task_id` 都替换为 `info.PublicTaskID`。
+6. OpenAI Video 客户端响应中的 `model` 替换为 `info.OriginModelName`。
+7. OpenAI Video 响应的 `object` 固定为 `video`，状态、进度和创建时间保留上游已验证语义。
+8. ARK 客户端提交响应只返回 `{"id":"<public_task_id>"}`，与现有 ARK 入口行为一致。
 
 提交成功响应示例：
 
@@ -264,6 +353,14 @@ Authorization: Bearer <API_KEY>
 }
 ```
 
+同一任务的 ARK 提交响应：
+
+```json
+{
+  "id": "task_local_public_id"
+}
+```
+
 ## 8. 轮询与完整数据保留
 
 ### 8.1 双轨处理
@@ -271,12 +368,13 @@ Authorization: Bearer <API_KEY>
 轮询响应必须采用“解析投影 + 完整存储”方式：
 
 1. 将原始响应体完整保存到 `task.Data`。
-2. 同一份响应只读解析为明确投影，用于提取任务状态、进度、URL、错误、时间和 usage。
-3. 不得将精简 DTO 重新序列化后覆盖 `task.Data`。
+2. 优先解析实测的 `TaskResponse<TaskDto>`；若没有 wrapper，则兼容公开文档展示的直接 `OpenAIVideo`。
+3. 同一份响应只读解析为明确投影，用于提取任务状态、进度、URL、错误、时间和 usage。
+4. 不得将精简 DTO 重新序列化后覆盖 `task.Data`。
 
 投影中的嵌套 `data.data` 使用 `json.RawMessage` 或等价的保留方式。`draft: false`、`seed`、`duration`、`resolution`、`usage` 和上游未来增加的未知字段都必须保留。允许安全层对巨大的内嵌 Base64 媒体执行现有截断策略，但不能删除普通 JSON 字段。
 
-完整响应是内部数据，不作为客户端响应直接返回。客户端输出必须通过明确的 `OpenAIVideo` 字段白名单构造。
+完整响应是内部数据，不作为客户端响应直接返回。OpenAI Video 和 ARK 两种客户端输出都必须通过各自的明确字段白名单构造。
 
 ### 8.2 状态映射
 
@@ -291,6 +389,8 @@ Authorization: Bearer <API_KEY>
 | `SUCCESS` | `SUCCESS` | `completed` |
 | `FAILURE` | `FAILURE` | `failed` |
 
+直接 `OpenAIVideo` 响应兼容 `queued`、`in_progress`、`running`、`completed`、`succeeded`、`failed` 和 `cancelled`。其中 `completed` / `succeeded` 映射成功，`failed` / `cancelled` 映射失败；未知状态同样保持任务原状态并等待后续轮询。
+
 未知状态不得默认映射为成功、失败或处理中。本轮轮询返回解析错误并保持任务原状态，等待后续轮询或系统超时处理。
 
 ### 8.3 结果和错误
@@ -299,17 +399,21 @@ Authorization: Bearer <API_KEY>
 
 1. `data.result_url`
 2. `data.data.content.video_url`
+3. 直接响应的 `metadata.url`
+4. 直接响应的 `content.video_url`
+5. 直接响应的 `data.url`
 
-`SUCCESS` 但两个位置都没有 URL 时，不立即标记成功；保持原状态并等待下一轮，避免产生无法下载的视频任务。
+成功状态但所有已知位置都没有 URL 时，不立即标记成功；保持原状态并等待下一轮，避免产生无法下载的视频任务。
 
 失败原因的读取顺序：
 
 1. `data.fail_reason`
 2. `data.data.error.message`
-3. 上游错误 envelope 的 `message`
-4. 统一回退文本 `task failed`
+3. 直接响应的 `error.message`
+4. 上游错误 envelope 的 `message`
+5. 统一回退文本 `task failed`
 
-错误码优先读取 `data.data.error.code`。
+错误码优先读取 `data.data.error.code`，其次读取直接响应的 `error.code`。
 
 ### 8.4 HTTP 和网络错误
 
@@ -326,6 +430,8 @@ Authorization: Bearer <API_KEY>
 现有 `service/task_polling.go` 对 new-api wrapper 的通用解析必须改用包含 `result_url` 的明确 DTO。当前直接解码为 `model.Task` 会忽略 JSON 中的 `result_url`，可能错误生成本地代理占位 URL。
 
 ## 9. 本地查询响应
+
+### 9.1 OpenAI Video 响应
 
 `GET /v1/video/generations/:public_task_id` 直接返回 `dto.OpenAIVideo`，不带 `code/data` 包装。
 
@@ -399,6 +505,71 @@ Authorization: Bearer <API_KEY>
 
 `expires_at`、`seconds`、`size` 和 `remixed_from_video_id` 在没有可靠来源时省略。处理中不复制上游错误提前填充的完成时间。
 
+### 9.2 ARK task response
+
+`GET /api/v3/contents/generations/tasks/:public_task_id` 直接返回 ARK 风格对象，不返回 `code/data` wrapper。成功示例：
+
+```json
+{
+  "id": "task_local_public_id",
+  "model": "seedance-720p-token",
+  "status": "succeeded",
+  "content": {
+    "video_url": "https://example.com/video.mp4"
+  },
+  "created_at": 1784716214,
+  "updated_at": 1784716351,
+  "draft": false,
+  "duration": 5,
+  "execution_expires_after": 172800,
+  "framespersecond": 24,
+  "generate_audio": true,
+  "priority": 0,
+  "ratio": "16:9",
+  "resolution": "720p",
+  "seed": 47347,
+  "service_tier": "default",
+  "usage": {
+    "completion_tokens": 108900,
+    "total_tokens": 108900
+  }
+}
+```
+
+ARK 转换器从 `data.data` 复制以下已知安全字段，并保留显式 `false` 和 `0`：
+
+- `content.video_url`、`created_at`、`updated_at`、`draft`、`duration`、`execution_expires_after`
+- `framespersecond`、`generate_audio`、`priority`、`ratio`、`resolution`、`seed`、`service_tier`
+- `usage.completion_tokens`、`usage.total_tokens` 和标准 `error.code` / `error.message`
+
+随后执行强制覆盖：
+
+- `id` 使用本地公开任务 ID，绝不返回 `data.data.id`。
+- `model` 使用客户端提交的本地模型名，绝不返回 provider model。
+- `status` 使用本地状态映射：queued -> `queued`，处理中 -> `running`，成功 -> `succeeded`，失败 -> `failed`。
+- `content.video_url` 为空时使用已经解析的 `Task.PrivateData.ResultURL`。
+- `created_at` / `updated_at` 优先使用嵌套 ARK 值，缺失时回退到外层任务时间。
+
+失败任务返回相同顶层结构，并包含：
+
+```json
+{
+  "id": "task_local_public_id",
+  "model": "seedance-720p-token",
+  "status": "failed",
+  "error": {
+    "code": "upstream_error_code",
+    "message": "task failed"
+  },
+  "created_at": 1784716214,
+  "updated_at": 1784716375
+}
+```
+
+外层 wrapper 的 `user_id`、`channel_id`、`group`、`quota`、`platform` 和上游任务 ID 属于内部数据，不进入 ARK 响应。`data.data` 的未知未来字段保留在 `task.Data`，但未经审查不自动公开。
+
+ARK 列表接口复用同一转换器，确保单查和列表字段、ID 改写及状态语义一致；平台白名单加入 `NewAPIVideo`，单查也必须执行相同白名单。
+
 ## 10. 计费设计
 
 新适配器接入现有计费模式，不自行定义第三方价格公式。
@@ -412,6 +583,7 @@ Authorization: Bearer <API_KEY>
 适配器实现 `TaskDurationEstimator`：
 
 - `duration` 必填。
+- OpenAI Video 请求可由规范化后的 `duration` 或 `seconds` 提供；ARK 请求使用 `duration`。
 - 当前中央接口使用整数秒，因此首版 `per_duration` 模式只接受整数秒。
 - 小数时长在固定价格或 token 模式下可以透传；在 `per_duration` 模式下返回 HTTP 400。
 - 使用 `relaycommon.MaxTaskDurationSeconds` 上限。
@@ -427,6 +599,7 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 3. 字段缺失与显式零值必须区分。
 4. 负数、超大值和转换溢出必须经过现有 quota 饱和保护并记录 `QuotaClamp`。
 5. 禁止对未界定数据做裸 `int` 转换。
+6. 若精简直接响应没有任何 usage，不能把“字段缺失”解释为零 token；沿用现有结算语义保留预扣额度，不产生免费任务。
 
 成功终态进入现有差额结算，失败终态进入现有退款路径。多节点轮询继续使用任务 CAS，避免重复结算或退款。
 
@@ -458,9 +631,10 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 
 - `Task.PrivateData.UpstreamTaskID` 是上游任务 ID 的权威通信索引；内部完整响应可以包含其审计副本，但客户端响应统一使用本地公开 ID。
 - `task.Data` 中的完整轮询响应属于内部数据，不得由通用回退分支直接返回给客户端。
-- `/v1/video/generations/:task_id` 为类型 60 增加明确的 `OpenAIVideoConverter` 分支，不再返回通用 `TaskDto`。
-- ARK 单任务查询必须与列表使用相同的平台白名单；类型 60 不进入该白名单，避免 `/api/v3/...` 回退暴露原始数据。
-- 首版不实现 `ArkVideoTaskConverter`。
+- `/v1/video/generations/:task_id` 和 `/v1/videos/:task_id` 都识别为 OpenAI Video 查询；类型 60 走明确的 `OpenAIVideoConverter`，不返回通用 `TaskDto`。
+- 类型 60 实现 `ArkVideoTaskConverter`，只公开第 9.2 节列出的 ARK 字段，并强制改写 ID、模型和状态。
+- ARK 单任务查询必须与列表使用相同的平台白名单；类型 60 加入白名单，其他平台不得通过 `/api/v3/...` 的 raw-data 回退泄露内部响应。
+- OpenAI Video 与 ARK 查询可以读取同一任务，但各自独立转换，不能互相复用序列化后的客户端响应。
 - 首版不修改 `dto.VideoRequest`、`dto.VideoResponse` 和 `dto.VideoTaskResponse`，因为它们不是实测协议。
 - 不新增数据库字段或迁移；继续使用现有 `Task`、`TaskPrivateData` 和 `TaskBillingContext`。
 
@@ -471,13 +645,14 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 | 文件 | 改动 |
 |---|---|
 | `relay/channel/task/newapivideo/constants.go` | 渠道名称；不提供虚假默认模型 |
-| `relay/channel/task/newapivideo/dto.go` | 请求验证投影、详细轮询投影和错误结构 |
-| `relay/channel/task/newapivideo/adaptor.go` | 提交、轮询、响应转换、计费接口和错误解析 |
+| `relay/channel/task/newapivideo/dto.go` | OpenAI/ARK 请求投影、双形态轮询投影、ARK 输出和错误结构 |
+| `relay/channel/task/newapivideo/native.go` | ARK 内容校验和到上游 new-api 字段的显式转换 |
+| `relay/channel/task/newapivideo/adaptor.go` | 提交、轮询、两种客户端响应转换、计费接口和错误解析 |
 | `relay/relay_adaptor.go` | 注册类型 60 适配器 |
 | `constant/channel.go` | 新增类型 60，Dummy 后移到 61 |
-| `relay/relay_task.go` | 类型 60 的本地查询转换分支 |
+| `relay/relay_task.go` | `/v1/video/generations/:id` 识别为 OpenAI Video，并走类型 60 转换分支 |
 | `service/task_polling.go` | 正确解析 new-api `TaskDto.result_url`、完整保存响应、处理轮询 HTTP 状态 |
-| `relay/seedance_task.go` | ARK 单查使用平台白名单，禁止原始数据回退 |
+| `relay/seedance_task.go` | 类型 60 加入 ARK 白名单；单查与列表共用安全转换器，禁止原始数据回退 |
 | `controller/channel-test.go` | 类型 60 禁用通用聊天测试 |
 | 对应 `_test.go` | 请求、响应、轮询、计费、隔离和生命周期回归测试 |
 
@@ -499,11 +674,14 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 
 - 仅接受 JSON，拒绝 multipart、数组根节点和损坏 JSON。
 - 覆盖缺失/空 `model`、`prompt`。
-- 覆盖 `duration` 的缺失、整数、小数、零值、负数、超上限和 `per_duration` 限制。
+- 覆盖 `duration` / `seconds` 的缺失、整数、小数、数值字符串、冲突、零值、负数、超上限和 `per_duration` 限制。
 - 覆盖 `n` 缺失、`1`、零值、负数、小数、超大整数和大于 `1`。
 - 覆盖 metadata 计费字段绕过和冲突。
 - 断言 `watermark: false`、`seed: 0`、未知字段和嵌套对象保留。
 - 断言只修改顶层 `model`。
+- ARK 覆盖文生、单首帧、首尾帧、多参考图和音频参考的精确上游 JSON。
+- ARK 覆盖视频参考、draft task、`draft: true`、非空 tools、未知非中性字段和未确认媒体组合的明确拒绝。
+- ARK 断言 `generate_audio` 转为 `generateAudio`，中性 `draft: false` / 空 tools 可接受但不发送。
 
 ### 14.2 适配器契约
 
@@ -512,6 +690,7 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 - 验证 Bearer 鉴权、Content-Type、Accept 和任务 ID URL 转义。
 - 验证提交响应的 `id`/`task_id` 兼容、冲突和缺失情况。
 - 验证两种上游错误 envelope。
+- 验证 OpenAI Video 提交返回完整 `OpenAIVideo`，ARK 提交只返回公开 `id`。
 - 验证所有客户端响应只包含本地公开 ID 和本地模型名。
 
 ### 14.3 轮询和完整数据
@@ -521,11 +700,13 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
 - 验证 `SUCCESS` 无 URL 保持可重试。
 - 验证 429/5xx 不修改任务，404/410 和确定性 4xx 进入失败。
 - 使用实测完整 `data.data` 样例，断言 `draft: false`、`seed`、`usage` 和未知字段都保留在 `task.Data`。
+- 使用公开文档的直接 `OpenAIVideo` 样例验证兼容解析，以及 `metadata.url` / `content.video_url` / `data.url` 回退。
 - 验证 `completion_tokens: 0` 与字段缺失的区别。
 - 验证 token 超限进入现有饱和审计。
 - 验证 queued、in_progress、completed、failed 四种本地 `OpenAIVideo`。
+- 验证 ARK queued/running/succeeded/failed，且完整保留第 9.2 节的 `draft: false`、`priority: 0`、usage 等安全字段。
 - 验证任何客户端出口都不包含上游任务 ID。
-- 验证类型 60 不能通过 ARK 查询入口读取原始 `task.Data`。
+- 验证 ARK 单查和列表只接受白名单平台，类型 60 走 converter，其他平台不能读取原始 `task.Data`。
 
 ### 14.4 生命周期
 
@@ -539,6 +720,13 @@ ratio/token 模式从 `data.data.usage` 获取实际用量：
   -> mock 详细轮询返回 TaskResponse<TaskDto>
   -> 本地保存完整响应并更新状态/计费
   -> 本地查询返回 OpenAIVideo
+
+提交 ARK content JSON
+  -> 本地拒绝未确认能力或生成精确的 new-api 上游字段
+  -> mock 上游返回任务 ID
+  -> 本地返回 ARK {id: public_task_id}
+  -> mock 详细轮询返回带完整 data.data 的 TaskResponse<TaskDto>
+  -> ARK 单查和列表返回改写 ID/model/status 后的安全 task response
 ```
 
 ### 14.5 验证命令
@@ -564,4 +752,5 @@ bun run build
 3. Key 填上游 API Key。
 4. 添加本地可用模型，并按需配置上游模型映射。
 5. 为本地模型配置固定价格、按时长价格或 ratio/token 计费。
-6. 客户端使用本地 `POST /v1/video/generations` 提交，并使用本地 `GET /v1/video/generations/:task_id` 查询。
+6. OpenAI Video 客户端使用本地 `POST /v1/video/generations` 提交，并使用本地 `GET /v1/video/generations/:task_id` 查询。
+7. ARK SDK 客户端可使用 `/api/v3/contents/generations/tasks*`；首版仅承诺第 2.1 和 6.4 节列出的子集。

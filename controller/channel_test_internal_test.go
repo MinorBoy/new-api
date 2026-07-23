@@ -87,6 +87,7 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 
 func TestSupportsGenericChannelTestRejectsDimensio(t *testing.T) {
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeDimensio))
+	require.False(t, supportsGenericChannelTest(constant.ChannelTypeNewAPIVideo))
 	require.True(t, supportsGenericChannelTest(constant.ChannelTypeOpenAI))
 }
 

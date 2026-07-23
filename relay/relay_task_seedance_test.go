@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -373,6 +374,52 @@ func TestClmmMallSeedanceTaskFetchUsesArkConverterAndProtectsPrivateData(t *test
 		require.NotNil(t, taskErr)
 		assert.Equal(t, http.StatusNotFound, taskErr.StatusCode)
 	})
+}
+
+func TestClmmMallVideoFetchByIDUsesArkConverterAndProtectsPrivateData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	task := model.Task{
+		TaskID:     "task_clmm_public",
+		Platform:   constant.TaskPlatform("60"),
+		UserId:     7,
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "upstream-private-id",
+		},
+		Data: json.RawMessage(`{"task_id":"upstream-private-id","status":"completed","video_url":"https://example.com/video.mp4","diagnostic":"Authorization: Bearer fake-upstream-secret"}`),
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_clmm_public", nil)
+	c.Params = gin.Params{{Key: "task_id", Value: "task_clmm_public"}}
+	c.Set("id", 7)
+
+	taskErr := RelayTaskFetch(c, relayconstant.RelayModeVideoFetchByID)
+
+	require.Nil(t, taskErr)
+	body := recorder.Body.Bytes()
+	assert.NotContains(t, string(body), "upstream-private-id")
+	assert.NotContains(t, string(body), "fake-upstream-secret")
+	var response struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Status  string `json:"status"`
+		Content struct {
+			VideoURL string `json:"video_url"`
+		} `json:"content"`
+	}
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "task_clmm_public", response.ID)
+	assert.Equal(t, "client-video-model", response.Model)
+	assert.Equal(t, "succeeded", response.Status)
+	assert.Equal(t, "https://example.com/video.mp4", response.Content.VideoURL)
 }
 
 func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.T) {

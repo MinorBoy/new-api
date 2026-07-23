@@ -499,6 +499,21 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
 		return
 	}
+	if originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)) {
+		adaptor := GetTaskAdaptor(originTask.Platform)
+		converter, ok := adaptor.(channel.ArkVideoTaskConverter)
+		if !ok {
+			taskResp = service.TaskErrorWrapper(errors.New("CLMM Mall Ark task converter is unavailable"), "convert_to_ark_video_failed", http.StatusInternalServerError)
+			return
+		}
+		converted, err := converter.ConvertToArkVideoTask(originTask)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "convert_to_ark_video_failed", http.StatusInternalServerError)
+			return
+		}
+		respBody = converted
+		return
+	}
 	if originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)) {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {

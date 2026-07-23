@@ -220,24 +220,16 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, response *http.Response, info *
 	return upstreamTaskID, body, nil
 }
 
-func (a *TaskAdaptor) ParseTaskError(body []byte, statusCode int) *dto.TaskError {
-	code, message := extractClmmError(body)
+func (a *TaskAdaptor) ParseTaskError(_ []byte, statusCode int) *dto.TaskError {
 	switch statusCode {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
-		if code == "" {
-			code = "invalid_request"
-		}
-		if message == "" {
-			message = "CLMM Mall rejected the request"
-		}
-		return &dto.TaskError{Code: code, Message: message, StatusCode: http.StatusBadRequest, Error: errors.New(message)}
+		message := "CLMM Mall rejected the request"
+		return &dto.TaskError{Code: "invalid_request", Message: message, StatusCode: http.StatusBadRequest, Error: errors.New(message)}
 	case http.StatusTooManyRequests:
-		if message == "" {
-			message = "CLMM Mall rate limit exceeded"
-		}
+		message := "CLMM Mall rate limit exceeded"
 		return &dto.TaskError{Code: "rate_limit_exceeded", Message: message, StatusCode: http.StatusTooManyRequests, Error: errors.New(message)}
 	default:
-		message = "CLMM Mall upstream request failed"
+		message := "CLMM Mall upstream request failed"
 		return &dto.TaskError{Code: "upstream_error", Message: message, StatusCode: http.StatusBadGateway, Error: errors.New(message)}
 	}
 }
@@ -364,21 +356,6 @@ func clmmArkRequest(c *gin.Context) (arkRequest, error) {
 		return arkRequest{}, errors.New("invalid CLMM Mall Ark request")
 	}
 	return request, nil
-}
-
-func extractClmmError(body []byte) (string, string) {
-	var payload map[string]any
-	if err := common.Unmarshal(body, &payload); err != nil {
-		return "", ""
-	}
-	code, message := clmmErrorValue(payload["error"])
-	if message != "" {
-		return code, message
-	}
-	if message = clmmMessageValue(payload["message"]); message != "" {
-		return code, message
-	}
-	return code, clmmMessageValue(payload["detail"])
 }
 
 func clmmErrorValue(value any) (string, string) {

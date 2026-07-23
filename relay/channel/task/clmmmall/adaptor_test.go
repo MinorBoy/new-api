@@ -189,27 +189,59 @@ func TestTaskAdaptorFetchTaskKeepsTemporaryHTTPFailuresRetryable(t *testing.T) {
 
 func TestTaskAdaptorParseTaskErrorUsesStableMappings(t *testing.T) {
 	adaptor := &TaskAdaptor{}
-	clientErr := adaptor.ParseTaskError([]byte(`{"error":{"code":"bad_duration","message":"duration invalid"}}`), http.StatusUnprocessableEntity)
-	require.NotNil(t, clientErr)
-	assert.Equal(t, http.StatusBadRequest, clientErr.StatusCode)
-	assert.Equal(t, "bad_duration", clientErr.Code)
-	assert.Equal(t, "duration invalid", clientErr.Message)
+	for _, test := range []struct {
+		name, body, code, message  string
+		responseStatus, taskStatus int
+	}{
+		{
+			name:           "client error",
+			responseStatus: http.StatusBadRequest,
+			taskStatus:     http.StatusBadRequest,
+			body:           `{"error":{"code":"upstream-private-id","message":"Authorization: Bearer fake-upstream-secret diagnostic=private"}}`,
+			code:           "invalid_request",
+			message:        "CLMM Mall rejected the request",
+		},
+		{
+			name:           "unprocessable client error",
+			responseStatus: http.StatusUnprocessableEntity,
+			taskStatus:     http.StatusBadRequest,
+			body:           `{"error":{"code":"upstream-private-id","message":"Authorization: Bearer fake-upstream-secret diagnostic=private"}}`,
+			code:           "invalid_request",
+			message:        "CLMM Mall rejected the request",
+		},
+		{
+			name:           "rate limit",
+			responseStatus: http.StatusTooManyRequests,
+			taskStatus:     http.StatusTooManyRequests,
+			body:           `{"detail":"upstream-private-id Authorization: Bearer fake-upstream-secret diagnostic=private"}`,
+			code:           "rate_limit_exceeded",
+			message:        "CLMM Mall rate limit exceeded",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.responseStatus)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			response, err := http.Get(server.URL)
+			require.NoError(t, err)
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
 
-	stringErr := adaptor.ParseTaskError([]byte(`{"error":"invalid source image"}`), http.StatusBadRequest)
-	require.NotNil(t, stringErr)
-	assert.Equal(t, http.StatusBadRequest, stringErr.StatusCode)
-	assert.Equal(t, "invalid_request", stringErr.Code)
-	assert.Equal(t, "invalid source image", stringErr.Message)
+			taskErr := adaptor.ParseTaskError(body, response.StatusCode)
 
-	fallbackErr := adaptor.ParseTaskError([]byte(`{"error":{"code":"bad_media"},"message":"media invalid"}`), http.StatusBadRequest)
-	require.NotNil(t, fallbackErr)
-	assert.Equal(t, "bad_media", fallbackErr.Code)
-	assert.Equal(t, "media invalid", fallbackErr.Message)
-
-	rateErr := adaptor.ParseTaskError([]byte(`{"detail":"slow down"}`), http.StatusTooManyRequests)
-	require.NotNil(t, rateErr)
-	assert.Equal(t, http.StatusTooManyRequests, rateErr.StatusCode)
-	assert.Equal(t, "rate_limit_exceeded", rateErr.Code)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, test.taskStatus, taskErr.StatusCode)
+			assert.Equal(t, test.code, taskErr.Code)
+			assert.Equal(t, test.message, taskErr.Message)
+			assert.NotContains(t, taskErr.Code, "upstream-private-id")
+			assert.NotContains(t, taskErr.Message, "upstream-private-id")
+			assert.NotContains(t, taskErr.Message, "fake-upstream-secret")
+			assert.NotContains(t, taskErr.Message, "diagnostic")
+		})
+	}
 
 	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTeapot, http.StatusInternalServerError} {
 		gatewayErr := adaptor.ParseTaskError([]byte(`{"message":"secret upstream diagnostic token=abc"}`), statusCode)

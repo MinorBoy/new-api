@@ -124,6 +124,21 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 	return nil
 }
 
+func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, info *relaycommon.RelayInfo) (int, *dto.TaskError) {
+	request, err := clmmArkRequest(c)
+	if err != nil {
+		return 0, service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+	}
+	if info == nil || info.ChannelMeta == nil || strings.TrimSpace(info.UpstreamModelName) == "" {
+		return 0, service.TaskErrorWrapperLocal(errors.New("mapped CLMM Mall model is required"), "invalid_model", http.StatusBadRequest)
+	}
+	_, billingSeconds, err := arkToClmm(request, info.UpstreamModelName)
+	if err != nil {
+		return 0, service.TaskErrorWrapperLocal(err, "invalid_model", http.StatusBadRequest)
+	}
+	return billingSeconds, nil
+}
+
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	baseURL := a.baseURL
 	if baseURL == "" && info != nil && info.ChannelMeta != nil {

@@ -156,8 +156,6 @@ Seedance 官方请求
 ```json
 {
   "output_resolutions": ["1080p"],
-  "generation_resolution": "720p",
-  "upscaled": true,
   "durations": { "min": 4, "max": 15 },
   "aspect_ratios": ["16:9", "9:16"],
   "reference_limits": {
@@ -172,8 +170,7 @@ Seedance 官方请求
 约束语义：
 
 - `output_resolutions` 是用户请求匹配字段，使用 `480p`、`720p`、`1080p` 或 `4k`。
-- `generation_resolution` 是上游实际生成分辨率，只用于说明、成本和审计。
-- `upscaled=true` 表示上游从 `generation_resolution` 自动超分到 `output_resolutions`。例如生成 720p、输出 1080p 的目标只匹配用户的 1080p 请求，不匹配 720p 请求。
+- 上游内部如何得到输出分辨率不属于路由能力。例如渠道将内部 720p 结果超分为 1080p 时，该目标仍只配置 `1080p` 输出能力；内部实现可以写在目标名称中，但不作为路由字段或上游参数。
 - `durations` 使用离散 `values` 或闭区间 `min/max`，两种形式互斥。Seedance 路由只接受整数秒。
 - `aspect_ratios` 缺省或空数组表示不限制，否则必须精确命中规范比例。
 - `reference_limits` 三个字段均为必填的有界非负整数。`0` 表示不支持该素材类型。
@@ -182,7 +179,6 @@ Seedance 官方请求
 保存时还必须满足：
 
 - `output_resolutions` 非空且只包含 `480p`、`720p`、`1080p` 或 `4k`。
-- `upscaled=true` 时只能配置一个输出分辨率，必须填写不同于输出值的 `generation_resolution`；`upscaled=false` 时不填写该字段，输出分辨率视为原生分辨率。
 - 离散时长和区间端点都在 `1..relaycommon.MaxTaskDurationSeconds` 内。
 - 比例只包含当前 Seedance 官方集合：`16:9`、`4:3`、`1:1`、`3:4`、`9:16`、`21:9`、`adaptive`。
 - 图片、视频和音频上限分别在 `0..9`、`0..3` 和 `0..3` 内，与现有 Seedance 请求全局边界一致。
@@ -302,7 +298,9 @@ UpstreamModelName = RouteTarget.upstream_model
 - 新建、编辑、启用、禁用和删除策略。
 - 在策略内新增、复制、编辑、排序、启用、禁用和删除路由目标。
 - 渠道选择器只允许选择当前分组和本站模型的现有候选渠道。
-- 结构化控件编辑分辨率、时长、比例、素材上限、真人支持和超分信息。
+- 结构化控件编辑分辨率、允许生成时长、比例、素材上限和真人支持。
+- 分组从现有管理员分组接口加载；抽屉中的下拉列表统一使用项目主题化 Select/Combobox。
+- 选中和启用状态使用语义 `primary` 主题色，深色主题呈现项目统一的偏蓝色视觉效果。
 - 保存前展示字段错误和目标重叠错误。
 - 渠道页面只显示关联路由目标数量并提供跳转入口。
 
@@ -323,7 +321,7 @@ UpstreamModelName = RouteTarget.upstream_model
 ### 后端测试
 
 - 类型化约束解析、规范化和保存校验。
-- 离散时长、闭区间、任意比例、超分输出分辨率和素材上限匹配。
+- 离散时长、闭区间、任意比例、输出分辨率和素材上限匹配。
 - 真人能力的 `true`、`false` 和未知语义。
 - 同渠道同优先级目标重叠检测。
 - 请求默认值补全和显式值优先级。
@@ -340,7 +338,7 @@ UpstreamModelName = RouteTarget.upstream_model
 
 - 策略和目标表单 schema 校验。
 - 时长离散值/区间互斥。
-- 超分字段联动和三个素材上限控件。
+- 分组数据加载、主题化下拉、主色选中状态和三个素材上限控件。
 - 保存错误映射、权限状态和渠道过滤。
 - 所有新增翻译键同步。
 

@@ -22,12 +22,41 @@ func TestArkToClmmUsesOrdinaryDefaults(t *testing.T) {
 	assert.JSONEq(t, `{"model":"sh-video-basic","prompt":"a prompt","aspect_ratio":"16:9","resolution":"480p","size":"1280x720","seconds":"5"}`, string(mustMarshalClmm(t, converted)))
 }
 
+func TestArkToClmmRejectsExplicitEmptyRatioAndResolution(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request arkRequest
+	}{
+		{
+			name: "ratio",
+			request: arkRequest{
+				Model:   "client-model",
+				Ratio:   stringPointer(""),
+				Content: []arkContent{{Type: "text", Text: "prompt"}},
+			},
+		},
+		{
+			name: "resolution",
+			request: arkRequest{
+				Model:      "client-model",
+				Resolution: stringPointer(""),
+				Content:    []arkContent{{Type: "text", Text: "prompt"}},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := arkToClmm(test.request, "sh-video")
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestArkToClmmPreservesContentOrderAndDegradesImageRoles(t *testing.T) {
 	duration := 8
 	request := arkRequest{
 		Model:      "client-model",
-		Ratio:      "9:16",
-		Resolution: "720p",
+		Ratio:      stringPointer("9:16"),
+		Resolution: stringPointer("720p"),
 		Duration:   &duration,
 		Content: []arkContent{
 			{Type: "text", Text: "line one"},
@@ -112,7 +141,7 @@ func TestArkToClmmUsesFixedDurationForEitherGzSuffixOrder(t *testing.T) {
 func TestArkToClmmAppliesResolutionImageAndVideoControlSuffixes(t *testing.T) {
 	request := arkRequest{
 		Model:      "client-model",
-		Resolution: "720p",
+		Resolution: stringPointer("720p"),
 		Content: []arkContent{
 			{Type: "text", Text: "controlled"},
 			{Type: "image_url", Role: "reference_image", ImageURL: &arkMedia{URL: "image-1"}},
@@ -143,6 +172,17 @@ func TestArkToClmmAcceptsDocumentedChannelPrefixes(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestArkToClmmNormalizesMappedModelWhitespace(t *testing.T) {
+	converted, _, err := arkToClmm(arkRequest{
+		Model:   "client-model",
+		Content: []arkContent{{Type: "text", Text: "prompt"}},
+	}, "  sh-video-720P  ")
+
+	require.NoError(t, err)
+	assert.Equal(t, "sh-video-720P", converted.Model)
+	assert.Equal(t, "720p", converted.Resolution)
 }
 
 func TestArkToClmmRejectsInvalidMappedModelControls(t *testing.T) {
@@ -208,8 +248,8 @@ func TestArkToClmmRejectsUnsupportedArkInput(t *testing.T) {
 		{name: "unsupported content", mutate: func(request *arkRequest) {
 			request.Content = append(request.Content, arkContent{Type: "input_file"})
 		}},
-		{name: "invalid ratio", mutate: func(request *arkRequest) { request.Ratio = "1:1" }},
-		{name: "invalid resolution", mutate: func(request *arkRequest) { request.Resolution = "1080p" }},
+		{name: "invalid ratio", mutate: func(request *arkRequest) { request.Ratio = stringPointer("1:1") }},
+		{name: "invalid resolution", mutate: func(request *arkRequest) { request.Resolution = stringPointer("1080p") }},
 		{name: "ordinary duration below minimum", mutate: func(request *arkRequest) { request.Duration = intPointer(4) }},
 		{name: "ordinary duration above maximum", mutate: func(request *arkRequest) { request.Duration = intPointer(16) }},
 		{name: "non-default service tier", mutate: func(request *arkRequest) { request.ServiceTier = &priorityTier }},
@@ -291,5 +331,9 @@ func mustMarshalClmm(t *testing.T, request clmmRequest) []byte {
 }
 
 func intPointer(value int) *int {
+	return &value
+}
+
+func stringPointer(value string) *string {
 	return &value
 }

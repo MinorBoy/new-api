@@ -243,7 +243,15 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	if err != nil {
 		return nil, fmt.Errorf("create proxy HTTP client: %w", err)
 	}
-	return client.Do(request)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_ = response.Body.Close()
+		return nil, fmt.Errorf("CLMM Mall task polling failed with HTTP status %d", response.StatusCode)
+	}
+	return response, nil
 }
 
 func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
@@ -263,6 +271,9 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 		result.Status = string(model.TaskStatusSuccess)
 		defaultProgress = 100
 		result.Url = clmmResultURL(response)
+		if result.Url == "" {
+			return nil, errors.New("CLMM Mall task succeeded without a result URL")
+		}
 	case "failed", "error", "cancelled", "canceled":
 		result.Status = string(model.TaskStatusFailure)
 		defaultProgress = 100
@@ -323,28 +334,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		}
 	}
 	if response.Status == "failed" {
-		code, message := clmmErrorValue(upstream.Error)
-		if message == "" {
-			message = clmmMessageValue(upstream.Detail)
-		}
-		if message == "" {
-			message = strings.TrimSpace(upstream.Message)
-		}
-		if message == "" {
-			message = strings.TrimSpace(task.FailReason)
-		}
-		upstreamTaskID := strings.TrimSpace(task.GetUpstreamTaskID())
-		if upstreamTaskID != "" && (strings.Contains(code, upstreamTaskID) || strings.Contains(message, upstreamTaskID)) {
-			code = "task_failed"
-			message = "task failed"
-		}
-		if code == "" {
-			code = "task_failed"
-		}
-		if message == "" {
-			message = "task failed"
-		}
-		response.Error = &arkTaskError{Code: code, Message: message}
+		response.Error = &arkTaskError{Code: "task_failed", Message: "task failed"}
 	}
 	return common.Marshal(response)
 }

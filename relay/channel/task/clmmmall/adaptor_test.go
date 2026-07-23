@@ -166,6 +166,27 @@ func TestTaskAdaptorFetchesEscapedPrivateID(t *testing.T) {
 	assert.Equal(t, "/v1/videos/private%2Fid%20with%20space", requestURI)
 }
 
+func TestTaskAdaptorFetchTaskKeepsTemporaryHTTPFailuresRetryable(t *testing.T) {
+	service.InitHttpClient()
+	for _, statusCode := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(statusCode)
+				_, _ = w.Write([]byte(`{"status":"error","error":"temporary private diagnostic"}`))
+			}))
+			defer server.Close()
+
+			response, err := (&TaskAdaptor{}).FetchTask(server.URL, "upstream-secret", map[string]any{"task_id": "private-task"}, "")
+
+			require.Error(t, err)
+			assert.Nil(t, response)
+			assert.NotContains(t, err.Error(), "temporary private diagnostic")
+			assert.NotContains(t, err.Error(), "upstream-secret")
+			assert.NotContains(t, err.Error(), "private-task")
+		})
+	}
+}
+
 func TestTaskAdaptorParseTaskErrorUsesStableMappings(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	clientErr := adaptor.ParseTaskError([]byte(`{"error":{"code":"bad_duration","message":"duration invalid"}}`), http.StatusUnprocessableEntity)

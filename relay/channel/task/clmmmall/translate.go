@@ -36,6 +36,7 @@ type normalizedArkRequest struct {
 }
 
 func arkToClmm(request arkRequest, upstreamModel string) (clmmRequest, int, error) {
+	upstreamModel = strings.TrimSpace(upstreamModel)
 	normalized, err := normalizeArkRequest(request)
 	if err != nil {
 		return clmmRequest{}, 0, err
@@ -111,16 +112,22 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 		return normalizedArkRequest{}, fmt.Errorf("duration must be between 1 and %d seconds", relaycommon.MaxTaskDurationSeconds)
 	}
 
-	ratio := strings.ToLower(strings.TrimSpace(request.Ratio))
-	if ratio == "" {
-		ratio = "16:9"
+	ratio := "16:9"
+	if request.Ratio != nil {
+		ratio = strings.ToLower(strings.TrimSpace(*request.Ratio))
+		if ratio == "" {
+			return normalizedArkRequest{}, fmt.Errorf("ratio must not be empty")
+		}
 	}
 	if ratio != "16:9" && ratio != "9:16" {
 		return normalizedArkRequest{}, fmt.Errorf("ratio %s is not supported", ratio)
 	}
-	resolution := strings.ToLower(strings.TrimSpace(request.Resolution))
-	if resolution == "" {
-		resolution = "480p"
+	resolution := "480p"
+	if request.Resolution != nil {
+		resolution = strings.ToLower(strings.TrimSpace(*request.Resolution))
+		if resolution == "" {
+			return normalizedArkRequest{}, fmt.Errorf("resolution must not be empty")
+		}
 	}
 	if resolution != "480p" && resolution != "720p" {
 		return normalizedArkRequest{}, fmt.Errorf("resolution %s is not supported", resolution)
@@ -185,8 +192,7 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 }
 
 func parseModelControls(modelName string) (modelControls, error) {
-	trimmedModel := strings.TrimSpace(modelName)
-	lowerModel := strings.ToLower(trimmedModel)
+	lowerModel := strings.ToLower(modelName)
 	validPrefix := false
 	for _, prefix := range clmmModelPrefixes {
 		if strings.HasPrefix(lowerModel, prefix) {
@@ -195,7 +201,7 @@ func parseModelControls(modelName string) (modelControls, error) {
 		}
 	}
 	if !validPrefix {
-		return modelControls{}, fmt.Errorf("model %s is not supported by CLMM Mall", trimmedModel)
+		return modelControls{}, fmt.Errorf("model %s is not supported by CLMM Mall", modelName)
 	}
 
 	controls := modelControls{}

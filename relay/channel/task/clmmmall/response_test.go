@@ -30,7 +30,11 @@ func TestParseTaskResultMapsStatusAliasesCaseInsensitively(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.status, func(t *testing.T) {
-			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"status":"` + test.status + `"}`))
+			body := `{"status":"` + test.status + `"}`
+			if test.expected == model.TaskStatusSuccess {
+				body = `{"status":"` + test.status + `","video_url":"video"}`
+			}
+			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(body))
 			require.NoError(t, err)
 			assert.Equal(t, string(test.expected), result.Status)
 			assert.Equal(t, test.progress, result.Progress)
@@ -59,6 +63,17 @@ func TestParseTaskResultClampsProgressAndPrioritizesURLs(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.progress, result.Progress)
 			assert.Equal(t, test.url, result.Url)
+		})
+	}
+}
+
+func TestParseTaskResultRetriesSuccessWithoutResultURL(t *testing.T) {
+	for _, status := range []string{"completed", "succeeded", "success"} {
+		t.Run(status, func(t *testing.T) {
+			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"status":"` + status + `"}`))
+
+			require.Error(t, err)
+			assert.Nil(t, result)
 		})
 	}
 }
@@ -115,10 +130,13 @@ func TestConvertToArkVideoTaskMapsStableFailure(t *testing.T) {
 		SubmitTime: 1,
 		UpdatedAt:  2,
 		Properties: model.Properties{OriginModelName: "origin-model"},
-		Data:       []byte(`{"id":"upstream-private","status":"failed","error":{"code":"content_policy","message":"blocked"}}`),
+		Data:       []byte(`{"id":"upstream-private","status":"failed","error":{"code":"content_policy","message":"Authorization: Bearer secret-token https://internal.example/private encoded=c2VjcmV0"}}`),
 	}
 	data, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
 	require.NoError(t, err)
+	assert.NotContains(t, string(data), "secret-token")
+	assert.NotContains(t, string(data), "internal.example")
+	assert.NotContains(t, string(data), "c2VjcmV0")
 
 	var response arkTaskResponse
 	require.NoError(t, common.Unmarshal(data, &response))
@@ -126,8 +144,8 @@ func TestConvertToArkVideoTaskMapsStableFailure(t *testing.T) {
 	assert.Equal(t, "origin-model", response.Model)
 	assert.Equal(t, "failed", response.Status)
 	require.NotNil(t, response.Error)
-	assert.Equal(t, "content_policy", response.Error.Code)
-	assert.Equal(t, "blocked", response.Error.Message)
+	assert.Equal(t, "task_failed", response.Error.Code)
+	assert.Equal(t, "task failed", response.Error.Message)
 }
 
 func TestConvertToArkVideoTaskDoesNotExposePrivateIDInFailure(t *testing.T) {

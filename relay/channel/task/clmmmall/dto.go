@@ -3,8 +3,8 @@ package clmmmall
 type arkRequest struct {
 	Model                 string       `json:"model"`
 	Content               []arkContent `json:"content"`
-	Ratio                 string       `json:"ratio,omitempty"`
-	Resolution            string       `json:"resolution,omitempty"`
+	Ratio                 *string      `json:"ratio,omitempty"`
+	Resolution            *string      `json:"resolution,omitempty"`
 	Duration              *int         `json:"duration,omitempty"`
 	ServiceTier           *string      `json:"service_tier,omitempty"`
 	Watermark             *bool        `json:"watermark,omitempty"`

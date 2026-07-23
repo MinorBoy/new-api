@@ -103,6 +103,7 @@ export function getChannelTypeIcon(type: number): string {
     54: 'Doubao', // DoubaoVideo
     56: 'Replicate', // Replicate
     59: 'Dimensio', // Dimensio
+    60: 'NewAPI', // NewAPIVideo
 
     // Tools & Platforms
     37: 'Dify', // Dify

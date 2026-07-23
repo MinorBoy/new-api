@@ -161,6 +161,17 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Supported upstream models: jimeng-video-seedance-2.0-fast-vip, jimeng-video-seedance-2.0-mini, jimeng-video-seedance-2.0-vip',
     },
   },
+  60: {
+    id: 60,
+    name: CHANNEL_TYPES[60],
+    icon: 'NewAPI',
+    supportedModels: [],
+    hints: {
+      baseUrl: 'Enter the upstream NewAPI base URL',
+      key: 'Enter the upstream NewAPI video API key',
+      models: 'Add client model names and map them to upstream video models',
+    },
+  },
 }
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

@@ -84,3 +84,32 @@ describe('Dimensio channel configuration', () => {
     expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(59)).toBe(true)
   })
 })
+
+describe('NewAPIVideo channel configuration', () => {
+  test('registers task-only type 60 without fake defaults', () => {
+    expect(CHANNEL_TYPES[60]).toBe('NewAPIVideo')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 60,
+      label: 'NewAPIVideo',
+    })
+    expect(getChannelTypeIcon(60)).toBe('NewAPI')
+    expect(getDefaultBaseUrl(60)).toBe('')
+    expect(getChannelTypeConfig(60).supportedModels).toEqual([])
+    expect(MODEL_FETCHABLE_TYPES.has(60)).toBe(false)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(60)).toBe(true)
+  })
+
+  test('provides protocol-specific guidance', () => {
+    expect(TYPE_TO_KEY_PROMPT[60]).toBe(
+      'Enter the upstream NewAPI video API key'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[60]).toBe(
+      'NewAPIVideo is task-only. Call it through /v1/video/generations or the ARK /api/v3 task API.'
+    )
+    expect(getChannelTypeHints(60)).toEqual({
+      baseUrl: 'Enter the upstream NewAPI base URL',
+      key: 'Enter the upstream NewAPI video API key',
+      models: 'Add client model names and map them to upstream video models',
+    })
+  })
+})

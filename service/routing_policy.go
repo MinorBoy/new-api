@@ -246,7 +246,6 @@ func normalizeRoutingPolicyWriteRequest(request *RoutingPolicyWriteRequest) {
 		target.Name = strings.TrimSpace(target.Name)
 		target.UpstreamModel = strings.TrimSpace(target.UpstreamModel)
 		target.Constraints.OutputResolutions = normalizedStrings(target.Constraints.OutputResolutions)
-		target.Constraints.GenerationResolution = strings.ToLower(strings.TrimSpace(target.Constraints.GenerationResolution))
 		target.Constraints.AspectRatios = normalizedStrings(target.Constraints.AspectRatios)
 		target.Constraints.Durations.Values = normalizedInts(target.Constraints.Durations.Values)
 	}

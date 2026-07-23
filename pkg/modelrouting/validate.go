@@ -15,7 +15,6 @@ const (
 	ValidationInvalidDuration         ValidationCode = "invalid_duration"
 	ValidationInvalidAspectRatio      ValidationCode = "invalid_aspect_ratio"
 	ValidationInvalidReferenceLimit   ValidationCode = "invalid_reference_limit"
-	ValidationInvalidUpscale          ValidationCode = "invalid_upscale"
 	ValidationDefaultRouteUnavailable ValidationCode = "default_route_unavailable"
 	ValidationTargetOverlap           ValidationCode = "routing_target_overlap"
 )
@@ -105,19 +104,6 @@ func validateConstraints(constraints Constraints, maxDuration int) error {
 	limits := constraints.ReferenceLimits
 	if limits.Images < 0 || limits.Images > 9 || limits.Videos < 0 || limits.Videos > 3 || limits.Audios < 0 || limits.Audios > 3 {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_limits", "reference limits are invalid")
-	}
-
-	generationResolution := strings.TrimSpace(constraints.GenerationResolution)
-	if constraints.Upscaled {
-		if len(constraints.OutputResolutions) != 1 ||
-			!containsString(allowedResolutions, generationResolution) ||
-			generationResolution == constraints.OutputResolutions[0] {
-			return newValidationError(ValidationInvalidUpscale, "targets.constraints.upscaled", "upscaled targets require one distinct generation resolution")
-		}
-		return nil
-	}
-	if generationResolution != "" {
-		return newValidationError(ValidationInvalidUpscale, "targets.constraints.generation_resolution", "native targets cannot set a generation resolution")
 	}
 	return nil
 }

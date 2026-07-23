@@ -32,11 +32,41 @@ func TestSaveRoutingPolicyNormalizesAndPublishesCompleteReplacement(t *testing.T
 	assert.Equal(t, []string{"720p"}, saved.Targets[0].Constraints.OutputResolutions)
 	assert.Equal(t, []int{10, 15}, saved.Targets[0].Constraints.Durations.Values)
 	assert.Equal(t, []string{"16:9", "9:16"}, saved.Targets[0].Constraints.AspectRatios)
+	var persisted model.RouteTarget
+	require.NoError(t, model.DB.Where("policy_id = ?", saved.ID).First(&persisted).Error)
+	assert.NotContains(t, persisted.Constraints, "generation_resolution")
+	assert.NotContains(t, persisted.Constraints, "upscaled")
+
+	encodedView, err := common.Marshal(saved)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encodedView), "generation_resolution")
+	assert.NotContains(t, string(encodedView), "upscaled")
 
 	snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
 	require.True(t, ok)
 	assert.Equal(t, saved.ID, snapshot.ID)
 	assert.Equal(t, saved.Targets[0].UpstreamModel, snapshot.TargetsByChannel[11][0].UpstreamModel)
+}
+
+func TestRoutingConstraintsIgnoreLegacyUpscaleProperties(t *testing.T) {
+	legacy := `{
+		"output_resolutions":["1080p"],
+		"generation_resolution":"720p",
+		"upscaled":true,
+		"durations":{"min":4,"max":15},
+		"aspect_ratios":["16:9"],
+		"reference_limits":{"images":4,"videos":3,"audios":1},
+		"supports_real_person":true
+	}`
+
+	var constraints modelrouting.Constraints
+	require.NoError(t, common.UnmarshalJsonStr(legacy, &constraints))
+	assert.Equal(t, []string{"1080p"}, constraints.OutputResolutions)
+
+	encoded, err := common.Marshal(constraints)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "generation_resolution")
+	assert.NotContains(t, string(encoded), "upscaled")
 }
 
 func TestSaveRoutingPolicyRejectsAutoGroup(t *testing.T) {

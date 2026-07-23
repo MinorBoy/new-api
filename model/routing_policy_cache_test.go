@@ -78,6 +78,45 @@ func TestRefreshRoutingPolicyCacheKeepsPreviousSnapshotOnDecodeFailure(t *testin
 	assert.Equal(t, before, after)
 }
 
+func TestRoutingPolicyCacheLoadsLegacyUpscaleProperties(t *testing.T) {
+	db := openRoutingTestDB(t)
+	prepareRoutingCacheTest(t, db)
+	policy := createCachedPolicy(t, modelrouting.Seedance20, true, 11, "provider-1080p", true)
+	legacy := `{
+		"output_resolutions":["1080p"],
+		"generation_resolution":"720p",
+		"upscaled":true,
+		"durations":{"min":4,"max":15},
+		"aspect_ratios":["16:9"],
+		"reference_limits":{"images":4,"videos":3,"audios":1},
+		"supports_real_person":true
+	}`
+	require.NoError(t, db.Model(&model.RouteTarget{}).
+		Where("policy_id = ?", policy.ID).
+		Update("constraints", legacy).Error)
+	require.NoError(t, db.Model(&model.RoutingPolicy{}).
+		Where("id = ?", policy.ID).
+		Update("default_resolution", "1080p").Error)
+
+	require.NoError(t, model.InitRoutingPolicyCache())
+	snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
+	require.True(t, ok)
+
+	matched := modelrouting.Evaluate(snapshot, matchingFactsForResolution("1080p"))
+	assert.Contains(t, matched.CompatibleByChannel, 11)
+
+	notMatched := modelrouting.Evaluate(snapshot, matchingFactsForResolution("720p"))
+	assert.NotContains(t, notMatched.CompatibleByChannel, 11)
+}
+
+func matchingFactsForResolution(resolution string) modelrouting.Facts {
+	return modelrouting.Facts{
+		OutputResolution: resolution,
+		DurationSeconds:  10,
+		AspectRatio:      "16:9",
+	}
+}
+
 func TestRefreshRoutingPolicyCacheRemovesDisabledPolicy(t *testing.T) {
 	db := openRoutingTestDB(t)
 	prepareRoutingCacheTest(t, db)

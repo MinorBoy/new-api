@@ -37,7 +37,7 @@ func TestResolveFactsPrefersExplicitValues(t *testing.T) {
 	assert.True(t, facts.RequireRealPerson)
 }
 
-func TestEvaluateTargetsUsesOutputResolutionForUpscale(t *testing.T) {
+func TestEvaluateTargetsUsesConfiguredOutputResolution(t *testing.T) {
 	supportsRealPerson := true
 	snapshot := modelrouting.PolicySnapshot{
 		ID:             7,
@@ -53,13 +53,11 @@ func TestEvaluateTargetsUsesOutputResolutionForUpscale(t *testing.T) {
 				Priority:      50,
 				Enabled:       true,
 				Constraints: modelrouting.Constraints{
-					OutputResolutions:    []string{"1080p"},
-					GenerationResolution: "720p",
-					Upscaled:             true,
-					Durations:            modelrouting.DurationConstraint{Min: intPtr(4), Max: intPtr(15)},
-					AspectRatios:         []string{"16:9", "9:16"},
-					ReferenceLimits:      modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1},
-					SupportsRealPerson:   &supportsRealPerson,
+					OutputResolutions:  []string{"1080p"},
+					Durations:          modelrouting.DurationConstraint{Min: intPtr(4), Max: intPtr(15)},
+					AspectRatios:       []string{"16:9", "9:16"},
+					ReferenceLimits:    modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1},
+					SupportsRealPerson: &supportsRealPerson,
 				},
 			}},
 		},

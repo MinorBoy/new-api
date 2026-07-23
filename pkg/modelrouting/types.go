@@ -48,13 +48,11 @@ type ReferenceLimits struct {
 }
 
 type Constraints struct {
-	OutputResolutions    []string           `json:"output_resolutions"`
-	GenerationResolution string             `json:"generation_resolution,omitempty"`
-	Upscaled             bool               `json:"upscaled"`
-	Durations            DurationConstraint `json:"durations"`
-	AspectRatios         []string           `json:"aspect_ratios,omitempty"`
-	ReferenceLimits      ReferenceLimits    `json:"reference_limits"`
-	SupportsRealPerson   *bool              `json:"supports_real_person"`
+	OutputResolutions  []string           `json:"output_resolutions"`
+	Durations          DurationConstraint `json:"durations"`
+	AspectRatios       []string           `json:"aspect_ratios,omitempty"`
+	ReferenceLimits    ReferenceLimits    `json:"reference_limits"`
+	SupportsRealPerson *bool              `json:"supports_real_person"`
 }
 
 type Target struct {

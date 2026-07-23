@@ -155,33 +155,6 @@ func TestValidatePolicyRejectsInvalidContracts(t *testing.T) {
 			expected: modelrouting.ValidationInvalidReferenceLimit,
 		},
 		{
-			name: "upscale has multiple outputs",
-			mutate: func(policy *modelrouting.PolicySnapshot) {
-				target := &policy.TargetsByChannel[11][0]
-				target.Constraints.Upscaled = true
-				target.Constraints.OutputResolutions = []string{"720p", "1080p"}
-				target.Constraints.GenerationResolution = "480p"
-			},
-			expected: modelrouting.ValidationInvalidUpscale,
-		},
-		{
-			name: "upscale generation equals output",
-			mutate: func(policy *modelrouting.PolicySnapshot) {
-				target := &policy.TargetsByChannel[11][0]
-				target.Constraints.Upscaled = true
-				target.Constraints.OutputResolutions = []string{"720p"}
-				target.Constraints.GenerationResolution = "720p"
-			},
-			expected: modelrouting.ValidationInvalidUpscale,
-		},
-		{
-			name: "native target has generation resolution",
-			mutate: func(policy *modelrouting.PolicySnapshot) {
-				policy.TargetsByChannel[11][0].Constraints.GenerationResolution = "480p"
-			},
-			expected: modelrouting.ValidationInvalidUpscale,
-		},
-		{
 			name: "enabled policy defaults are unsupported",
 			mutate: func(policy *modelrouting.PolicySnapshot) {
 				policy.Defaults.OutputResolution = "1080p"

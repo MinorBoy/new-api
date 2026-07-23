@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ModelRouting } from '@/features/model-routing'
 
 import { listDeployments } from './api'
 import { DeploymentAccessGuard } from './components/deployment-access-guard'
@@ -47,6 +48,9 @@ const route = getRouteApi('/_authenticated/models/$section')
 const SECTION_META: Record<ModelsSectionId, { titleKey: string }> = {
   metadata: {
     titleKey: 'Metadata',
+  },
+  routing: {
+    titleKey: 'Routing policies',
   },
   deployments: {
     titleKey: 'Deployments',
@@ -88,9 +92,8 @@ function ModelsContent() {
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>{t(meta.titleKey)}</SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          {activeSection === 'metadata' ? (
-            <ModelsPrimaryButtons />
-          ) : (
+          {activeSection === 'metadata' && <ModelsPrimaryButtons />}
+          {activeSection === 'deployments' && (
             <Button onClick={() => setCreateDeploymentOpen(true)} size='sm'>
               <Plus className='h-4 w-4' />
               {t('Create deployment')}
@@ -109,11 +112,9 @@ function ModelsContent() {
               </TabsList>
             </Tabs>
             <div className='min-h-0 flex-1'>
-              {activeSection === 'metadata' ? (
-                <ModelsTable />
-              ) : (
-                <DeploymentsSection />
-              )}
+              {activeSection === 'metadata' && <ModelsTable />}
+              {activeSection === 'routing' && <ModelRouting />}
+              {activeSection === 'deployments' && <DeploymentsSection />}
             </div>
           </div>
         </SectionPageLayout.Content>

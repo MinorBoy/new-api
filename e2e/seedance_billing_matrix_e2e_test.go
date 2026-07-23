@@ -1333,12 +1333,16 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 	}
 	for _, modelConfig := range models {
 		for _, duration := range []int{0, 3, modelConfig.maxDuration + 1, -2} {
+			wantDurationCode := "InvalidParameter"
+			if strings.HasPrefix(modelConfig.id, "doubao-seedance-2-0-") && (duration == 0 || duration < -1) {
+				wantDurationCode = "InvalidParameter.duration"
+			}
 			invalidCases = append(invalidCases, invalidHTTPCase{
 				id: fmt.Sprintf("model=%s/duration=%d", modelConfig.id, duration),
 				request: map[string]any{
 					"model": modelConfig.id, "content": textContent, "duration": duration,
 				},
-				wantCode: "InvalidParameter",
+				wantCode: wantDurationCode,
 			})
 		}
 	}
@@ -1355,7 +1359,7 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		request: map[string]any{
 			"model": "doubao-seedance-2-0-260128", "content": fourVideos,
 		},
-		wantCode: "InvalidParameter",
+		wantCode: "InvalidParameter.content",
 	})
 
 	invalidCases = append(invalidCases,

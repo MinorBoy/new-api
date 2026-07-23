@@ -172,7 +172,22 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Add client model names and map them to upstream video models',
     },
   },
+  61: {
+    id: 61,
+    name: CHANNEL_TYPES[61],
+    icon: 'Jimeng',
+    defaultBaseUrl: 'https://clmm-mall.top',
+    supportedModels: [],
+    hints: {
+      baseUrl: 'Default: https://clmm-mall.top',
+      key: 'Enter the raw API key issued by CLMM Mall',
+      models:
+        'Use client-visible Ark model names and map them to complete CLMM Mall model names.',
+    },
+  },
 }
+
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)
@@ -221,6 +236,8 @@ export function getBaseUrlOnChannelTypeChange(
   currentBaseUrl: string,
   isDirty: boolean
 ): string {
+  if (!MANAGED_DEFAULT_BASE_URL_TYPES.has(type)) return currentBaseUrl
+
   const defaultBaseUrl = getDefaultBaseUrl(type)
   if (isDirty || !defaultBaseUrl) return currentBaseUrl
   if (currentBaseUrl && !KNOWN_PROVIDER_BASE_URLS.has(currentBaseUrl)) {

@@ -17,7 +17,9 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -193,9 +195,55 @@ func setupSeedanceTaskDB(t *testing.T) {
 	originalDB := model.DB
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		model.DB = originalDB
+		require.NoError(t, sqlDB.Close())
+	})
 	require.NoError(t, database.AutoMigrate(&model.Task{}))
 	model.DB = database
-	t.Cleanup(func() { model.DB = originalDB })
+}
+
+func TestClmmMallSeedanceTaskPayloadRequiresArkConverter(t *testing.T) {
+	task := &model.Task{
+		Platform:    constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "clmm-private-upstream"},
+		Data:        json.RawMessage(`{"task_id":"clmm-private-upstream","diagnostic":"raw-private-data"}`),
+	}
+
+	adaptors := []struct {
+		name    string
+		adaptor channel.TaskAdaptor
+	}{
+		{name: "nil adaptor", adaptor: nil},
+		{name: "adaptor without converter", adaptor: GetTaskAdaptor(constant.TaskPlatformSuno)},
+	}
+	require.NotNil(t, adaptors[1].adaptor)
+	_, supportsArkConversion := adaptors[1].adaptor.(channel.ArkVideoTaskConverter)
+	require.False(t, supportsArkConversion)
+	for _, test := range adaptors {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := seedanceTaskPayload(task, test.adaptor)
+
+			require.EqualError(t, err, "CLMM Mall Ark task converter is unavailable")
+			assert.Nil(t, response)
+			assert.NotContains(t, err.Error(), "clmm-private-upstream")
+			assert.NotContains(t, err.Error(), "raw-private-data")
+		})
+	}
+}
+
+func TestSeedanceTaskPayloadPreservesRawFallbackForOtherPlatforms(t *testing.T) {
+	task := &model.Task{
+		Platform: constant.TaskPlatform("999"),
+		Data:     json.RawMessage(`{"task_id":"legacy-upstream","status":"queued"}`),
+	}
+
+	response, err := seedanceTaskPayload(task, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "legacy-upstream", response["task_id"])
 }
 
 func TestSeedanceTaskFetchUsesPublicIDAndOwner(t *testing.T) {
@@ -237,6 +285,220 @@ func TestSeedanceTaskFetchUsesPublicIDAndOwner(t *testing.T) {
 	_, taskErr = SeedanceTaskFetch(other)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, http.StatusNotFound, taskErr.StatusCode)
+}
+
+func TestClmmMallSeedanceTaskFetchUsesArkConverterAndProtectsPrivateData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	tasks := []model.Task{
+		{
+			TaskID:     "task_clmm_success",
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:     7,
+			Status:     model.TaskStatusSuccess,
+			SubmitTime: 111,
+			UpdatedAt:  222,
+			Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+			PrivateData: model.TaskPrivateData{
+				UpstreamTaskID: "clmm-upstream-success",
+				ResultURL:      "https://example.com/private-fallback.mp4",
+			},
+			Data: json.RawMessage(`{"task_id":"clmm-upstream-success","status":"completed","video_url":"https://example.com/clmm-video.mp4","diagnostic":"raw-private-success"}`),
+		},
+		{
+			TaskID:      "task_clmm_failed",
+			Platform:    constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:      7,
+			Status:      model.TaskStatusFailure,
+			SubmitTime:  333,
+			UpdatedAt:   444,
+			Properties:  model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+			PrivateData: model.TaskPrivateData{UpstreamTaskID: "clmm-upstream-failed"},
+			Data:        json.RawMessage(`{"task_id":"clmm-upstream-failed","status":"failed","error":{"code":"provider_code","message":"provider detail"},"diagnostic":"raw-private-failure"}`),
+		},
+	}
+	require.NoError(t, model.DB.Create(&tasks).Error)
+
+	t.Run("successful task", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_clmm_success", nil)
+		c.Params = gin.Params{{Key: "task_id", Value: "task_clmm_success"}}
+		c.Set("id", 7)
+
+		body, taskErr := SeedanceTaskFetch(c)
+
+		require.Nil(t, taskErr)
+		assert.NotContains(t, string(body), "clmm-upstream-success")
+		assert.NotContains(t, string(body), "raw-private-success")
+		var response map[string]interface{}
+		require.NoError(t, common.Unmarshal(body, &response))
+		assert.Equal(t, "task_clmm_success", response["id"])
+		assert.Equal(t, "client-video-model", response["model"])
+		assert.Equal(t, "succeeded", response["status"])
+		content, ok := response["content"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "https://example.com/clmm-video.mp4", content["video_url"])
+	})
+
+	t.Run("failed task", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_clmm_failed", nil)
+		c.Params = gin.Params{{Key: "task_id", Value: "task_clmm_failed"}}
+		c.Set("id", 7)
+
+		body, taskErr := SeedanceTaskFetch(c)
+
+		require.Nil(t, taskErr)
+		assert.NotContains(t, string(body), "clmm-upstream-failed")
+		assert.NotContains(t, string(body), "raw-private-failure")
+		var response struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Error  struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		require.NoError(t, common.Unmarshal(body, &response))
+		assert.Equal(t, "task_clmm_failed", response.ID)
+		assert.Equal(t, "failed", response.Status)
+		assert.Equal(t, "task_failed", response.Error.Code)
+		assert.Equal(t, "task failed", response.Error.Message)
+	})
+
+	t.Run("other user", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_clmm_success", nil)
+		c.Params = gin.Params{{Key: "task_id", Value: "task_clmm_success"}}
+		c.Set("id", 8)
+
+		_, taskErr := SeedanceTaskFetch(c)
+
+		require.NotNil(t, taskErr)
+		assert.Equal(t, http.StatusNotFound, taskErr.StatusCode)
+	})
+}
+
+func TestClmmMallVideoFetchByIDUsesArkConverterAndProtectsPrivateData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	task := model.Task{
+		TaskID:     "task_clmm_public",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+		UserId:     7,
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "upstream-private-id",
+		},
+		Data: json.RawMessage(`{"task_id":"upstream-private-id","status":"completed","video_url":"https://example.com/video.mp4","diagnostic":"Authorization: Bearer fake-upstream-secret"}`),
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task_clmm_public", nil)
+	c.Params = gin.Params{{Key: "task_id", Value: "task_clmm_public"}}
+	c.Set("id", 7)
+
+	taskErr := RelayTaskFetch(c, relayconstant.RelayModeVideoFetchByID)
+
+	require.Nil(t, taskErr)
+	body := recorder.Body.Bytes()
+	assert.NotContains(t, string(body), "upstream-private-id")
+	assert.NotContains(t, string(body), "fake-upstream-secret")
+	var response struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Status  string `json:"status"`
+		Content struct {
+			VideoURL string `json:"video_url"`
+		} `json:"content"`
+	}
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "task_clmm_public", response.ID)
+	assert.Equal(t, "client-video-model", response.Model)
+	assert.Equal(t, "succeeded", response.Status)
+	assert.Equal(t, "https://example.com/video.mp4", response.Content.VideoURL)
+}
+
+func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	now := time.Now().Unix()
+	tasks := []model.Task{
+		{
+			TaskID:      "task_clmm_match",
+			Platform:    constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:      7,
+			Status:      model.TaskStatusSuccess,
+			SubmitTime:  now,
+			Properties:  model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+			PrivateData: model.TaskPrivateData{UpstreamTaskID: "clmm-list-upstream"},
+			Data:        json.RawMessage(`{"task_id":"clmm-list-upstream","status":"completed","video_url":"https://example.com/list.mp4","service_tier":"priority","diagnostic":"raw-list-private"}`),
+		},
+		{
+			TaskID:     "task_clmm_other_user",
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:     8,
+			Status:     model.TaskStatusSuccess,
+			SubmitTime: now,
+			Properties: model.Properties{OriginModelName: "client-video-model"},
+			Data:       json.RawMessage(`{"task_id":"other-user-upstream","status":"completed","video_url":"https://example.com/other.mp4","service_tier":"priority"}`),
+		},
+		{
+			TaskID:     "task_clmm_wrong_model",
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:     7,
+			Status:     model.TaskStatusSuccess,
+			SubmitTime: now,
+			Properties: model.Properties{OriginModelName: "other-model"},
+			Data:       json.RawMessage(`{"task_id":"wrong-model-upstream","status":"completed","video_url":"https://example.com/wrong-model.mp4","service_tier":"priority"}`),
+		},
+		{
+			TaskID:     "task_clmm_wrong_status",
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:     7,
+			Status:     model.TaskStatusFailure,
+			SubmitTime: now,
+			Properties: model.Properties{OriginModelName: "client-video-model"},
+			Data:       json.RawMessage(`{"task_id":"wrong-status-upstream","status":"failed","service_tier":"priority"}`),
+		},
+		{
+			TaskID:     "task_clmm_wrong_tier",
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
+			UserId:     7,
+			Status:     model.TaskStatusSuccess,
+			SubmitTime: now,
+			Properties: model.Properties{OriginModelName: "client-video-model"},
+			Data:       json.RawMessage(`{"task_id":"wrong-tier-upstream","status":"completed","video_url":"https://example.com/wrong-tier.mp4","service_tier":"default"}`),
+		},
+	}
+	require.NoError(t, model.DB.Create(&tasks).Error)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks?status=succeeded&filter.model=client-video-model&filter.service_tier=priority", nil)
+	c.Set("id", 7)
+
+	body, taskErr := SeedanceTaskFetch(c)
+
+	require.Nil(t, taskErr)
+	assert.NotContains(t, string(body), "clmm-list-upstream")
+	assert.NotContains(t, string(body), "raw-list-private")
+	assert.NotContains(t, string(body), "other-user-upstream")
+	var response seedanceTaskListResponse
+	require.NoError(t, common.Unmarshal(body, &response))
+	require.Equal(t, 1, response.Total)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, "task_clmm_match", response.Items[0]["id"])
+	assert.Equal(t, "client-video-model", response.Items[0]["model"])
+	assert.Equal(t, "succeeded", response.Items[0]["status"])
+	content, ok := response.Items[0]["content"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "https://example.com/list.mp4", content["video_url"])
 }
 
 func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {

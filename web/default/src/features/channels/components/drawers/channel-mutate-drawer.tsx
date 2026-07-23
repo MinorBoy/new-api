@@ -1262,16 +1262,14 @@ export function ChannelMutateDrawer({
 
   // Handle type change - set default values for specific types
   useEffect(() => {
-    if (currentType === 59) {
-      const currentBaseUrlValue = form.getValues('base_url')
-      const nextBaseUrl = getBaseUrlOnChannelTypeChange(
-        currentType,
-        currentBaseUrlValue ?? '',
-        form.getFieldState('base_url').isDirty
-      )
-      if (nextBaseUrl !== currentBaseUrlValue) {
-        form.setValue('base_url', nextBaseUrl)
-      }
+    const currentBaseUrlValue = form.getValues('base_url')
+    const nextBaseUrl = getBaseUrlOnChannelTypeChange(
+      currentType,
+      currentBaseUrlValue ?? '',
+      form.getFieldState('base_url').isDirty
+    )
+    if (nextBaseUrl !== currentBaseUrlValue) {
+      form.setValue('base_url', nextBaseUrl)
     }
 
     if (isEditing) return // Don't auto-set creation defaults when editing

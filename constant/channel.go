@@ -58,7 +58,8 @@ const (
 	ChannelTypeAdvancedCustom = 58
 	ChannelTypeDimensio       = 59 // dimensio 视频生成(ARK v3 协议翻译网关)
 	ChannelTypeNewAPIVideo    = 60 // new-api /v1/video/generations task protocol
-	ChannelTypeDummy          = 61 // this one is only for count, do not add any channel after this
+	ChannelTypeClmmMall       = 61 // CLMM Mall 视频生成(ARK v3 协议翻译网关)
+	ChannelTypeDummy          = 62 // this one is only for count, do not add any channel after this
 
 )
 
@@ -124,6 +125,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //58
 	"https://jimeng.dimensio.cn",                //59 Dimensio
 	"",                                          //60 NewAPIVideo
+	"https://clmm-mall.top",                     //61 CLMM Mall
 }
 
 var ChannelTypeNames = map[int]string{
@@ -184,6 +186,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeAdvancedCustom: "Advanced Custom",
 	ChannelTypeDimensio:       "Dimensio",
 	ChannelTypeNewAPIVideo:    "NewAPIVideo",
+	ChannelTypeClmmMall:       "CLMM Mall",
 }
 
 func GetChannelTypeName(channelType int) string {

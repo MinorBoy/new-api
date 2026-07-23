@@ -20,6 +20,8 @@ import (
 
 const seedanceTaskScanBatchSize = 200
 
+var errClmmMallArkTaskConverterUnavailable = errors.New("CLMM Mall Ark task converter is unavailable")
+
 type seedanceTaskListResponse struct {
 	Items []map[string]interface{} `json:"items"`
 	Total int                      `json:"total"`
@@ -209,22 +211,9 @@ func seedanceTaskMatchesJSONFilter(task *model.Task, modelFilter, serviceTierFil
 }
 
 func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
-	response := make(map[string]interface{})
-	adaptor := GetTaskAdaptor(task.Platform)
-	if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
-		converted, err := converter.ConvertToArkVideoTask(task)
-		if err != nil {
-			return nil, err
-		}
-		if err := common.Unmarshal(converted, &response); err != nil {
-			return nil, fmt.Errorf("unmarshal converted task data: %w", err)
-		}
-	} else if task.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)) {
-		return nil, fmt.Errorf("new-api video task adaptor must implement ARK conversion")
-	} else if len(task.Data) > 0 {
-		if err := common.Unmarshal(task.Data, &response); err != nil {
-			return nil, fmt.Errorf("unmarshal task data: %w", err)
-		}
+	response, err := seedanceTaskPayload(task, GetTaskAdaptor(task.Platform))
+	if err != nil {
+		return nil, err
 	}
 	response["id"] = task.TaskID
 	publicStatus := seedanceTaskStatus(task.Status)
@@ -271,7 +260,8 @@ func isSeedanceTaskPlatform(platform constant.TaskPlatform) bool {
 	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeVolcEngine)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDoubaoVideo)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)):
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
 		return true
 	default:
 		return false
@@ -284,6 +274,7 @@ func seedanceTaskPlatformValues() []string {
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDoubaoVideo)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
 	}
 	values := make([]string, 0, len(candidates))
 	for _, platform := range candidates {
@@ -292,6 +283,32 @@ func seedanceTaskPlatformValues() []string {
 		}
 	}
 	return values
+}
+
+func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[string]interface{}, error) {
+	response := make(map[string]interface{})
+	if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
+		converted, err := converter.ConvertToArkVideoTask(task)
+		if err != nil {
+			return nil, err
+		}
+		if err := common.Unmarshal(converted, &response); err != nil {
+			return nil, fmt.Errorf("unmarshal converted task data: %w", err)
+		}
+		return response, nil
+	}
+	switch task.Platform {
+	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)):
+		return nil, fmt.Errorf("new-api video task adaptor must implement ARK conversion")
+	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
+		return nil, errClmmMallArkTaskConverterUnavailable
+	}
+	if len(task.Data) > 0 {
+		if err := common.Unmarshal(task.Data, &response); err != nil {
+			return nil, fmt.Errorf("unmarshal task data: %w", err)
+		}
+	}
+	return response, nil
 }
 
 func seedanceTaskStatus(status model.TaskStatus) string {

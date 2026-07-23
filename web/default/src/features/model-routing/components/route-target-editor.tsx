@@ -31,7 +31,6 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
@@ -308,79 +307,6 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
           </FormItem>
         )}
       />
-
-      <FormField
-        control={props.form.control}
-        name={`targets.${props.index}.upscaled`}
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>{t('Resolution mode')}</FormLabel>
-            <FormControl>
-              <ToggleGroup
-                value={[field.value ? 'upscaled' : 'native']}
-                onValueChange={(values) => {
-                  const next = values.find(
-                    (value) => value !== (field.value ? 'upscaled' : 'native')
-                  )
-                  if (!next) {
-                    return
-                  }
-                  const upscaled = next === 'upscaled'
-                  field.onChange(upscaled)
-                  if (!upscaled) {
-                    props.form.setValue(
-                      `targets.${props.index}.generation_resolution`,
-                      undefined,
-                      { shouldValidate: true }
-                    )
-                  }
-                }}
-                variant='outline'
-                className='w-full'
-              >
-                <ToggleGroupItem value='native' className='flex-1'>
-                  {t('Native')}
-                </ToggleGroupItem>
-                <ToggleGroupItem value='upscaled' className='flex-1'>
-                  {t('Upscaled')}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      {target?.upscaled && (
-        <FormField
-          control={props.form.control}
-          name={`targets.${props.index}.generation_resolution`}
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{t('Generation resolution')}</FormLabel>
-              <FormControl>
-                <NativeSelect
-                  className='w-full'
-                  value={field.value ?? ''}
-                  onChange={(event) =>
-                    field.onChange(event.target.value || undefined)
-                  }
-                >
-                  <NativeSelectOption value=''>
-                    {t('Select resolution')}
-                  </NativeSelectOption>
-                  {OUTPUT_RESOLUTIONS.map((resolution) => (
-                    <NativeSelectOption key={resolution} value={resolution}>
-                      {resolution}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-      )}
 
       <FormField
         control={props.form.control}

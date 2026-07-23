@@ -57,7 +57,13 @@ import {
   ComboboxList,
 } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetClose,
@@ -342,19 +348,27 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t('Canonical model')}</FormLabel>
-                      <FormControl>
-                        <NativeSelect
-                          className='w-full font-mono text-xs'
-                          value={field.value}
-                          onChange={field.onChange}
-                        >
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger className='w-full font-mono text-xs'>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent align='start'>
                           {CANONICAL_SEEDANCE_MODELS.map((model) => (
-                            <NativeSelectOption key={model} value={model}>
+                            <SelectItem
+                              key={model}
+                              value={model}
+                              className='font-mono text-xs'
+                            >
                               {model}
-                            </NativeSelectOption>
+                            </SelectItem>
                           ))}
-                        </NativeSelect>
-                      </FormControl>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -385,22 +399,23 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t('Default resolution')}</FormLabel>
-                      <FormControl>
-                        <NativeSelect
-                          className='w-full'
-                          value={field.value}
-                          onChange={field.onChange}
-                        >
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger className='w-full'>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent align='start'>
                           {OUTPUT_RESOLUTIONS.map((resolution) => (
-                            <NativeSelectOption
-                              key={resolution}
-                              value={resolution}
-                            >
+                            <SelectItem key={resolution} value={resolution}>
                               {resolution}
-                            </NativeSelectOption>
+                            </SelectItem>
                           ))}
-                        </NativeSelect>
-                      </FormControl>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -434,19 +449,23 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t('Default aspect ratio')}</FormLabel>
-                      <FormControl>
-                        <NativeSelect
-                          className='w-full'
-                          value={field.value}
-                          onChange={field.onChange}
-                        >
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger className='w-full'>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent align='start'>
                           {ASPECT_RATIOS.map((ratio) => (
-                            <NativeSelectOption key={ratio} value={ratio}>
+                            <SelectItem key={ratio} value={ratio}>
                               {ratio}
-                            </NativeSelectOption>
+                            </SelectItem>
                           ))}
-                        </NativeSelect>
-                      </FormControl>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -302,6 +302,12 @@ func TestDimensioTaskAdaptorIsTaskOnly(t *testing.T) {
 	require.False(t, success)
 }
 
+func TestNewAPIVideoTaskAdaptorIsTaskOnly(t *testing.T) {
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("60")))
+	_, success := common.ChannelType2APIType(constant.ChannelTypeNewAPIVideo)
+	require.False(t, success)
+}
+
 func TestSeedanceTaskFetchPreservesOfficialFailedTaskFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)

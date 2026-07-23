@@ -782,6 +782,7 @@ type TaskInfo struct {
 	TotalTokens             int                `json:"total_tokens,omitempty"`      // 用于按倍率计费
 	Resolution              string             `json:"resolution,omitempty"`
 	CompletionTokensPresent bool               `json:"-"`
+	TotalTokensPresent      bool               `json:"-"`
 	BillingClamp            *common.QuotaClamp `json:"-"`
 }
 

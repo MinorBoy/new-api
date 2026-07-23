@@ -65,6 +65,91 @@ type upstreamRoleImage struct {
 	Role string `json:"role"`
 }
 
+type tokenUsage struct {
+	CompletionTokens *json.Number `json:"completion_tokens,omitempty"`
+	TotalTokens      *json.Number `json:"total_tokens,omitempty"`
+}
+
+type arkVideoContent struct {
+	VideoURL string `json:"video_url,omitempty"`
+}
+
+type arkTaskData struct {
+	Content               *arkVideoContent `json:"content,omitempty"`
+	CreatedAt             *int64           `json:"created_at,omitempty"`
+	UpdatedAt             *int64           `json:"updated_at,omitempty"`
+	Draft                 *bool            `json:"draft,omitempty"`
+	Duration              *json.Number     `json:"duration,omitempty"`
+	ExecutionExpiresAfter *json.Number     `json:"execution_expires_after,omitempty"`
+	FramesPerSecond       *json.Number     `json:"framespersecond,omitempty"`
+	GenerateAudio         *bool            `json:"generate_audio,omitempty"`
+	Priority              *json.Number     `json:"priority,omitempty"`
+	Ratio                 string           `json:"ratio,omitempty"`
+	Resolution            string           `json:"resolution,omitempty"`
+	Seed                  *json.Number     `json:"seed,omitempty"`
+	ServiceTier           string           `json:"service_tier,omitempty"`
+	Status                string           `json:"status,omitempty"`
+	Usage                 *tokenUsage      `json:"usage,omitempty"`
+	Error                 *upstreamError   `json:"error,omitempty"`
+}
+
+type detailedTask struct {
+	TaskID     string          `json:"task_id"`
+	Status     string          `json:"status"`
+	FailReason string          `json:"fail_reason"`
+	ResultURL  string          `json:"result_url"`
+	SubmitTime int64           `json:"submit_time"`
+	StartTime  int64           `json:"start_time"`
+	FinishTime int64           `json:"finish_time"`
+	Progress   string          `json:"progress"`
+	Data       json.RawMessage `json:"data"`
+}
+
+type detailedEnvelope struct {
+	Code    *string       `json:"code"`
+	Message string        `json:"message"`
+	Data    *detailedTask `json:"data"`
+}
+
+type directTask struct {
+	ID          string `json:"id"`
+	TaskID      string `json:"task_id"`
+	Status      string `json:"status"`
+	Progress    int    `json:"progress"`
+	CreatedAt   int64  `json:"created_at"`
+	CompletedAt int64  `json:"completed_at"`
+	Metadata    *struct {
+		URL string `json:"url,omitempty"`
+	} `json:"metadata,omitempty"`
+	Content *arkVideoContent `json:"content,omitempty"`
+	Data    *struct {
+		URL string `json:"url,omitempty"`
+	} `json:"data,omitempty"`
+	Usage *tokenUsage    `json:"usage,omitempty"`
+	Error *upstreamError `json:"error,omitempty"`
+}
+
+type arkTaskResponse struct {
+	ID                    string           `json:"id"`
+	Model                 string           `json:"model"`
+	Status                string           `json:"status"`
+	Content               *arkVideoContent `json:"content,omitempty"`
+	CreatedAt             *int64           `json:"created_at,omitempty"`
+	UpdatedAt             *int64           `json:"updated_at,omitempty"`
+	Draft                 *bool            `json:"draft,omitempty"`
+	Duration              *json.Number     `json:"duration,omitempty"`
+	ExecutionExpiresAfter *json.Number     `json:"execution_expires_after,omitempty"`
+	FramesPerSecond       *json.Number     `json:"framespersecond,omitempty"`
+	GenerateAudio         *bool            `json:"generate_audio,omitempty"`
+	Priority              *json.Number     `json:"priority,omitempty"`
+	Ratio                 string           `json:"ratio,omitempty"`
+	Resolution            string           `json:"resolution,omitempty"`
+	Seed                  *json.Number     `json:"seed,omitempty"`
+	ServiceTier           string           `json:"service_tier,omitempty"`
+	Usage                 *tokenUsage      `json:"usage,omitempty"`
+	Error                 *upstreamError   `json:"error,omitempty"`
+}
+
 func getRequestState(c *gin.Context) (requestState, error) {
 	value, exists := c.Get(requestStateContextKey)
 	if !exists {

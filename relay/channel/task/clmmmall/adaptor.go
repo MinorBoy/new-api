@@ -79,7 +79,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		}
 	}
 
-	var request ArkRequest
+	var request arkRequest
 	if err := common.Unmarshal(rawBody, &request); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
@@ -110,7 +110,7 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 	if info == nil || info.ChannelMeta == nil || strings.TrimSpace(info.UpstreamModelName) == "" {
 		return service.TaskErrorWrapperLocal(errors.New("mapped CLMM Mall model is required"), "invalid_model", http.StatusBadRequest)
 	}
-	converted, billingSeconds, err := ArkToClmm(request, info.UpstreamModelName)
+	converted, billingSeconds, err := arkToClmm(request, info.UpstreamModelName)
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_model", http.StatusBadRequest)
 	}
@@ -147,10 +147,10 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, request *http.Request, 
 }
 
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
-	var converted ClmmRequest
+	var converted clmmRequest
 	if value, ok := c.Get(clmmRequestContextKey); ok {
 		var valid bool
-		converted, valid = value.(ClmmRequest)
+		converted, valid = value.(clmmRequest)
 		if !valid {
 			return nil, errors.New("invalid CLMM Mall request in context")
 		}
@@ -162,7 +162,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		if info == nil || info.ChannelMeta == nil {
 			return nil, errors.New("CLMM Mall channel metadata is missing")
 		}
-		converted, _, err = ArkToClmm(request, info.UpstreamModelName)
+		converted, _, err = arkToClmm(request, info.UpstreamModelName)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +187,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, response *http.Response, info *
 	if err != nil {
 		return "", nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusBadGateway)
 	}
-	var submitResponse ClmmSubmitResponse
+	var submitResponse clmmSubmitResponse
 	if err := common.Unmarshal(body, &submitResponse); err != nil {
 		return "", body, service.TaskErrorWrapper(errors.New("invalid CLMM Mall task response"), "invalid_response", http.StatusBadGateway)
 	}
@@ -247,7 +247,7 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 }
 
 func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
-	var response ClmmTaskResponse
+	var response clmmTaskResponse
 	if err := common.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal CLMM Mall task result: %w", err)
 	}
@@ -299,7 +299,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if task == nil {
 		return nil, errors.New("task is nil")
 	}
-	var upstream ClmmTaskResponse
+	var upstream clmmTaskResponse
 	if len(task.Data) > 0 {
 		if err := common.Unmarshal(task.Data, &upstream); err != nil {
 			return nil, fmt.Errorf("unmarshal CLMM Mall task data: %w", err)
@@ -309,7 +309,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if createdAt == 0 {
 		createdAt = task.CreatedAt
 	}
-	response := ArkTaskResponse{
+	response := arkTaskResponse{
 		ID:        task.TaskID,
 		Model:     task.Properties.OriginModelName,
 		Status:    arkTaskStatus(task.Status),
@@ -333,25 +333,30 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		if message == "" {
 			message = strings.TrimSpace(task.FailReason)
 		}
+		upstreamTaskID := strings.TrimSpace(task.GetUpstreamTaskID())
+		if upstreamTaskID != "" && (strings.Contains(code, upstreamTaskID) || strings.Contains(message, upstreamTaskID)) {
+			code = "task_failed"
+			message = "task failed"
+		}
 		if code == "" {
 			code = "task_failed"
 		}
 		if message == "" {
 			message = "task failed"
 		}
-		response.Error = &ArkTaskError{Code: code, Message: message}
+		response.Error = &arkTaskError{Code: code, Message: message}
 	}
 	return common.Marshal(response)
 }
 
-func clmmArkRequest(c *gin.Context) (ArkRequest, error) {
+func clmmArkRequest(c *gin.Context) (arkRequest, error) {
 	value, ok := c.Get(clmmArkRequestContextKey)
 	if !ok {
-		return ArkRequest{}, errors.New("CLMM Mall Ark request is missing")
+		return arkRequest{}, errors.New("CLMM Mall Ark request is missing")
 	}
-	request, ok := value.(ArkRequest)
+	request, ok := value.(arkRequest)
 	if !ok {
-		return ArkRequest{}, errors.New("invalid CLMM Mall Ark request")
+		return arkRequest{}, errors.New("invalid CLMM Mall Ark request")
 	}
 	return request, nil
 }
@@ -395,7 +400,7 @@ func clmmMessageValue(value any) string {
 	}
 }
 
-func clmmResultURL(response ClmmTaskResponse) string {
+func clmmResultURL(response clmmTaskResponse) string {
 	for _, candidate := range []string{
 		response.VideoURL,
 		response.URL,

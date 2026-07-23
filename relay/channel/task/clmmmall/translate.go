@@ -35,21 +35,21 @@ type normalizedArkRequest struct {
 	videos     []string
 }
 
-func ArkToClmm(request ArkRequest, upstreamModel string) (ClmmRequest, int, error) {
+func arkToClmm(request arkRequest, upstreamModel string) (clmmRequest, int, error) {
 	normalized, err := normalizeArkRequest(request)
 	if err != nil {
-		return ClmmRequest{}, 0, err
+		return clmmRequest{}, 0, err
 	}
 	controls, err := parseModelControls(upstreamModel)
 	if err != nil {
-		return ClmmRequest{}, 0, err
+		return clmmRequest{}, 0, err
 	}
 	resolution := normalized.resolution
 	if controls.resolution != "" {
 		resolution = controls.resolution
 	}
 	if len(normalized.images) < controls.minimumImages {
-		return ClmmRequest{}, 0, fmt.Errorf("model requires at least %d reference images", controls.minimumImages)
+		return clmmRequest{}, 0, fmt.Errorf("model requires at least %d reference images", controls.minimumImages)
 	}
 	videos := normalized.videos
 	if controls.dropVideos {
@@ -63,7 +63,7 @@ func ArkToClmm(request ArkRequest, upstreamModel string) (ClmmRequest, int, erro
 		billingSeconds = controls.durationLimit
 		if normalized.duration != nil && !controls.fixedDuration {
 			if *normalized.duration > controls.durationLimit {
-				return ClmmRequest{}, 0, fmt.Errorf("duration must be between 1 and %d seconds", controls.durationLimit)
+				return clmmRequest{}, 0, fmt.Errorf("duration must be between 1 and %d seconds", controls.durationLimit)
 			}
 			billingSeconds = *normalized.duration
 		}
@@ -75,7 +75,7 @@ func ArkToClmm(request ArkRequest, upstreamModel string) (ClmmRequest, int, erro
 			billingSeconds = *normalized.duration
 		}
 		if billingSeconds < 5 || billingSeconds > 15 || billingSeconds > relaycommon.MaxTaskDurationSeconds {
-			return ClmmRequest{}, 0, fmt.Errorf("duration must be between 5 and 15 seconds")
+			return clmmRequest{}, 0, fmt.Errorf("duration must be between 5 and 15 seconds")
 		}
 		seconds = strconv.Itoa(billingSeconds)
 	}
@@ -84,7 +84,7 @@ func ArkToClmm(request ArkRequest, upstreamModel string) (ClmmRequest, int, erro
 	if normalized.ratio == "9:16" {
 		size = "720x1280"
 	}
-	return ClmmRequest{
+	return clmmRequest{
 		Model:              upstreamModel,
 		Prompt:             normalized.prompt,
 		AspectRatio:        normalized.ratio,
@@ -97,7 +97,7 @@ func ArkToClmm(request ArkRequest, upstreamModel string) (ClmmRequest, int, erro
 	}, billingSeconds, nil
 }
 
-func normalizeArkRequest(request ArkRequest) (normalizedArkRequest, error) {
+func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 	if strings.TrimSpace(request.Model) == "" {
 		return normalizedArkRequest{}, fmt.Errorf("model is required")
 	}
@@ -237,7 +237,7 @@ func parseModelControls(modelName string) (modelControls, error) {
 	return controls, nil
 }
 
-func validateUnsupportedArkFields(request ArkRequest) error {
+func validateUnsupportedArkFields(request arkRequest) error {
 	if request.Watermark != nil || request.GenerateAudio != nil || request.Draft != nil || request.Tools != nil ||
 		request.Seed != nil || request.CameraFixed != nil || request.Frames != nil || request.Priority != nil ||
 		request.ExecutionExpiresAfter != nil || request.ReturnLastFrame != nil || request.SafetyIdentifier != nil {
@@ -249,6 +249,6 @@ func validateUnsupportedArkFields(request ArkRequest) error {
 	return nil
 }
 
-func marshalClmmRequest(request ClmmRequest) ([]byte, error) {
+func marshalClmmRequest(request clmmRequest) ([]byte, error) {
 	return common.Marshal(request)
 }

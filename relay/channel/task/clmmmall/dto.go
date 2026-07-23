@@ -1,8 +1,8 @@
 package clmmmall
 
-type ArkRequest struct {
+type arkRequest struct {
 	Model                 string       `json:"model"`
-	Content               []ArkContent `json:"content"`
+	Content               []arkContent `json:"content"`
 	Ratio                 string       `json:"ratio,omitempty"`
 	Resolution            string       `json:"resolution,omitempty"`
 	Duration              *int         `json:"duration,omitempty"`
@@ -10,7 +10,7 @@ type ArkRequest struct {
 	Watermark             *bool        `json:"watermark,omitempty"`
 	GenerateAudio         *bool        `json:"generate_audio,omitempty"`
 	Draft                 *bool        `json:"draft,omitempty"`
-	Tools                 *[]ArkTool   `json:"tools,omitempty"`
+	Tools                 *[]arkTool   `json:"tools,omitempty"`
 	Seed                  *int         `json:"seed,omitempty"`
 	CameraFixed           *bool        `json:"camera_fixed,omitempty"`
 	Frames                *int         `json:"frames,omitempty"`
@@ -20,25 +20,25 @@ type ArkRequest struct {
 	SafetyIdentifier      *string      `json:"safety_identifier,omitempty"`
 }
 
-type ArkContent struct {
+type arkContent struct {
 	Type      string    `json:"type"`
 	Text      string    `json:"text,omitempty"`
-	ImageURL  *ArkMedia `json:"image_url,omitempty"`
-	VideoURL  *ArkMedia `json:"video_url,omitempty"`
-	AudioURL  *ArkMedia `json:"audio_url,omitempty"`
+	ImageURL  *arkMedia `json:"image_url,omitempty"`
+	VideoURL  *arkMedia `json:"video_url,omitempty"`
+	AudioURL  *arkMedia `json:"audio_url,omitempty"`
 	Role      string    `json:"role,omitempty"`
 	DraftTask any       `json:"draft_task,omitempty"`
 }
 
-type ArkMedia struct {
+type arkMedia struct {
 	URL string `json:"url"`
 }
 
-type ArkTool struct {
+type arkTool struct {
 	Type string `json:"type,omitempty"`
 }
 
-type ClmmRequest struct {
+type clmmRequest struct {
 	Model              string   `json:"model"`
 	Prompt             string   `json:"prompt"`
 	AspectRatio        string   `json:"aspect_ratio"`
@@ -50,13 +50,13 @@ type ClmmRequest struct {
 	ReferenceVideos    []string `json:"reference_videos,omitempty"`
 }
 
-type ClmmSubmitResponse struct {
+type clmmSubmitResponse struct {
 	ID     string `json:"id,omitempty"`
 	TaskID string `json:"task_id,omitempty"`
 	Status string `json:"status,omitempty"`
 }
 
-type ClmmTaskResponse struct {
+type clmmTaskResponse struct {
 	ID          string         `json:"id,omitempty"`
 	TaskID      string         `json:"task_id,omitempty"`
 	Model       string         `json:"model,omitempty"`
@@ -74,21 +74,21 @@ type ClmmTaskResponse struct {
 	CompletedAt int64          `json:"completed_at,omitempty"`
 }
 
-type ArkTaskResponse struct {
+type arkTaskResponse struct {
 	ID        string         `json:"id"`
 	Model     string         `json:"model,omitempty"`
 	Status    string         `json:"status"`
-	Content   ArkTaskContent `json:"content"`
-	Error     *ArkTaskError  `json:"error,omitempty"`
+	Content   arkTaskContent `json:"content"`
+	Error     *arkTaskError  `json:"error,omitempty"`
 	CreatedAt int64          `json:"created_at,omitempty"`
 	UpdatedAt int64          `json:"updated_at,omitempty"`
 }
 
-type ArkTaskContent struct {
+type arkTaskContent struct {
 	VideoURL string `json:"video_url,omitempty"`
 }
 
-type ArkTaskError struct {
+type arkTaskError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
 }

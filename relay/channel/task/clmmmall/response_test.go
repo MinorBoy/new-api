@@ -120,7 +120,7 @@ func TestConvertToArkVideoTaskMapsStableFailure(t *testing.T) {
 	data, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
 	require.NoError(t, err)
 
-	var response ArkTaskResponse
+	var response arkTaskResponse
 	require.NoError(t, common.Unmarshal(data, &response))
 	assert.Equal(t, "task_public", response.ID)
 	assert.Equal(t, "origin-model", response.Model)
@@ -128,4 +128,29 @@ func TestConvertToArkVideoTaskMapsStableFailure(t *testing.T) {
 	require.NotNil(t, response.Error)
 	assert.Equal(t, "content_policy", response.Error.Code)
 	assert.Equal(t, "blocked", response.Error.Message)
+}
+
+func TestConvertToArkVideoTaskDoesNotExposePrivateIDInFailure(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public",
+		Status:     model.TaskStatusFailure,
+		SubmitTime: 1,
+		UpdatedAt:  2,
+		Properties: model.Properties{OriginModelName: "origin-model"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "upstream-private",
+		},
+		Data: []byte(`{"id":"upstream-private","status":"failed","error":{"code":"provider_error","message":"task upstream-private failed; raw private diagnostic"}}`),
+	}
+
+	data, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "upstream-private")
+	assert.NotContains(t, string(data), "raw private diagnostic")
+
+	var response arkTaskResponse
+	require.NoError(t, common.Unmarshal(data, &response))
+	require.NotNil(t, response.Error)
+	assert.Equal(t, "task_failed", response.Error.Code)
+	assert.Equal(t, "task failed", response.Error.Message)
 }

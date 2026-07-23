@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -32,14 +33,25 @@ type ModelRequest struct {
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
-		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
+		var retryParam *service.RetryParam
+		channelIDValue, specificChannel := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
-		if ok {
-			id, err := strconv.Atoi(channelId.(string))
+		routingInput, inputErr := extractSeedanceRoutingInput(c, modelRequest.Model)
+		if inputErr != nil {
+			abortSeedanceRoutingError(c, http.StatusBadRequest, inputErr.Code, inputErr.Message)
+			return
+		}
+		if routingInput != nil {
+			common.SetContextKey(c, constant.ContextKeyRoutingFactsInput, *routingInput)
+		}
+
+		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		if specificChannel {
+			id, err := strconv.Atoi(channelIDValue.(string))
 			if err != nil {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidChannelId))
 				return
@@ -51,6 +63,46 @@ func Distribute() func(c *gin.Context) {
 			}
 			if channel.Status != common.ChannelStatusEnabled {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
+				return
+			}
+			retryParam = &service.RetryParam{
+				Ctx: c, TokenGroup: usingGroup, ModelName: modelRequest.Model,
+				RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0), RoutingInput: routingInput,
+			}
+			groups := []string{usingGroup}
+			if usingGroup == "auto" {
+				groups = service.GetUserAutoGroup(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
+			}
+			knownChannelCompatible := false
+			var knownChannelErr error
+			for _, group := range groups {
+				if usingGroup == "auto" && !model.IsChannelEnabledForGroupModel(group, modelRequest.Model, channel.Id) {
+					continue
+				}
+				compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, group, channel.Id)
+				if routeErr != nil {
+					var selectionErr *service.ChannelSelectionError
+					if errors.As(routeErr, &selectionErr) && selectionErr.Code == types.ErrorCodeRoutingPolicyError {
+						abortRoutingSelectionError(c, routeErr)
+						return
+					}
+					knownChannelErr = routeErr
+					continue
+				}
+				if compatible {
+					knownChannelCompatible = true
+					if usingGroup == "auto" {
+						common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
+					}
+					break
+				}
+			}
+			if !knownChannelCompatible {
+				if knownChannelErr != nil {
+					abortRoutingSelectionError(c, knownChannelErr)
+				} else {
+					abortSeedanceRoutingError(c, http.StatusBadRequest, types.ErrorCodeNoCompatibleRoute, "the specific channel is not compatible with this request")
+				}
 				return
 			}
 		} else {
@@ -82,7 +134,6 @@ func Distribute() func(c *gin.Context) {
 					return
 				}
 				var selectGroup string
-				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -100,6 +151,10 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
+				retryParam = &service.RetryParam{
+					Ctx: c, ModelName: modelRequest.Model, TokenGroup: usingGroup,
+					RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0), RoutingInput: routingInput,
+				}
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
@@ -111,6 +166,10 @@ func Distribute() func(c *gin.Context) {
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, g, preferred.Id)
+									if routeErr != nil || !compatible {
+										continue
+									}
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -120,10 +179,13 @@ func Distribute() func(c *gin.Context) {
 								}
 							}
 						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-							channel = preferred
-							selectGroup = usingGroup
-							affinityUsable = true
-							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+							compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, usingGroup, preferred.Id)
+							if routeErr == nil && compatible {
+								channel = preferred
+								selectGroup = usingGroup
+								affinityUsable = true
+								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+							}
 						}
 					}
 					if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
@@ -132,14 +194,11 @@ func Distribute() func(c *gin.Context) {
 				}
 
 				if channel == nil {
-					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
-						Ctx:         c,
-						ModelName:   modelRequest.Model,
-						TokenGroup:  usingGroup,
-						RequestPath: c.Request.URL.Path,
-						Retry:       common.GetPointer(0),
-					})
+					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(retryParam)
 					if err != nil {
+						if abortRoutingSelectionError(c, err) {
+							return
+						}
 						showGroup := usingGroup
 						if usingGroup == "auto" {
 							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
@@ -161,12 +220,63 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if channel != nil {
+			for {
+				setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+				if setupErr == nil {
+					break
+				}
+				if !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+					abortSeedanceRoutingError(c, setupErr.StatusCode, setupErr.GetErrorCode(), setupErr.Error())
+					return
+				}
+				if specificChannel {
+					abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "the compatible channel is unavailable")
+					return
+				}
+				if setupErr.GetErrorCode() != types.ErrorCodeChannelNoAvailableKey || retryParam == nil {
+					abortSeedanceRoutingError(c, setupErr.StatusCode, setupErr.GetErrorCode(), setupErr.Error())
+					return
+				}
+				retryParam.ExcludeCapabilityChannel(channel.Id)
+				channel, _, err = service.CacheGetRandomSatisfiedChannel(retryParam)
+				if err != nil {
+					if abortRoutingSelectionError(c, err) {
+						return
+					}
+					abortSeedanceRoutingError(c, http.StatusInternalServerError, types.ErrorCodeRoutingPolicyError, err.Error())
+					return
+				}
+			}
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func abortRoutingSelectionError(c *gin.Context, err error) bool {
+	var selectionErr *service.ChannelSelectionError
+	if !errors.As(err, &selectionErr) {
+		return false
+	}
+	if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok {
+		service.RecordRoutingSelectionFailure(c, input.CanonicalModel, selectionErr)
+	}
+	abortSeedanceRoutingError(c, selectionErr.StatusCode, selectionErr.Code, selectionErr.Error())
+	return true
+}
+
+func abortSeedanceRoutingError(c *gin.Context, status int, code types.ErrorCode, message string) {
+	if status == 0 {
+		status = http.StatusInternalServerError
+	}
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
+		return
+	}
+	abortWithOpenAiMessage(c, status, message, code)
 }
 
 // channelSupportsRequestPath reports whether a channel can serve the request path.

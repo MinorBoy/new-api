@@ -2,22 +2,34 @@ package service
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
 type RetryParam struct {
-	Ctx          *gin.Context
-	TokenGroup   string
-	ModelName    string
-	RequestPath  string
-	Retry        *int
-	resetNextTry bool
+	Ctx                *gin.Context
+	TokenGroup         string
+	ModelName          string
+	RequestPath        string
+	Retry              *int
+	RoutingInput       *modelrouting.FactsInput
+	ExcludedChannelIDs map[int]struct{}
+	resetNextTry       bool
+}
+
+func (p *RetryParam) ExcludeCapabilityChannel(channelID int) {
+	if p.ExcludedChannelIDs == nil {
+		p.ExcludedChannelIDs = map[int]struct{}{}
+	}
+	p.ExcludedChannelIDs[channelID] = struct{}{}
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -82,6 +94,7 @@ func (p *RetryParam) ResetRetryNextTry() {
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
+	clearRoutingDecision(param.Ctx)
 	var channel *model.Channel
 	var err error
 	selectGroup := param.TokenGroup
@@ -92,6 +105,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
 		autoGroups := GetUserAutoGroup(userGroup)
+		diagnostics := make([]modelrouting.Audit, 0)
+		sawCapabilityNoMatch := false
+		sawCompatibleUnavailable := false
 
 		// startGroupIndex: the group index to start searching from
 		// startGroupIndex: 开始搜索的分组索引
@@ -106,6 +122,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 
 		for i := startGroupIndex; i < len(autoGroups); i++ {
 			autoGroup := autoGroups[i]
+			selectGroup = autoGroup
 			// Calculate priorityRetry for current group
 			// 计算当前分组的 priorityRetry
 			priorityRetry := param.GetRetry()
@@ -116,7 +133,21 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry, param.RequestPath, model.ChannelSelectFilter{})
+			channel, _, err = selectChannelForGroup(param, autoGroup, priorityRetry)
+			if err != nil {
+				var selectionErr *ChannelSelectionError
+				if !errors.As(err, &selectionErr) || selectionErr.Code == types.ErrorCodeRoutingPolicyError {
+					return nil, autoGroup, err
+				}
+				for _, diagnostic := range selectionErr.Diagnostics {
+					diagnostics = append(diagnostics, diagnostic)
+				}
+				if selectionErr.Code == types.ErrorCodeCompatibleChannelUnavailable {
+					sawCompatibleUnavailable = true
+				} else {
+					sawCapabilityNoMatch = true
+				}
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -153,8 +184,22 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			break
 		}
+		if channel == nil {
+			if sawCompatibleUnavailable {
+				return nil, selectGroup, &ChannelSelectionError{
+					Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+					Err: errors.New("compatible channels are unavailable"), Diagnostics: diagnostics,
+				}
+			}
+			if sawCapabilityNoMatch {
+				return nil, selectGroup, &ChannelSelectionError{
+					Code: types.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+					Err: errors.New("no compatible route supports this request"), Diagnostics: diagnostics,
+				}
+			}
+		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, model.ChannelSelectFilter{})
+		channel, _, err = selectChannelForGroup(param, param.TokenGroup, param.GetRetry())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

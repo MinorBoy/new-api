@@ -176,7 +176,7 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   },
 }
 
-export const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 60])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 60])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)
@@ -225,6 +225,8 @@ export function getBaseUrlOnChannelTypeChange(
   currentBaseUrl: string,
   isDirty: boolean
 ): string {
+  if (!MANAGED_DEFAULT_BASE_URL_TYPES.has(type)) return currentBaseUrl
+
   const defaultBaseUrl = getDefaultBaseUrl(type)
   if (isDirty || !defaultBaseUrl) return currentBaseUrl
   if (currentBaseUrl && !KNOWN_PROVIDER_BASE_URLS.has(currentBaseUrl)) {

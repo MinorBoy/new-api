@@ -39,6 +39,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
 import {
   ASPECT_RATIOS,
@@ -61,6 +62,9 @@ type RouteTargetEditorProps = {
 function numericValue(value: string): number {
   return value === '' ? 0 : Number(value)
 }
+
+const ROUTING_SELECTED_CLASS =
+  'data-[state=on]:border-primary data-[state=on]:bg-primary/15 data-[state=on]:text-primary dark:data-[state=on]:bg-primary/20'
 
 export function RouteTargetEditor(props: RouteTargetEditorProps) {
   const { t } = useTranslation()
@@ -288,7 +292,11 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
               {OUTPUT_RESOLUTIONS.map((resolution) => (
                 <label
                   key={resolution}
-                  className='flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm'
+                  className={cn(
+                    'flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors',
+                    field.value.includes(resolution) &&
+                      'border-primary bg-primary/10 text-primary dark:bg-primary/15'
+                  )}
                 >
                   <Checkbox
                     checked={field.value.includes(resolution)}
@@ -313,7 +321,7 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
         name={`targets.${props.index}.durations.mode`}
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t('Duration')}</FormLabel>
+            <FormLabel>{t('Allowed generation durations')}</FormLabel>
             <FormControl>
               <ToggleGroup
                 value={[field.value]}
@@ -326,10 +334,16 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
                 variant='outline'
                 className='w-full'
               >
-                <ToggleGroupItem value='values' className='flex-1'>
+                <ToggleGroupItem
+                  value='values'
+                  className={cn('flex-1', ROUTING_SELECTED_CLASS)}
+                >
                   {t('Discrete values')}
                 </ToggleGroupItem>
-                <ToggleGroupItem value='range' className='flex-1'>
+                <ToggleGroupItem
+                  value='range'
+                  className={cn('flex-1', ROUTING_SELECTED_CLASS)}
+                >
                   {t('Range')}
                 </ToggleGroupItem>
               </ToggleGroup>
@@ -436,7 +450,11 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
                 className='flex w-full flex-wrap justify-start'
               >
                 {ASPECT_RATIOS.map((ratio) => (
-                  <ToggleGroupItem key={ratio} value={ratio}>
+                  <ToggleGroupItem
+                    key={ratio}
+                    value={ratio}
+                    className={ROUTING_SELECTED_CLASS}
+                  >
                     {ratio}
                   </ToggleGroupItem>
                 ))}
@@ -498,13 +516,22 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
                 variant='outline'
                 className='w-full'
               >
-                <ToggleGroupItem value='unknown' className='flex-1'>
+                <ToggleGroupItem
+                  value='unknown'
+                  className={cn('flex-1', ROUTING_SELECTED_CLASS)}
+                >
                   {t('Unknown')}
                 </ToggleGroupItem>
-                <ToggleGroupItem value='yes' className='flex-1'>
+                <ToggleGroupItem
+                  value='yes'
+                  className={cn('flex-1', ROUTING_SELECTED_CLASS)}
+                >
                   {t('Supported')}
                 </ToggleGroupItem>
-                <ToggleGroupItem value='no' className='flex-1'>
+                <ToggleGroupItem
+                  value='no'
+                  className={cn('flex-1', ROUTING_SELECTED_CLASS)}
+                >
                   {t('Not supported')}
                 </ToggleGroupItem>
               </ToggleGroup>

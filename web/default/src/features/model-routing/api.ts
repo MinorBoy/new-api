@@ -30,7 +30,7 @@ import {
 } from './types'
 
 export async function listRoutingPolicies(params: RoutingPolicyListParams) {
-  const response = await api.get('/api/routing-policies', { params })
+  const response = await api.get('/api/routing-policies/', { params })
   return routingPolicyListResponseSchema.parse(response.data)
 }
 
@@ -52,7 +52,7 @@ export async function listRoutingGroups() {
 }
 
 export async function createRoutingPolicy(payload: RoutingPolicyWriteRequest) {
-  const response = await api.post('/api/routing-policies', payload, {
+  const response = await api.post('/api/routing-policies/', payload, {
     skipBusinessError: true,
   })
   return routingPolicyResponseSchema.parse(response.data)

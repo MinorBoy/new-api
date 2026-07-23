@@ -229,7 +229,11 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		if factsErr != nil {
 			return service.TaskErrorWrapperLocal(factsErr, "invalid_request", http.StatusBadRequest)
 		}
-		if fieldsErr := validateSeedanceNativeFields(nativeRequest, facts); fieldsErr != nil {
+		if fieldsErr := validateSeedanceNativeFields(
+			nativeRequest,
+			facts,
+			common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode),
+		); fieldsErr != nil {
 			return service.TaskErrorWrapperLocal(fieldsErr, "invalid_request", http.StatusBadRequest)
 		}
 		generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily

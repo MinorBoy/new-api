@@ -171,7 +171,7 @@ func TestSeedanceBillingAcceptanceExplicitMatrix(t *testing.T) {
 							}
 						}
 
-						require.NoError(t, validateSeedanceNativeFields(request, facts), caseID)
+						require.NoError(t, validateSeedanceNativeFields(request, facts, false), caseID)
 						ratio, ok := GetVideoBillingRatio(model.ID, resolution, hasVideo)
 						require.True(t, ok, caseID)
 						officialUnitPrice := seedanceAcceptanceOfficialUnitPrice(t, model.ID, resolution, hasVideo)
@@ -228,7 +228,7 @@ func TestSeedanceBillingAcceptanceExplicitMatrix(t *testing.T) {
 								}
 							}
 
-							require.NoError(t, validateSeedanceNativeFields(request, facts), caseID)
+							require.NoError(t, validateSeedanceNativeFields(request, facts, false), caseID)
 							got, ok := GetSeedance15ProRatios(audio, false, tier)
 							require.True(t, ok, caseID)
 							want := map[string]float64{}
@@ -280,7 +280,7 @@ func TestSeedanceBillingAcceptanceExplicitMatrix(t *testing.T) {
 						}
 					}
 
-					require.NoError(t, validateSeedanceNativeFields(request, facts), caseID)
+					require.NoError(t, validateSeedanceNativeFields(request, facts, false), caseID)
 					got, ok := GetSeedance15ProRatios(audio, true, "default")
 					require.True(t, ok, caseID)
 					want := map[string]float64{}
@@ -425,7 +425,7 @@ func TestSeedanceBillingAcceptanceInvalidMatrix(t *testing.T) {
 			facts, err = validateSeedanceContent(testCase.request.Model, testCase.content)
 		}
 		if err == nil {
-			err = validateSeedanceNativeFields(testCase.request, facts)
+			err = validateSeedanceNativeFields(testCase.request, facts, false)
 		}
 		require.Error(t, err, testCase.id)
 		require.NotEmpty(t, err.Error(), testCase.id)

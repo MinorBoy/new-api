@@ -49,7 +49,7 @@ func TestARKToUpstream(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			request, err := parseARKRequest([]byte(tt.body))
 			require.NoError(t, err)
-			translated, err := arkToUpstream(request, tt.upstream)
+			translated, err := arkToUpstream(request, tt.upstream, false)
 			require.NoError(t, err)
 			encoded, err := marshalUpstreamRequest(translated)
 			require.NoError(t, err)
@@ -105,7 +105,7 @@ func TestARKRejects(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			request, err := parseARKRequest([]byte(tt.body))
 			if err == nil {
-				_, err = arkToUpstream(request, "provider-720p")
+				_, err = arkToUpstream(request, "provider-720p", false)
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.code)
@@ -116,7 +116,7 @@ func TestARKRejects(t *testing.T) {
 func TestARKDurationAndBooleanSemantics(t *testing.T) {
 	request, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}],"generate_audio":false,"duration":10}`))
 	require.NoError(t, err)
-	translated, err := arkToUpstream(request, "provider-720p")
+	translated, err := arkToUpstream(request, "provider-720p", false)
 	require.NoError(t, err)
 	encoded, err := marshalUpstreamRequest(translated)
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestARKDurationAndBooleanSemantics(t *testing.T) {
 func TestARKAcceptsExplicitUnsupportedFeatureZeros(t *testing.T) {
 	request, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}],"draft":false,"tools":[]}`))
 	require.NoError(t, err)
-	translated, err := arkToUpstream(request, "provider-720p")
+	translated, err := arkToUpstream(request, "provider-720p", false)
 	require.NoError(t, err)
 	encoded, err := marshalUpstreamRequest(translated)
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func TestARKAcceptsExplicitUnsupportedFeatureZeros(t *testing.T) {
 func TestARKReferenceAudioEnablesOutputAudio(t *testing.T) {
 	request, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"},{"type":"video_url","video_url":{"url":"https://x/a.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://x/a.mp3"},"role":"reference_audio"}]}`))
 	require.NoError(t, err)
-	translated, err := arkToUpstream(request, "provider-720p")
+	translated, err := arkToUpstream(request, "provider-720p", false)
 	require.NoError(t, err)
 	encoded, err := marshalUpstreamRequest(translated)
 	require.NoError(t, err)
@@ -149,4 +149,21 @@ func TestValidateMappedResolution(t *testing.T) {
 	assert.NoError(t, validateMappedResolution("", "provider-model"))
 	assert.Error(t, validateMappedResolution("1080p", "seedance-720p-token"))
 	assert.Error(t, validateMappedResolution("720p", "provider-model"))
+}
+
+func TestARKCapabilityRoutingStripsExtensionAndUsesPrevalidatedResolution(t *testing.T) {
+	request, err := parseARKRequest([]byte(`{
+		"model":"doubao-seedance-2-0-260128",
+		"content":[{"type":"text","text":"text"}],
+		"resolution":"1080p",
+		"routing":{"require_real_person":true}
+	}`))
+	require.NoError(t, err)
+
+	translated, err := arkToUpstream(request, "lec-feituo-seedance-2-0-my-upscaled-1080p", true)
+	require.NoError(t, err)
+	encoded, err := marshalUpstreamRequest(translated)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"lec-feituo-seedance-2-0-my-upscaled-1080p","prompt":"text"}`, string(encoded))
+	assert.NotContains(t, string(encoded), `"routing"`)
 }

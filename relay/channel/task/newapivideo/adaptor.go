@@ -98,7 +98,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	var body []byte
 	var err error
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		body, err = buildARKRequestBody(c, modelName)
+		body, err = buildARKRequestBody(c, info)
 	} else {
 		body, err = buildOpenAIRequestBody(c, modelName)
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -454,6 +455,116 @@ func assertNewAPIVideoPublicBody(t *testing.T, body []byte) {
 		"secret-group", "platform", "quota",
 	} {
 		assert.NotContains(t, string(body), privateValue)
+	}
+}
+
+func configureNewAPIVideoFixedPricing(t *testing.T, modelName string) {
+	t.Helper()
+	original := ratio_setting.ModelRatio2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(original)) })
+	ratios := ratio_setting.GetModelRatioCopy()
+	ratios[modelName] = 0.1
+	encoded, err := common.Marshal(ratios)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
+}
+
+func newNewAPIVideoRelayContext(body, upstreamURL string) (*gin.Context, *relaycommon.RelayInfo) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeNewAPIVideo)
+	c.Set(string(constant.ContextKeyChannelBaseUrl), upstreamURL)
+	c.Set(string(constant.ContextKeyChannelKey), "mock-newapi-video-key")
+	c.Set("model_mapping", `{"client-video":"seedance-720p-token"}`)
+	return c, &relaycommon.RelayInfo{
+		OriginModelName: "client-video",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		Billing:         seedanceTaskTestBilling{},
+	}
+}
+
+func TestNewAPIVideoDurationFixedModePreservesFractionalValue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	configureNewAPIVideoFixedPricing(t, "client-video")
+	var upstreamCalls atomic.Int32
+	var capturedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-task","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","duration":5.5,"watermark":false,"seed":0}`, server.URL)
+
+	result, taskErr := RelayTaskSubmit(c, info)
+
+	require.Nil(t, taskErr)
+	require.NotNil(t, result)
+	assert.Equal(t, int32(1), upstreamCalls.Load())
+	assert.JSONEq(t, `{"model":"seedance-720p-token","prompt":"text","duration":5.5,"watermark":false,"seed":0}`, string(capturedBody))
+	assert.NotEqual(t, billing_setting.BillingModePerDuration, info.PriceData.BillingMode)
+}
+
+func TestNewAPIVideoDurationPerDurationMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
+		"client-video": {Price: 0.1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1, MinimumDurationSeconds: 1},
+	})
+
+	tests := []struct {
+		name              string
+		body              string
+		wantSuccess       bool
+		wantSeconds       int
+		wantUpstreamValue string
+	}{
+		{name: "fractional duration", body: `{"model":"client-video","prompt":"text","duration":5.5}`},
+		{name: "integer seconds five", body: `{"model":"client-video","prompt":"text","seconds":"5"}`, wantSuccess: true, wantSeconds: 5, wantUpstreamValue: "5"},
+		{name: "numeric seconds", body: `{"model":"client-video","prompt":"text","seconds":5}`},
+		{name: "integer seconds ten", body: `{"model":"client-video","prompt":"text","seconds":"10"}`, wantSuccess: true, wantSeconds: 10, wantUpstreamValue: "10"},
+		{name: "duration only", body: `{"model":"client-video","prompt":"text","duration":10}`},
+		{name: "duration overflow", body: `{"model":"client-video","prompt":"text","duration":3601}`},
+		{name: "metadata bypass", body: `{"model":"client-video","prompt":"text","duration":5,"metadata":{"duration":3601}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var upstreamCalls atomic.Int32
+			var capturedBody []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamCalls.Add(1)
+				capturedBody, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"upstream-task","status":"queued"}`))
+			}))
+			t.Cleanup(server.Close)
+			c, info := newNewAPIVideoRelayContext(tt.body, server.URL)
+
+			result, taskErr := RelayTaskSubmit(c, info)
+
+			if !tt.wantSuccess {
+				assert.Nil(t, result)
+				require.NotNil(t, taskErr)
+				assert.Equal(t, int32(0), upstreamCalls.Load())
+				return
+			}
+			require.Nil(t, taskErr)
+			require.NotNil(t, result)
+			assert.Equal(t, int32(1), upstreamCalls.Load())
+			assert.Equal(t, tt.wantSeconds, info.PriceData.RequestedDurationSeconds)
+			assert.Equal(t, tt.wantSeconds, info.PriceData.BillableDurationSeconds)
+			assert.NotContains(t, info.PriceData.OtherRatios(), "seconds")
+			var upstream map[string]interface{}
+			require.NoError(t, common.Unmarshal(capturedBody, &upstream))
+			assert.Equal(t, tt.wantUpstreamValue, upstream["seconds"])
+		})
 	}
 }
 

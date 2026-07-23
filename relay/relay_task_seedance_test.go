@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -137,6 +138,25 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	capturedBody := <-capturedBodyCh
 	require.NoError(t, common.Unmarshal(capturedBody, &upstreamRequest))
 	assert.Equal(t, upstreamModel, upstreamRequest["model"])
+}
+
+func TestTaskModel2DtoHidesCapabilityRouteFromUsers(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task-routing-private",
+		Properties: model.Properties{OriginModelName: modelrouting.Seedance20},
+		PrivateData: model.TaskPrivateData{Routing: &modelrouting.Audit{
+			PolicyID: 7, TargetID: 21, UpstreamModel: "provider-1080p",
+		}},
+		Data: json.RawMessage(`{"model":"provider-1080p"}`),
+	}
+
+	userDTO := TaskModel2Dto(task, false)
+	assert.Equal(t, modelrouting.Seedance20, userDTO.Properties.(model.Properties).OriginModelName)
+	assert.Empty(t, userDTO.Properties.(model.Properties).UpstreamModelName)
+	assert.Nil(t, userDTO.Data)
+
+	adminDTO := TaskModel2Dto(task, true)
+	assert.Equal(t, task.Data, adminDTO.Data)
 }
 
 func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {

@@ -28,6 +28,11 @@ const MODELS_SECTIONS = [
     build: () => null, // Content is rendered directly in the page component
   },
   {
+    id: 'routing',
+    titleKey: 'Routing policies',
+    build: () => null, // Content is rendered directly in the page component
+  },
+  {
     id: 'deployments',
     titleKey: 'Deployments',
     build: () => null, // Content is rendered directly in the page component

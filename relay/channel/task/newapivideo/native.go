@@ -22,7 +22,7 @@ import (
 var acceptedARKFields = map[string]struct{}{
 	"model": {}, "content": {}, "ratio": {}, "resolution": {},
 	"duration": {}, "watermark": {}, "generate_audio": {},
-	"service_tier": {}, "draft": {}, "tools": {},
+	"service_tier": {}, "draft": {}, "tools": {}, "routing": {},
 }
 
 type arkRequestError struct {
@@ -87,7 +87,7 @@ func validateARKRequest(c *gin.Context, info *relaycommon.RelayInfo, body []byte
 	return nil
 }
 
-func buildARKRequestBody(c *gin.Context, upstreamModel string) ([]byte, error) {
+func buildARKRequestBody(c *gin.Context, info *relaycommon.RelayInfo) ([]byte, error) {
 	state, err := getRequestState(c)
 	if err != nil {
 		return nil, err
@@ -95,19 +95,32 @@ func buildARKRequestBody(c *gin.Context, upstreamModel string) ([]byte, error) {
 	if state.ARK == nil {
 		return nil, fmt.Errorf("ARK request state is missing")
 	}
-	request, err := arkToUpstream(*state.ARK, upstreamModel)
+	upstreamModel := ""
+	if info != nil {
+		upstreamModel = info.UpstreamModelName
+		if upstreamModel == "" {
+			upstreamModel = info.OriginModelName
+		}
+	}
+	request, err := arkToUpstream(
+		*state.ARK,
+		upstreamModel,
+		common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode),
+	)
 	if err != nil {
 		return nil, err
 	}
 	return marshalUpstreamRequest(request)
 }
 
-func arkToUpstream(request arkRequest, upstreamModel string) (upstreamRequest, error) {
+func arkToUpstream(request arkRequest, upstreamModel string, resolutionPrevalidated bool) (upstreamRequest, error) {
 	if err := validateARKSemantics(request); err != nil {
 		return upstreamRequest{}, err
 	}
-	if err := validateMappedResolution(request.Resolution, upstreamModel); err != nil {
-		return upstreamRequest{}, &arkRequestError{Code: "InvalidParameter.resolution", Message: err.Error()}
+	if !resolutionPrevalidated {
+		if err := validateMappedResolution(request.Resolution, upstreamModel); err != nil {
+			return upstreamRequest{}, &arkRequestError{Code: "InvalidParameter.resolution", Message: err.Error()}
+		}
 	}
 
 	result := upstreamRequest{

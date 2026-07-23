@@ -5,6 +5,34 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
+type ChannelSelectFilter struct {
+	AllowedChannelIDs  map[int]struct{}
+	ExcludedChannelIDs map[int]struct{}
+}
+
+func (f ChannelSelectFilter) Allows(channelID int) bool {
+	if len(f.AllowedChannelIDs) > 0 {
+		if _, ok := f.AllowedChannelIDs[channelID]; !ok {
+			return false
+		}
+	}
+	_, excluded := f.ExcludedChannelIDs[channelID]
+	return !excluded
+}
+
+func filterChannelIDs(ids []int, filter ChannelSelectFilter) []int {
+	if len(ids) == 0 || len(filter.AllowedChannelIDs) == 0 && len(filter.ExcludedChannelIDs) == 0 {
+		return ids
+	}
+	filtered := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if filter.Allows(id) {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
+}
+
 func IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {
 	if group == "" || modelName == "" || channelID <= 0 {
 		return false

@@ -160,3 +160,31 @@ func TestBuildNativeRequestBodyAppliesMappedModel(t *testing.T) {
 	require.Contains(t, string(data), `"watermark":false`)
 	require.Contains(t, string(data), `"unknown_field":{"preserve":true}`)
 }
+
+func TestNativeCapabilityRoutingStripsExtensionAndUsesPrevalidatedResolution(t *testing.T) {
+	body := `{
+		"model":"doubao-seedance-2-0-fast-260128",
+		"content":[{"type":"text","text":"a cat"}],
+		"resolution":"1080p",
+		"routing":{"require_real_person":true}
+	}`
+	c := newNativeTaskContext(t, body)
+	common.SetContextKey(c, constant.ContextKeyRoutingCapabilityMode, true)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:   &relaycommon.ChannelMeta{UpstreamModelName: "provider-fast-1080p"},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	require.Nil(t, (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info))
+	taskRequest, err := relaycommon.GetTaskRequest(c)
+	require.NoError(t, err)
+	require.NotContains(t, taskRequest.Metadata, "routing")
+
+	requestBody, err := (&TaskAdaptor{}).BuildRequestBody(c, info)
+	require.NoError(t, err)
+	data, err := io.ReadAll(requestBody)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(data, &fields))
+	require.NotContains(t, fields, "routing")
+	require.Contains(t, string(data), `"model":"provider-fast-1080p"`)
+}

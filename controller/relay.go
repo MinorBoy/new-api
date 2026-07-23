@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -194,6 +195,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok {
+		retryParam.RoutingInput = &input
+	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
@@ -240,7 +244,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		shouldRetryRequest := shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		if shouldRetryRequest && common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+			retryParam.ExcludeCapabilityChannel(channel.Id)
+		}
+		if !shouldRetryRequest {
 			break
 		}
 	}
@@ -313,22 +321,57 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	for {
+		channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
-	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
+		if err != nil {
+			var selectionErr *service.ChannelSelectionError
+			if errors.As(err, &selectionErr) {
+				service.RecordRoutingSelectionFailure(c, info.OriginModelName, selectionErr)
+				return nil, routingSelectionErrorToAPI(selectionErr)
+			}
+			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if channel == nil {
+			return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil {
+		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+		if newAPIError == nil {
+			return channel, nil
+		}
+		if common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) &&
+			newAPIError.GetErrorCode() == types.ErrorCodeChannelNoAvailableKey {
+			retryParam.ExcludeCapabilityChannel(channel.Id)
+			continue
+		}
 		return nil, newAPIError
 	}
-	return channel, nil
+}
+
+func routingSelectionErrorToAPI(err error) *types.NewAPIError {
+	var selectionErr *service.ChannelSelectionError
+	if !errors.As(err, &selectionErr) {
+		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	return types.NewErrorWithStatusCode(selectionErr.Err, selectionErr.Code, selectionErr.StatusCode, types.ErrOptionWithSkipRetry())
+}
+
+func routingSelectionErrorToTaskError(err error) *dto.TaskError {
+	var selectionErr *service.ChannelSelectionError
+	if errors.As(err, &selectionErr) {
+		return service.TaskErrorWrapperLocal(selectionErr.Err, string(selectionErr.Code), selectionErr.StatusCode)
+	}
+	var apiErr *types.NewAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.GetErrorCode() {
+		case types.ErrorCodeNoCompatibleRoute, types.ErrorCodeCompatibleChannelUnavailable, types.ErrorCodeRoutingPolicyError:
+			return service.TaskErrorWrapperLocal(apiErr.Err, string(apiErr.GetErrorCode()), apiErr.StatusCode)
+		}
+	}
+	return service.TaskErrorWrapperLocal(err, "get_channel_failed", http.StatusInternalServerError)
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
@@ -400,6 +443,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
+		service.AppendRoutingAdminInfoFromContext(c, other)
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()
@@ -523,15 +567,52 @@ func RelayTask(c *gin.Context) {
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok {
+		retryParam.RoutingInput = &input
+	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
+			if retryParam.RoutingInput != nil {
+				groups := []string{relayInfo.TokenGroup}
+				if relayInfo.TokenGroup == "auto" {
+					groups = service.GetUserAutoGroup(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
+				}
+				knownChannel := false
+				var knownChannelErr error
+				for _, group := range groups {
+					compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, group, lockedCh.Id)
+					if routeErr != nil {
+						knownChannelErr = routeErr
+						continue
+					}
+					if compatible {
+						knownChannel = true
+						if relayInfo.TokenGroup == "auto" {
+							common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
+						}
+						break
+					}
+				}
+				if !knownChannel {
+					if knownChannelErr != nil {
+						taskErr = routingSelectionErrorToTaskError(knownChannelErr)
+					} else {
+						taskErr = service.TaskErrorWrapperLocal(errors.New("no compatible route supports this request"), string(types.ErrorCodeNoCompatibleRoute), http.StatusBadRequest)
+					}
+					break
+				}
+			}
 			channel = lockedCh
 			if retryParam.GetRetry() > 0 {
 				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
-					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
+					if common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) && setupErr.GetErrorCode() == types.ErrorCodeChannelNoAvailableKey {
+						taskErr = service.TaskErrorWrapperLocal(errors.New("compatible channel is unavailable"), string(types.ErrorCodeCompatibleChannelUnavailable), http.StatusServiceUnavailable)
+					} else {
+						taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
+					}
 					break
 				}
 			}
@@ -540,7 +621,7 @@ func RelayTask(c *gin.Context) {
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
-				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
+				taskErr = routingSelectionErrorToTaskError(channelErr)
 				break
 			}
 		}
@@ -569,7 +650,11 @@ func RelayTask(c *gin.Context) {
 				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
 		}
 
-		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
+		shouldRetryRequest := shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry())
+		if shouldRetryRequest && common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+			retryParam.ExcludeCapabilityChannel(channel.Id)
+		}
+		if !shouldRetryRequest {
 			break
 		}
 	}

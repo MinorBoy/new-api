@@ -23,7 +23,7 @@ import (
 type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
-	Key                string  `json:"key" gorm:"not null"`
+	Key                string  `json:"key,omitempty" gorm:"not null"`
 	OpenAIOrganization *string `json:"openai_organization"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
@@ -53,7 +53,8 @@ type Channel struct {
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
-	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	OtherSettings      string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	RoutingTargetCount int64  `json:"routing_target_count" gorm:"-"`
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
@@ -365,6 +366,40 @@ func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOpti
 	return channels, err
 }
 
+func FillRoutingTargetCounts(channels []*Channel) error {
+	ids := make([]int, 0, len(channels))
+	byID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		channel.RoutingTargetCount = 0
+		ids = append(ids, channel.Id)
+		byID[channel.Id] = channel
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var counts []struct {
+		ChannelID int
+		Count     int64
+	}
+	if err := DB.Model(&RouteTarget{}).
+		Select("channel_id, count(*) as count").
+		Where("channel_id IN ?", ids).
+		Group("channel_id").
+		Scan(&counts).Error; err != nil {
+		return err
+	}
+	for _, count := range counts {
+		if channel := byID[count.ChannelID]; channel != nil {
+			channel.RoutingTargetCount = count.Count
+		}
+	}
+	return nil
+}
+
 func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
 	var channels []*Channel
 	order := resolveChannelSortOptions(idSort, sortOptions)
@@ -456,22 +491,29 @@ func BatchDeleteChannels(ids []int) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	// 使用事务 分批删除channel表和abilities表
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return tx.Error
 	}
+	keys, err := deleteRouteTargetsForChannels(tx, ids)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
 	for _, chunk := range lo.Chunk(ids, 200) {
-		if err := tx.Where("id in (?)", chunk).Delete(&Channel{}).Error; err != nil {
+		if err := tx.Where("channel_id IN ?", chunk).Delete(&Ability{}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}
-		if err := tx.Where("channel_id in (?)", chunk).Delete(&Ability{}).Error; err != nil {
+		if err := tx.Where("id IN ?", chunk).Delete(&Channel{}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	return RefreshRoutingPolicyCacheKeys(keys)
 }
 
 func (channel *Channel) GetPriority() int64 {
@@ -593,13 +635,27 @@ func (channel *Channel) UpdateBalance(balance float64) {
 }
 
 func (channel *Channel) Delete() error {
-	var err error
-	err = DB.Delete(channel).Error
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	keys, err := deleteRouteTargetsForChannels(tx, []int{channel.Id})
 	if err != nil {
+		tx.Rollback()
 		return err
 	}
-	err = channel.DeleteAbilities()
-	return err
+	if err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Where("id = ?", channel.Id).Delete(&Channel{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	return RefreshRoutingPolicyCacheKeys(keys)
 }
 
 var channelStatusLock sync.Mutex
@@ -873,8 +929,44 @@ func DeleteChannelByStatus(status int64) (int64, error) {
 }
 
 func DeleteDisabledChannel() (int64, error) {
-	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
-	return result.RowsAffected, result.Error
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	var channelIDs []int
+	if err := tx.Model(&Channel{}).
+		Where("status = ? OR status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).
+		Pluck("id", &channelIDs).Error; err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if len(channelIDs) == 0 {
+		if err := tx.Commit().Error; err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
+	keys, err := deleteRouteTargetsForChannels(tx, channelIDs)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Where("channel_id IN ?", channelIDs).Delete(&Ability{}).Error; err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	result := tx.Where("id IN ?", channelIDs).Delete(&Channel{})
+	if result.Error != nil {
+		tx.Rollback()
+		return 0, result.Error
+	}
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	if err := RefreshRoutingPolicyCacheKeys(keys); err != nil {
+		return result.RowsAffected, err
+	}
+	return result.RowsAffected, nil
 }
 
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {

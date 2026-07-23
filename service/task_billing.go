@@ -63,8 +63,12 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	}
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
-		other["upstream_model_name"] = info.UpstreamModelName
+		if info.Routing == nil {
+			other["upstream_model_name"] = info.UpstreamModelName
+		}
 	}
+	appendRoutingAdminInfo(other, info.Routing)
+	AppendRoutingAdminInfoFromContext(c, other)
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
@@ -153,7 +157,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 				other[k] = v
 			}
 		}
-		if bc.UpstreamModelName != "" {
+		if bc.UpstreamModelName != "" && task.PrivateData.Routing == nil {
 			other["upstream_model_name"] = bc.UpstreamModelName
 		}
 		other["has_video_input"] = bc.HasVideoInput
@@ -170,10 +174,11 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["billing_tokens"] = bc.BillingTokens
 	}
 	props := task.Properties
-	if props.UpstreamModelName != "" && props.UpstreamModelName != props.OriginModelName {
+	if task.PrivateData.Routing == nil && props.UpstreamModelName != "" && props.UpstreamModelName != props.OriginModelName {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
+	appendRoutingAdminInfo(other, task.PrivateData.Routing)
 	return other
 }
 
@@ -418,6 +423,9 @@ func taskAdjustQuotaData(task *model.Task, quotaDelta, tokenDelta int) {
 }
 
 func taskBillingModelName(task *model.Task) string {
+	if task.PrivateData.Routing != nil {
+		return taskModelName(task)
+	}
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.UpstreamModelName != "" {
 		return bc.UpstreamModelName
 	}

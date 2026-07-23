@@ -78,13 +78,18 @@ func (a *TaskAdaptor) validateNativeRequest(c *gin.Context, info *relaycommon.Re
 	if err := common.Unmarshal(rawBody, &metadata); err != nil {
 		return nativeTaskError(err.Error(), "InvalidParameter")
 	}
+	delete(metadata, "routing")
 
 	facts, err := validateSeedanceContent(request.Model, request.Content)
 	if err != nil {
 		return nativeTaskError(err.Error(), "InvalidParameter.content")
 	}
 	if seedanceModelFamily(request.Model) != "" {
-		if err := validateSeedanceNativeFields(request, facts); err != nil {
+		if err := validateSeedanceNativeFields(
+			request,
+			facts,
+			common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode),
+		); err != nil {
 			return nativeTaskError(err.Error(), "InvalidParameter")
 		}
 	}
@@ -141,6 +146,7 @@ func (a *TaskAdaptor) buildNativeRequestBody(c *gin.Context, info *relaycommon.R
 	if err := common.Unmarshal(rawBody, &fields); err != nil {
 		return nil, fmt.Errorf("invalid ARK request body: %w", err)
 	}
+	delete(fields, "routing")
 	if info.UpstreamModelName == "" {
 		var modelName string
 		if err := common.Unmarshal(fields["model"], &modelName); err != nil || strings.TrimSpace(modelName) == "" {
@@ -232,7 +238,7 @@ func validateSeedanceContent(modelName string, content []ContentItem) (seedanceC
 	return facts, nil
 }
 
-func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceContentFacts) error {
+func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceContentFacts, resolutionPrevalidated bool) error {
 	family := seedanceModelFamily(request.Model)
 	if family == "" {
 		return fmt.Errorf("unsupported Seedance model: %s", request.Model)
@@ -257,14 +263,12 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 
 	resolution := strings.ToLower(strings.TrimSpace(request.Resolution))
 	if resolution != "" {
-		allowed := map[string]bool{"480p": true, "720p": true, "1080p": true}
-		if family == "2.0" {
-			allowed["4k"] = true
-		}
-		if family == "2.0-fast" || family == "2.0-mini" {
-			delete(allowed, "1080p")
-		}
+		allowed := map[string]bool{"480p": true, "720p": true, "1080p": true, "4k": true}
 		if !allowed[resolution] {
+			return fmt.Errorf("resolution %s is invalid", resolution)
+		}
+		if !resolutionPrevalidated && (resolution == "4k" && family != "2.0" ||
+			(resolution == "1080p" && (family == "2.0-fast" || family == "2.0-mini"))) {
 			return fmt.Errorf("resolution %s is not supported by %s", resolution, family)
 		}
 	}

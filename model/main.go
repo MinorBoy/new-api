@@ -27,6 +27,10 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
+func init() {
+	initCol()
+}
+
 func initCol() {
 	// init common column names
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -270,6 +274,8 @@ func migrateDB() error {
 
 	err := DB.AutoMigrate(
 		&Channel{},
+		&RoutingPolicy{},
+		&RouteTarget{},
 		&Token{},
 		&User{},
 		&PasskeyCredential{},
@@ -324,6 +330,8 @@ func migrateDBFast() error {
 		name  string
 	}{
 		{&Channel{}, "Channel"},
+		{&RoutingPolicy{}, "RoutingPolicy"},
+		{&RouteTarget{}, "RouteTarget"},
 		{&Token{}, "Token"},
 		{&User{}, "User"},
 		{&PasskeyCredential{}, "PasskeyCredential"},

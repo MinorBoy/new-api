@@ -18,12 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
 import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
   ListOrdered,
+  Route,
   Shuffle,
   SlidersHorizontal,
 } from 'lucide-react'
@@ -46,12 +48,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
 import {
   formatCurrencyFromUSD,
   formatQuotaWithCurrency,
   getCurrencyLabel,
 } from '@/lib/currency'
-import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampToDate } from '@/lib/format'
 import { truncateText } from '@/lib/utils'
 
@@ -60,6 +62,7 @@ import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   formatRelativeTime,
   formatResponseTime,
+  getRoutingTargetCount,
   getBalanceVariant,
   getChannelTypeIcon,
   getChannelTypeLabel,
@@ -165,6 +168,61 @@ function UpstreamUpdateTags({ channel }: { channel: Channel }) {
         />
       )}
     </div>
+  )
+}
+
+function RoutingTargetCountLink(props: { channel: Channel }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const aggregate = isTagAggregateRow(props.channel)
+  const count = getRoutingTargetCount(props.channel)
+  const label = t('Routing targets')
+
+  if (aggregate) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className='text-muted-foreground inline-flex h-6 items-center gap-1 px-1.5 text-xs' />
+          }
+        >
+          <Route aria-hidden='true' />
+          <span>{count}</span>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className='inline-flex' />}>
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='h-6 px-1.5'
+          disabled={count === 0}
+          aria-label={`${label}: ${count}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            void navigate({
+              to: '/models/$section',
+              params: { section: 'routing' },
+              search: (previous) => ({
+                ...previous,
+                rChannel: props.channel.id,
+                rPage: 1,
+              }),
+            })
+          }}
+        >
+          <Route data-icon='inline-start' aria-hidden='true' />
+          <span>{count}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -614,6 +672,7 @@ export function useChannelsColumns(
                     size='sm'
                     copyable={false}
                   />
+                  <RoutingTargetCountLink channel={channel} />
                 </div>
               </div>
             )
@@ -664,6 +723,7 @@ export function useChannelsColumns(
                     </TooltipProvider>
                   )}
                   <UpstreamUpdateTags channel={channel} />
+                  <RoutingTargetCountLink channel={channel} />
                 </div>
                 {channel.remark && (
                   <TooltipProvider delay={200}>

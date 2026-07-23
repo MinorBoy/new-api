@@ -738,6 +738,9 @@ func ApplyChannelUpstreamModelUpdates(c *gin.Context) {
 
 	if modelsChanged {
 		refreshChannelRuntimeCache()
+		if !refreshRoutingPolicySnapshots(c, []int{channel.Id}) {
+			return
+		}
 	}
 
 	recordManageAudit(c, "channel.upstream_apply", map[string]interface{}{
@@ -873,6 +876,7 @@ func findEnabledChannelsAfterID(lastID int, batchSize int) ([]*model.Channel, er
 func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 	results := make([]applyAllChannelUpstreamModelUpdatesResult, 0)
 	failed := make([]int, 0)
+	changedChannelIDs := make([]int, 0)
 	refreshNeeded := false
 	addedModelCount := 0
 	removedModelCount := 0
@@ -916,6 +920,7 @@ func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 			}
 			if modelsChanged {
 				refreshNeeded = true
+				changedChannelIDs = append(changedChannelIDs, channel.Id)
 			}
 			addedModelCount += len(addedModels)
 			removedModelCount += len(removedModels)
@@ -936,6 +941,9 @@ func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 
 	if refreshNeeded {
 		refreshChannelRuntimeCache()
+		if !refreshRoutingPolicySnapshots(c, changedChannelIDs) {
+			return
+		}
 	}
 
 	recordManageAudit(c, "channel.upstream_apply_all", map[string]interface{}{

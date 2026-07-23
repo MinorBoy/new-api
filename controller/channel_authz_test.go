@@ -158,6 +158,72 @@ func TestChannelStatusValidation(t *testing.T) {
 	assert.False(t, isManageableChannelStatus(0))
 }
 
+func TestChannelResponsesIncludeRoutingTargetCount(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RouteTarget{}))
+	require.NoError(t, db.Create([]model.Channel{
+		{Id: 11, Type: 1, Key: "secret-11", Name: "A1", Models: "doubao-seedance-2-0-260128", Group: "分组A"},
+		{Id: 12, Type: 1, Key: "secret-12", Name: "A1_copy", Models: "doubao-seedance-2-0-260128", Group: "分组A"},
+		{Id: 13, Type: 1, Key: "secret-13", Name: "unrelated", Models: "gpt-4o", Group: "default"},
+	}).Error)
+	require.NoError(t, db.Create([]model.RouteTarget{
+		{PolicyID: 1, ChannelID: 11, Name: "first", UpstreamModel: "upstream-a", Constraints: `{}`, Enabled: true},
+		{PolicyID: 1, ChannelID: 11, Name: "second", UpstreamModel: "upstream-b", Constraints: `{}`, Enabled: true},
+		{PolicyID: 1, ChannelID: 12, Name: "third", UpstreamModel: "upstream-c", Constraints: `{}`, Enabled: true},
+	}).Error)
+
+	router := gin.New()
+	router.GET("/channels", GetAllChannels)
+	router.GET("/channels/search", SearchChannels)
+	router.GET("/channels/:id", GetChannel)
+
+	tests := []struct {
+		name      string
+		path      string
+		detail    bool
+		wantID    int
+		wantCount float64
+	}{
+		{name: "list", path: "/channels?p=1&page_size=20", wantID: 11, wantCount: 2},
+		{name: "search", path: "/channels/search?keyword=A1&p=1&page_size=20", wantID: 12, wantCount: 1},
+		{name: "detail", path: "/channels/11", detail: true, wantID: 11, wantCount: 2},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Equal(t, true, response["success"])
+			data, ok := response["data"].(map[string]any)
+			require.True(t, ok)
+
+			var channel map[string]any
+			if test.detail {
+				channel = data
+			} else {
+				items, ok := data["items"].([]any)
+				require.True(t, ok)
+				for _, item := range items {
+					candidate, ok := item.(map[string]any)
+					if ok && candidate["id"] == float64(test.wantID) {
+						channel = candidate
+						break
+					}
+				}
+			}
+
+			require.NotNil(t, channel)
+			assert.Equal(t, test.wantCount, channel["routing_target_count"])
+			assert.NotContains(t, channel, "key")
+		})
+	}
+}
+
 // TestChannelFieldsAreClassified guards the fail-closed sensitivity check: every
 // JSON field of PatchChannel (including the embedded model.Channel) must be listed
 // in channelSensitiveFields, channelNonSensitiveFields, or

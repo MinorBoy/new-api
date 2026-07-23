@@ -72,6 +72,15 @@ const (
 	ContextKeyTaskDraft         ContextKey = "task_draft"
 	ContextKeyTaskServiceTier   ContextKey = "task_service_tier"
 
+	ContextKeyRoutingFactsInput     ContextKey = "routing_facts_input"
+	ContextKeyRoutingCapabilityMode ContextKey = "routing_capability_mode"
+	ContextKeyRoutingPolicyID       ContextKey = "routing_policy_id"
+	ContextKeyRoutingTargetID       ContextKey = "routing_target_id"
+	ContextKeyRoutingTargetName     ContextKey = "routing_target_name"
+	ContextKeyRoutingUpstreamModel  ContextKey = "routing_upstream_model"
+	ContextKeyRoutingFacts          ContextKey = "routing_facts"
+	ContextKeyRoutingMismatchCounts ContextKey = "routing_mismatch_counts"
+
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit
 	// fallback in authHelper (finishAdminAudit) skips its record to avoid

@@ -87,6 +87,12 @@ var auditRouteActions = map[string]string{
 	"PUT /api/deployments/:id":    "deployment.update",
 	"DELETE /api/deployments/:id": "deployment.delete",
 
+	// 模型路由策略
+	"POST /api/routing-policies/":           "routing_policy.create",
+	"PUT /api/routing-policies/:id":         "routing_policy.update",
+	"POST /api/routing-policies/:id/status": "routing_policy.status_update",
+	"DELETE /api/routing-policies/:id":      "routing_policy.delete",
+
 	// 订阅（管理员）
 	"POST /api/subscription/admin/plans":    "subscription.plan_create",
 	"PUT /api/subscription/admin/plans/:id": "subscription.plan_update",

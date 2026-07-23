@@ -37,7 +37,7 @@ export type ChannelInfo = z.infer<typeof channelInfoSchema>
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
-  key: z.string(),
+  key: z.string().default(''),
   openai_organization: z.string().nullish(),
   test_model: z.string().nullish(),
   status: z.number(), // 1: enabled, 0: manual disabled, 2: auto disabled
@@ -71,6 +71,7 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  routing_target_count: z.number().int().nonnegative().default(0),
 })
 
 export type Channel = z.infer<typeof channelSchema>

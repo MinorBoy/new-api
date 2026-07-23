@@ -37,6 +37,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
@@ -136,41 +137,45 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
         <p className='min-w-0 truncate text-sm font-medium'>
           {target?.name || `${t('Routing target')} ${props.index + 1}`}
         </p>
-        <div className='flex shrink-0 items-center gap-1'>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='icon-sm'
-                  aria-label={t('Copy')}
-                  onClick={props.onCopy}
-                />
-              }
-            >
-              <Copy aria-hidden='true' />
-            </TooltipTrigger>
-            <TooltipContent>{t('Copy')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='icon-sm'
-                  aria-label={t('Delete')}
-                  disabled={!props.canRemove}
-                  onClick={props.onRemove}
-                />
-              }
-            >
-              <Trash2 aria-hidden='true' />
-            </TooltipTrigger>
-            <TooltipContent>{t('Delete')}</TooltipContent>
-          </Tooltip>
-        </div>
+        <TooltipProvider>
+          <div className='flex shrink-0 items-center gap-1'>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-lg'
+                    aria-label={t('Copy')}
+                    title={t('Copy')}
+                    onClick={props.onCopy}
+                  />
+                }
+              >
+                <Copy aria-hidden='true' />
+              </TooltipTrigger>
+              <TooltipContent>{t('Copy')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-lg'
+                    aria-label={t('Delete')}
+                    title={t('Delete')}
+                    disabled={!props.canRemove}
+                    onClick={props.onRemove}
+                  />
+                }
+              >
+                <Trash2 aria-hidden='true' />
+              </TooltipTrigger>
+              <TooltipContent>{t('Delete')}</TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
       </div>
 
       <div className='grid gap-4 lg:grid-cols-2'>

@@ -138,8 +138,8 @@ describe('CLMM Mall channel configuration', () => {
       getBaseUrlOnChannelTypeChange(60, 'https://proxy.example.com', false)
     ).toBe('https://proxy.example.com')
     expect(
-      getBaseUrlOnChannelTypeChange(60, 'https://proxy.example.com', true)
-    ).toBe('https://proxy.example.com')
+      getBaseUrlOnChannelTypeChange(60, 'https://jimeng.dimensio.cn', true)
+    ).toBe('https://jimeng.dimensio.cn')
   })
 })
 

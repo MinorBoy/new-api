@@ -169,20 +169,20 @@ func setupSeedanceCapabilityRoutingE2E(t *testing.T) *seedanceCapabilityE2EEnv {
 	model.InvalidatePricingCache()
 
 	standardRequest := capabilityPolicyRequest(modelrouting.Seedance20, []service.RouteTargetWriteRequest{
-		capabilityTarget(capabilityChannelA, upstreamStandard1080, 100, []string{"1080p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false, false, ""),
-		capabilityTarget(capabilityChannelA, upstreamStandard720, 100, []string{"720p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false, false, ""),
-		capabilityTarget(capabilityChannelB, upstreamStandardMG, 90, []string{"720p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true, false, ""),
-		capabilityTarget(capabilityChannelB, upstreamUpscaled1080, 110, []string{"1080p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true, true, "720p"),
+		capabilityTarget(capabilityChannelA, upstreamStandard1080, 100, []string{"1080p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false),
+		capabilityTarget(capabilityChannelA, upstreamStandard720, 100, []string{"720p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false),
+		capabilityTarget(capabilityChannelB, upstreamStandardMG, 90, []string{"720p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true),
+		capabilityTarget(capabilityChannelB, upstreamUpscaled1080, 110, []string{"1080p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true),
 	})
 	standard, err := service.SaveRoutingPolicy(0, standardRequest)
 	require.NoError(t, err)
 	_, err = service.SaveRoutingPolicy(0, capabilityPolicyRequest(modelrouting.Seedance20Fast, []service.RouteTargetWriteRequest{
-		capabilityTarget(capabilityChannelA, upstreamFast720, 100, []string{"720p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false, false, ""),
-		capabilityTarget(capabilityChannelB, upstreamFastMG, 90, []string{"720p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true, false, ""),
+		capabilityTarget(capabilityChannelA, upstreamFast720, 100, []string{"720p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false),
+		capabilityTarget(capabilityChannelB, upstreamFastMG, 90, []string{"720p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true),
 	}))
 	require.NoError(t, err)
 	_, err = service.SaveRoutingPolicy(0, capabilityPolicyRequest(modelrouting.Seedance20Mini, []service.RouteTargetWriteRequest{
-		capabilityTarget(capabilityChannelB, upstreamMiniMG, 90, []string{"720p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true, false, ""),
+		capabilityTarget(capabilityChannelB, upstreamMiniMG, 90, []string{"720p"}, rangeDuration(4, 15), nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, true),
 	}))
 	require.NoError(t, err)
 
@@ -205,12 +205,11 @@ func capabilityPolicyRequest(canonicalModel string, targets []service.RouteTarge
 	}
 }
 
-func capabilityTarget(channelID int, upstreamModel string, priority int, resolutions []string, durations modelrouting.DurationConstraint, ratios []string, references modelrouting.ReferenceLimits, supportsRealPerson, upscaled bool, generationResolution string) service.RouteTargetWriteRequest {
+func capabilityTarget(channelID int, upstreamModel string, priority int, resolutions []string, durations modelrouting.DurationConstraint, ratios []string, references modelrouting.ReferenceLimits, supportsRealPerson bool) service.RouteTargetWriteRequest {
 	return service.RouteTargetWriteRequest{
 		ChannelID: channelID, Name: upstreamModel, UpstreamModel: upstreamModel, TargetPriority: priority, Enabled: true,
 		Constraints: modelrouting.Constraints{
-			OutputResolutions: resolutions, GenerationResolution: generationResolution, Upscaled: upscaled,
-			Durations: durations, AspectRatios: ratios, ReferenceLimits: references,
+			OutputResolutions: resolutions, Durations: durations, AspectRatios: ratios, ReferenceLimits: references,
 			SupportsRealPerson: common.GetPointer(supportsRealPerson),
 		},
 	}
@@ -271,7 +270,7 @@ func TestSeedanceCapabilityRoutingMatrixE2E(t *testing.T) {
 		disableChannels                         bool
 	}{
 		{name: "standard native 1080", canonicalModel: modelrouting.Seedance20, resolution: "1080p", duration: 15, ratio: "9:16", wantChannel: capabilityChannelA, wantUpstream: upstreamStandard1080, wantStatus: http.StatusOK},
-		{name: "standard upscaled 1080", canonicalModel: modelrouting.Seedance20, resolution: "1080p", duration: 10, ratio: "16:9", references: mediumReferences, requireRealPerson: true, wantChannel: capabilityChannelB, wantUpstream: upstreamUpscaled1080, wantStatus: http.StatusOK},
+		{name: "standard provider 1080 output", canonicalModel: modelrouting.Seedance20, resolution: "1080p", duration: 10, ratio: "16:9", references: mediumReferences, requireRealPerson: true, wantChannel: capabilityChannelB, wantUpstream: upstreamUpscaled1080, wantStatus: http.StatusOK},
 		{name: "standard native 720 with 933", canonicalModel: modelrouting.Seedance20, resolution: "720p", duration: 15, ratio: "9:16", references: largeReferences, wantChannel: capabilityChannelA, wantUpstream: upstreamStandard720, wantStatus: http.StatusOK},
 		{name: "standard flexible 720 with 431", canonicalModel: modelrouting.Seedance20, resolution: "720p", duration: 10, ratio: "16:9", references: mediumReferences, requireRealPerson: true, wantChannel: capabilityChannelB, wantUpstream: upstreamStandardMG, wantStatus: http.StatusOK},
 		{name: "fast native 720", canonicalModel: modelrouting.Seedance20Fast, resolution: "720p", duration: 15, ratio: "9:16", wantChannel: capabilityChannelA, wantUpstream: upstreamFast720, wantStatus: http.StatusOK},
@@ -336,7 +335,7 @@ func TestSeedanceCapabilityRoutingMatrixE2E(t *testing.T) {
 
 func TestSeedanceCapabilityRoutingRetryExcludesFailedChannelE2E(t *testing.T) {
 	env := setupSeedanceCapabilityRoutingE2E(t)
-	backup := capabilityTarget(capabilityChannelA, "bb-seedance2.0-1080p-pro-backup", 50, []string{"1080p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false, false, "")
+	backup := capabilityTarget(capabilityChannelA, "bb-seedance2.0-1080p-pro-backup", 50, []string{"1080p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false)
 	env.standardRequest.Targets = append(env.standardRequest.Targets, backup)
 	_, err := service.SaveRoutingPolicy(env.standardPolicy, env.standardRequest)
 	require.NoError(t, err)

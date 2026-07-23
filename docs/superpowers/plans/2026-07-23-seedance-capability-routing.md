@@ -24,7 +24,7 @@
 - `duration=-1` 在能力模式返回 400 `no_compatible_route`；请求字段类型错误、超出全局边界或内容结构错误继续使用 `InvalidParameter.*`。
 - 没有任何启用目标支持合法参数组合返回 400 `no_compatible_route`；存在兼容目标但对应渠道禁用、不可用或已在本请求失败返回 503 `compatible_channel_unavailable`；缓存或策略损坏返回 500 `routing_policy_error`。
 - 路由匹配素材缩写固定为：`933 = 9 图/3 视频/3 音频`、`431 = 4 图/3 视频/1 音频`、`9 = 9 图/0 视频/0 音频`。
-- `upscaled=true` 的目标按 `output_resolutions` 匹配客户端；例如 `generation_resolution=720p`、输出 `1080p` 的目标只匹配用户请求 `1080p`。
+- 上游内部生成或超分细节不属于路由字段；目标只按 `output_resolutions` 匹配用户请求的输出分辨率。
 - 第一期不按上游成本选择，不把 `generate_audio`、`service_tier`、`draft` 或 `tools` 作为路由维度，不分析提示词或媒体内容，不下载远程 URL。
 - 用户定价、预扣和结算只使用 canonical/origin model；能力模式的 upstream model、策略 ID、目标 ID 和事实只对管理员可见。
 
@@ -111,15 +111,15 @@ func TestResolveFactsPrefersExplicitValues(t *testing.T) {
 	assert.True(t, facts.RequireRealPerson)
 }
 
-func TestEvaluateTargetsUsesOutputResolutionForUpscale(t *testing.T) {
+func TestEvaluateTargetsUsesConfiguredOutputResolution(t *testing.T) {
 	supportsRealPerson := true
 	snapshot := modelrouting.PolicySnapshot{
 		ID: 7, GroupName: "分组A", CanonicalModel: modelrouting.Seedance20, Enabled: true,
 		TargetsByChannel: map[int][]modelrouting.Target{11: {{
-			ID: 21, ChannelID: 11, Name: "720p generation to 1080p",
+			ID: 21, ChannelID: 11, Name: "provider 1080p output",
 			UpstreamModel: "lec-feituo-seedance-2-0-my-upscaled-1080p", Priority: 50, Enabled: true,
 			Constraints: modelrouting.Constraints{
-				OutputResolutions: []string{"1080p"}, GenerationResolution: "720p", Upscaled: true,
+				OutputResolutions: []string{"1080p"},
 				Durations: modelrouting.DurationConstraint{Min: intPtr(4), Max: intPtr(15)},
 				AspectRatios: []string{"16:9", "9:16"},
 				ReferenceLimits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1},
@@ -212,13 +212,11 @@ type ReferenceLimits struct {
 }
 
 type Constraints struct {
-	OutputResolutions    []string           `json:"output_resolutions"`
-	GenerationResolution string             `json:"generation_resolution,omitempty"`
-	Upscaled             bool               `json:"upscaled"`
-	Durations            DurationConstraint `json:"durations"`
-	AspectRatios         []string           `json:"aspect_ratios,omitempty"`
-	ReferenceLimits      ReferenceLimits    `json:"reference_limits"`
-	SupportsRealPerson   *bool              `json:"supports_real_person"`
+	OutputResolutions  []string           `json:"output_resolutions"`
+	Durations          DurationConstraint `json:"durations"`
+	AspectRatios       []string           `json:"aspect_ratios,omitempty"`
+	ReferenceLimits    ReferenceLimits    `json:"reference_limits"`
+	SupportsRealPerson *bool              `json:"supports_real_person"`
 }
 
 type Target struct {
@@ -315,7 +313,7 @@ func Evaluate(snapshot PolicySnapshot, facts Facts) Evaluation {
 }
 ```
 
-`Match` returns all applicable mismatch reasons. `aspect_ratios=[]` means any ratio;真人要求 only rejects `nil` or `false` when the request explicitly requires `true`; `generation_resolution` never participates in matching.
+`Match` returns all applicable mismatch reasons. `aspect_ratios=[]` means any ratio;真人要求 only rejects `nil` or `false` when the request explicitly requires `true`; upstream-internal generation details never participate in matching.
 
 - [ ] **Step 5: Format and run the matching suite**
 
@@ -381,8 +379,6 @@ The table must assert these exact failures:
 | duration `0` or `MaxTaskDurationSeconds+1` | `invalid_duration` |
 | ratio `2:1` | `invalid_aspect_ratio` |
 | images 10, videos 4, or audios 4 | `invalid_reference_limit` |
-| `upscaled=true` with two outputs or equal generation/output | `invalid_upscale` |
-| `upscaled=false` with generation resolution | `invalid_upscale` |
 | enabled policy with no enabled target matching defaults | `default_route_unavailable` |
 
 - [ ] **Step 2: Run validation tests and verify the missing symbols fail**
@@ -617,7 +613,7 @@ The cache test must prove that a successful refresh replaces only one key and a 
 ```go
 func TestRefreshRoutingPolicyCacheKeepsPreviousSnapshotOnDecodeFailure(t *testing.T) {
 	openRoutingTestDB(t)
-	seedPolicyRows(t, `{"output_resolutions":["720p"],"upscaled":false,"durations":{"min":4,"max":15},"reference_limits":{"images":9,"videos":3,"audios":3},"supports_real_person":true}`)
+	seedPolicyRows(t, `{"output_resolutions":["720p"],"durations":{"min":4,"max":15},"reference_limits":{"images":9,"videos":3,"audios":3},"supports_real_person":true}`)
 	require.NoError(t, model.InitRoutingPolicyCache())
 	before, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
 	require.True(t, ok)
@@ -1031,7 +1027,7 @@ func arkToUpstream(request arkRequest, upstreamModel string, resolutionPrevalida
 }
 ```
 
-Update all direct unit calls with `false`; add one capability test using upstream model `lec-feituo-seedance-2-0-my-upscaled-1080p`, client resolution `1080p`, and `true`, asserting success and absence of `routing` in the marshaled body.
+Update all direct unit calls with the appropriate resolution-validation mode; add one capability test using upstream model `lec-feituo-seedance-2-0-my-upscaled-1080p` and client resolution `1080p`, asserting success and absence of `routing` in the marshaled body.
 
 - [ ] **Step 6: Strip `routing` from both Doubao raw maps**
 
@@ -1654,7 +1650,7 @@ const durationConstraintSchema = z
 
 Use the exported `MAX_TASK_DURATION_SECONDS` constant in both Zod bounds and numeric inputs. Its value mirrors the backend `relaycommon.MaxTaskDurationSeconds`, giving the duplicated protocol ceiling one frontend definition.
 
-Define `routeTargetFormSchema` with channel ID, name, upstream model, integer target priority, enabled, output resolutions, optional generation resolution, upscaled, duration, ratios, reference limits (`9/3/3` bounds), and `supports_real_person` as `'unknown' | 'yes' | 'no'`. Its `superRefine` must enforce one output plus different generation resolution when upscaled, and no generation resolution when native.
+Define `routeTargetFormSchema` with channel ID, name, upstream model, integer target priority, enabled, output resolutions, duration, ratios, reference limits (`9/3/3` bounds), and `supports_real_person` as `'unknown' | 'yes' | 'no'`.
 
 Define separate API schemas matching backend JSON (`supports_real_person` as `boolean | null`, `durations` as values or min/max). Add `routingPolicyErrorSchema` for `{success:false,message,code,data?:{field?,target_indexes?}}`. Add pure `toWriteRequest` and `fromPolicyResponse` functions that convert between form and API shapes without retaining UI-only `mode`/tri-state strings.
 
@@ -1828,8 +1824,6 @@ export function createEmptyTarget(): RouteTargetFormValues {
     target_priority: 0,
     enabled: true,
     output_resolutions: ['720p'],
-    generation_resolution: undefined,
-    upscaled: false,
     durations: { mode: 'range', values: [], min: 4, max: 15 },
     aspect_ratios: [],
     reference_limits: { images: 9, videos: 3, audios: 3 },
@@ -1862,7 +1856,6 @@ When the candidate list is empty, render `No channels declare this group and can
 - Name and upstream-model text inputs.
 - Numeric priority spinner and enabled switch.
 - Resolution checkbox swatches for 480p/720p/1080p/4k.
-- Native/upscaled toggle; upscaled reveals a generation-resolution select.
 - Duration segmented control (`Discrete values` / `Range`); discrete values are editable integer chips, range uses two numeric inputs.
 - Aspect ratio multi-select; empty state visibly reads `Any ratio`.
 - Three bounded numeric inputs for images/videos/audios with `9/3/3` maxima.
@@ -2029,8 +2022,6 @@ Use English source strings as flat keys. Add at least this exact core set; every
   "Target priority": "Target priority",
   "Upstream model": "Upstream model",
   "Output resolutions": "Output resolutions",
-  "Generation resolution": "Generation resolution",
-  "Upscaled": "Upscaled",
   "Discrete values": "Discrete values",
   "Any ratio": "Any ratio",
   "Require real person": "Require real person",
@@ -2045,11 +2036,11 @@ Use English source strings as flat keys. Add at least this exact core set; every
 Use these non-English values for the same keys, in the same order:
 
 ```text
-zh: 模型路由策略｜新建策略｜编辑路由策略｜本站模型｜路由目标｜目标优先级｜上游模型｜输出分辨率｜生成分辨率｜自动超分｜离散值｜不限比例｜要求支持真人｜支持｜不支持｜该目标与相同优先级的另一目标重叠｜没有兼容路由支持此请求｜兼容渠道当前不可用
-fr: Politiques de routage｜Créer une politique｜Modifier la politique de routage｜Modèle canonique｜Cibles de routage｜Priorité de la cible｜Modèle en amont｜Résolutions de sortie｜Résolution de génération｜Mise à l’échelle｜Valeurs discrètes｜Tous les formats｜Exiger la prise en charge des personnes réelles｜Pris en charge｜Non pris en charge｜Cette cible chevauche une autre cible de même priorité｜Aucune route compatible ne prend en charge cette requête｜Les canaux compatibles sont indisponibles
-ru: Политики маршрутизации｜Создать политику｜Изменить политику маршрутизации｜Каноническая модель｜Цели маршрутизации｜Приоритет цели｜Вышестоящая модель｜Выходные разрешения｜Разрешение генерации｜Масштабирование｜Дискретные значения｜Любое соотношение｜Требовать поддержку реальных людей｜Поддерживается｜Не поддерживается｜Эта цель пересекается с другой целью того же приоритета｜Нет совместимого маршрута для этого запроса｜Совместимые каналы недоступны
-ja: ルーティングポリシー｜ポリシーを作成｜ルーティングポリシーを編集｜正規モデル｜ルーティング先｜ターゲット優先度｜アップストリームモデル｜出力解像度｜生成解像度｜アップスケール｜離散値｜任意の比率｜実在人物のサポートを要求｜サポートあり｜サポートなし｜同じ優先度の別ターゲットと条件が重複しています｜このリクエストをサポートする互換ルートがありません｜互換チャネルを利用できません
-vi: Chính sách định tuyến｜Tạo chính sách｜Chỉnh sửa chính sách định tuyến｜Mô hình chuẩn｜Đích định tuyến｜Độ ưu tiên đích｜Mô hình thượng nguồn｜Độ phân giải đầu ra｜Độ phân giải tạo｜Nâng độ phân giải｜Giá trị rời rạc｜Mọi tỷ lệ｜Yêu cầu hỗ trợ người thật｜Có hỗ trợ｜Không hỗ trợ｜Đích này chồng lấn với một đích khác có cùng độ ưu tiên｜Không có tuyến tương thích hỗ trợ yêu cầu này｜Các kênh tương thích hiện không khả dụng
+zh: 模型路由策略｜新建策略｜编辑路由策略｜本站模型｜路由目标｜目标优先级｜上游模型｜输出分辨率｜离散值｜不限比例｜要求支持真人｜支持｜不支持｜该目标与相同优先级的另一目标重叠｜没有兼容路由支持此请求｜兼容渠道当前不可用
+fr: Politiques de routage｜Créer une politique｜Modifier la politique de routage｜Modèle canonique｜Cibles de routage｜Priorité de la cible｜Modèle en amont｜Résolutions de sortie｜Valeurs discrètes｜Tous les formats｜Exiger la prise en charge des personnes réelles｜Pris en charge｜Non pris en charge｜Cette cible chevauche une autre cible de même priorité｜Aucune route compatible ne prend en charge cette requête｜Les canaux compatibles sont indisponibles
+ru: Политики маршрутизации｜Создать политику｜Изменить политику маршрутизации｜Каноническая модель｜Цели маршрутизации｜Приоритет цели｜Вышестоящая модель｜Выходные разрешения｜Дискретные значения｜Любое соотношение｜Требовать поддержку реальных людей｜Поддерживается｜Не поддерживается｜Эта цель пересекается с другой целью того же приоритета｜Нет совместимого маршрута для этого запроса｜Совместимые каналы недоступны
+ja: ルーティングポリシー｜ポリシーを作成｜ルーティングポリシーを編集｜正規モデル｜ルーティング先｜ターゲット優先度｜アップストリームモデル｜出力解像度｜離散値｜任意の比率｜実在人物のサポートを要求｜サポートあり｜サポートなし｜同じ優先度の別ターゲットと条件が重複しています｜このリクエストをサポートする互換ルートがありません｜互換チャネルを利用できません
+vi: Chính sách định tuyến｜Tạo chính sách｜Chỉnh sửa chính sách định tuyến｜Mô hình chuẩn｜Đích định tuyến｜Độ ưu tiên đích｜Mô hình thượng nguồn｜Độ phân giải đầu ra｜Giá trị rời rạc｜Mọi tỷ lệ｜Yêu cầu hỗ trợ người thật｜Có hỗ trợ｜Không hỗ trợ｜Đích này chồng lấn với một đích khác có cùng độ ưu tiên｜Không có tuyến tương thích hỗ trợ yêu cầu này｜Các kênh tương thích hiện không khả dụng
 ```
 
 - [ ] **Step 5: Synchronize and verify translation quality**
@@ -2099,7 +2090,7 @@ Create two `httptest.Server` instances that record method, path, body, and autho
 | fast | A1 | 100 | `bb-seedance2.0-720p-fast-gz-15s` | 720p | 15 | 9:16 | 9/3/3 | false |
 | fast | A1_copy | 90 | `mg-seedance2.0-720p-fast` | 720p | 4..15 | any | 4/3/1 | true |
 | mini | A1_copy | 90 | `mg-seedance2.0-720p-mini` | 720p | 4..15 | any | 4/3/1 | true |
-| standard | A1_copy | 110 | `lec-feituo-seedance-2-0-my-upscaled-1080p` | 1080p, generated 720p, upscaled | 4..15 | any | 4/3/1 | true |
+| standard | A1_copy | 110 | `lec-feituo-seedance-2-0-my-upscaled-1080p` | 1080p | 4..15 | any | 4/3/1 | true |
 
 The two A1 standard targets are allowed at equal priority because their output resolution sets are disjoint. The A1_copy 1080 target is higher priority than other targets in the same channel, proving target priority does not become channel priority.
 
@@ -2110,7 +2101,7 @@ Submit official ARK requests through the full middleware/router/controller/relay
 | Request | Expected |
 |---|---|
 | standard, 1080p, 15s, 9:16, no refs | A1 `bb-...1080p...` |
-| standard, 1080p, 10s, 16:9,真人 true, 4/3/1 | A1_copy upscaled target |
+| standard, 1080p, 10s, 16:9,真人 true, 4/3/1 | A1_copy 1080p-output target |
 | standard, 720p, 15s, 9:16, 9/3/3 | A1 720 target |
 | standard, 720p, 10s, 16:9,真人 true, 4/3/1 | A1_copy 720 target |
 | fast, 720p, 15s, 9:16 | A1 fast target |
@@ -2194,7 +2185,7 @@ Use the `browser:control-in-app-browser` skill, open `http://127.0.0.1:3003/mode
 
 1. The Models page shows Metadata, Routing policies, and Deployments tabs without wrapping over the title/actions.
 2. Create a disabled `分组A + doubao-seedance-2-0-260128` policy.
-3. Add A1 and A1_copy targets, including one native 720p and one 720p-to-1080p upscaled target.
+3. Add A1 and A1_copy targets, including one 720p target and one 1080p-output target.
 4. Switch duration between discrete and range modes and verify mutually exclusive fields are removed from the payload.
 5. Enter an overlapping same-priority target; verify both target rows receive inline errors from the server.
 6. Fix priority, save, reopen, and verify all structured values round-trip.
@@ -2246,7 +2237,7 @@ Do not commit screenshots, local databases, logs, or environment files.
 3. Create three disabled policies for `分组A`, one per canonical model, and enter all verified targets with structured constraints. Do not enter cost fields.
 4. Run the mock matrix and channel tests, then use the admin diagnostics to verify facts, policy IDs, target IDs, and mismatch reasons without issuing paid tasks.
 5. Enable standard, Fast, and Mini policies one at a time. Observe counts for `no_compatible_route`, `compatible_channel_unavailable`, retries, and automatic channel disables before enabling the next model.
-6. Add the remaining collected upstreams incrementally. Keep same-channel/same-priority ranges disjoint and model every upscaled 1080p target as output `1080p` with its actual generation resolution recorded separately.
+6. Add the remaining collected upstreams incrementally. Keep same-channel/same-priority ranges disjoint and configure every upstream that returns 1080p as output `1080p`; its name may describe provider-internal processing, which is not routing metadata.
 7. To roll back one group/model immediately, disable its policy; the selector returns to the unchanged legacy channel/mapping behavior for that exact key.
 
 ---

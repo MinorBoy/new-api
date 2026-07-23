@@ -264,6 +264,33 @@ func TestConvertToArkVideoTaskPreservesExplicitZeroUsage(t *testing.T) {
 	assert.Contains(t, string(body), `"total_tokens":0`)
 }
 
+func TestPublicConvertersFallbackToLocalPollingFailure(t *testing.T) {
+	task := reportTaskFixture()
+	task.Status = model.TaskStatusFailure
+	task.FailReason = "task not found or expired"
+	task.Data = json.RawMessage(`{"code":"not_found","message":"provider task missing","user_id":59,"quota":2000000}`)
+
+	openAIBody, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)
+	require.NoError(t, err)
+	assertPublicBody(t, openAIBody)
+	var openAIResponse dto.OpenAIVideo
+	require.NoError(t, common.Unmarshal(openAIBody, &openAIResponse))
+	assert.Equal(t, dto.VideoStatusFailed, openAIResponse.Status)
+	require.NotNil(t, openAIResponse.Error)
+	assert.Equal(t, "not_found", openAIResponse.Error.Code)
+	assert.Equal(t, "task not found or expired", openAIResponse.Error.Message)
+
+	arkBody, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
+	require.NoError(t, err)
+	assertPublicBody(t, arkBody)
+	var arkResponse arkTaskResponse
+	require.NoError(t, common.Unmarshal(arkBody, &arkResponse))
+	assert.Equal(t, "failed", arkResponse.Status)
+	require.NotNil(t, arkResponse.Error)
+	assert.Equal(t, "not_found", arkResponse.Error.Code)
+	assert.Equal(t, "task not found or expired", arkResponse.Error.Message)
+}
+
 func reportTaskFixture() *model.Task {
 	return &model.Task{
 		TaskID:     "task_public",

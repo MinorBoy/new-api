@@ -311,7 +311,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
-	parsed, err := parseTaskProjection(task.Data)
+	parsed, err := parsePublicTaskProjection(task)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +366,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
-	parsed, err := parseTaskProjection(task.Data)
+	parsed, err := parsePublicTaskProjection(task)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +426,41 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		response.Error = &upstreamError{Code: parsed.ErrorCode, Message: message}
 	}
 	return common.Marshal(response)
+}
+
+func parsePublicTaskProjection(task *model.Task) (*parsedTask, error) {
+	parsed, err := parseTaskProjection(task.Data)
+	if err == nil || task.Status != model.TaskStatusFailure {
+		return parsed, err
+	}
+
+	parsed = &parsedTask{
+		Status: model.TaskStatusFailure,
+		Reason: strings.TrimSpace(task.FailReason),
+		Nested: &arkTaskData{},
+	}
+	var response upstreamErrorEnvelope
+	if unmarshalErr := common.Unmarshal(task.Data, &response); unmarshalErr == nil {
+		parsed.ErrorCode = response.Code
+		if parsed.Reason == "" {
+			parsed.Reason = response.Message
+		}
+		if response.Error != nil {
+			if response.Error.Code != "" {
+				parsed.ErrorCode = response.Error.Code
+			}
+			if parsed.Reason == "" {
+				parsed.Reason = response.Error.Message
+			}
+		}
+	}
+	if parsed.ErrorCode == "" {
+		parsed.ErrorCode = "task_failed"
+	}
+	if parsed.Reason == "" {
+		parsed.Reason = "task failed"
+	}
+	return parsed, nil
 }
 
 func arkStatus(status model.TaskStatus) string {

@@ -428,6 +428,53 @@ func TestNewAPIVideoARKQuerySingleAndList(t *testing.T) {
 	assert.Equal(t, task.TaskID, response.Items[0]["id"])
 }
 
+func TestNewAPIVideoPollingFailureQueriesRemainPublic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	now := time.Now().Unix()
+	task := model.Task{
+		TaskID: "task_public_failed", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)), UserId: 7,
+		Status: model.TaskStatusFailure, SubmitTime: now, FinishTime: now + 10, UpdatedAt: now + 10, Progress: "100%",
+		FailReason:  "task not found or expired",
+		Properties:  model.Properties{OriginModelName: "client-model", UpstreamModelName: "provider-model"},
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "upstream-secret"},
+		Data:        json.RawMessage(`{"code":"not_found","message":"provider task missing","user_id":59,"quota":2000000}`),
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+
+	openAI, _ := gin.CreateTestContext(httptest.NewRecorder())
+	openAI.Request = httptest.NewRequest(http.MethodGet, "/v1/video/generations/"+task.TaskID, nil)
+	openAI.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	openAI.Set("id", 7)
+	body, taskErr := videoFetchByIDRespBodyBuilder(openAI)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	assert.Contains(t, string(body), `"status":"failed"`)
+	assert.Contains(t, string(body), `"message":"task not found or expired"`)
+
+	single, _ := gin.CreateTestContext(httptest.NewRecorder())
+	single.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/"+task.TaskID, nil)
+	single.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	single.Set("id", 7)
+	body, taskErr = SeedanceTaskFetch(single)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	assert.Contains(t, string(body), `"status":"failed"`)
+	assert.Contains(t, string(body), `"message":"task not found or expired"`)
+
+	list, _ := gin.CreateTestContext(httptest.NewRecorder())
+	list.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks", nil)
+	list.Set("id", 7)
+	body, taskErr = SeedanceTaskFetch(list)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	var response seedanceTaskListResponse
+	require.NoError(t, common.Unmarshal(body, &response))
+	require.Equal(t, 1, response.Total)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, task.TaskID, response.Items[0]["id"])
+}
+
 func TestSeedanceTaskFetchRejectsUnsupportedPlatform(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)

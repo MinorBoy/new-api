@@ -270,6 +270,8 @@ func migrateDB() error {
 
 	err := DB.AutoMigrate(
 		&Channel{},
+		&RoutingPolicy{},
+		&RouteTarget{},
 		&Token{},
 		&User{},
 		&PasskeyCredential{},
@@ -324,6 +326,8 @@ func migrateDBFast() error {
 		name  string
 	}{
 		{&Channel{}, "Channel"},
+		{&RoutingPolicy{}, "RoutingPolicy"},
+		{&RouteTarget{}, "RouteTarget"},
 		{&Token{}, "Token"},
 		{&User{}, "User"},
 		{&PasskeyCredential{}, "PasskeyCredential"},

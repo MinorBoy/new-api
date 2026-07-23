@@ -321,6 +321,11 @@ func InitResources() error {
 		common.FatalLog("failed to initialize database: " + err.Error())
 		return err
 	}
+	if err = model.InitRoutingPolicyCache(); err != nil {
+		common.FatalLog("failed to initialize routing policy cache: " + err.Error())
+		return err
+	}
+	go model.SyncRoutingPolicyCache(common.SyncFrequency)
 	if err = authz.Init(model.DB); err != nil {
 		common.FatalLog("failed to initialize authorization: " + err.Error())
 		return err

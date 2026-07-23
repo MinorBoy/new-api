@@ -19,12 +19,28 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import type { ColumnDef, ColumnFiltersState } from '@tanstack/react-table'
-import { RefreshCw } from 'lucide-react'
+import {
+  Copy,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Power,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTablePage, useDataTable } from '@/components/data-table'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
@@ -41,6 +57,14 @@ import { CANONICAL_SEEDANCE_MODELS, type RoutingPolicy } from '../types'
 
 const route = getRouteApi('/_authenticated/models/$section')
 
+type RoutingPoliciesTableProps = {
+  onCreate: () => void
+  onEdit: (policy: RoutingPolicy) => void
+  onCopy: (policy: RoutingPolicy) => void
+  onToggleStatus: (policy: RoutingPolicy) => void
+  onDelete: (policy: RoutingPolicy) => void
+}
+
 function updateStringFilter(
   filters: ColumnFiltersState,
   columnId: string,
@@ -53,7 +77,7 @@ function updateStringFilter(
   return next
 }
 
-export function RoutingPoliciesTable() {
+export function RoutingPoliciesTable(props: RoutingPoliciesTableProps) {
   const { t } = useTranslation()
   const search = route.useSearch()
   const navigate = route.useNavigate()
@@ -151,15 +175,9 @@ export function RoutingPoliciesTable() {
         accessorKey: 'enabled',
         header: t('Status'),
         cell: ({ row }) => (
-          <span
-            className={
-              row.original.enabled
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-muted-foreground'
-            }
-          >
+          <Badge variant={row.original.enabled ? 'default' : 'secondary'}>
             {row.original.enabled ? t('Enabled') : t('Disabled')}
-          </span>
+          </Badge>
         ),
       },
       {
@@ -171,8 +189,63 @@ export function RoutingPoliciesTable() {
           </span>
         ),
       },
+      {
+        id: 'actions',
+        header: t('Actions'),
+        cell: ({ row }) => (
+          <Tooltip>
+            <DropdownMenu>
+              <TooltipTrigger
+                render={
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon-sm'
+                        aria-label={t('Actions')}
+                      />
+                    }
+                  >
+                    <MoreHorizontal aria-hidden='true' />
+                  </DropdownMenuTrigger>
+                }
+              />
+              <TooltipContent>{t('Actions')}</TooltipContent>
+              <DropdownMenuContent align='end' className='w-44'>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => props.onEdit(row.original)}>
+                    <Pencil aria-hidden='true' />
+                    {t('Edit')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => props.onCopy(row.original)}>
+                    <Copy aria-hidden='true' />
+                    {t('Copy')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => props.onToggleStatus(row.original)}
+                  >
+                    <Power aria-hidden='true' />
+                    {row.original.enabled ? t('Disable') : t('Enable')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant='destructive'
+                    onClick={() => props.onDelete(row.original)}
+                  >
+                    <Trash2 aria-hidden='true' />
+                    {t('Delete')}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </Tooltip>
+        ),
+        enableSorting: false,
+        enableHiding: false,
+        meta: { pinned: 'right' as const },
+      },
     ],
-    [t]
+    [props, t]
   )
 
   const policies = policiesQuery.data?.data.items ?? []
@@ -231,50 +304,58 @@ export function RoutingPoliciesTable() {
       skeletonKeyPrefix='routing-policy-skeleton'
       applyHeaderSize
       toolbar={
-        <div className='grid gap-2 sm:grid-cols-3'>
-          <Input
-            value={groupFilter}
-            onChange={(event) =>
-              onColumnFiltersChange(
-                updateStringFilter(
-                  columnFilters,
-                  'group_name',
-                  event.target.value
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+          <div className='grid min-w-0 flex-1 gap-2 sm:grid-cols-3'>
+            <Input
+              value={groupFilter}
+              onChange={(event) =>
+                onColumnFiltersChange(
+                  updateStringFilter(
+                    columnFilters,
+                    'group_name',
+                    event.target.value
+                  )
                 )
-              )
-            }
-            placeholder={t('Filter by group...')}
-            aria-label={t('Group')}
-          />
-          <NativeSelect
-            className='w-full'
-            value={globalFilter ?? ''}
-            onChange={(event) => onGlobalFilterChange?.(event.target.value)}
-            aria-label={t('Canonical model')}
-          >
-            <NativeSelectOption value=''>{t('All models')}</NativeSelectOption>
-            {CANONICAL_SEEDANCE_MODELS.map((model) => (
-              <NativeSelectOption key={model} value={model}>
-                {model}
+              }
+              placeholder={t('Filter by group...')}
+              aria-label={t('Group')}
+            />
+            <NativeSelect
+              className='w-full'
+              value={globalFilter ?? ''}
+              onChange={(event) => onGlobalFilterChange?.(event.target.value)}
+              aria-label={t('Canonical model')}
+            >
+              <NativeSelectOption value=''>
+                {t('All models')}
               </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <Input
-            type='number'
-            min={1}
-            value={channelFilter}
-            onChange={(event) =>
-              onColumnFiltersChange(
-                updateStringFilter(
-                  columnFilters,
-                  'channel_id',
-                  event.target.value
+              {CANONICAL_SEEDANCE_MODELS.map((model) => (
+                <NativeSelectOption key={model} value={model}>
+                  {model}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Input
+              type='number'
+              min={1}
+              value={channelFilter}
+              onChange={(event) =>
+                onColumnFiltersChange(
+                  updateStringFilter(
+                    columnFilters,
+                    'channel_id',
+                    event.target.value
+                  )
                 )
-              )
-            }
-            placeholder={t('Filter by channel ID...')}
-            aria-label={t('Channel ID')}
-          />
+              }
+              placeholder={t('Filter by channel ID...')}
+              aria-label={t('Channel ID')}
+            />
+          </div>
+          <Button type='button' size='sm' onClick={props.onCreate}>
+            <Plus data-icon='inline-start' aria-hidden='true' />
+            {t('Create policy')}
+          </Button>
         </div>
       }
     />

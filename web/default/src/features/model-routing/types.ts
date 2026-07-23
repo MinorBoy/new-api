@@ -47,7 +47,7 @@ const durationValueSchema = z
 const durationConstraintFormSchema = z
   .object({
     mode: z.enum(['values', 'range']),
-    values: z.array(durationValueSchema).default([]),
+    values: z.array(durationValueSchema),
     min: durationValueSchema.optional(),
     max: durationValueSchema.optional(),
   })
@@ -83,7 +83,7 @@ export const routeTargetFormSchema = z
   .object({
     id: z.number().int().positive().optional(),
     channel_id: z.number().int().positive('Channel is required'),
-    channel_name: z.string().default(''),
+    channel_name: z.string(),
     name: z.string().trim().min(1, 'Target name is required'),
     upstream_model: z.string().trim().min(1, 'Upstream model is required'),
     target_priority: z.number().int(),
@@ -94,7 +94,7 @@ export const routeTargetFormSchema = z
     generation_resolution: resolutionSchema.optional(),
     upscaled: z.boolean(),
     durations: durationConstraintFormSchema,
-    aspect_ratios: z.array(aspectRatioSchema).default([]),
+    aspect_ratios: z.array(aspectRatioSchema),
     reference_limits: referenceLimitsSchema,
     supports_real_person: z.enum(['unknown', 'yes', 'no']),
   })
@@ -123,18 +123,28 @@ export const routeTargetFormSchema = z
     }
   })
 
-export const routingPolicyFormSchema = z.object({
-  id: z.number().int().positive().optional(),
-  group_name: z.string().trim().min(1, 'Group is required'),
-  model: z.enum(CANONICAL_SEEDANCE_MODELS),
-  enabled: z.boolean(),
-  defaults: z.object({
-    output_resolution: resolutionSchema,
-    duration_seconds: durationValueSchema,
-    aspect_ratio: aspectRatioSchema,
-  }),
-  targets: z.array(routeTargetFormSchema).default([]),
-})
+export const routingPolicyFormSchema = z
+  .object({
+    id: z.number().int().positive().optional(),
+    group_name: z.string().trim().min(1, 'Group is required'),
+    model: z.enum(CANONICAL_SEEDANCE_MODELS),
+    enabled: z.boolean(),
+    defaults: z.object({
+      output_resolution: resolutionSchema,
+      duration_seconds: durationValueSchema,
+      aspect_ratio: aspectRatioSchema,
+    }),
+    targets: z.array(routeTargetFormSchema),
+  })
+  .superRefine((value, ctx) => {
+    if (value.enabled && value.targets.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['targets'],
+        message: 'At least one routing target is required when enabled',
+      })
+    }
+  })
 
 const durationValuesApiSchema = z.object({
   values: z.array(durationValueSchema).min(1),
@@ -260,6 +270,85 @@ export type RoutingPolicyListParams = {
   channel_id?: number
   p?: number
   page_size?: number
+}
+
+export function createEmptyPolicyForm(): RoutingPolicyFormValues {
+  return {
+    group_name: '',
+    model: CANONICAL_SEEDANCE_MODELS[0],
+    enabled: false,
+    defaults: {
+      output_resolution: '720p',
+      duration_seconds: 10,
+      aspect_ratio: '16:9',
+    },
+    targets: [],
+  }
+}
+
+export function createEmptyTarget(): RouteTargetFormValues {
+  return {
+    channel_id: 0,
+    channel_name: '',
+    name: '',
+    upstream_model: '',
+    target_priority: 0,
+    enabled: true,
+    output_resolutions: ['720p'],
+    generation_resolution: undefined,
+    upscaled: false,
+    durations: { mode: 'range', values: [], min: 4, max: 15 },
+    aspect_ratios: [],
+    reference_limits: { images: 9, videos: 3, audios: 3 },
+    supports_real_person: 'unknown',
+  }
+}
+
+export function copyPolicyForm(policy: RoutingPolicy): RoutingPolicyFormValues {
+  const copy = fromPolicyResponse(policy)
+  return {
+    ...copy,
+    id: undefined,
+    enabled: false,
+    targets: copy.targets.map((target) => cloneTargetForm(target, target.name)),
+  }
+}
+
+export function copyTargetForm(
+  target: RouteTargetFormValues
+): RouteTargetFormValues {
+  return cloneTargetForm(target, `${target.name} copy`)
+}
+
+function cloneTargetForm(
+  target: RouteTargetFormValues,
+  name: string
+): RouteTargetFormValues {
+  return {
+    ...target,
+    id: undefined,
+    name,
+    output_resolutions: [...target.output_resolutions],
+    durations: {
+      ...target.durations,
+      values: [...target.durations.values],
+    },
+    aspect_ratios: [...target.aspect_ratios],
+    reference_limits: { ...target.reference_limits },
+  }
+}
+
+export function clearUnavailableTargetChannels(
+  targets: RouteTargetFormValues[],
+  candidateIDs: number[]
+): RouteTargetFormValues[] {
+  const available = new Set(candidateIDs)
+  return targets.map((target) => {
+    if (target.channel_id === 0 || available.has(target.channel_id)) {
+      return target
+    }
+    return { ...target, channel_id: 0, channel_name: '' }
+  })
 }
 
 export function toWriteRequest(

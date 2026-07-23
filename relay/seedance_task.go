@@ -72,7 +72,7 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 	pageSize := boundedSeedancePage(c.Query("page_size"), 20, 100, 20)
 	query := model.DB.Model(&model.Task{}).
 		Where("user_id = ?", c.GetInt("id")).
-		Where("platform IN ?", []string{strconv.Itoa(constant.ChannelTypeVolcEngine), strconv.Itoa(constant.ChannelTypeDoubaoVideo), strconv.Itoa(constant.ChannelTypeDimensio)}).
+		Where("platform IN ?", []string{strconv.Itoa(constant.ChannelTypeVolcEngine), strconv.Itoa(constant.ChannelTypeDoubaoVideo), strconv.Itoa(constant.ChannelTypeDimensio), strconv.Itoa(constant.ChannelTypeClmmMall)}).
 		Where("submit_time >= ?", time.Now().Add(-7*24*time.Hour).Unix())
 
 	if status := strings.TrimSpace(c.Query("status")); status != "" {

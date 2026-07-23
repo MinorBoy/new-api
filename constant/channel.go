@@ -57,7 +57,8 @@ const (
 	ChannelTypeCodex          = 57
 	ChannelTypeAdvancedCustom = 58
 	ChannelTypeDimensio       = 59 // dimensio 视频生成(ARK v3 协议翻译网关)
-	ChannelTypeDummy          = 60 // this one is only for count, do not add any channel after this
+	ChannelTypeClmmMall       = 60 // CLMM Mall 视频生成(ARK v3 协议翻译网关)
+	ChannelTypeDummy          = 61 // this one is only for count, do not add any channel after this
 
 )
 
@@ -122,6 +123,7 @@ var ChannelBaseURLs = []string{
 	"https://chatgpt.com",                       //57
 	"",                                          //58
 	"https://jimeng.dimensio.cn",                //59 Dimensio
+	"https://clmm-mall.top",                     //60 CLMM Mall
 }
 
 var ChannelTypeNames = map[int]string{
@@ -181,6 +183,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeAdvancedCustom: "Advanced Custom",
 	ChannelTypeDimensio:       "Dimensio",
+	ChannelTypeClmmMall:       "CLMM Mall",
 }
 
 func GetChannelTypeName(channelType int) string {

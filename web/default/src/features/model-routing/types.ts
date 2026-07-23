@@ -89,38 +89,12 @@ export const routeTargetFormSchema = z
     target_priority: z.number().int(),
     enabled: z.boolean(),
     output_resolutions: z
-      .array(resolutionSchema)
-      .min(1, 'At least one output resolution is required'),
-    generation_resolution: resolutionSchema.optional(),
-    upscaled: z.boolean(),
+    .array(resolutionSchema)
+    .min(1, 'At least one output resolution is required'),
     durations: durationConstraintFormSchema,
     aspect_ratios: z.array(aspectRatioSchema),
     reference_limits: referenceLimitsSchema,
     supports_real_person: z.enum(['unknown', 'yes', 'no']),
-  })
-  .superRefine((value, ctx) => {
-    if (value.upscaled) {
-      if (
-        value.output_resolutions.length !== 1 ||
-        value.generation_resolution === undefined ||
-        value.generation_resolution === value.output_resolutions[0]
-      ) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['generation_resolution'],
-          message:
-            'Upscaled targets require one distinct generation resolution',
-        })
-      }
-      return
-    }
-    if (value.generation_resolution !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['generation_resolution'],
-        message: 'Native targets cannot set a generation resolution',
-      })
-    }
   })
 
 export const routingPolicyFormSchema = z
@@ -170,8 +144,6 @@ export const durationConstraintApiSchema = z.union([
 
 export const routeConstraintsApiSchema = z.object({
   output_resolutions: z.array(resolutionSchema).min(1),
-  generation_resolution: resolutionSchema.optional(),
-  upscaled: z.boolean(),
   durations: durationConstraintApiSchema,
   aspect_ratios: z.array(aspectRatioSchema).default([]),
   reference_limits: referenceLimitsSchema,
@@ -295,8 +267,6 @@ export function createEmptyTarget(): RouteTargetFormValues {
     target_priority: 0,
     enabled: true,
     output_resolutions: ['720p'],
-    generation_resolution: undefined,
-    upscaled: false,
     durations: { mode: 'range', values: [], min: 4, max: 15 },
     aspect_ratios: [],
     reference_limits: { images: 9, videos: 3, audios: 3 },
@@ -368,10 +338,6 @@ export function toWriteRequest(
       enabled: target.enabled,
       constraints: {
         output_resolutions: target.output_resolutions,
-        ...(target.upscaled && target.generation_resolution
-          ? { generation_resolution: target.generation_resolution }
-          : {}),
-        upscaled: target.upscaled,
         durations:
           target.durations.mode === 'values'
             ? { values: target.durations.values }
@@ -425,8 +391,6 @@ export function fromPolicyResponse(
         target_priority: target.target_priority,
         enabled: target.enabled,
         output_resolutions: target.constraints.output_resolutions,
-        generation_resolution: target.constraints.generation_resolution,
-        upscaled: target.constraints.upscaled,
         durations: durationForm,
         aspect_ratios: target.constraints.aspect_ratios,
         reference_limits: target.constraints.reference_limits,

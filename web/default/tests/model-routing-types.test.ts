@@ -7,7 +7,6 @@ import {
   createEmptyPolicyForm,
   createEmptyTarget,
   fromPolicyResponse,
-  routeTargetFormSchema,
   routingPolicyFormSchema,
   routingPolicyResponseSchema,
   toWriteRequest,
@@ -33,8 +32,6 @@ describe('model routing data contract', () => {
           target_priority: 100,
           enabled: true,
           output_resolutions: ['720p'],
-          generation_resolution: undefined,
-          upscaled: false,
           durations: { mode: 'values', values: [5, 10] },
           aspect_ratios: [],
           reference_limits: { images: 9, videos: 3, audios: 3 },
@@ -49,10 +46,11 @@ describe('model routing data contract', () => {
     expect(payload.targets[0]?.constraints).not.toHaveProperty(
       'generation_resolution'
     )
+    expect(payload.targets[0]?.constraints).not.toHaveProperty('upscaled')
     expect(payload.targets[0]?.constraints.supports_real_person).toBeNull()
   })
 
-  test('restores range mode and tri-state support from an API response', () => {
+  test('restores range mode and ignores legacy super-resolution properties', () => {
     const response = routingPolicyResponseSchema.parse({
       success: true,
       data: {
@@ -98,26 +96,13 @@ describe('model routing data contract', () => {
       max: 15,
     })
     expect(form.targets[0]?.supports_real_person).toBe('no')
-  })
-
-  test('rejects upscaled targets without a distinct generation resolution', () => {
-    const result = routeTargetFormSchema.safeParse({
-      channel_id: 12,
-      channel_name: 'A1_copy',
-      name: 'invalid upscale',
-      upstream_model: 'provider-1080p',
-      target_priority: 100,
-      enabled: true,
+    expect(response.data.targets[0]?.constraints).toEqual({
       output_resolutions: ['1080p'],
-      generation_resolution: '1080p',
-      upscaled: true,
-      durations: { mode: 'range', values: [], min: 4, max: 15 },
+      durations: { min: 4, max: 15 },
       aspect_ratios: [],
       reference_limits: { images: 4, videos: 3, audios: 1 },
-      supports_real_person: 'yes',
+      supports_real_person: false,
     })
-
-    expect(result.success).toBe(false)
   })
 
   test('creates independent policy and target defaults', () => {
@@ -172,7 +157,6 @@ describe('model routing data contract', () => {
             enabled: true,
             constraints: {
               output_resolutions: ['720p'],
-              upscaled: false,
               durations: { min: 4, max: 15 },
               aspect_ratios: [],
               reference_limits: { images: 9, videos: 3, audios: 3 },

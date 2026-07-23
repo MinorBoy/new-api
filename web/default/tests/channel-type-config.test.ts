@@ -84,3 +84,61 @@ describe('Dimensio channel configuration', () => {
     expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(59)).toBe(true)
   })
 })
+
+describe('CLMM Mall channel configuration', () => {
+  test('registers type 60 in the standard channel options', () => {
+    expect(CHANNEL_TYPES[60]).toBe('CLMM Mall')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 60,
+      label: 'CLMM Mall',
+    })
+    expect(getChannelTypeIcon(60)).toBe('Jimeng')
+  })
+
+  test('provides the CLMM Mall form defaults and guidance', () => {
+    expect(getChannelTypeConfig(60)).toMatchObject({
+      id: 60,
+      name: 'CLMM Mall',
+      icon: 'Jimeng',
+      defaultBaseUrl: 'https://clmm-mall.top',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(60)).toBe('https://clmm-mall.top')
+    expect(getChannelTypeHints(60)).toEqual({
+      baseUrl: 'Default: https://clmm-mall.top',
+      key: 'Enter the raw API key issued by CLMM Mall',
+      models:
+        'Use client-visible Ark model names and map them to complete CLMM Mall model names.',
+    })
+    expect(TYPE_TO_KEY_PROMPT[60]).toBe(
+      'Enter the raw API key issued by CLMM Mall'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[60]).toBe(
+      'CLMM Mall is task-only. Call it through the Ark /api/v3 task API.'
+    )
+  })
+
+  test('keeps task-only capabilities disabled', () => {
+    expect(MODEL_FETCHABLE_TYPES.has(60)).toBe(false)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(60)).toBe(true)
+  })
+
+  test('replaces known defaults but preserves administrator URLs and dirty values', () => {
+    expect(
+      getBaseUrlOnChannelTypeChange(60, 'https://jimeng.dimensio.cn', false)
+    ).toBe('https://clmm-mall.top')
+    expect(
+      getBaseUrlOnChannelTypeChange(
+        60,
+        'https://ark.cn-beijing.volces.com',
+        false
+      )
+    ).toBe('https://clmm-mall.top')
+    expect(
+      getBaseUrlOnChannelTypeChange(60, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+    expect(
+      getBaseUrlOnChannelTypeChange(60, 'https://proxy.example.com', true)
+    ).toBe('https://proxy.example.com')
+  })
+})

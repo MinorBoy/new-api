@@ -161,6 +161,19 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Supported upstream models: jimeng-video-seedance-2.0-fast-vip, jimeng-video-seedance-2.0-mini, jimeng-video-seedance-2.0-vip',
     },
   },
+  60: {
+    id: 60,
+    name: CHANNEL_TYPES[60],
+    icon: 'Jimeng',
+    defaultBaseUrl: 'https://clmm-mall.top',
+    supportedModels: [],
+    hints: {
+      baseUrl: 'Default: https://clmm-mall.top',
+      key: 'Enter the raw API key issued by CLMM Mall',
+      models:
+        'Use client-visible Ark model names and map them to complete CLMM Mall model names.',
+    },
+  },
 }
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

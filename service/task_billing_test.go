@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -347,6 +348,87 @@ func TestLogTaskConsumptionIncludesDurationSnapshot(t *testing.T) {
 	assert.NotContains(t, other, "model_price")
 	assert.Equal(t, quota, getUserUsedQuota(t, userID))
 	assert.Equal(t, int64(quota), getChannelUsedQuota(t, channelID))
+}
+
+func TestCapabilityRoutingLogKeepsTargetAdminOnly(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 42, 42
+	seedUser(t, userID, 10_000_000)
+	seedChannel(t, channelID)
+	routing := &modelrouting.Audit{
+		PolicyID: 7, TargetID: 21, UpstreamModel: "provider-1080p",
+		Facts: modelrouting.Facts{GroupName: "分组A", CanonicalModel: modelrouting.Seedance20, OutputResolution: "1080p"},
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		UsingGroup:      "分组A",
+		OriginModelName: modelrouting.Seedance20,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         channelID,
+			UpstreamModelName: "provider-1080p",
+			IsModelMapped:     true,
+			Routing:           routing,
+		},
+		TaskRelayInfo:     &relaycommon.TaskRelayInfo{Action: "generate"},
+		StartTime:         time.Now().Add(-time.Second),
+		FirstResponseTime: time.Now(),
+		PriceData: types.PriceData{
+			Quota:          100,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+
+	other := GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+	assert.Equal(t, modelrouting.Seedance20, info.OriginModelName)
+	assert.NotContains(t, other, "upstream_model_name")
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	adminRouting, ok := adminInfo["routing"].(*modelrouting.Audit)
+	require.True(t, ok)
+	assert.Equal(t, "provider-1080p", adminRouting.UpstreamModel)
+
+	LogTaskConsumption(c, info)
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, modelrouting.Seedance20, log.ModelName)
+	require.NotContains(t, log.Other, `"upstream_model_name"`)
+	require.Contains(t, log.Other, `"upstream_model":"provider-1080p"`)
+	userLogs, _, err := model.GetUserLogs(userID, model.LogTypeUnknown, 0, 0, "", "", 0, 10, "", "", "")
+	require.NoError(t, err)
+	require.Len(t, userLogs, 1)
+	assert.NotContains(t, userLogs[0].Other, "provider-1080p")
+	assert.NotContains(t, userLogs[0].Other, "target_id")
+	assert.NotContains(t, userLogs[0].Other, "policy_id")
+}
+
+func TestTaskBillingOtherKeepsCapabilityTargetAdminOnly(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = modelrouting.Seedance20
+	task.PrivateData.Routing = &modelrouting.Audit{PolicyID: 7, TargetID: 21, UpstreamModel: "provider-1080p"}
+	task.PrivateData.BillingContext.UpstreamModelName = "provider-1080p"
+
+	other := taskBillingOther(task)
+	assert.NotContains(t, other, "upstream_model_name")
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	routing, ok := adminInfo["routing"].(*modelrouting.Audit)
+	require.True(t, ok)
+	assert.Equal(t, "provider-1080p", routing.UpstreamModel)
+}
+
+func TestTaskBillingModelNameUsesCanonicalForCapabilityRoute(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = modelrouting.Seedance20
+	task.PrivateData.BillingContext.OriginModelName = modelrouting.Seedance20
+	task.PrivateData.BillingContext.UpstreamModelName = "provider-1080p"
+	task.PrivateData.Routing = &modelrouting.Audit{PolicyID: 7, TargetID: 21, UpstreamModel: "provider-1080p"}
+
+	assert.Equal(t, modelrouting.Seedance20, taskBillingModelName(task))
+
+	task.PrivateData.Routing = nil
+	assert.Equal(t, "provider-1080p", taskBillingModelName(task))
 }
 
 func TestTaskBillingOtherPreservesServiceTierRatio(t *testing.T) {

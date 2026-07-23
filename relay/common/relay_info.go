@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -78,6 +79,7 @@ type ChannelMeta struct {
 	UpstreamModelName    string
 	IsModelMapped        bool
 	SupportStreamOptions bool // 是否支持流式选项
+	Routing              *modelrouting.Audit
 }
 
 type TokenCountMeta struct {
@@ -198,6 +200,26 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
 	apiType, _ := common.ChannelType2APIType(channelType)
+	upstreamModelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+	var routing *modelrouting.Audit
+	if common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+		policyID := common.GetContextKeyInt(c, constant.ContextKeyRoutingPolicyID)
+		targetID := common.GetContextKeyInt(c, constant.ContextKeyRoutingTargetID)
+		routeUpstreamModel := common.GetContextKeyString(c, constant.ContextKeyRoutingUpstreamModel)
+		facts, factsOK := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
+		if policyID > 0 && targetID > 0 && routeUpstreamModel != "" && factsOK {
+			mismatchCounts, _ := common.GetContextKeyType[map[modelrouting.MismatchReason]int](c, constant.ContextKeyRoutingMismatchCounts)
+			routing = &modelrouting.Audit{
+				PolicyID:       policyID,
+				TargetID:       targetID,
+				TargetName:     common.GetContextKeyString(c, constant.ContextKeyRoutingTargetName),
+				UpstreamModel:  routeUpstreamModel,
+				Facts:          facts,
+				MismatchCounts: mismatchCounts,
+			}
+			upstreamModelName = routeUpstreamModel
+		}
+	}
 	channelMeta := &ChannelMeta{
 		ChannelType:          channelType,
 		ChannelId:            common.GetContextKeyInt(c, constant.ContextKeyChannelId),
@@ -211,9 +233,10 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		ChannelCreateTime:    c.GetInt64("channel_create_time"),
 		ParamOverride:        paramOverride,
 		HeadersOverride:      headerOverride,
-		UpstreamModelName:    common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		UpstreamModelName:    upstreamModelName,
 		IsModelMapped:        false,
 		SupportStreamOptions: false,
+		Routing:              routing,
 	}
 
 	if channelType == constant.ChannelTypeAzure {

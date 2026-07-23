@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
@@ -31,6 +32,44 @@ func attachQuotaSaturationToOther(other map[string]interface{}, clamp *common.Qu
 		other["admin_info"] = adminInfo
 	}
 	adminInfo["quota_saturation"] = clamp.AuditMap()
+}
+
+func appendRoutingAdminInfo(other map[string]interface{}, routing *modelrouting.Audit) {
+	if other == nil || routing == nil {
+		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["routing"] = routing
+}
+
+func routingAuditFromContext(c *gin.Context) *modelrouting.Audit {
+	if c == nil || !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+		return nil
+	}
+	policyID := common.GetContextKeyInt(c, constant.ContextKeyRoutingPolicyID)
+	targetID := common.GetContextKeyInt(c, constant.ContextKeyRoutingTargetID)
+	upstreamModel := common.GetContextKeyString(c, constant.ContextKeyRoutingUpstreamModel)
+	facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
+	if policyID <= 0 || targetID <= 0 || upstreamModel == "" || !ok {
+		return nil
+	}
+	mismatchCounts, _ := common.GetContextKeyType[map[modelrouting.MismatchReason]int](c, constant.ContextKeyRoutingMismatchCounts)
+	return &modelrouting.Audit{
+		PolicyID:       policyID,
+		TargetID:       targetID,
+		TargetName:     common.GetContextKeyString(c, constant.ContextKeyRoutingTargetName),
+		UpstreamModel:  upstreamModel,
+		Facts:          facts,
+		MismatchCounts: mismatchCounts,
+	}
+}
+
+func AppendRoutingAdminInfoFromContext(c *gin.Context, other map[string]interface{}) {
+	appendRoutingAdminInfo(other, routingAuditFromContext(c))
 }
 
 // attachQuotaSaturation records the request's quota clamp (if any) onto the
@@ -84,7 +123,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 	if relayInfo.IsModelMapped {
 		other["is_model_mapped"] = true
-		other["upstream_model_name"] = relayInfo.UpstreamModelName
+		if relayInfo.Routing == nil {
+			other["upstream_model_name"] = relayInfo.UpstreamModelName
+		}
 	}
 
 	isSystemPromptOverwritten := common.GetContextKeyBool(ctx, constant.ContextKeySystemPromptOverride)
@@ -108,6 +149,8 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 
 	other["admin_info"] = adminInfo
+	appendRoutingAdminInfo(other, relayInfo.Routing)
+	AppendRoutingAdminInfoFromContext(ctx, other)
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)

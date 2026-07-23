@@ -22,6 +22,7 @@ import { api } from '@/lib/api'
 
 import {
   routingCandidateResponseSchema,
+  routingGroupResponseSchema,
   routingPolicyListResponseSchema,
   routingPolicyResponseSchema,
   type RoutingPolicyListParams,
@@ -43,6 +44,11 @@ export async function listRoutingCandidates(groupName: string, model: string) {
     params: { group_name: groupName, model },
   })
   return routingCandidateResponseSchema.parse(response.data)
+}
+
+export async function listRoutingGroups() {
+  const response = await api.get('/api/group/')
+  return routingGroupResponseSchema.parse(response.data)
 }
 
 export async function createRoutingPolicy(payload: RoutingPolicyWriteRequest) {

@@ -48,6 +48,14 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
@@ -63,6 +71,7 @@ import { Switch } from '@/components/ui/switch'
 
 import {
   createRoutingPolicy,
+  listRoutingGroups,
   listRoutingCandidates,
   updateRoutingPolicy,
 } from '../api'
@@ -78,6 +87,7 @@ import {
   createEmptyPolicyForm,
   createEmptyTarget,
   fromPolicyResponse,
+  normalizeRoutingGroups,
   routingPolicyErrorSchema,
   routingPolicyFormSchema,
   toWriteRequest,
@@ -149,7 +159,16 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
     queryFn: () => listRoutingCandidates(groupName, modelName),
     enabled: groupName.length > 0 && modelName.length > 0 && props.open,
   })
+  const groupsQuery = useQuery({
+    queryKey: routingPolicyQueryKeys.groups(),
+    queryFn: listRoutingGroups,
+    enabled: props.open,
+  })
   const candidates = candidatesQuery.data?.data
+  const groupOptions = normalizeRoutingGroups(
+    groupsQuery.data?.data ?? [],
+    groupName
+  )
 
   useEffect(() => {
     if (!props.open) {
@@ -213,6 +232,22 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
 
   const handleSubmit = (values: RoutingPolicyFormValues) => {
     form.clearErrors()
+    const selectableGroups = normalizeRoutingGroups(
+      groupsQuery.data?.data ?? [],
+      isEditing || props.copyingPolicy ? values.group_name : ''
+    )
+    if (
+      !groupsQuery.isSuccess ||
+      !selectableGroups.includes(values.group_name)
+    ) {
+      form.setError('group_name', {
+        type: 'validate',
+        message: groupsQuery.isError
+          ? 'Failed to load groups'
+          : 'Group is required',
+      })
+      return
+    }
     saveMutation.mutate(values)
   }
 
@@ -246,9 +281,56 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>{t('Group')}</FormLabel>
-                      <FormControl>
-                        <Input placeholder={t('Enter group name')} {...field} />
-                      </FormControl>
+                      <Combobox
+                        value={field.value || null}
+                        onValueChange={(value) => field.onChange(value ?? '')}
+                        items={groupOptions}
+                        disabled={groupsQuery.isLoading}
+                      >
+                        <FormControl>
+                          <ComboboxInput
+                            placeholder={
+                              groupsQuery.isLoading
+                                ? t('Loading groups...')
+                                : t('Search groups...')
+                            }
+                            aria-label={t('Group')}
+                          >
+                            <ComboboxContent>
+                              <ComboboxList>
+                                {(group: string) => (
+                                  <ComboboxItem key={group} value={group}>
+                                    {group}
+                                  </ComboboxItem>
+                                )}
+                              </ComboboxList>
+                              <ComboboxEmpty>
+                                {t('No groups available')}
+                              </ComboboxEmpty>
+                            </ComboboxContent>
+                          </ComboboxInput>
+                        </FormControl>
+                      </Combobox>
+                      {groupsQuery.isSuccess && groupOptions.length === 0 && (
+                        <p className='text-muted-foreground text-xs'>
+                          {t('No groups available')}
+                        </p>
+                      )}
+                      {groupsQuery.isError && (
+                        <div className='flex items-center justify-between gap-2'>
+                          <p className='text-destructive text-xs'>
+                            {t('Failed to load groups')}
+                          </p>
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            onClick={() => void groupsQuery.refetch()}
+                          >
+                            {t('Retry')}
+                          </Button>
+                        </div>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}

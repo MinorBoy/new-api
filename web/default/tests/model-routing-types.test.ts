@@ -7,6 +7,7 @@ import {
   createEmptyPolicyForm,
   createEmptyTarget,
   fromPolicyResponse,
+  normalizeRoutingGroups,
   routingPolicyFormSchema,
   routingPolicyResponseSchema,
   toWriteRequest,
@@ -206,5 +207,22 @@ describe('model routing data contract', () => {
     expect(result[0]?.channel_name).toBe('')
     expect(result[1]?.channel_id).toBe(12)
     expect(result[1]?.channel_name).toBe('A1_copy')
+  })
+
+  test('normalizes, deduplicates, sorts, and filters routing groups', () => {
+    expect(
+      normalizeRoutingGroups(
+        [' group-b ', 'auto', 'Group-A', 'group-b', '', 'AUTO'],
+        ''
+      )
+    ).toEqual(['Group-A', 'group-b'])
+  })
+
+  test('preserves the current group when it is missing from the API', () => {
+    expect(normalizeRoutingGroups(['default', 'vip'], 'legacy-group')).toEqual([
+      'default',
+      'legacy-group',
+      'vip',
+    ])
   })
 })

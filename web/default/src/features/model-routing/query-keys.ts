@@ -27,4 +27,5 @@ export const routingPolicyQueryKeys = {
   detail: (id: number) => [...routingPolicyQueryKeys.details(), id] as const,
   candidates: (groupName: string, model: string) =>
     [...routingPolicyQueryKeys.all, 'candidates', groupName, model] as const,
+  groups: () => [...routingPolicyQueryKeys.all, 'groups'] as const,
 }

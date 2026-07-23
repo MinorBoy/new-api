@@ -190,6 +190,36 @@ const apiSuccessSchema = z.object({
   message: z.string().optional(),
 })
 
+export const routingGroupResponseSchema = apiSuccessSchema.extend({
+  data: z.array(z.string()),
+})
+
+export function normalizeRoutingGroups(
+  groups: string[],
+  currentGroup: string
+): string[] {
+  const normalized = new Map<string, string>()
+  for (const value of groups) {
+    const group = value.trim()
+    if (group === '' || group.toLowerCase() === 'auto') {
+      continue
+    }
+    const key = group.toLocaleLowerCase()
+    if (!normalized.has(key)) {
+      normalized.set(key, group)
+    }
+  }
+
+  const current = currentGroup.trim()
+  if (current !== '' && current.toLowerCase() !== 'auto') {
+    normalized.set(current.toLocaleLowerCase(), current)
+  }
+
+  return [...normalized.values()].sort((left, right) =>
+    left.localeCompare(right, undefined, { sensitivity: 'base' })
+  )
+}
+
 export const routingPolicyResponseSchema = apiSuccessSchema.extend({
   data: routingPolicySchema,
 })

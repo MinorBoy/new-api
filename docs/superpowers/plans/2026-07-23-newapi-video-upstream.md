@@ -4,7 +4,7 @@
 
 **Goal:** Add a task-only `NewAPIVideo` channel that submits and polls an upstream new-api `/v1/video/generations` service while exposing safe OpenAI Video and ARK-compatible local APIs, including ARK token usage.
 
-**Architecture:** Register channel type 60 without a generic API type. A focused task adaptor preserves OpenAI JSON request semantics, explicitly translates the verified ARK subset, parses both detailed `TaskResponse<TaskDto>` and direct `OpenAIVideo` polling responses, and builds allowlisted public projections. The shared polling service remains responsible for persistence, CAS transitions, settlement, and refunds, but gains deterministic HTTP classification and a `result_url`-aware wrapper projection.
+**Architecture:** Register channel type 60 without a generic API type. A focused task adaptor preserves OpenAI JSON request semantics, translates the verified ARK request into the upstream's required string `prompt` plus preserved `content` array, parses both detailed `TaskResponse<TaskDto>` and direct `OpenAIVideo` polling responses, and builds allowlisted public projections. The shared polling service remains responsible for persistence, CAS transitions, settlement, and refunds, but gains deterministic HTTP classification and a `result_url`-aware wrapper projection.
 
 **Tech Stack:** Go 1.22+, Gin, GORM v2, `common.*` JSON wrappers, `shopspring/decimal`, `testify`, React 19, TypeScript, Bun.
 
@@ -14,13 +14,24 @@
 
 - Upstream submit: `POST {baseURL}/v1/video/generations`.
 - Upstream poll: `GET {baseURL}/v1/video/generations/{upstream_task_id}`.
+- The detailed polling endpoint is intentional: the standard `GET /v1/videos/{task_id}` response is useful for client polling, but does not contain the complete nested task data or token usage needed by the gateway.
 - Local OpenAI submit/query return direct `dto.OpenAIVideo`, with local public IDs and origin model names.
 - Local ARK submit returns `{"id":"task_local_public_id"}`; query/list return an allowlisted ARK task object.
 - OpenAI submission accepts only `application/json`, preserves every top-level JSON value, and replaces only `model`.
-- ARK input supports text, first frame, first+last frames, reference images, and one reference audio. Video reference, draft task, `draft:true`, non-empty tools, and unverified semantic fields return 400.
+- ARK input requires text in a top-level string `prompt` for the upstream request. The adaptor derives that prompt from the ARK text item. Text-only, first-frame, and first+last-frame modes retain their documented `prompt`/`image`/`image_with_roles` translations. Reference mode preserves the complete `content` array, including the verified combination of two reference images, one reference video, and one reference audio. Mixing first/last-frame roles with reference-mode media remains unverified and returns 400, as do `draft_task`, `draft:true`, non-empty `tools`, and other unverified semantic fields.
+- Upstream `generateAudio` is camelCase; the local ARK spelling remains `generate_audio` and is translated to `generateAudio`.
+- Upstream `duration` is accepted but does not control this route. Effective non-default duration uses the string field `seconds`, for example `"seconds":"10"`; numeric `seconds` is rejected by the upstream. OpenAI `duration` remains passthrough-only and cannot satisfy per-duration billing by itself.
 - Detailed polling data is stored intact in `Task.Data`, subject only to the existing Base64 redaction policy.
 - ARK output exposes nested `usage.completion_tokens` and `usage.total_tokens`, including explicit zero, but never exposes upstream IDs, provider model, user/channel/group/platform/quota fields, or local `Task.Quota`.
 - Fixed-price and per-duration tasks retain their configured charge. Ratio/token tasks settle from authoritative polling usage.
+
+### Verified upstream facts (2026-07-23 test report)
+
+- `prompt` is required and must be a string. A top-level `content` array cannot replace it, and an array in `prompt` returns a JSON type error.
+- A request containing one text item, two `reference_image` items, one `reference_video`, and one `reference_audio` completed successfully when the same text was also supplied as the top-level `prompt`.
+- The upstream accepts `generateAudio:true` and returns `generate_audio:true` in the detailed nested result. The resulting media contained an AAC audio track.
+- `duration:10` was accepted but generated about five seconds. `seconds:10` was rejected as a type error; `seconds:"10"` generated about ten seconds.
+- The detailed response reports `data.data.duration` and token usage, while the standard response reports progress and `metadata.url`. `completed_at` may be non-zero while status is still `in_progress`.
 
 ## File Map
 
@@ -156,10 +167,12 @@ Create Gin contexts with the stated body and assert the exact status/code from
 | damaged | `{bad` | 400 `invalid_json` |
 | array root | `[]` | 400 `invalid_request` |
 | missing model | `{"prompt":"x"}` | 400 `missing_model` |
+| missing prompt | `{"model":"m"}` | 400 `invalid_request` |
 | empty prompt | `{"model":"m","prompt":" "}` | 400 `invalid_request` |
 | duration zero | `duration:0` | 400 `invalid_duration` |
 | duration overflow | `duration:3601` | 400 `invalid_duration` |
-| seconds string | `seconds:"5"` | success |
+| seconds string | `seconds:"5"` | success and retained |
+| seconds number | `seconds:5` | 400 `invalid_seconds` |
 | conflicting duration | `duration:5,seconds:"6"` | 400 `invalid_duration` |
 | n one | `n:1` | success |
 | n huge | `n:18446744073686646784` | 400 `invalid_n` |
@@ -174,6 +187,12 @@ out, err := buildOpenAIRequestBody(c, "provider-model")
 require.NoError(t, err)
 assert.JSONEq(t, `{"model":"provider-model","prompt":"x","watermark":false,"seed":0,"duration":5.5,"unknown":{"zero":0,"flag":false}}`, string(out))
 ```
+
+Add a report-derived passthrough case containing a string `prompt`, the full
+text/image/video/audio `content` array, `generateAudio:true`, and
+`seconds:"10"`. Assert every value and content item is unchanged and only
+`model` is replaced. A corresponding `seconds:10` request must fail locally
+before upstream traffic.
 
 - [ ] **Step 2: Run the request tests and confirm they fail**
 
@@ -194,6 +213,7 @@ const requestStateContextKey = "newapi_video_request_state"
 type requestState struct {
 	OpenAIFields map[string]json.RawMessage
 	Duration     *decimal.Decimal
+	Seconds      *decimal.Decimal
 }
 
 func getRequestState(c *gin.Context) (requestState, error) {
@@ -209,16 +229,24 @@ func getRequestState(c *gin.Context) (requestState, error) {
 }
 ```
 
-Decode the root into `map[string]json.RawMessage`; reject a nil map. Decode
-strings, booleans, and numbers from their raw values. Parse numeric values
-with `decimal.NewFromString(common.JsonRawMessageToString(raw))`, require
-finite positive values up to `relaycommon.MaxTaskDurationSeconds`, require
-`n` and `seed` to be integers, and require `n == 1`.
+Decode the root into `map[string]json.RawMessage`; reject a nil map. Parse
+numeric `duration` values with
+`decimal.NewFromString(common.JsonRawMessageToString(raw))`. Parse `seconds`
+only after requiring its JSON type to be string, matching the verified
+upstream contract. Require finite positive values up to
+`relaycommon.MaxTaskDurationSeconds`; `seconds` must be an integer string.
+Require `n` and `seed` to be integers, and require `n == 1`.
+
+Require a non-empty top-level string `prompt`. Do not treat `messages` as a
+prompt source: the tested upstream endpoint ignores Chat Completions-shaped
+`messages`. Preserve `content` and every other top-level value unchanged for
+the upstream request.
 
 For `metadata`, decode another raw-message map and enforce this rule for each
 of `duration`, `seconds`, and `n`: the top-level field must exist and its
 normalized numeric value must equal the metadata value. The top-level value
-is the only value stored as the billing duration.
+is the only value stored as the billing duration; when `seconds` is present,
+it is authoritative for billing and known upstream behavior.
 
 - [ ] **Step 4: Implement model-only rewriting**
 
@@ -266,7 +294,7 @@ objects, arrays, and unknown top-level fields survive unchanged.
 
 ---
 
-### Task 3: Translate the Verified ARK Request Subset
+### Task 3: Translate the Verified ARK Request
 
 **Files:**
 - Modify: `relay/channel/task/newapivideo/dto.go`
@@ -313,12 +341,11 @@ type upstreamRequest struct {
 	Model          string              `json:"model"`
 	Prompt         string              `json:"prompt"`
 	Image          string              `json:"image,omitempty"`
-	Images         []string            `json:"images,omitempty"`
 	ImageWithRoles []upstreamRoleImage `json:"image_with_roles,omitempty"`
 	Content        []arkContent        `json:"content,omitempty"`
 	GenerateAudio  *bool               `json:"generateAudio,omitempty"`
 	Ratio          string              `json:"ratio,omitempty"`
-	Duration       *int                `json:"duration,omitempty"`
+	Seconds        *string             `json:"seconds,omitempty"`
 	Watermark      *bool               `json:"watermark,omitempty"`
 }
 
@@ -347,19 +374,20 @@ Cover these outputs with `assert.JSONEq`:
 {"model":"provider-720p","prompt":"text","image_with_roles":[{"url":"https://x/first.png","role":"first_frame"},{"url":"https://x/last.png","role":"last_frame"}]}
 ```
 
-```json
-{"model":"provider-720p","prompt":"text","images":["https://x/a.png","https://x/b.png"]}
-```
+Add the report-derived mixed reference case and assert that the complete
+content order and roles are preserved:
 
 ```json
-{"model":"provider-720p","prompt":"text","content":[{"type":"text","text":"text"},{"type":"audio_url","audio_url":{"url":"https://x/a.mp3"},"role":"reference_audio"}],"generateAudio":true}
+{"model":"provider-720p","prompt":"text","content":[{"type":"text","text":"text"},{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://x/b.png"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://x/a.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://x/a.mp3"},"role":"reference_audio"}],"generateAudio":true,"seconds":"10"}
 ```
 
-Assert explicit `generate_audio:false` becomes `generateAudio:false` when no
-audio exists. Assert these inputs fail with 400: `video_url`, `draft_task`, two
-text items, two audio items, `draft:true`, non-empty tools, audio plus
-`generate_audio:false`, first/last mixed with reference images or audio, and
-top-level `seed`, `frames`, `camera_fixed`, `return_last_frame`, `priority`,
+Assert explicit local `generate_audio:false` becomes upstream
+`generateAudio:false`, `duration:10` becomes `seconds:"10"` and no upstream
+`duration` field is emitted. Reject `draft_task`, `draft:true`, non-empty
+`tools`, two text items, missing text, malformed media URLs, unsupported roles,
+reference audio combined with explicit `generate_audio:false`, first/last-frame
+content mixed with reference-mode media, and top-level `seed`, `frames`,
+`camera_fixed`, `return_last_frame`, `priority`,
 `execution_expires_after`, or `safety_identifier`.
 
 - [ ] **Step 3: Run the tests and confirm translation is absent**
@@ -387,13 +415,29 @@ Reject every other key with
 `fmt.Sprintf("InvalidParameter.%s", field)`. Accept only absent or
 `"default"` service tier. Accept `draft:false` and an empty tools array but do
 not send either upstream. Require integer ARK duration from 1 through
-`relaycommon.MaxTaskDurationSeconds`.
+`relaycommon.MaxTaskDurationSeconds`, then serialize it as the upstream string
+`seconds`. Never send ARK `duration` upstream because the report proves that
+field is accepted but ignored for this route.
 
-Implement media-mode counting before constructing output. A single missing or
-`first_frame` role maps to `image`; one first plus one last maps to
-`image_with_roles`; only `reference_image` entries map to `images`; one
-`reference_audio` retains text and audio in `content`. Any cross-mode mixture
-returns an error.
+Require at least one non-empty text item and derive the upstream string
+`prompt` from it. For a single first frame, emit `image`; for one first plus
+one last frame, emit `image_with_roles`. For reference mode, preserve every
+supported `content` item, its URL, type, role, and relative order. The
+verified initial reference combination is text plus two `reference_image`
+items, one `reference_video`, and one `reference_audio`; do not downgrade
+those roles or reject that cross-media combination. The upstream
+`generateAudio` field is emitted in camelCase. When reference audio is present,
+emit `generateAudio:true` unless the client explicitly supplied false, which
+is rejected as contradictory. Do not infer support for
+`draft` or `tools` from the successful media test; their unsupported values
+remain explicit 400 responses.
+
+Apply the existing Seedance 2.0 media safety limits before serialization:
+at most 9 images, 3 videos, and 3 audios; audio requires at least one image
+or video; first/last-frame mode cannot mix with reference media, accepts at
+most one first and one last image, and requires first before last. These
+limits protect request size and match the project's existing Seedance
+validation; they are not billing multipliers.
 
 Validate `resolution` after model mapping:
 
@@ -439,7 +483,9 @@ Assert `BuildRequestURL` returns `/v1/video/generations`; a request passed to
 `Accept: application/json`, and `Content-Type: application/json`. Through a
 mock server, assert `FetchTask` sends
 `GET /v1/video/generations/upstream%2Ftask` with Bearer authorization and the
-Accept header.
+Accept header. The report also confirms that `GET /v1/videos/{task_id}` is the
+standard client-facing polling shape; do not substitute it for the detailed
+backend polling request because it omits the nested usage-bearing task data.
 
 Test submit responses:
 
@@ -487,9 +533,14 @@ validation based on `common.KeySeedanceOfficialAPI`.
 
 `BuildRequestBody` calls `arkToUpstream` for ARK state and
 `buildOpenAIRequestBody` otherwise. `EstimateDurationSeconds` requires a
-stored duration and an integer value; this makes fractional duration valid for
-fixed/token billing but invalid for `per_duration`. `EstimateBilling` remains
-nil so duration is never duplicated in `OtherRatios`.
+stored duration and uses `seconds` when present, otherwise `duration`. The
+`seconds` value is always an integer string; fractional `duration` remains
+valid for fixed/token billing but invalid for `per_duration`. OpenAI JSON is
+still forwarded unchanged, so a client that sends `duration` rather than the
+upstream-specific `seconds` field must not be promised that the requested
+duration will take effect; reject duration-only requests in `per_duration`
+mode. `EstimateBilling` remains nil so duration is never duplicated in
+`OtherRatios`.
 
 Implement `GetModelList` as the empty `ModelList` and `GetChannelName` as
 `ChannelName`. The interface-dependent `DoRequest` is added in Task 5 after
@@ -512,6 +563,8 @@ if response.ID != "" && response.TaskID != "" && response.ID != response.TaskID 
 ```
 
 Use `url.PathEscape(taskID)` in `FetchTask`; never concatenate an unescaped ID.
+Decode JSON normally so escaped URL separators such as `\u0026` become `&`;
+never perform a string-level replacement on the signed URL.
 
 - [ ] **Step 4: Parse both upstream error envelopes**
 
@@ -653,7 +706,9 @@ type directTask struct {
 	Progress    int               `json:"progress"`
 	CreatedAt   int64             `json:"created_at"`
 	CompletedAt int64             `json:"completed_at"`
-	Metadata    map[string]any    `json:"metadata,omitempty"`
+	Metadata    *struct {
+		URL string `json:"url,omitempty"`
+	} `json:"metadata,omitempty"`
 	Content     *arkVideoContent  `json:"content,omitempty"`
 	Data        *struct {
 		URL string `json:"url,omitempty"`
@@ -670,8 +725,9 @@ fields without admitting unknown fields to public output.
 - [ ] **Step 2: Write parsing and converter tests from the real report**
 
 Use the report's complete wrapper, including `draft:false`, `priority:0`,
-`seed:47347`, unknown nested field `"future_field":{"keep":true}`, and usage
-108900. Assert:
+`seed`, `framespersecond:24`, `generate_audio:true`,
+`execution_expires_after:172800`, unknown nested field
+`"future_field":{"keep":true}`, and usage 108900. Assert:
 
 ```go
 assert.Equal(t, model.TaskStatusSuccess, result.Status)
@@ -685,7 +741,10 @@ assert.True(t, result.TotalTokensPresent)
 Add status tables for wrapper `NOT_START`, `SUBMITTED`, `QUEUED`,
 `IN_PROGRESS`, `SUCCESS`, `FAILURE` and direct `queued`, `in_progress`,
 `running`, `completed`, `succeeded`, `failed`, `cancelled`. Unknown status and
-successful status without any known URL must return an error.
+terminal successful status without any known URL must return an error. A
+non-terminal direct `in_progress` result with `progress:50`, an empty
+`metadata.url`, and a non-zero `completed_at` must remain in progress; never
+use `completed_at` alone as a completion signal.
 
 Assert URL precedence in this order: outer `result_url`, nested
 `content.video_url`, direct `metadata.url`, direct `content.video_url`, direct
@@ -821,6 +880,8 @@ optional parser implementation. Assert:
 - 2xx malformed JSON and unknown status leave the task unchanged;
 - a detailed success wrapper stores the entire wrapper in `Task.Data`, reads
   outer `result_url`, and does not create a proxy placeholder URL;
+- a direct `in_progress` response with `progress:50`, empty `metadata.url`,
+  and non-zero `completed_at` leaves the task processing;
 - the stored body still contains `draft:false`, `seed`, `usage`, and
   `future_field`;
 - the fetch call receives `Task.PrivateData.UpstreamTaskID`.
@@ -1025,7 +1086,10 @@ func isSeedanceTaskPlatform(platform constant.TaskPlatform) bool {
 Use it in both the list SQL platform set and single-task lookup. For type 60,
 require `channel.ArkVideoTaskConverter`; if conversion fails, return an error.
 Retain raw parsing only for the existing official ARK platforms whose stored
-data is already their public response shape.
+data is already their public response shape. Do not replace other ARK-native
+platforms when adding type 60; if the CLMM Mall channel is registered under
+the reconciled type 61, it must be added to this same whitelist and use its
+own converter.
 
 When filtering service tier, inspect top-level `service_tier`, then wrapper
 `data.data.service_tier`, then billing context, then default to `default`.
@@ -1054,8 +1118,13 @@ Use a mock upstream and `RelayTaskSubmit` to assert:
 - fixed/token mode accepts `duration:5.5` and forwards it unchanged;
 - per-duration mode rejects `duration:5.5` before upstream traffic;
 - per-duration mode accepts integer `seconds:"5"`, records requested and
-  billable seconds as 5, and has no `seconds` or `duration` other ratio;
-- `duration` is required only when billing mode is `per_duration`;
+  billable seconds as 5, and does not add a duplicate duration ratio;
+- per-duration mode rejects numeric `seconds:5` and accepts string
+  `seconds:"10"`, forwarding the string unchanged;
+- a request using `duration:10` remains a valid passthrough but is not claimed
+  to produce ten seconds; a request using `seconds:"10"` is the effective
+  ten-second upstream form;
+- per-duration mode requires `seconds` (a duration-only request is rejected);
 - oversized duration and metadata bypass are rejected before pre-consume and
   before upstream traffic.
 
@@ -1084,8 +1153,13 @@ Submit response:
 Polling response:
 
 ```json
-{"code":"success","message":"","data":{"task_id":"upstream-task","status":"SUCCESS","result_url":"https://example.com/video.mp4","submit_time":1784728184,"finish_time":1784728390,"progress":"100%","user_id":59,"channel_id":14,"group":"secret","quota":2000000,"platform":"54","data":{"content":{"video_url":"https://example.com/video.mp4"},"created_at":1784728184,"updated_at":1784728390,"draft":false,"duration":5,"execution_expires_after":172800,"framespersecond":24,"generate_audio":true,"id":"provider-secret","model":"doubao-seedance-2.0","priority":0,"ratio":"16:9","resolution":"720p","seed":47347,"service_tier":"default","status":"succeeded","usage":{"completion_tokens":108900,"total_tokens":108900},"future_field":{"keep":true}}}}
+{"code":"success","message":"","data":{"task_id":"upstream-task","status":"SUCCESS","result_url":"https://example.com/video.mp4","submit_time":1784728184,"finish_time":1784728390,"progress":"100%","user_id":59,"channel_id":14,"group":"secret","quota":2000000,"platform":"54","data":{"content":{"video_url":"https://example.com/video.mp4"},"created_at":1784728184,"updated_at":1784728390,"draft":false,"duration":10,"execution_expires_after":172800,"framespersecond":24,"generate_audio":true,"id":"provider-secret","model":"doubao-seedance-2.0","priority":0,"ratio":"16:9","resolution":"720p","seed":92859,"service_tier":"default","status":"succeeded","usage":{"completion_tokens":216900,"total_tokens":216900},"future_field":{"keep":true}}}}
 ```
+
+The fixture should also include the report-observed `start_time` and
+`properties.origin_model_name`/`properties.upstream_model_name` fields in the
+stored-body assertion. The converter must ignore those provider metadata
+fields in public output while retaining them in redacted `Task.Data`.
 
 - [ ] **Step 3: Assert both client protocols against one stored task**
 
@@ -1102,21 +1176,25 @@ assert.Equal(t, model.TaskStatusSuccess, task.Status)
 assert.Equal(t, "upstream-task", task.PrivateData.UpstreamTaskID)
 assert.Equal(t, "https://example.com/video.mp4", task.PrivateData.ResultURL)
 assert.Contains(t, string(task.Data), `"future_field":{"keep":true}`)
-assert.Equal(t, 108900, task.PrivateData.BillingContext.BillingTokens)
+assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
 ```
 
 Query both local endpoints. OpenAI must return `completed`, public IDs, origin
 model, and `metadata.url`. ARK must return `succeeded`, safe ARK fields, and
-usage 108900. Assert the detailed wrapper's private fields and both upstream
+usage 216900. Assert the detailed wrapper's private fields and both upstream
 IDs are absent from each client body.
 
 - [ ] **Step 4: Add an ARK submit lifecycle case**
 
-Submit text plus one `reference_audio` through
-`POST /api/v3/contents/generations/tasks`. Assert the mock body contains
-top-level prompt, mapped model, retained text/audio content, and
-`generateAudio:true`; the local response contains only the public ID. Reuse
-the same polling/query assertions.
+Submit the report-derived ARK request through
+`POST /api/v3/contents/generations/tasks`: one text item, two
+`reference_image` items, one `reference_video`, one `reference_audio`, and
+`generate_audio:true`, with `duration:10`. Assert the mock body contains the
+top-level string prompt, mapped model, the complete ordered content array,
+`generateAudio:true`, and `seconds:"10"` with no upstream `duration` field.
+The local response contains only the public ID. Reuse the same polling/query
+assertions and add a negative case proving that ARK content without a
+non-empty text item cannot be translated into the required upstream prompt.
 
 - [ ] **Step 5: Run and commit lifecycle coverage**
 
@@ -1321,7 +1399,10 @@ Check each frozen contract at the top of this plan against an automated test.
 Specifically verify the report's full `data.data` sample remains in stored
 `Task.Data`, ARK usage includes explicit zero, `GET /v1/video/generations/:id`
 is direct OpenAI JSON, ARK single/list share the same whitelist and converter,
-and fixed/per-duration billing does not get overwritten by token usage.
+fixed/per-duration billing does not get overwritten by token usage, a
+non-zero `completed_at` cannot finish an `in_progress` task, mixed ARK
+image/video/audio content is retained, and ARK duration is serialized upstream
+as string `seconds` rather than ineffective `duration`.
 
 If verification required a correction, return to the task that owns the
 affected files, stage the explicit file list in that task, rerun its focused
@@ -1336,15 +1417,34 @@ Do not create an empty verification commit.
 
 Use a temporary API key supplied through the shell environment, never a file
 or command-line literal committed to history. Configure a type 60 channel with
-the upstream root URL and a model mapping, then perform one text-only request:
+the upstream root URL and a model mapping in the same group available to the
+test token. Model availability is a function of the token group, channel, and
+mapping; a `model_not_found` or `No available channel` response must be
+diagnosed as configuration failure rather than retried as a payload failure.
+Then perform these acceptance cases:
+
+1. OpenAI JSON text-only generation with `seconds:"10"`.
+2. ARK text-only generation with `duration:10`, verifying the adaptor sends
+   `seconds:"10"` upstream.
+3. ARK mixed-reference generation with two images, one video, one audio, and
+   `generate_audio:true`.
+
+For each task, exercise:
 
 ```http
 POST /v1/video/generations
 GET /v1/video/generations/{public_task_id}
+POST /api/v3/contents/generations/tasks
 GET /api/v3/contents/generations/tasks/{public_task_id}
+GET /api/v3/contents/generations/tasks
 ```
 
 Record only HTTP statuses, local public task ID, local model, state
 transitions, final URL presence, and token usage. Do not record the API key,
 full signed video URL, upstream task ID, group, channel ID, or upstream wrapper
-identity fields.
+identity fields. Confirm the detailed upstream poll is
+`/v1/video/generations/{upstream_task_id}`, the completed ten-second task
+reports `data.data.duration:10`, and the mixed-reference task returns
+`generate_audio:true` and non-zero usage. Media-content adherence still
+requires visual/audio acceptance; a successful response alone proves request
+acceptance, not that every reference was followed.

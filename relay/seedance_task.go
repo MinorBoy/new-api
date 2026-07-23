@@ -20,6 +20,8 @@ import (
 
 const seedanceTaskScanBatchSize = 200
 
+var errClmmMallArkTaskConverterUnavailable = errors.New("CLMM Mall Ark task converter is unavailable")
+
 type seedanceTaskListResponse struct {
 	Items []map[string]interface{} `json:"items"`
 	Total int                      `json:"total"`
@@ -200,20 +202,9 @@ func seedanceTaskMatchesJSONFilter(task *model.Task, modelFilter, serviceTierFil
 }
 
 func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
-	response := make(map[string]interface{})
-	adaptor := GetTaskAdaptor(task.Platform)
-	if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
-		converted, err := converter.ConvertToArkVideoTask(task)
-		if err != nil {
-			return nil, err
-		}
-		if err := common.Unmarshal(converted, &response); err != nil {
-			return nil, fmt.Errorf("unmarshal converted task data: %w", err)
-		}
-	} else if len(task.Data) > 0 {
-		if err := common.Unmarshal(task.Data, &response); err != nil {
-			return nil, fmt.Errorf("unmarshal task data: %w", err)
-		}
+	response, err := seedanceTaskPayload(task, GetTaskAdaptor(task.Platform))
+	if err != nil {
+		return nil, err
 	}
 	response["id"] = task.TaskID
 	publicStatus := seedanceTaskStatus(task.Status)
@@ -250,6 +241,29 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 		if videoURL == "" && task.PrivateData.ResultURL != "" {
 			content["video_url"] = task.PrivateData.ResultURL
 			response["content"] = content
+		}
+	}
+	return response, nil
+}
+
+func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[string]interface{}, error) {
+	response := make(map[string]interface{})
+	if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
+		converted, err := converter.ConvertToArkVideoTask(task)
+		if err != nil {
+			return nil, err
+		}
+		if err := common.Unmarshal(converted, &response); err != nil {
+			return nil, fmt.Errorf("unmarshal converted task data: %w", err)
+		}
+		return response, nil
+	}
+	if task.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)) {
+		return nil, errClmmMallArkTaskConverterUnavailable
+	}
+	if len(task.Data) > 0 {
+		if err := common.Unmarshal(task.Data, &response); err != nil {
+			return nil, fmt.Errorf("unmarshal task data: %w", err)
 		}
 	}
 	return response, nil

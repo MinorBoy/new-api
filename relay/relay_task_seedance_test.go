@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -190,9 +191,55 @@ func setupSeedanceTaskDB(t *testing.T) {
 	originalDB := model.DB
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		model.DB = originalDB
+		require.NoError(t, sqlDB.Close())
+	})
 	require.NoError(t, database.AutoMigrate(&model.Task{}))
 	model.DB = database
-	t.Cleanup(func() { model.DB = originalDB })
+}
+
+func TestClmmMallSeedanceTaskPayloadRequiresArkConverter(t *testing.T) {
+	task := &model.Task{
+		Platform:    constant.TaskPlatform("60"),
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "clmm-private-upstream"},
+		Data:        json.RawMessage(`{"task_id":"clmm-private-upstream","diagnostic":"raw-private-data"}`),
+	}
+
+	adaptors := []struct {
+		name    string
+		adaptor channel.TaskAdaptor
+	}{
+		{name: "nil adaptor", adaptor: nil},
+		{name: "adaptor without converter", adaptor: GetTaskAdaptor(constant.TaskPlatformSuno)},
+	}
+	require.NotNil(t, adaptors[1].adaptor)
+	_, supportsArkConversion := adaptors[1].adaptor.(channel.ArkVideoTaskConverter)
+	require.False(t, supportsArkConversion)
+	for _, test := range adaptors {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := seedanceTaskPayload(task, test.adaptor)
+
+			require.EqualError(t, err, "CLMM Mall Ark task converter is unavailable")
+			assert.Nil(t, response)
+			assert.NotContains(t, err.Error(), "clmm-private-upstream")
+			assert.NotContains(t, err.Error(), "raw-private-data")
+		})
+	}
+}
+
+func TestSeedanceTaskPayloadPreservesRawFallbackForOtherPlatforms(t *testing.T) {
+	task := &model.Task{
+		Platform: constant.TaskPlatform("999"),
+		Data:     json.RawMessage(`{"task_id":"legacy-upstream","status":"queued"}`),
+	}
+
+	response, err := seedanceTaskPayload(task, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "legacy-upstream", response["task_id"])
 }
 
 func TestSeedanceTaskFetchUsesPublicIDAndOwner(t *testing.T) {
@@ -284,7 +331,9 @@ func TestClmmMallSeedanceTaskFetchUsesArkConverterAndProtectsPrivateData(t *test
 		assert.Equal(t, "task_clmm_success", response["id"])
 		assert.Equal(t, "client-video-model", response["model"])
 		assert.Equal(t, "succeeded", response["status"])
-		assert.Equal(t, "https://example.com/clmm-video.mp4", response["content"].(map[string]interface{})["video_url"])
+		content, ok := response["content"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "https://example.com/clmm-video.mp4", content["video_url"])
 	})
 
 	t.Run("failed task", func(t *testing.T) {
@@ -397,7 +446,9 @@ func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.
 	assert.Equal(t, "task_clmm_match", response.Items[0]["id"])
 	assert.Equal(t, "client-video-model", response.Items[0]["model"])
 	assert.Equal(t, "succeeded", response.Items[0]["status"])
-	assert.Equal(t, "https://example.com/list.mp4", response.Items[0]["content"].(map[string]interface{})["video_url"])
+	content, ok := response.Items[0]["content"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "https://example.com/list.mp4", content["video_url"])
 }
 
 func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {

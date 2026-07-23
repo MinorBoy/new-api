@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -306,6 +308,153 @@ func TestNewAPIVideoTaskAdaptorIsTaskOnly(t *testing.T) {
 	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("60")))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeNewAPIVideo)
 	require.False(t, success)
+}
+
+const newAPIVideoDetailedZeroUsage = `{
+	"code":"success",
+	"message":"",
+	"data":{
+		"task_id":"upstream-secret",
+		"status":"SUCCESS",
+		"result_url":"https://example.com/video.mp4",
+		"submit_time":1784716214,
+		"finish_time":1784716351,
+		"progress":"100%",
+		"user_id":59,
+		"channel_id":14,
+		"group":"secret-group",
+		"platform":"54",
+		"quota":2000000,
+		"data":{
+			"content":{"video_url":"https://example.com/video.mp4"},
+			"created_at":1784716214,
+			"updated_at":1784716351,
+			"draft":false,
+			"duration":5,
+			"framespersecond":24,
+			"generate_audio":true,
+			"id":"provider-secret",
+			"model":"provider-model",
+			"priority":0,
+			"service_tier":"default",
+			"status":"succeeded",
+			"usage":{"completion_tokens":0,"total_tokens":0}
+		}
+	}
+}`
+
+func createNewAPIVideoQueryTask(t *testing.T) *model.Task {
+	t.Helper()
+	now := time.Now().Unix()
+	task := &model.Task{
+		TaskID:     "task_public_newapi",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		UserId:     7,
+		ChannelId:  14,
+		Group:      "secret-group",
+		Quota:      2000000,
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: now,
+		FinishTime: now + 10,
+		UpdatedAt:  now + 10,
+		Progress:   "100%",
+		Properties: model.Properties{OriginModelName: "client-model", UpstreamModelName: "provider-model"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "upstream-secret",
+			ResultURL:      "https://example.com/video.mp4",
+			BillingContext: &model.TaskBillingContext{ServiceTier: "flex"},
+		},
+		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	return task
+}
+
+func TestNewAPIVideoOpenAIQueryUsesDirectPublicProjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := createNewAPIVideoQueryTask(t)
+
+	for _, path := range []string{
+		"/v1/video/generations/" + task.TaskID,
+		"/v1/videos/" + task.TaskID,
+	} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+		c.Set("id", 7)
+
+		body, taskErr := videoFetchByIDRespBodyBuilder(c)
+		require.Nil(t, taskErr)
+		assert.NotContains(t, string(body), `"code":"success"`)
+		assertNewAPIVideoPublicBody(t, body)
+		var response dto.OpenAIVideo
+		require.NoError(t, common.Unmarshal(body, &response))
+		assert.Equal(t, task.TaskID, response.ID)
+		assert.Equal(t, task.TaskID, response.TaskID)
+		assert.Equal(t, "client-model", response.Model)
+		assert.Equal(t, dto.VideoStatusCompleted, response.Status)
+	}
+}
+
+func TestNewAPIVideoARKQuerySingleAndList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := createNewAPIVideoQueryTask(t)
+
+	single, _ := gin.CreateTestContext(httptest.NewRecorder())
+	single.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/"+task.TaskID, nil)
+	single.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	single.Set("id", 7)
+	body, taskErr := SeedanceTaskFetch(single)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	assert.Contains(t, string(body), `"draft":false`)
+	assert.Contains(t, string(body), `"priority":0`)
+	assert.Contains(t, string(body), `"completion_tokens":0`)
+	assert.Contains(t, string(body), `"total_tokens":0`)
+
+	list, _ := gin.CreateTestContext(httptest.NewRecorder())
+	list.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks?filter.service_tier=default", nil)
+	list.Set("id", 7)
+	body, taskErr = SeedanceTaskFetch(list)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	var response seedanceTaskListResponse
+	require.NoError(t, common.Unmarshal(body, &response))
+	require.Equal(t, 1, response.Total)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, task.TaskID, response.Items[0]["id"])
+}
+
+func TestSeedanceTaskFetchRejectsUnsupportedPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := model.Task{
+		TaskID: "task_unsupported", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling)), UserId: 7,
+		Status: model.TaskStatusSuccess, SubmitTime: time.Now().Unix(),
+		Data: json.RawMessage(`{"id":"upstream-secret","status":"succeeded","quota":999}`),
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/"+task.TaskID, nil)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Set("id", 7)
+
+	body, taskErr := SeedanceTaskFetch(c)
+	assert.Nil(t, body)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusNotFound, taskErr.StatusCode)
+}
+
+func assertNewAPIVideoPublicBody(t *testing.T, body []byte) {
+	t.Helper()
+	for _, privateValue := range []string{
+		"upstream-secret", "provider-model", "provider-secret", "user_id", "channel_id",
+		"secret-group", "platform", "quota",
+	} {
+		assert.NotContains(t, string(body), privateValue)
+	}
 }
 
 func TestSeedanceTaskFetchPreservesOfficialFailedTaskFields(t *testing.T) {

@@ -472,7 +472,9 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
+	path := c.Request.URL.Path
+	isOpenAIVideoAPI := strings.HasPrefix(path, "/v1/videos/") ||
+		strings.HasPrefix(path, "/v1/video/generations/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -499,7 +501,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
 		return
 	}
-	if originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)) {
+	if originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)) ||
+		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)) {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
 			converted, err := converter.ConvertToArkVideoTask(originTask)
@@ -510,6 +513,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 			respBody = converted
 			return
 		}
+		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
+		return
 	}
 
 	// 通用 TaskDto 格式

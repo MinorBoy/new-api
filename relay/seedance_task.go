@@ -64,7 +64,14 @@ func seedanceFetchTaskByID(c *gin.Context) (*model.Task, bool, error) {
 	if taskID == "" {
 		return nil, false, nil
 	}
-	return model.GetByTaskId(c.GetInt("id"), taskID)
+	task, exists, err := model.GetByTaskId(c.GetInt("id"), taskID)
+	if err != nil || !exists {
+		return task, exists, err
+	}
+	if !isSeedanceTaskPlatform(task.Platform) {
+		return nil, false, nil
+	}
+	return task, true, nil
 }
 
 func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
@@ -72,7 +79,7 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 	pageSize := boundedSeedancePage(c.Query("page_size"), 20, 100, 20)
 	query := model.DB.Model(&model.Task{}).
 		Where("user_id = ?", c.GetInt("id")).
-		Where("platform IN ?", []string{strconv.Itoa(constant.ChannelTypeVolcEngine), strconv.Itoa(constant.ChannelTypeDoubaoVideo), strconv.Itoa(constant.ChannelTypeDimensio)}).
+		Where("platform IN ?", seedanceTaskPlatformValues()).
 		Where("submit_time >= ?", time.Now().Add(-7*24*time.Hour).Unix())
 
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
@@ -178,15 +185,17 @@ func seedanceTaskMatchesJSONFilter(task *model.Task, modelFilter, serviceTierFil
 	}
 	if serviceTierFilter != "" {
 		serviceTier := ""
-		if billingContext := task.PrivateData.BillingContext; billingContext != nil {
-			serviceTier = billingContext.ServiceTier
+		serviceTier, _ = data["service_tier"].(string)
+		if serviceTier == "" {
+			if wrapperData, ok := data["data"].(map[string]interface{}); ok {
+				if nestedData, ok := wrapperData["data"].(map[string]interface{}); ok {
+					serviceTier, _ = nestedData["service_tier"].(string)
+				}
+			}
 		}
 		if serviceTier == "" {
-			serviceTier, _ = data["service_tier"].(string)
-		}
-		if serviceTier == "" {
-			if metadata, ok := data["metadata"].(map[string]interface{}); ok {
-				serviceTier, _ = metadata["service_tier"].(string)
+			if billingContext := task.PrivateData.BillingContext; billingContext != nil {
+				serviceTier = billingContext.ServiceTier
 			}
 		}
 		if serviceTier == "" {
@@ -210,6 +219,8 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 		if err := common.Unmarshal(converted, &response); err != nil {
 			return nil, fmt.Errorf("unmarshal converted task data: %w", err)
 		}
+	} else if task.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)) {
+		return nil, fmt.Errorf("new-api video task adaptor must implement ARK conversion")
 	} else if len(task.Data) > 0 {
 		if err := common.Unmarshal(task.Data, &response); err != nil {
 			return nil, fmt.Errorf("unmarshal task data: %w", err)
@@ -253,6 +264,34 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 		}
 	}
 	return response, nil
+}
+
+func isSeedanceTaskPlatform(platform constant.TaskPlatform) bool {
+	switch platform {
+	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeVolcEngine)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDoubaoVideo)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)):
+		return true
+	default:
+		return false
+	}
+}
+
+func seedanceTaskPlatformValues() []string {
+	candidates := []constant.TaskPlatform{
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeVolcEngine)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDoubaoVideo)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+	}
+	values := make([]string, 0, len(candidates))
+	for _, platform := range candidates {
+		if isSeedanceTaskPlatform(platform) {
+			values = append(values, string(platform))
+		}
+	}
+	return values
 }
 
 func seedanceTaskStatus(status model.TaskStatus) string {

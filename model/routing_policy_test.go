@@ -142,6 +142,80 @@ func TestListRoutingCandidatesUsesExactAbilityAndOmitsSecrets(t *testing.T) {
 	assert.NotContains(t, strings.ToLower(string(encoded)), `"key"`)
 }
 
+func TestChannelDeletePathsCleanRoutingTargetsAndAbilities(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		remove func(t *testing.T, channel *model.Channel)
+	}{
+		{
+			name:   "single delete",
+			status: common.ChannelStatusEnabled,
+			remove: func(t *testing.T, channel *model.Channel) {
+				require.NoError(t, channel.Delete())
+			},
+		},
+		{
+			name:   "batch delete",
+			status: common.ChannelStatusEnabled,
+			remove: func(t *testing.T, channel *model.Channel) {
+				require.NoError(t, model.BatchDeleteChannels([]int{channel.Id}))
+			},
+		},
+		{
+			name:   "delete disabled",
+			status: common.ChannelStatusManuallyDisabled,
+			remove: func(t *testing.T, _ *model.Channel) {
+				rows, err := model.DeleteDisabledChannel()
+				require.NoError(t, err)
+				assert.Equal(t, int64(1), rows)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openRoutingTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+			priority := int64(100)
+			weight := uint(10)
+			channels := []model.Channel{
+				{Id: 11, Name: "delete", Key: "secret-delete", Status: tt.status, Priority: &priority, Weight: &weight},
+				{Id: 12, Name: "retain", Key: "secret-retain", Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &weight},
+			}
+			require.NoError(t, db.Create(&channels).Error)
+			abilities := []model.Ability{
+				{Group: "分组A", Model: modelrouting.Seedance20, ChannelId: 11, Enabled: tt.status == common.ChannelStatusEnabled, Priority: &priority, Weight: weight},
+				{Group: "分组A", Model: modelrouting.Seedance20, ChannelId: 12, Enabled: true, Priority: &priority, Weight: weight},
+			}
+			require.NoError(t, db.Create(&abilities).Error)
+			created, err := model.ReplaceRoutingPolicy(0, validRoutingPolicyRow(), []model.RouteTarget{
+				{ChannelID: 11, Name: "delete", UpstreamModel: "provider-delete", TargetPriority: 100, Enabled: true, Constraints: validConstraintsJSON(t, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3})},
+				{ChannelID: 12, Name: "retain", UpstreamModel: "provider-retain", TargetPriority: 100, Enabled: true, Constraints: validConstraintsJSON(t, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3})},
+			})
+			require.NoError(t, err)
+			require.NoError(t, model.InitRoutingPolicyCache())
+
+			tt.remove(t, &channels[0])
+
+			var deletedTargetCount int64
+			var retainedTargetCount int64
+			var deletedAbilityCount int64
+			require.NoError(t, db.Model(&model.RouteTarget{}).Where("policy_id = ? AND channel_id = ?", created.ID, 11).Count(&deletedTargetCount).Error)
+			require.NoError(t, db.Model(&model.RouteTarget{}).Where("policy_id = ? AND channel_id = ?", created.ID, 12).Count(&retainedTargetCount).Error)
+			require.NoError(t, db.Model(&model.Ability{}).Where("channel_id = ?", 11).Count(&deletedAbilityCount).Error)
+			assert.Zero(t, deletedTargetCount)
+			assert.Equal(t, int64(1), retainedTargetCount)
+			assert.Zero(t, deletedAbilityCount)
+
+			snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
+			require.True(t, ok)
+			assert.NotContains(t, snapshot.TargetsByChannel, 11)
+			assert.Contains(t, snapshot.TargetsByChannel, 12)
+		})
+	}
+}
+
 func openRoutingTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

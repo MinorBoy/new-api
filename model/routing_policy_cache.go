@@ -33,31 +33,53 @@ func GetRoutingPolicySnapshot(group, canonicalModel string) (modelrouting.Policy
 }
 
 func InitRoutingPolicyCache() error {
+	routingPolicyCacheMu.Lock()
+	defer routingPolicyCacheMu.Unlock()
 	next, err := loadAllRoutingPolicySnapshots()
 	if err != nil {
 		return err
 	}
-	routingPolicyCacheMu.Lock()
 	routingPolicySnapshots.Store(next)
-	routingPolicyCacheMu.Unlock()
 	return nil
 }
 
 func RefreshRoutingPolicyCache(group, canonicalModel string) error {
+	return RefreshRoutingPolicyCacheKeys([]RoutingPolicyKey{{GroupName: group, Model: canonicalModel}})
+}
+
+func RefreshRoutingPolicyCacheKeys(keys []RoutingPolicyKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
 	routingPolicyCacheMu.Lock()
 	defer routingPolicyCacheMu.Unlock()
 
-	key := RoutingPolicyKey{GroupName: group, Model: canonicalModel}
-	snapshot, enabled, err := loadRoutingPolicySnapshot(key)
-	if err != nil {
-		return err
+	type loadedSnapshot struct {
+		key      RoutingPolicyKey
+		snapshot modelrouting.PolicySnapshot
+		enabled  bool
+	}
+	loaded := make([]loadedSnapshot, 0, len(keys))
+	seen := make(map[RoutingPolicyKey]struct{}, len(keys))
+	for _, key := range keys {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		snapshot, enabled, err := loadRoutingPolicySnapshot(key)
+		if err != nil {
+			return err
+		}
+		loaded = append(loaded, loadedSnapshot{key: key, snapshot: snapshot, enabled: enabled})
 	}
 	current := routingPolicySnapshots.Load().(map[RoutingPolicyKey]modelrouting.PolicySnapshot)
 	next := maps.Clone(current)
-	if enabled {
-		next[key] = snapshot
-	} else {
-		delete(next, key)
+	for _, item := range loaded {
+		if item.enabled {
+			next[item.key] = item.snapshot
+		} else {
+			delete(next, item.key)
+		}
 	}
 	routingPolicySnapshots.Store(next)
 	return nil

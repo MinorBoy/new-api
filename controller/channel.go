@@ -752,6 +752,27 @@ type ChannelTag struct {
 	HeaderOverride *string `json:"header_override"`
 }
 
+func routingPolicyChannelIDsByTag(tag string) ([]int, error) {
+	channels, err := model.GetChannelsByTag(tag, false, false)
+	if err != nil {
+		return nil, err
+	}
+	channelIDs := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		channelIDs = append(channelIDs, channel.Id)
+	}
+	return channelIDs, nil
+}
+
+func refreshRoutingPolicySnapshots(c *gin.Context, channelIDs []int) bool {
+	if err := model.RefreshRoutingPolicyCacheByChannelIDs(channelIDs); err != nil {
+		common.SysError("failed to refresh routing policy cache: " + err.Error())
+		common.ApiError(c, err)
+		return false
+	}
+	return true
+}
+
 func DisableTagChannels(c *gin.Context) {
 	channelTag := ChannelTag{}
 	err := c.ShouldBindJSON(&channelTag)
@@ -762,12 +783,20 @@ func DisableTagChannels(c *gin.Context) {
 		})
 		return
 	}
+	channelIDs, err := routingPolicyChannelIDsByTag(channelTag.Tag)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	err = model.DisableChannelByTag(channelTag.Tag)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
+	if !refreshRoutingPolicySnapshots(c, channelIDs) {
+		return
+	}
 	recordManageAudit(c, "channel.tag_disable", map[string]interface{}{
 		"tag": channelTag.Tag,
 	})
@@ -788,12 +817,20 @@ func EnableTagChannels(c *gin.Context) {
 		})
 		return
 	}
+	channelIDs, err := routingPolicyChannelIDsByTag(channelTag.Tag)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	err = model.EnableChannelByTag(channelTag.Tag)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
+	if !refreshRoutingPolicySnapshots(c, channelIDs) {
+		return
+	}
 	recordManageAudit(c, "channel.tag_enable", map[string]interface{}{
 		"tag": channelTag.Tag,
 	})
@@ -819,6 +856,11 @@ func EditTagChannels(c *gin.Context) {
 			"success": false,
 			"message": "tag不能为空",
 		})
+		return
+	}
+	channelIDs, err := routingPolicyChannelIDsByTag(channelTag.Tag)
+	if err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil) &&
@@ -854,6 +896,9 @@ func EditTagChannels(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
+	if !refreshRoutingPolicySnapshots(c, channelIDs) {
+		return
+	}
 	recordManageAudit(c, "channel.tag_edit", map[string]interface{}{
 		"tag": channelTag.Tag,
 	})
@@ -1051,6 +1096,9 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
+	if !refreshRoutingPolicySnapshots(c, []int{channel.Id}) {
+		return
+	}
 	service.ResetProxyClientCache()
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
@@ -1098,6 +1146,9 @@ func UpdateChannelStatus(c *gin.Context) {
 	changed := model.UpdateChannelStatus(id, "", req.Status, "manual operation")
 	if changed {
 		model.InitChannelCache()
+		if !refreshRoutingPolicySnapshots(c, []int{id}) {
+			return
+		}
 		service.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.status_update", map[string]interface{}{
@@ -1126,6 +1177,9 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 	}
 	if changedCount > 0 {
 		model.InitChannelCache()
+		if !refreshRoutingPolicySnapshots(c, req.Ids) {
+			return
+		}
 		service.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.status_update_batch", map[string]interface{}{
@@ -1316,6 +1370,9 @@ func CopyChannel(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
+	if !refreshRoutingPolicySnapshots(c, []int{clone.Id}) {
+		return
+	}
 	recordManageAudit(c, "channel.copy", map[string]interface{}{
 		"sourceId": id,
 		"id":       clone.Id,

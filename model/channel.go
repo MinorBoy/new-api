@@ -456,22 +456,29 @@ func BatchDeleteChannels(ids []int) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	// 使用事务 分批删除channel表和abilities表
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return tx.Error
 	}
+	keys, err := deleteRouteTargetsForChannels(tx, ids)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
 	for _, chunk := range lo.Chunk(ids, 200) {
-		if err := tx.Where("id in (?)", chunk).Delete(&Channel{}).Error; err != nil {
+		if err := tx.Where("channel_id IN ?", chunk).Delete(&Ability{}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}
-		if err := tx.Where("channel_id in (?)", chunk).Delete(&Ability{}).Error; err != nil {
+		if err := tx.Where("id IN ?", chunk).Delete(&Channel{}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	return RefreshRoutingPolicyCacheKeys(keys)
 }
 
 func (channel *Channel) GetPriority() int64 {
@@ -593,13 +600,27 @@ func (channel *Channel) UpdateBalance(balance float64) {
 }
 
 func (channel *Channel) Delete() error {
-	var err error
-	err = DB.Delete(channel).Error
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	keys, err := deleteRouteTargetsForChannels(tx, []int{channel.Id})
 	if err != nil {
+		tx.Rollback()
 		return err
 	}
-	err = channel.DeleteAbilities()
-	return err
+	if err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Where("id = ?", channel.Id).Delete(&Channel{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	return RefreshRoutingPolicyCacheKeys(keys)
 }
 
 var channelStatusLock sync.Mutex
@@ -873,8 +894,44 @@ func DeleteChannelByStatus(status int64) (int64, error) {
 }
 
 func DeleteDisabledChannel() (int64, error) {
-	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
-	return result.RowsAffected, result.Error
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	var channelIDs []int
+	if err := tx.Model(&Channel{}).
+		Where("status = ? OR status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).
+		Pluck("id", &channelIDs).Error; err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if len(channelIDs) == 0 {
+		if err := tx.Commit().Error; err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
+	keys, err := deleteRouteTargetsForChannels(tx, channelIDs)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Where("channel_id IN ?", channelIDs).Delete(&Ability{}).Error; err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	result := tx.Where("id IN ?", channelIDs).Delete(&Channel{})
+	if result.Error != nil {
+		tx.Rollback()
+		return 0, result.Error
+	}
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	if err := RefreshRoutingPolicyCacheKeys(keys); err != nil {
+		return result.RowsAffected, err
+	}
+	return result.RowsAffected, nil
 }
 
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {

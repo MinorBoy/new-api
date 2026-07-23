@@ -43,6 +43,49 @@ type RoutingCandidateChannel struct {
 	Weight   uint   `json:"weight"`
 }
 
+func ListRoutingPolicies(groupName, canonicalModel string, channelID, offset, limit int) ([]RoutingPolicy, int64, error) {
+	query := DB.Model(&RoutingPolicy{})
+	if groupName != "" {
+		query = query.Where("group_name = ?", groupName)
+	}
+	if canonicalModel != "" {
+		query = query.Where("model = ?", canonicalModel)
+	}
+	if channelID > 0 {
+		subquery := DB.Model(&RouteTarget{}).Select("policy_id").Where("channel_id = ?", channelID)
+		query = query.Where("id IN (?)", subquery)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var policies []RoutingPolicy
+	if err := query.Order("updated_at DESC").Order("id DESC").Offset(offset).Limit(limit).Find(&policies).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(policies) == 0 {
+		return policies, total, nil
+	}
+	policyIDs := make([]int, 0, len(policies))
+	byID := make(map[int]*RoutingPolicy, len(policies))
+	for index := range policies {
+		policyIDs = append(policyIDs, policies[index].ID)
+		byID[policies[index].ID] = &policies[index]
+	}
+	var targets []RouteTarget
+	if err := DB.Where("policy_id IN ?", policyIDs).
+		Order("channel_id ASC, target_priority DESC, id ASC").
+		Find(&targets).Error; err != nil {
+		return nil, 0, err
+	}
+	for _, target := range targets {
+		policy := byID[target.PolicyID]
+		policy.Targets = append(policy.Targets, target)
+	}
+	return policies, total, nil
+}
+
 func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (*RoutingPolicy, error) {
 	snapshot := modelrouting.PolicySnapshot{
 		ID:             id,
@@ -181,4 +224,50 @@ func ListRoutingCandidates(groupName, canonicalModel string) ([]RoutingCandidate
 		return nil, err
 	}
 	return candidates, nil
+}
+
+func RefreshRoutingPolicyCacheByChannelIDs(channelIDs []int) error {
+	keys, err := routingPolicyKeysByChannelIDs(DB, channelIDs)
+	if err != nil {
+		return err
+	}
+	return RefreshRoutingPolicyCacheKeys(keys)
+}
+
+func deleteRouteTargetsForChannels(tx *gorm.DB, channelIDs []int) ([]RoutingPolicyKey, error) {
+	keys, err := routingPolicyKeysByChannelIDs(tx, channelIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(channelIDs) > 0 {
+		if err := tx.Where("channel_id IN ?", channelIDs).Delete(&RouteTarget{}).Error; err != nil {
+			return nil, err
+		}
+	}
+	return keys, nil
+}
+
+func routingPolicyKeysByChannelIDs(db *gorm.DB, channelIDs []int) ([]RoutingPolicyKey, error) {
+	if len(channelIDs) == 0 {
+		return nil, nil
+	}
+	var policyIDs []int
+	if err := db.Model(&RouteTarget{}).
+		Where("channel_id IN ?", channelIDs).
+		Distinct("policy_id").
+		Pluck("policy_id", &policyIDs).Error; err != nil {
+		return nil, err
+	}
+	if len(policyIDs) == 0 {
+		return nil, nil
+	}
+	var policies []RoutingPolicy
+	if err := db.Select("id, group_name, model").Where("id IN ?", policyIDs).Find(&policies).Error; err != nil {
+		return nil, err
+	}
+	keys := make([]RoutingPolicyKey, 0, len(policies))
+	for _, policy := range policies {
+		keys = append(keys, RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model})
+	}
+	return keys, nil
 }

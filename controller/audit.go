@@ -45,6 +45,11 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply":     "Applied upstream model changes to channel (ID: ${id})",
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
+	"routing_policy.create":        "Created routing policy ${group_name}/${model} (ID: ${policy_id})",
+	"routing_policy.update":        "Updated routing policy ${group_name}/${model} (ID: ${policy_id})",
+	"routing_policy.status_update": "Changed routing policy status ${group_name}/${model} (ID: ${policy_id})",
+	"routing_policy.delete":        "Deleted routing policy ${group_name}/${model} (ID: ${policy_id})",
+
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
 
 	"subscription.plan_reset":      "Reset active subscriptions for plan ${plan_id}",

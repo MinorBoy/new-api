@@ -23,7 +23,7 @@ import (
 type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
-	Key                string  `json:"key" gorm:"not null"`
+	Key                string  `json:"key,omitempty" gorm:"not null"`
 	OpenAIOrganization *string `json:"openai_organization"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
@@ -53,7 +53,8 @@ type Channel struct {
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
-	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	OtherSettings      string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	RoutingTargetCount int64  `json:"routing_target_count" gorm:"-"`
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
@@ -363,6 +364,40 @@ func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOpti
 		err = order.Apply(DB).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
 	}
 	return channels, err
+}
+
+func FillRoutingTargetCounts(channels []*Channel) error {
+	ids := make([]int, 0, len(channels))
+	byID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		channel.RoutingTargetCount = 0
+		ids = append(ids, channel.Id)
+		byID[channel.Id] = channel
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var counts []struct {
+		ChannelID int
+		Count     int64
+	}
+	if err := DB.Model(&RouteTarget{}).
+		Select("channel_id, count(*) as count").
+		Where("channel_id IN ?", ids).
+		Group("channel_id").
+		Scan(&counts).Error; err != nil {
+		return err
+	}
+	for _, count := range counts {
+		if channel := byID[count.ChannelID]; channel != nil {
+			channel.RoutingTargetCount = count.Count
+		}
+	}
+	return nil
 }
 
 func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {

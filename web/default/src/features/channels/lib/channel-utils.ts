@@ -618,6 +618,16 @@ export function isTagAggregateRow(row: Channel | TagRow): row is TagRow {
   return Array.isArray((row as TagRow).children)
 }
 
+export function getRoutingTargetCount(row: Channel | TagRow): number {
+  if (!isTagAggregateRow(row)) {
+    return row.routing_target_count
+  }
+  return row.children.reduce(
+    (total, channel) => total + channel.routing_target_count,
+    0
+  )
+}
+
 /**
  * Aggregate channels by tag for tag mode display
  * Converts flat array into tree structure grouped by tag

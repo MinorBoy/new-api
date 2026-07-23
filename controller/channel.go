@@ -164,6 +164,11 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
+	if err := model.FillRoutingTargetCounts(channelData); err != nil {
+		common.SysError("failed to get channel routing target counts: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道列表失败，请稍后重试"})
+		return
+	}
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
@@ -370,6 +375,13 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
+	if err := model.FillRoutingTargetCounts(pagedData); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
@@ -394,6 +406,10 @@ func GetChannel(c *gin.Context) {
 	}
 	channel, err := model.GetChannelById(id, false)
 	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.FillRoutingTargetCounts([]*model.Channel{channel}); err != nil {
 		common.ApiError(c, err)
 		return
 	}

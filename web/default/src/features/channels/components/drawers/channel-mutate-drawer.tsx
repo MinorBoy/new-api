@@ -168,6 +168,7 @@ import {
   findMissingModelsInMapping,
   validateModelMappingJson,
   hasAdvancedSettingsErrors,
+  MANAGED_DEFAULT_BASE_URL_TYPES,
 } from '../../lib'
 import {
   collectInvalidStatusCodeEntries,
@@ -1262,7 +1263,7 @@ export function ChannelMutateDrawer({
 
   // Handle type change - set default values for specific types
   useEffect(() => {
-    if (currentType === 59) {
+    if (MANAGED_DEFAULT_BASE_URL_TYPES.has(currentType)) {
       const currentBaseUrlValue = form.getValues('base_url')
       const nextBaseUrl = getBaseUrlOnChannelTypeChange(
         currentType,

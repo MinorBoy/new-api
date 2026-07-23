@@ -9,6 +9,7 @@ import {
   TYPE_TO_KEY_PROMPT,
 } from '../src/features/channels/constants'
 import {
+  MANAGED_DEFAULT_BASE_URL_TYPES,
   getBaseUrlOnChannelTypeChange,
   getChannelTypeConfig,
   getChannelTypeHints,
@@ -86,6 +87,11 @@ describe('Dimensio channel configuration', () => {
 })
 
 describe('CLMM Mall channel configuration', () => {
+  test('manages default base URLs for Dimensio and CLMM Mall type changes', () => {
+    expect(MANAGED_DEFAULT_BASE_URL_TYPES.has(59)).toBe(true)
+    expect(MANAGED_DEFAULT_BASE_URL_TYPES.has(60)).toBe(true)
+  })
+
   test('registers type 60 in the standard channel options', () => {
     expect(CHANNEL_TYPES[60]).toBe('CLMM Mall')
     expect(CHANNEL_TYPE_OPTIONS).toContainEqual({

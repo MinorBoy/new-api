@@ -176,6 +176,8 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   },
 }
 
+export const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 60])
+
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)
     .map((config) => config.defaultBaseUrl)

@@ -79,23 +79,22 @@ const referenceLimitsSchema = z.object({
   audios: z.number().int().min(0).max(3),
 })
 
-export const routeTargetFormSchema = z
-  .object({
-    id: z.number().int().positive().optional(),
-    channel_id: z.number().int().positive('Channel is required'),
-    channel_name: z.string(),
-    name: z.string().trim().min(1, 'Target name is required'),
-    upstream_model: z.string().trim().min(1, 'Upstream model is required'),
-    target_priority: z.number().int(),
-    enabled: z.boolean(),
-    output_resolutions: z
+export const routeTargetFormSchema = z.object({
+  id: z.number().int().positive().optional(),
+  channel_id: z.number().int().positive('Channel is required'),
+  channel_name: z.string(),
+  name: z.string().trim().min(1, 'Target name is required'),
+  upstream_model: z.string().trim().min(1, 'Upstream model is required'),
+  target_priority: z.number().int(),
+  enabled: z.boolean(),
+  output_resolutions: z
     .array(resolutionSchema)
     .min(1, 'At least one output resolution is required'),
-    durations: durationConstraintFormSchema,
-    aspect_ratios: z.array(aspectRatioSchema),
-    reference_limits: referenceLimitsSchema,
-    supports_real_person: z.enum(['unknown', 'yes', 'no']),
-  })
+  durations: durationConstraintFormSchema,
+  aspect_ratios: z.array(aspectRatioSchema),
+  reference_limits: referenceLimitsSchema,
+  supports_real_person: z.enum(['unknown', 'yes', 'no']),
+})
 
 export const routingPolicyFormSchema = z
   .object({

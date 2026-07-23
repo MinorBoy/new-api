@@ -3,6 +3,7 @@ package newapivideo
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -49,6 +50,39 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 		TotalTokensPresent:      parsed.TotalTokensPresent,
 		BillingClamp:            parsed.BillingClamp,
 	}, nil
+}
+
+func (a *TaskAdaptor) ParseTaskPollingHTTPError(body []byte, statusCode int) *relaycommon.TaskInfo {
+	if statusCode == http.StatusNotFound || statusCode == http.StatusGone {
+		result := relaycommon.FailTaskInfo("task not found or expired")
+		result.ErrorCode = strconv.Itoa(statusCode)
+		return result
+	}
+	if statusCode < http.StatusBadRequest || statusCode >= http.StatusInternalServerError {
+		return nil
+	}
+
+	var response upstreamErrorEnvelope
+	code, message := strconv.Itoa(statusCode), fmt.Sprintf("upstream returned HTTP %d", statusCode)
+	if err := common.Unmarshal(body, &response); err == nil {
+		if response.Code != "" {
+			code = response.Code
+		}
+		if response.Message != "" {
+			message = response.Message
+		}
+		if response.Error != nil {
+			if response.Error.Code != "" {
+				code = response.Error.Code
+			}
+			if response.Error.Message != "" {
+				message = response.Error.Message
+			}
+		}
+	}
+	result := relaycommon.FailTaskInfo(message)
+	result.ErrorCode = code
+	return result
 }
 
 func parseTaskProjection(body []byte) (*parsedTask, error) {

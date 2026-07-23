@@ -196,6 +196,29 @@ func TestParseTaskResultFailurePrecedence(t *testing.T) {
 	}
 }
 
+func TestParseTaskPollingHTTPError(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	for _, status := range []int{404, 410} {
+		result := adaptor.ParseTaskPollingHTTPError([]byte(`{"error":{"code":"gone","message":"provider detail"}}`), status)
+		require.NotNil(t, result)
+		assert.Equal(t, string(model.TaskStatusFailure), result.Status)
+		assert.Equal(t, "task not found or expired", result.Reason)
+		assert.Equal(t, fmt.Sprintf("%d", status), result.ErrorCode)
+	}
+
+	result := adaptor.ParseTaskPollingHTTPError([]byte(`{"code":"bad_duration","message":"duration invalid"}`), 400)
+	require.NotNil(t, result)
+	assert.Equal(t, "duration invalid", result.Reason)
+	assert.Equal(t, "bad_duration", result.ErrorCode)
+
+	nested := adaptor.ParseTaskPollingHTTPError([]byte(`{"error":{"code":"policy","message":"blocked"}}`), 422)
+	require.NotNil(t, nested)
+	assert.Equal(t, "blocked", nested.Reason)
+	assert.Equal(t, "policy", nested.ErrorCode)
+
+	assert.Nil(t, adaptor.ParseTaskPollingHTTPError([]byte(`{}`), 503))
+}
+
 func TestConvertToOpenAIVideoUsesOnlyPublicTaskFacts(t *testing.T) {
 	task := reportTaskFixture()
 	body, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)

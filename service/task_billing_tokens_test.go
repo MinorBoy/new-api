@@ -46,4 +46,19 @@ func TestTaskBillingTokensPrefersPresentCompletionValue(t *testing.T) {
 	assert.False(t, ok)
 	assert.Equal(t, 0, tokens)
 	assert.Nil(t, clamp)
+
+	tokens, ok, clamp = taskBillingTokensChecked(&relaycommon.TaskInfo{TotalTokens: 0, TotalTokensPresent: true})
+	assert.True(t, ok)
+	assert.Equal(t, 0, tokens)
+	assert.Nil(t, clamp)
+
+	existing := &common.QuotaClamp{Op: "QuotaFromDecimal", Kind: common.QuotaClampOverflow, Clamped: common.MaxQuota}
+	tokens, ok, clamp = taskBillingTokensChecked(&relaycommon.TaskInfo{
+		CompletionTokens:        common.MaxQuota,
+		CompletionTokensPresent: true,
+		BillingClamp:            existing,
+	})
+	assert.Equal(t, common.MaxQuota, tokens)
+	assert.True(t, ok)
+	assert.Same(t, existing, clamp)
 }

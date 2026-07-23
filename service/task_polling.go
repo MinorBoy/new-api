@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +33,19 @@ type TaskPollingAdaptor interface {
 	// AdjustBillingOnComplete 在任务到达终态（成功/失败）时由轮询循环调用。
 	// 返回正数触发差额结算（补扣/退还），返回 0 保持预扣费金额不变。
 	AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int
+}
+
+type TaskPollingHTTPErrorParser interface {
+	ParseTaskPollingHTTPError(body []byte, statusCode int) *relaycommon.TaskInfo
+}
+
+type taskPollingResponseData struct {
+	TaskID     string           `json:"task_id"`
+	Status     model.TaskStatus `json:"status"`
+	FailReason string           `json:"fail_reason"`
+	ResultURL  string           `json:"result_url"`
+	Progress   string           `json:"progress"`
+	Data       json.RawMessage  `json:"data"`
 }
 
 // GetTaskAdaptorFunc 由 main 包注入，用于获取指定平台的任务适配器。
@@ -456,6 +471,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
 	}
+	if resp == nil || resp.Body == nil {
+		return fmt.Errorf("fetchTask returned an empty response for task %s", taskId)
+	}
 	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -465,21 +483,38 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
 
 	snap := task.Snapshot()
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+		return fmt.Errorf("retryable polling HTTP status %d for task %s", resp.StatusCode, taskId)
+	}
 
-	taskResult := &relaycommon.TaskInfo{}
-	// try parse as New API response format
-	var responseItems dto.TaskResponse[model.Task]
-	if err = common.Unmarshal(responseBody, &responseItems); err == nil && responseItems.IsSuccess() {
-		logger.LogDebug(ctx, "updateVideoSingleTask parsed as new api response format: %+v", responseItems)
-		t := responseItems.Data
-		taskResult.TaskID = t.TaskID
-		taskResult.Status = string(t.Status)
-		taskResult.Url = t.GetResultURL()
-		taskResult.Progress = t.Progress
-		taskResult.Reason = t.FailReason
-		task.Data = t.Data
-	} else if taskResult, err = adaptor.ParseTaskResult(responseBody); err != nil {
-		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
+	var taskResult *relaycommon.TaskInfo
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if parser, ok := adaptor.(TaskPollingHTTPErrorParser); ok {
+			taskResult = parser.ParseTaskPollingHTTPError(responseBody, resp.StatusCode)
+		}
+		if taskResult == nil {
+			taskResult = relaycommon.FailTaskInfo(fmt.Sprintf("upstream returned HTTP %d", resp.StatusCode))
+			taskResult.ErrorCode = strconv.Itoa(resp.StatusCode)
+		}
+	} else {
+		taskResult, err = adaptor.ParseTaskResult(responseBody)
+		if err != nil || taskResult == nil || taskResult.Status == "" {
+			parseErr := err
+			if parseErr == nil {
+				parseErr = fmt.Errorf("upstream returned empty task status")
+			}
+			var wrapper dto.TaskResponse[taskPollingResponseData]
+			if wrapperErr := common.Unmarshal(responseBody, &wrapper); wrapperErr != nil || !wrapper.IsSuccess() {
+				return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, parseErr)
+			}
+			taskResult = &relaycommon.TaskInfo{
+				TaskID:   wrapper.Data.TaskID,
+				Status:   string(wrapper.Data.Status),
+				Url:      wrapper.Data.ResultURL,
+				Progress: wrapper.Data.Progress,
+				Reason:   wrapper.Data.FailReason,
+			}
+		}
 	}
 
 	task.Data = redactVideoResponseBody(responseBody)
@@ -487,27 +522,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
 
 	now := time.Now().Unix()
-	if taskResult.Status == "" {
-		//taskResult = relaycommon.FailTaskInfo("upstream returned empty status")
-		errorResult := &dto.GeneralErrorResponse{}
-		if err = common.Unmarshal(responseBody, &errorResult); err == nil {
-			openaiError := errorResult.TryToOpenAIError()
-			if openaiError != nil {
-				// 返回规范的 OpenAI 错误格式，提取错误信息，判断错误是否为任务失败
-				if openaiError.Code == "429" {
-					// 429 错误通常表示请求过多或速率限制，暂时不认为是任务失败，保持原状态等待下一轮轮询
-					return nil
-				}
-
-				// 其他错误认为是任务失败，记录错误信息并更新任务状态
-				taskResult = relaycommon.FailTaskInfo("upstream returned error")
-			} else {
-				// unknown error format, log original response
-				logger.LogError(ctx, fmt.Sprintf("Task %s returned empty status with unrecognized error format, response: %s", taskId, string(responseBody)))
-				taskResult = relaycommon.FailTaskInfo("upstream returned unrecognized message")
-			}
-		}
-	}
 
 	shouldRefund := false
 	shouldSettle := false
@@ -683,14 +697,15 @@ func taskBillingTokensChecked(taskResult *relaycommon.TaskInfo) (int, bool, *com
 		return 0, false, nil
 	}
 	tokens := taskResult.TotalTokens
-	if taskResult.CompletionTokensPresent {
+	switch {
+	case taskResult.CompletionTokensPresent:
 		tokens = taskResult.CompletionTokens
-	} else if tokens == 0 {
-		if taskResult.CompletionTokens > 0 {
-			tokens = taskResult.CompletionTokens
-		} else {
-			return 0, false, nil
-		}
+	case taskResult.TotalTokensPresent:
+	case taskResult.TotalTokens != 0:
+	case taskResult.CompletionTokens > 0:
+		tokens = taskResult.CompletionTokens
+	default:
+		return 0, false, nil
 	}
 	if tokens < 0 {
 		common.SysError("negative async task billing tokens; clamped to zero")
@@ -704,5 +719,5 @@ func taskBillingTokensChecked(taskResult *relaycommon.TaskInfo) (int, bool, *com
 		taskResult.BillingClamp = clamp
 		return common.MaxQuota, true, clamp
 	}
-	return tokens, true, nil
+	return tokens, true, taskResult.BillingClamp
 }

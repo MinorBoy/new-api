@@ -1,125 +1,97 @@
-# Channel Model Cost and Gross Profit Design
+# 渠道模型成本与毛利润设计
 
-## 1. Purpose
+## 1. 目标
 
-Add channel-level upstream cost accounting and administrator-only gross-profit
-reporting without changing the existing user billing contract. The user sale
-price remains global and keyed by the client-facing model. The effective user
-charge remains the official sale price multiplied by the effective user-group
-ratio. Upstream cost is resolved independently from the actual selected
-channel and mapped upstream model.
+在不改变现有用户计费契约的前提下，增加渠道级上游成本核算和仅管理员可见的毛利润报表。
+用户售价仍是按客户端模型配置的全局价格，用户最终费用仍由官方售价乘以有效用户分组倍率得到。
+上游成本作为独立账本，根据实际选中的渠道和映射后的上游模型计算。
 
-Phase 1 provides manual, versioned cost configuration for three structured
-cost modes: per request, per duration, and per token. Phase 2 imports local
-Excel or CSV price sheets, such as the Lucen table, into reviewable sale-price
-and channel-cost proposals. A future expression cost mode is documented as an
-extension point but cannot be configured or activated in Phase 1.
+第一期支持手工配置版本化成本规则，并提供三种结构化成本模式：按次、按时长和按 Token。
+第二期支持导入本地 Excel 或 CSV 价格表，例如 Lucen 表格，并生成可审核的售价提案和渠道成本提案。
+未来的成本表达式作为扩展点写入文档，但第一期不能配置或启用。
 
-## 2. Confirmed Business Decisions
+## 2. 已确认的业务决策
 
-1. User sale pricing and upstream cost accounting are independent ledgers.
-2. The official model sale price remains keyed by `OriginModelName` and is not
-   changed by channel selection or model mapping.
-3. The effective user-group ratio is the customer discount or markup.
-4. Realized gross profit is:
+1. 用户售价计费与上游成本核算是两个相互独立的账本。
+2. 官方模型售价仍以 `OriginModelName` 为键，不因渠道选择或模型映射而改变。
+3. 有效用户分组倍率用于给客户折扣或加价。
+4. 已实现毛利润的计算方式为：
 
    ```text
    gross_profit_usd = final_user_charge_usd - actual_upstream_cost_usd
    ```
 
-5. Profit may be negative. Revenue and cost may never be negative.
-6. Upstream cost is keyed by the actual `channel_id + upstream_model`, not by
-   the client model.
-7. Cost configuration retains the original currency and every conversion
-   input. A request snapshots both the original rule and its normalized USD
-   values when the channel is selected.
-8. Later rule, exchange-rate, model-mapping, or sale-price changes never
-   recalculate historical records automatically.
-9. Missing or invalid cost configuration uses strict routing: the channel is
-   ineligible. If every candidate is ineligible, the request is rejected.
-   The system never assumes that cost equals sale price.
-10. If an accepted request later lacks a declared authoritative duration or
-    token measurement, client delivery is not changed. Cost settlement becomes
-    `settlement_failed`, raises an administrator warning, and is excluded from
-    profit totals until reconciled.
-11. Failed requests have zero recognized provider cost by default. A rule may
-    instead declare that an accepted submission is billable.
-12. Phase 1 includes the cost configuration view, administrator request-log
-    details, and aggregate profit reporting.
+5. 利润可以为负数，收入和成本不能为负数。
+6. 上游成本以实际的 `channel_id + upstream_model` 为键，不能使用客户端模型作为成本键。
+7. 成本配置保留原始币种及全部换算参数。选中渠道时，同时快照原始规则和标准化后的 USD 数据。
+8. 后续成本规则、汇率、模型映射或售价变化，不得自动回算历史记录。
+9. 缺少或存在无效成本配置时采用严格路由：该渠道不可参与选择。如果所有候选渠道都不满足条件，则拒绝请求。系统不得假定“成本等于售价”。
+10. 请求已被上游接受后，如果缺少规则声明的权威时长或 Token 计量值，不影响客户端取得成功结果。成本结算状态变为 `settlement_failed`，触发管理员告警，并在完成对账前排除出利润金额汇总。
+11. 请求失败时，默认确认的供应商成本为零。若供应商采用“提交成功即收费”，成本规则可以明确声明该计费事件。
+12. 第一期同时交付渠道模型成本配置、管理员请求日志详情和利润聚合报表。
 
-## 3. Existing Contracts That Remain Unchanged
+## 3. 保持不变的现有契约
 
-The existing user billing paths continue to own pre-consume, settlement,
-refund, subscription, token quota, user used-quota, and channel used-quota
-behavior. `Channel.UsedQuota` remains user-billing quota and must not be
-reinterpreted as provider cost.
+现有用户计费链路继续负责预扣、结算、退款、订阅额度、令牌额度、用户已用额度和渠道已用额度。
+`Channel.UsedQuota` 仍表示用户计费额度，不能改为供应商成本。
 
-The existing sale-pricing modes remain global:
+现有售价模式继续作为全局用户售价配置：
 
-- token pricing through `ModelRatio` and related ratios;
-- fixed request pricing through `ModelPrice`;
-- duration pricing through `per_duration` rules;
-- expression pricing through `billing_expr`.
+- Token 售价使用 `ModelRatio` 及相关倍率；
+- 按次售价使用 `ModelPrice`；
+- 按时长售价使用 `per_duration` 规则；
+- 表达式售价使用 `billing_expr`。
 
-Cost accounting observes the final user charge produced by those paths. It
-does not insert a second user deduction and does not derive user price from
-provider cost.
+成本核算只读取这些链路产生的用户最终费用，不执行第二次用户扣费，也不使用供应商成本反推用户售价。
 
-## 4. Cost Rule Identity and Versioning
+## 4. 成本规则标识与版本管理
 
-Add a `channel_model_cost_rules` table in the main database. A business rule
-is identified by:
+在主数据库新增 `channel_model_cost_rules` 表。成本规则的业务标识为：
 
 ```text
 channel_id + upstream_model + version
 ```
 
-The mapped upstream model is resolved before cost lookup. A client alias can
-therefore keep one official sale price while different channels have different
-cost rules for their actual provider models.
+成本查询前必须先解析映射后的上游模型。因此，同一个客户端模型别名可以保持一份官方售价，同时在不同渠道使用不同的实际上游模型成本。
 
-Each rule has these common fields:
+每条规则包含以下公共字段：
 
-| Field | Meaning |
+| 字段 | 含义 |
 |---|---|
-| `id` | Database-generated rule ID |
-| `channel_id` | Actual provider channel |
-| `upstream_model` | Model sent to that provider |
-| `version` | Monotonically increasing version within the business key |
-| `status` | `draft`, `active`, `inactive`, or `invalid` |
-| `cost_mode` | `per_request`, `per_duration`, or `per_token` |
-| `effective_from` | Inclusive activation timestamp |
-| `effective_to` | Exclusive end timestamp; null for the current version |
-| `source` | `manual` in Phase 1; `import` is added in Phase 2 |
-| `source_batch_id` | Optional Phase 2 import batch reference |
-| `note` | Administrator note, including future expression guidance |
-| `created_by` | Administrator ID |
-| timestamps | Creation and update audit timestamps |
+| `id` | 数据库生成的规则 ID |
+| `channel_id` | 实际供应商渠道 |
+| `upstream_model` | 发送给供应商的模型名 |
+| `version` | 在同一业务键内单调递增的版本号 |
+| `status` | `draft`、`active`、`inactive` 或 `invalid` |
+| `cost_mode` | `per_request`、`per_duration` 或 `per_token` |
+| `effective_from` | 生效时间，包含该时刻 |
+| `effective_to` | 失效时间，不包含该时刻；当前版本为空 |
+| `source` | 第一期为 `manual`，第二期增加 `import` |
+| `source_batch_id` | 可选的第二期导入批次 ID |
+| `note` | 管理员备注，也用于说明未来表达式需求 |
+| `created_by` | 创建规则的管理员 ID |
+| 时间戳 | 创建和更新审计时间 |
 
-Editing an active rule is forbidden. An edit creates a draft successor. Rule
-activation locks the business key with the shared `lockForUpdate` helper,
-ends the previous version, activates the new version, and invalidates the
-rule cache. This avoids database-specific partial indexes and works on SQLite,
-MySQL, and PostgreSQL.
+禁止直接编辑活动规则。修改活动规则时应创建后继草稿版本。
+激活规则时，使用共享的 `lockForUpdate` 锁定业务键，结束旧版本、启用新版本并清理规则缓存。
+该方案不依赖数据库特有的部分索引，可同时支持 SQLite、MySQL 和 PostgreSQL。
 
-Exactly one version may be effective for a business key at a given instant.
-Overlapping effective windows are rejected transactionally.
+同一业务键在任意时刻只能有一个有效版本，事务中必须拒绝生效区间重叠的规则。
 
-## 5. Original Currency and Normalized Cost
+## 5. 原币价格与标准化成本
 
-Each rule stores these original pricing and conversion inputs as validated
-canonical decimal strings rather than binary floating-point numbers:
+每条规则使用经过校验的规范 Decimal 字符串保存原始价格和换算参数，不使用二进制浮点数：
 
-| Field | Constraint |
+| 字段 | 约束 |
 |---|---|
-| `currency` | ISO-style uppercase currency code, for example `CNY` or `USD` |
-| `billing_multiplier` | Positive; defaults to `1` |
-| `purchase_discount_ratio` | Positive; defaults to `1` |
-| `recharge_exchange_ratio` | Positive credited units per paid unit; defaults to `1` |
-| `fee_rate` | Non-negative fractional rate; defaults to `0` |
-| `currency_to_usd_rate` | Positive USD value of one original-currency unit |
+| `currency` | 大写币种代码，例如 `CNY` 或 `USD` |
+| `billing_multiplier` | 必须为正数，默认 `1` |
+| `purchase_discount_ratio` | 必须为正数，默认 `1` |
+| `recharge_exchange_ratio` | 每一实付单位获得的余额单位数，必须为正数，默认 `1` |
+| `fee_rate` | 非负的小数费率，默认 `0` |
+| `currency_to_usd_rate` | 一单位原币对应的 USD 金额，必须为正数 |
 
-The normalized USD unit price is frozen using:
+标准化 USD 单价按以下公式生成并快照：
 
 ```text
 normalized_usd_unit_price =
@@ -131,68 +103,54 @@ normalized_usd_unit_price =
     * currency_to_usd_rate
 ```
 
-The direction of `currency_to_usd_rate` is explicit. For example, a CNY rule
-stores the USD value of CNY 1 rather than an ambiguous `7.3` exchange rate.
+`currency_to_usd_rate` 的方向必须明确。例如 CNY 规则保存 CNY 1 对应的 USD 金额，而不是保存含义模糊的 `7.3`。
 
-Lucen columns such as the applicable no-V or with-V discount are configuration
-inputs. In Phase 1 the administrator selects the discount that applies to the
-channel account. It does not switch dynamically during a request.
+Lucen 表格中适用的“无 V”或“含 V”折扣属于配置输入。
+第一期由管理员选择适用于该渠道账户的折扣，请求期间不动态切换。
 
-All calculation uses `shopspring/decimal`. Persisted aggregate amounts use
-signed `int64` nano-USD, where USD 1 equals `1,000,000,000` nano-USD. Checked
-conversion rejects invalid negative values and reports saturation; bare float
-to integer casts are forbidden.
+所有计算使用 `shopspring/decimal`。用于汇总的金额以有符号 `int64` nano-USD 保存，其中 USD 1 等于 `1,000,000,000` nano-USD。
+所有 Decimal 到整数的换算必须带溢出检查；禁止直接把浮点数强制转换为整数。
 
-## 6. Structured Cost Modes
+## 6. 三种结构化成本模式
 
-### 6.1 Per Request
+### 6.1 按次成本
 
-`per_request` stores one original-currency price for a billable request. Its
-default charge event is `task_succeeded`. A rule may select
-`submit_accepted` when the provider contract charges after successful
-submission even if the eventual task fails.
+`per_request` 保存一次可计费请求的原币价格。默认计费事件为 `task_succeeded`。
+对于任务提交成功后即收费的供应商，规则可以选择 `submit_accepted`。
 
 ```text
 original_cost = request_unit_price * billable_request_count
 ```
 
-Phase 1 supports a billable count of one per gateway request or local task.
+第一期每个网关请求或本地任务的可计费次数为一。
 
-### 6.2 Per Duration
+### 6.2 按时长成本
 
-`per_duration` stores an original-currency price per second and declares one
-measurement source:
+`per_duration` 保存每秒原币价格，并明确选择一种计量来源：
 
-- `upstream_actual`: authoritative duration returned by the provider or media
-  metadata accepted by the adaptor;
-- `validated_request`: the bounded, normalized billable duration submitted to
-  the provider.
+- `upstream_actual`：供应商返回的权威时长，或适配器认可的媒体元数据时长；
+- `validated_request`：提交给供应商之前，经过边界校验和标准化的可计费请求时长。
 
 ```text
 original_cost = price_per_second * billable_duration_seconds
 ```
 
-The duration remains bounded by `relaycommon.MaxTaskDurationSeconds`. An
-adaptor must explicitly expose the declared measurement source. Unexpectedly
-missing measurement produces `settlement_failed`; it does not silently switch
-to the other source.
+时长必须受 `relaycommon.MaxTaskDurationSeconds` 限制。
+适配器必须明确提供规则声明的计量来源。如果运行时意外缺少该值，则进入 `settlement_failed`，不能静默切换到另一种来源。
 
-### 6.3 Per Token
+### 6.3 按 Token 成本
 
-`per_token` stores prices per one million tokens and declares a measurement
-source:
+`per_token` 保存每 1M Token 的价格，并明确选择一种计量来源：
 
-- `upstream_usage`: authoritative usage returned by the provider;
-- `local_usage`: deterministic usage produced by an adaptor or an existing
-  local token counter.
+- `upstream_usage`：供应商返回的权威 Token 用量；
+- `local_usage`：适配器或现有本地 Token 计数器生成的确定性用量。
 
-It has two structured pricing variants:
+按 Token 成本包含两种结构化子模式：
 
-1. `total`: one price for a configured `total_tokens` or
-   `completion_tokens` metric;
-2. `input_output`: separate input-token and output-token prices.
+1. `total`：对选定的 `total_tokens` 或 `completion_tokens` 使用一个单价；
+2. `input_output`：输入 Token 和输出 Token 分别使用不同单价。
 
-Calculations are:
+计算方式为：
 
 ```text
 single_cost = selected_tokens / 1,000,000 * total_token_price
@@ -201,89 +159,70 @@ split_cost = input_tokens / 1,000,000 * input_token_price
            + output_tokens / 1,000,000 * output_token_price
 ```
 
-For NewAPIVideo, detailed polling already preserves `completion_tokens` and
-`total_tokens`; a Lucen rule can select the provider-billed metric. A provider
-that supplies neither upstream nor reliable local usage cannot complete a
-Phase 1 `per_token` settlement. Provider-specific derivation such as
-resolution multiplied by duration and a token coefficient belongs to the
-future expression mode and must be labeled as estimated.
+NewAPIVideo 的详细轮询结果已经保留 `completion_tokens` 和 `total_tokens`，Lucen 规则可选择供应商实际采用的计费字段。
+如果供应商既不返回 Token，也不存在可靠的本地用量，就无法完成第一期的 `per_token` 成本结算。
+“分辨率 × 时长 × Token 系数”等供应商专用推导属于未来表达式模式，并且必须标记为估算值。
 
-## 7. Future Expression Mode
+## 7. 未来的表达式模式
 
-`expression` is reserved in documentation and validation messages but is not
-an activatable Phase 1 cost mode. It is intended for provider-specific rules
-whose actual cost depends on multiple request or result facts and cannot be
-represented by the three structured modes.
+`expression` 只作为文档和校验提示中的保留值，第一期不能启用。
+它用于表示无法由三种结构化模式覆盖、需要组合多个请求或结果参数的供应商成本规则。
 
-Future implementation must follow `pkg/billingexpr/expr.md`, use a separately
-versioned cost-expression contract, bound every user-controlled multiplier,
-and identify estimated rather than provider-authoritative measurements. A
-note on a Phase 1 rule may explain the future requirement but cannot execute
-an expression.
+未来实现必须遵循 `pkg/billingexpr/expr.md`，使用独立版本化的成本表达式契约，限制所有用户可控乘数，并区分估算计量与供应商权威计量。
+第一期规则的备注可以记录未来表达式需求，但不得执行表达式。
 
-## 8. Cost Snapshot and Accounting Record
+## 8. 成本快照与核算记录
 
-Add a `cost_accounting_records` table in the main database. It is the source
-of truth for request-level cost and profit reporting. Using the main database
-allows portable conditional updates and idempotency without depending on the
-configured log database or cross-database transactions.
+在主数据库新增 `cost_accounting_records` 表，作为请求级成本和利润报表的事实来源。
+选择主数据库可以使用跨数据库兼容的条件更新和幂等约束，不依赖日志数据库类型或跨库事务。
 
-Each record contains:
+每条记录包含：
 
-- stable `request_id` and optional local `task_id`;
-- user, group, token, channel, client model, and upstream model dimensions;
-- cost rule ID, version, mode, measurement source, and charge event;
-- complete original-currency rule and conversion snapshot;
-- requested and actual measurement values used for settlement;
-- `quota_per_unit` snapshot and final user quota;
-- original-currency cost as a canonical decimal string;
-- `revenue_nano_usd`, `cost_nano_usd`, and
-  `gross_profit_nano_usd`;
-- nullable `gross_margin_ppm`, where `1,000,000` represents 100%;
-- settlement status, failure code, reconciliation metadata, and timestamps.
+- 稳定的 `request_id` 和可选的本地 `task_id`；
+- 用户、分组、令牌、渠道、客户端模型和上游模型维度；
+- 成本规则 ID、版本、模式、计量来源和计费事件；
+- 完整的原币规则和换算参数快照；
+- 结算使用的请求计量值和实际计量值；
+- `quota_per_unit` 快照和用户最终额度；
+- 规范 Decimal 字符串形式的原币成本；
+- `revenue_nano_usd`、`cost_nano_usd` 和 `gross_profit_nano_usd`；
+- 可空的 `gross_margin_ppm`，其中 `1,000,000` 表示 100%；
+- 结算状态、失败代码、对账信息和相关时间戳。
 
-The cost snapshot is also attached to `RelayInfo` for a synchronous request.
-For an asynchronous task, its record ID and snapshot are persisted in
-`Task.PrivateData` before the upstream submission. This allows polling and
-reconciliation to use the selected version after rule or model-map changes.
+同步请求的成本快照还会挂载到 `RelayInfo`。
+异步任务则在提交上游之前，把成本记录 ID 和快照持久化到 `Task.PrivateData`。
+这样，即使轮询期间规则或模型映射发生变化，仍能使用选中时的版本完成结算和对账。
 
-Existing consume logs retain a cost-record reference and denormalized final
-amounts for administrator display. Public and non-administrator log shaping
-must remove all cost, profit, conversion, and rule fields just as it removes
-other `admin_info` fields. Aggregate reports query the accounting table, not
-log JSON.
+现有消费日志保存成本记录引用，并冗余最终金额用于管理员展示。
+公开日志和非管理员日志的响应整形必须移除成本、利润、换算和规则字段，与现有 `admin_info` 的处理方式一致。
+聚合报表查询成本核算表，不解析日志 JSON。
 
-## 9. Revenue, Cost, and Margin Recognition
+## 9. 收入、成本与毛利确认
 
-Revenue is recognized from the final user charge after normal settlement and
-refund behavior:
+收入以现有结算和退款流程完成后的用户最终费用为准：
 
 ```text
 revenue_nano_usd =
     final_user_quota / quota_per_unit_snapshot * 1,000,000,000
 ```
 
-This preserves the actual group-discounted charge rather than recalculating
-revenue from the current sale configuration. The quota conversion uses
-decimal arithmetic and checked rounding.
+该方式保留实际应用用户分组折扣后的费用，不使用当前售价配置重新计算历史收入。
+额度换算必须使用 Decimal 和带检查的舍入。
 
-Cost is finalized from the snapshotted normalized unit prices and the selected
-authoritative measurements. Profit and margin are:
+成本使用规则快照中的标准化单价和选定的权威计量值结算。利润和毛利率为：
 
 ```text
 gross_profit_nano_usd = revenue_nano_usd - cost_nano_usd
 gross_margin = gross_profit_nano_usd / revenue_nano_usd
 ```
 
-Margin is null when revenue is zero. A negative profit and margin are valid.
-For non-zero revenue, `gross_margin_ppm` is calculated with checked decimal
-rounding from `gross_profit / revenue * 1,000,000`. The API converts that
-integer to percentage display values; it must not treat a negative result as
-a quota credit.
+收入为零时毛利率为空。负利润和负毛利率是有效结果。
+收入非零时，`gross_margin_ppm` 使用 Decimal 按 `gross_profit / revenue * 1,000,000` 进行带检查舍入。
+API 将该整数转换为百分比展示，不能把负值当作额度返还。
 
-## 10. Settlement State Machine and Idempotency
+## 10. 结算状态机与幂等
 
-Cost records use this state machine:
+成本记录使用以下状态机：
 
 ```text
 pending -> settled
@@ -292,264 +231,203 @@ pending -> settlement_failed
 settlement_failed -> settled
 ```
 
-- `settled` means recognized revenue and provider cost are complete.
-- `zero_cost` means the terminal outcome is contractually not billed by the
-  provider. Its cost is zero and it may participate in aggregate totals.
-- `settlement_failed` means a rule existed but required measurement or
-  arithmetic could not be completed. Amounts are excluded from aggregate
-  totals until an administrator reconciles the record.
+- `settled`：收入和供应商成本均已完整确认；
+- `zero_cost`：终态按供应商契约不收费，成本为零，可以进入金额汇总；
+- `settlement_failed`：存在成本规则，但缺少必要计量值或计算失败；完成管理员对账前不进入金额汇总。
 
-`request_id` is the synchronous idempotency key. Local `task_id` is the
-asynchronous idempotency key. State transitions use conditional GORM updates,
-so polling retries, duplicate callbacks, and reconciliation retries cannot
-double-recognize cost.
+同步请求以 `request_id` 作为幂等键，异步任务以本地 `task_id` 作为幂等键。
+状态转换使用带条件的 GORM 更新，轮询重试、重复回调和对账重试都不能重复确认成本。
 
-A `submit_accepted` rule may settle cost after accepted submission. If the
-task later fails and user quota is refunded, revenue becomes zero while the
-recognized provider cost remains, producing a valid negative profit.
+`submit_accepted` 规则可以在上游接受提交后确认成本。
+如果任务随后失败且用户费用已退款，则收入变为零，供应商成本仍保留，从而产生有效的负利润。
 
-## 11. Routing and Strict Enforcement
+## 11. 路由与严格执行
 
-Cost accounting has a global disabled/strict setting. It defaults to disabled
-after migration so existing installations do not lose all channels before
-cost rules are configured. Once an administrator enables strict mode, there
-is no permissive fallback.
+成本核算提供全局 `disabled` 和 `strict` 两种设置。
+数据库迁移后默认为关闭，避免现有安装在尚未配置成本规则时失去全部渠道。
+管理员启用严格模式后，不再提供宽松回退。
 
-Strict enforcement occurs twice:
+严格校验执行两次：
 
-1. Candidate construction resolves each candidate's mapped upstream model and
-   filters candidates without a complete active cost rule.
-2. Immediately before the upstream request, the final channel and model are
-   resolved again and the immutable cost snapshot is created.
+1. 构建候选渠道时，解析每个候选的映射上游模型，并过滤没有完整活动成本规则的渠道；
+2. 真正发送上游请求前，再次根据最终渠道和模型解析规则，并创建不可变成本快照。
 
-The second check handles model-routing targets, ordinary channel model maps,
-rule activation races, and stale distributed caches. If every candidate is
-ineligible, the client receives the existing safe channel-unavailable shape
-with a stable error code. It must not expose which rule or price is missing.
-The administrator warning includes the channel and upstream model.
+第二次校验用于覆盖模型路由目标、普通渠道模型映射、规则激活并发和分布式缓存滞后。
+如果所有候选渠道均不满足条件，客户端收到现有安全的“渠道不可用”响应和稳定错误码，不得泄露缺失的规则或价格。
+管理员告警中可以包含渠道和上游模型。
 
-Active rules are cached by channel and upstream model under a monotonic shared
-cost-rule revision. Activation, deactivation, channel deletion, and relevant
-model-map changes advance the revision and invalidate affected entries on all
-nodes. The final pre-send check may use a cache entry only after observing the
-current revision; otherwise it reloads the authoritative database row. If the
-current revision or authoritative rule cannot be obtained, strict mode fails
-closed before upstream traffic.
+活动规则按渠道和上游模型缓存，并绑定单调递增的共享成本规则修订号。
+规则激活、停用、渠道删除和相关模型映射变化，都必须推进修订号并在所有节点清理受影响缓存。
+发送前的最终校验只有在观察到当前修订号后才能使用缓存，否则必须重新读取权威数据库记录。
+如果无法取得当前修订号或权威规则，严格模式必须在发送上游请求前拒绝本次请求。
 
-## 12. Synchronous and Asynchronous Data Flow
+## 12. 同步与异步数据流
 
-### 12.1 Synchronous Request
+### 12.1 同步请求
 
-1. Existing pricing resolves the official sale price from the client model.
-2. Distribution selects a cost-eligible channel and mapped upstream model.
-3. Cost accounting creates a `pending` record and attaches its snapshot to
-   `RelayInfo` before upstream traffic. Failure to persist this record rejects
-   the request in strict mode.
-4. Existing billing performs pre-consume and final settlement unchanged.
-5. The adaptor exposes authoritative token or duration usage when required.
-6. Cost accounting reads the final user quota, finalizes cost, and writes
-   revenue, profit, and administrator log details.
-7. A missing declared measurement changes only cost status and warning data;
-   it does not replace a successful client response with an error.
+1. 现有售价逻辑根据客户端模型解析官方售价。
+2. 分发逻辑选择存在有效成本规则的渠道和映射上游模型。
+3. 成本核算在发送上游请求前创建 `pending` 记录，并把快照挂载到 `RelayInfo`；严格模式下持久化失败必须拒绝请求。
+4. 现有计费链路按原有方式执行预扣和最终结算。
+5. 适配器按成本规则需要提供权威 Token 或时长用量。
+6. 成本核算读取用户最终额度，结算成本，并写入收入、利润和管理员日志信息。
+7. 如果缺少声明的计量值，只改变成本状态和告警信息，不能把成功的客户端响应替换为错误。
 
-### 12.2 Asynchronous Task
+### 12.2 异步任务
 
-1. Submission follows the same sale-price, routing, and cost-rule resolution.
-2. The accounting record ID and cost snapshot are written to
-   `Task.PrivateData` before contacting the provider. Failure to persist either
-   side rejects submission before provider traffic.
-3. The submit result records an accepted-submission cost when configured;
-   otherwise the record remains `pending`.
-4. Polling persists authoritative result duration or token usage.
-5. Existing task billing settles or refunds user quota.
-6. Cost accounting finalizes from the task snapshot and terminal result with
-   an idempotent state transition.
-7. A terminal provider failure becomes `zero_cost` unless the accepted
-   submission was already contractually billable.
+1. 提交阶段执行相同的售价、路由和成本规则解析。
+2. 在联系供应商之前，把成本记录 ID 和成本快照写入 `Task.PrivateData`；任一持久化失败都必须在发送供应商请求前拒绝提交。
+3. 若规则采用“提交成功即收费”，提交结果确认该成本；否则保持 `pending`。
+4. 轮询阶段持久化权威结果时长或 Token 用量。
+5. 现有任务计费逻辑结算或退还用户额度。
+6. 成本核算使用任务快照和终态结果，通过幂等状态转换完成结算。
+7. 供应商终态失败默认进入 `zero_cost`；如果提交成功成本已经按契约确认，则保留该成本。
 
-## 13. Administrator User Interface
+## 13. 管理员界面
 
-### 13.1 Channel Model Cost Configuration
+### 13.1 渠道模型成本配置
 
-Add a model-cost tab to channel administration. Its table shows upstream
-model, mapped client models, current official sale price, cost mode, original
-currency cost, normalized USD cost, active version, source, and status.
+在渠道管理中增加“模型成本”页签。
+表格展示上游模型、映射的客户端模型、当前官方售价、成本模式、原币成本、标准化 USD 成本、活动版本、来源和状态。
 
-The create/edit drawer changes fields by cost mode and provides:
+新增或编辑抽屉根据成本模式动态显示字段，并提供：
 
-- original-currency and conversion inputs;
-- `total` versus `input_output` token configuration;
-- explicit measurement source and charge event;
-- a line-by-line USD conversion preview;
-- current official sale price, selected group-discount preview, estimated
-  profit, and estimated margin;
-- draft save, validation, activation, deactivation, and version history.
+- 原币价格和换算参数；
+- `total` 与 `input_output` Token 子模式；
+- 明确的计量来源和计费事件；
+- 逐项 USD 换算预览；
+- 当前官方售价、选定用户分组的折后收入、预估利润和预估毛利率；
+- 草稿保存、规则校验、激活、停用和版本历史。
 
-The preview is labeled as an estimate. Historical realized profit always uses
-request snapshots.
+预览必须标记为估算值。历史已实现利润始终使用请求快照。
 
-### 13.2 Administrator Log Details
+### 13.2 管理员日志详情
 
-Request details show realized revenue, provider cost, gross profit, gross
-margin, status, actual channel, upstream model, rule version, measurement,
-original-currency amount, and conversion snapshot. A `settlement_failed`
-record provides an audited measurement backfill and reconciliation action.
+请求详情展示已实现收入、供应商成本、毛利润、毛利率、成本状态、实际渠道、上游模型、规则版本、计量值、原币金额和换算快照。
+`settlement_failed` 记录提供带审计的计量值补录和重新结算操作。
 
-No cost or profit fields appear in ordinary user logs or public pricing APIs.
+普通用户日志和公开定价 API 不得返回任何成本或利润字段。
 
-### 13.3 Profit Report
+### 13.3 利润报表
 
-The report filters by time, channel, upstream model, client model, user group,
-and cost status. It displays:
+报表支持按时间、渠道、上游模型、客户端模型、用户分组和成本状态筛选，并展示：
 
-- total revenue, total cost, gross profit, and gross margin;
-- settled request count, negative-profit count, pending count, and failed
-  settlement count;
-- channel and model breakdown rows.
+- 总收入、总成本、毛利润和毛利率；
+- 已结算请求数、负利润请求数、待结算数和结算失败数；
+- 按渠道和模型拆分的明细行。
 
-Only `settled` and `zero_cost` records participate in amount totals. Pending
-and failed records appear as separate counts. Async tasks become realized only
-after final settlement.
+只有 `settled` 和 `zero_cost` 记录参与金额汇总。
+`pending` 和 `settlement_failed` 单独显示数量。异步任务只有完成最终结算后才成为已实现利润。
 
-## 14. Phase 2 Excel and CSV Import
+## 14. 第二期 Excel 和 CSV 导入
 
-Phase 2 adds a browser upload workflow:
+第二期增加浏览器本地文件上传流程：
 
 ```text
-upload -> map columns -> validate and preview -> confirm proposals
+上传 -> 映射字段 -> 校验与预览 -> 确认提案
 ```
 
-The importer accepts local `.xlsx` and `.csv` files with size and row-count
-limits. It does not retain the original file after processing. Reusable import
-templates store only column mappings and parsing choices.
+导入器支持带文件大小和行数限制的 `.xlsx` 和 `.csv` 文件，处理后不长期保存原始文件。
+可复用导入模板只保存列映射和解析选项。
 
-For a Lucen-style sheet:
+对于 Lucen 类表格：
 
-- model ID maps to `upstream_model`;
-- non-empty `元/秒` maps to `per_duration`;
-- non-empty `元/次` maps to `per_request`;
-- non-empty `元/1M` maps to `per_token`;
-- recharge ratio, fee, billing multiplier, currency, and selected discount
-  columns map to their structured fields;
-- unsupported capability columns may be ignored or copied into the proposal
-  note, but cannot silently alter cost calculation.
+- 模型 ID 映射到 `upstream_model`；
+- 非空的 `元/秒` 映射到 `per_duration`；
+- 非空的 `元/次` 映射到 `per_request`；
+- 非空的 `元/1M` 映射到 `per_token`；
+- 充值比例、手续费、计费倍率、币种和选定折扣列映射到对应结构化字段；
+- 不参与成本的能力字段可以忽略或写入提案备注，但不得静默改变成本计算。
 
-One import produces two independent proposals:
+一次导入生成两份相互独立的提案：
 
-1. an official global sale-price proposal keyed by client model;
-2. a channel-cost proposal keyed by channel and upstream model.
+1. 按客户端模型生成的全局官方售价提案；
+2. 按渠道和上游模型生成的渠道成本提案。
 
-The administrator reviews and confirms each proposal separately. Confirmation
-creates new versions; it never updates active rows or historical records in
-place. Preview classifies rows as new, changed, unchanged, conflicting, or
-invalid. Invalid or ambiguous rows cannot be activated.
+管理员分别审核并确认两份提案。
+确认操作创建新版本，不直接更新活动规则或历史记录。
+预览把每一行标记为新增、变更、无变化、冲突或无效；无效或含义不明确的行不能激活。
 
-An import batch stores its ID, file hash, selected channel, parsing template,
-column mapping, selected discount column, actor, confirmation choices, and
-result summary. Re-uploading an identical file is detectable, but the
-administrator may intentionally create a later version after explicit review.
+导入批次保存批次 ID、文件哈希、选定渠道、解析模板、列映射、选定折扣列、操作人、确认选项和结果摘要。
+系统可以识别重复上传的相同文件，但管理员经过明确审核后仍可有意创建后续版本。
 
-## 15. API Boundaries
+## 15. API 边界
 
-Administrator-only endpoints cover:
+仅管理员可访问的 API 包括：
 
-- rule list, draft creation, validation preview, activation, deactivation, and
-  version history;
-- accounting-record details and audited reconciliation;
-- aggregate profit summary and grouped breakdown;
-- Phase 2 import upload preview and independent proposal confirmation.
+- 成本规则列表、草稿创建、校验预览、激活、停用和版本历史；
+- 成本核算记录详情和带审计的重新结算；
+- 利润汇总和分组明细；
+- 第二期导入文件预览和两份提案的独立确认。
 
-Request DTOs use explicit nullable scalar fields where omission differs from
-zero. All JSON operations use the wrappers in `common/json.go`. API responses
-return decimal display strings and integer nano-USD source amounts so clients
-do not depend on binary floating-point serialization.
+当“未提供”和“显式零值”语义不同时，请求 DTO 必须使用可空标量字段。
+所有 JSON 操作必须使用 `common/json.go` 中的包装函数。
+API 响应返回用于展示的 Decimal 字符串和整数 nano-USD 原始金额，避免客户端依赖二进制浮点序列化。
 
-## 16. Validation and Error Handling
+## 16. 校验与异常处理
 
-Rule activation rejects:
+出现以下情况时，规则不能激活：
 
-- missing channel or upstream model;
-- unsupported cost mode or measurement source;
-- zero, negative, NaN, infinite, or unparsable required prices and ratios;
-- negative fees;
-- incomplete token variant fields;
-- a measurement source the selected channel/adaptor cannot provide;
-- overlapping effective versions;
-- normalized values that overflow the supported accounting range.
+- 缺少渠道或上游模型；
+- 不支持的成本模式或计量来源；
+- 必填价格或倍率为零、负数、NaN、无穷大或无法解析；
+- 手续费为负数；
+- Token 子模式字段不完整；
+- 选定渠道或适配器不能提供声明的计量来源；
+- 有效版本的生效区间重叠；
+- 标准化金额超出支持的核算范围。
 
-Unexpected measurement absence after an accepted request records a stable
-failure code and request-correlated administrator warning. It never invents
-usage, assumes cost equals sale price, silently changes measurement source, or
-turns cost arithmetic into user quota credit.
+请求被上游接受后，如果意外缺少计量值，应写入稳定失败代码和带请求关联的管理员告警。
+系统不得虚构用量、假定成本等于售价、静默切换计量来源，或把成本计算结果转换成用户额度返还。
 
-Before provider traffic, rule lookup, shared revision, snapshot validation, or
-pending-record persistence errors fail closed in strict mode. After provider
-acceptance, accounting persistence errors must not hide a successful client
-result; they retain or move the record to `settlement_failed`, emit an
-administrator warning, and remain eligible for idempotent reconciliation.
+发送供应商请求之前，如果规则查询、共享修订号、快照校验或 `pending` 记录持久化失败，严格模式必须拒绝本次请求。
+供应商接受请求之后，成本核算持久化失败不得隐藏成功的客户端结果；记录应保持或进入 `settlement_failed`，发出管理员告警，并允许后续幂等对账。
 
-Reconciliation records the administrator, old state, supplied measurement,
-new result, timestamp, and reason. It uses the original snapshot, not the
-current active rule.
+重新结算必须记录管理员、原状态、补充的计量值、新结果、操作时间和原因，并继续使用原始快照，不能使用当前活动规则。
 
-## 17. Database Compatibility and Migration
+## 17. 数据库兼容与迁移
 
-All tables use GORM and must work on SQLite, MySQL 5.7.8+, and PostgreSQL 9.6+.
-Decimal rule values and original amounts are stored as canonical text to avoid
-dialect-specific decimal normalization. Aggregate nano-USD fields are
-`int64`. Boolean business defaults are assigned in code rather than GORM
-boolean default tags.
+所有表使用 GORM，并同时支持 SQLite、MySQL 5.7.8+ 和 PostgreSQL 9.6+。
+规则中的 Decimal 值和原币金额使用规范文本保存，避免不同数据库对 Decimal 的归一化差异。
+汇总金额使用 `int64` nano-USD。业务布尔默认值由代码设置，不使用 GORM 布尔默认标签。
 
-Migration adds the rule and accounting tables plus only the compact log fields
-needed for administrator display. The feature setting remains disabled. The
-administrator configures and validates rules, reviews uncovered candidate
-channels, and explicitly enables strict mode.
+迁移新增成本规则表、成本核算表，以及管理员日志展示所需的少量字段。
+迁移完成后功能保持关闭。管理员先配置和校验成本规则，检查尚未覆盖的候选渠道，再显式启用严格模式。
 
-Existing requests and logs have no fabricated cost record and appear as
-historical cost unavailable rather than zero-profit data.
+旧请求和旧日志不生成虚假成本记录，应显示为“历史成本不可用”，不能显示为零利润。
 
-## 18. Test Strategy
+## 18. 测试策略
 
-Backend tests must cover observable accounting and routing contracts:
+后端测试必须覆盖可观察的核算和路由契约：
 
-1. exact per-request, per-duration, total-token, and input/output-token cost;
-2. original currency, multiplier, discount, recharge ratio, fee, and FX
-   conversion snapshots;
-3. active-version transitions and historical immutability;
-4. strict candidate filtering and all-candidates-ineligible behavior;
-5. the final pre-send rule check after model routing and ordinary model maps;
-6. synchronous completion and final user-charge revenue recognition;
-7. async success, zero-cost failure, and accepted-submission provider cost;
-8. missing token or duration measurement becoming `settlement_failed` without
-   changing the client result;
-9. polling, callback, and reconciliation idempotency;
-10. negative profit, zero-revenue null margin, invalid negative values, and
-    checked overflow behavior;
-11. aggregate totals including only settled and zero-cost records;
-12. administrator authorization and non-administrator field isolation;
-13. deterministic GORM behavior on SQLite, MySQL, and PostgreSQL.
+1. 按次、按时长、单一 Token 和输入/输出 Token 的精确成本；
+2. 原币、计费倍率、采购折扣、充值比例、手续费和汇率换算快照；
+3. 活动版本切换及历史数据不可变；
+4. 严格候选过滤，以及全部候选均不满足时拒绝请求；
+5. 模型路由和普通模型映射完成后的发送前最终检查；
+6. 同步请求完成及基于用户最终费用的收入确认；
+7. 异步成功、失败零成本和提交成功供应商成本；
+8. 缺少 Token 或时长计量时进入 `settlement_failed`，同时保持客户端结果不变；
+9. 轮询、回调和人工对账的幂等性；
+10. 负利润、零收入空毛利率、非法负值和带检查的溢出处理；
+11. 金额汇总只包含 `settled` 和 `zero_cost`；
+12. 管理员授权及普通用户字段隔离；
+13. SQLite、MySQL 和 PostgreSQL 下确定一致的 GORM 行为。
 
-Frontend tests cover mode-specific form fields, conversion previews, rule
-history behavior, administrator-only log rendering, report filters and totals,
-empty/error/loading states, and responsive text containment. All new UI text
-is added to every supported locale.
+前端测试覆盖按模式变化的表单字段、换算预览、规则版本历史、仅管理员可见的日志展示、报表筛选与汇总、空状态、错误状态、加载状态和响应式文本布局。
+所有新增界面文案必须加入全部受支持语言。
 
-Phase 2 adds deterministic import fixtures for Lucen-style Excel and CSV,
-column mapping, locale-aware numbers, duplicate files, conflicting rows,
-invalid rows, preview classifications, and independent confirmation of the
-sale and cost proposals.
+第二期增加确定性的 Lucen 类 Excel 和 CSV 测试数据，覆盖列映射、本地化数字、重复文件、冲突行、无效行、预览分类，以及售价提案和成本提案的独立确认。
 
-## 19. Scope Boundaries
+## 19. 范围边界
 
-Phase 1 does not include:
+第一期不包含：
 
-- live provider pricing synchronization;
-- automatic retroactive profit recalculation;
-- executable provider-specific cost expressions;
-- silently estimated token usage;
-- recharge-income, payment-processor, gift-credit, tax, or company-level net
-  profit accounting;
-- exposing upstream costs or profit to ordinary users.
+- 供应商价格的在线实时同步；
+- 自动回算历史利润；
+- 可执行的供应商专用成本表达式；
+- 静默估算 Token 用量；
+- 充值收入、支付通道、赠送额度、税费或公司级净利润核算；
+- 向普通用户公开上游成本或利润。
 
-Phase 2 adds only local Excel/CSV proposal import. Automatic remote price-feed
-synchronization remains a separate future design.
+第二期只增加本地 Excel/CSV 提案导入。自动远程价格源同步需要单独设计。

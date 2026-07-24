@@ -134,6 +134,87 @@ func TestCostPreviewResponseSerializesNanoUSDAsStrings(t *testing.T) {
 	assert.Equal(t, "-500000", *response.MarginPPM)
 }
 
+func TestCostReportResponsesSerializeNanoUSDAsStrings(t *testing.T) {
+	margin := int64(-500_000)
+	summary := costProfitSummaryResponse(service.CostProfitSummary{
+		RealizedRevenueNanoUSD: 200_000_000, RealizedCostNanoUSD: 300_000_000,
+		RealizedProfitNanoUSD: -100_000_000, GrossMarginPPM: &margin,
+		KnownIncompleteCostNanoUSD: 50_000_000,
+	})
+	assert.Equal(t, "200000000", summary.RealizedRevenueNanoUSD)
+	assert.Equal(t, "300000000", summary.RealizedCostNanoUSD)
+	assert.Equal(t, "-100000000", summary.RealizedProfitNanoUSD)
+	assert.Equal(t, "50000000", summary.KnownIncompleteCostNanoUSD)
+	require.NotNil(t, summary.GrossMarginPPM)
+	assert.Equal(t, "-500000", *summary.GrossMarginPPM)
+
+	rows := costProfitBreakdownResponses([]service.CostProfitBreakdownRow{{
+		ChannelID: 7, BillableUpstreamModel: "vendor-model",
+		RealizedRevenueNanoUSD: 200_000_000, RealizedCostNanoUSD: 300_000_000,
+		RealizedProfitNanoUSD: -100_000_000, KnownIncompleteCostNanoUSD: 50_000_000,
+	}})
+	require.Len(t, rows, 1)
+	assert.Equal(t, "200000000", rows[0].RealizedRevenueNanoUSD)
+	assert.Equal(t, "300000000", rows[0].RealizedCostNanoUSD)
+	assert.Equal(t, "-100000000", rows[0].RealizedProfitNanoUSD)
+}
+
+func TestCostRequestDetailResponseSerializesLedgerNanoUSDAsStrings(t *testing.T) {
+	revenue := int64(1_000_000_000)
+	profit := int64(700_000_000)
+	cost := int64(300_000_000)
+	oldAmount := int64(100_000_000)
+	response := costRequestDetailResponse(service.CostRequestDetail{
+		Request: model.CostAccountingRequest{
+			ID: 1, BilledRevenueEquivalentNanoUSD: &revenue,
+			ConfirmedCostNanoUSD: cost, BilledGrossProfitNanoUSD: &profit,
+		},
+		Attempts: []service.CostRequestAttemptDetail{{
+			Attempt: model.CostAccountingAttempt{ID: 2, CostNanoUSD: &cost}, Winning: true,
+		}},
+		Audits: []model.CostAccountingAudit{{
+			ID: 3, OldAmountNanoUSD: &oldAmount, NewAmountNanoUSD: &cost,
+		}},
+	})
+	raw, err := common.Marshal(response)
+	require.NoError(t, err)
+	var decoded struct {
+		Request struct {
+			Revenue *string `json:"billed_revenue_equivalent_nano_usd"`
+			Cost    string  `json:"confirmed_cost_nano_usd"`
+			Profit  *string `json:"billed_gross_profit_nano_usd"`
+		} `json:"request"`
+		Attempts []struct {
+			Attempt struct {
+				Cost *string `json:"cost_nano_usd"`
+			} `json:"attempt"`
+		} `json:"attempts"`
+		Audits []struct {
+			Old *string `json:"old_amount_nano_usd"`
+			New *string `json:"new_amount_nano_usd"`
+		} `json:"audits"`
+	}
+	require.NoError(t, common.Unmarshal(raw, &decoded))
+	assert.Equal(t, costControllerStringPointer("1000000000"), decoded.Request.Revenue)
+	assert.Equal(t, "300000000", decoded.Request.Cost)
+	assert.Equal(t, costControllerStringPointer("700000000"), decoded.Request.Profit)
+	require.Len(t, decoded.Attempts, 1)
+	assert.Equal(t, costControllerStringPointer("300000000"), decoded.Attempts[0].Attempt.Cost)
+	require.Len(t, decoded.Audits, 1)
+	assert.Equal(t, costControllerStringPointer("100000000"), decoded.Audits[0].Old)
+	assert.Equal(t, costControllerStringPointer("300000000"), decoded.Audits[0].New)
+}
+
+func TestCostCoverageResponseKeepsPredictedUpstreamModelContract(t *testing.T) {
+	response := costCoverageResponse(service.CostCoverageRow{
+		ChannelID: 7, OriginModel: "client-model", BillableUpstreamModel: "vendor-model", Covered: true,
+	})
+	assert.Equal(t, 7, response.ChannelID)
+	assert.Equal(t, "client-model", response.OriginModel)
+	assert.Equal(t, "vendor-model", response.PredictedUpstreamModel)
+	assert.True(t, response.Covered)
+}
+
 func TestCostAccountingStrictModeRejectsIncompleteCoverage(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

@@ -227,18 +227,22 @@ func PreviewCostAccounting(c *gin.Context) {
 }
 
 func GetCostCoverage(c *gin.Context) {
-	results, err := service.CheckAuthoritativeCostCoverage()
+	channelID, err := optionalCostAccountingQueryInt(c, "channel_id")
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	results, err := service.CheckCostCoverage(service.CostCoverageFilter{
+		ChannelID: channelID, OriginModel: c.Query("origin_model"),
+		BillableUpstreamModel: c.Query("billable_upstream_model"),
+	})
 	if err != nil {
 		writeCostAccountingError(c, err)
 		return
 	}
 	response := make([]dto.CostCoverageItem, 0, len(results))
 	for _, result := range results {
-		response = append(response, dto.CostCoverageItem{
-			ChannelID: result.ChannelID, OriginModel: result.OriginModel,
-			PredictedUpstreamModel: result.PredictedUpstreamModel,
-			Covered:                result.Covered, Reason: result.Reason,
-		})
+		response = append(response, costCoverageResponse(result))
 	}
 	common.ApiSuccess(c, response)
 }
@@ -301,19 +305,94 @@ func ReconcileCostRevenue(c *gin.Context) {
 }
 
 func GetCostAccountingRequest(c *gin.Context) {
-	writeCostAccountingNotImplemented(c)
+	id, ok := costAccountingID(c)
+	if !ok {
+		return
+	}
+	detail, err := service.GetCostRequestDetail(id)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	common.ApiSuccess(c, costRequestDetailResponse(*detail))
 }
 
 func ListCostAnomalies(c *gin.Context) {
-	writeCostAccountingNotImplemented(c)
+	page, err := optionalCostAccountingQueryInt(c, "page")
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	pageSize, err := optionalCostAccountingQueryInt(c, "page_size")
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	if page == 0 {
+		page = 1
+	}
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	channelID, err := optionalCostAccountingQueryInt(c, "channel_id")
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	startTime, err := optionalCostAccountingQueryInt64(c, "start_time")
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	endTime, err := optionalCostAccountingQueryInt64(c, "end_time")
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	rows, total, err := service.ListCostAnomalies(service.CostAnomalyFilter{
+		Page: page, PageSize: pageSize, Kind: c.Query("kind"), ChannelID: channelID,
+		StartTime: startTime, EndTime: endTime,
+	})
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	responseRows := make([]costAnomalyAPIResponse, 0, len(rows))
+	for _, row := range rows {
+		responseRows = append(responseRows, costAnomalyResponse(row))
+	}
+	common.ApiSuccess(c, gin.H{"items": responseRows, "total": total, "page": page, "page_size": pageSize})
 }
 
 func GetCostReportSummary(c *gin.Context) {
-	writeCostAccountingNotImplemented(c)
+	filter, err := costReportFilterFromQuery(c)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	summary, err := service.SummarizeCostProfit(filter)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	common.ApiSuccess(c, costProfitSummaryResponse(summary))
 }
 
 func GetCostReportBreakdown(c *gin.Context) {
-	writeCostAccountingNotImplemented(c)
+	filter, err := costReportFilterFromQuery(c)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	rows, err := service.BreakDownCostProfit(filter)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	common.ApiSuccess(c, costProfitBreakdownResponses(rows))
 }
 
 func bindReconcileCostAttemptRequest(c *gin.Context) (dto.ReconcileCostAttemptRequest, error) {
@@ -341,6 +420,225 @@ func costPreviewResponse(preview service.CostPreview) dto.CostPreviewResponse {
 		response.MarginPPM = &margin
 	}
 	return response
+}
+
+type costProfitSummaryAPIResponse struct {
+	RealizedRevenueNanoUSD     string  `json:"realized_revenue_nano_usd"`
+	RealizedCostNanoUSD        string  `json:"realized_cost_nano_usd"`
+	RealizedProfitNanoUSD      string  `json:"realized_profit_nano_usd"`
+	GrossMarginPPM             *string `json:"gross_margin_ppm,omitempty"`
+	KnownIncompleteCostNanoUSD string  `json:"known_incomplete_cost_nano_usd"`
+	CompleteRequestCount       int64   `json:"complete_request_count"`
+	NegativeProfitRequestCount int64   `json:"negative_profit_request_count"`
+	RetryAttemptCount          int64   `json:"retry_attempt_count"`
+	AwaitingMeterCount         int64   `json:"awaiting_meter_count"`
+	UnknownCostCount           int64   `json:"unknown_cost_count"`
+	SettlementFailedCount      int64   `json:"settlement_failed_count"`
+	RevenueFailedCount         int64   `json:"revenue_failed_count"`
+}
+
+type costProfitBreakdownAPIResponse struct {
+	ChannelID                  int     `json:"channel_id"`
+	ChannelName                string  `json:"channel_name"`
+	BillableUpstreamModel      string  `json:"billable_upstream_model"`
+	RealizedRevenueNanoUSD     string  `json:"realized_revenue_nano_usd"`
+	RealizedCostNanoUSD        string  `json:"realized_cost_nano_usd"`
+	RealizedProfitNanoUSD      string  `json:"realized_profit_nano_usd"`
+	GrossMarginPPM             *string `json:"gross_margin_ppm,omitempty"`
+	KnownIncompleteCostNanoUSD string  `json:"known_incomplete_cost_nano_usd"`
+	CompleteRequestCount       int64   `json:"complete_request_count"`
+	NegativeProfitRequestCount int64   `json:"negative_profit_request_count"`
+	AttemptCount               int64   `json:"attempt_count"`
+	RetryAttemptCount          int64   `json:"retry_attempt_count"`
+	AwaitingMeterCount         int64   `json:"awaiting_meter_count"`
+	UnknownCostCount           int64   `json:"unknown_cost_count"`
+	SettlementFailedCount      int64   `json:"settlement_failed_count"`
+	RevenueFailedCount         int64   `json:"revenue_failed_count"`
+}
+
+type costRequestLedgerAPIResponse struct {
+	model.CostAccountingRequest
+	BilledRevenueEquivalentNanoUSD *string `json:"billed_revenue_equivalent_nano_usd,omitempty"`
+	ConfirmedCostNanoUSD           string  `json:"confirmed_cost_nano_usd"`
+	BilledGrossProfitNanoUSD       *string `json:"billed_gross_profit_nano_usd,omitempty"`
+}
+
+type costAttemptLedgerAPIResponse struct {
+	model.CostAccountingAttempt
+	CostNanoUSD *string `json:"cost_nano_usd,omitempty"`
+}
+
+type costAuditAPIResponse struct {
+	model.CostAccountingAudit
+	OldAmountNanoUSD *string `json:"old_amount_nano_usd,omitempty"`
+	NewAmountNanoUSD *string `json:"new_amount_nano_usd,omitempty"`
+}
+
+type costRequestAttemptAPIResponse struct {
+	Attempt costAttemptLedgerAPIResponse `json:"attempt"`
+	Winning bool                         `json:"winning"`
+}
+
+type costRequestDetailAPIResponse struct {
+	Request  costRequestLedgerAPIResponse    `json:"request"`
+	Attempts []costRequestAttemptAPIResponse `json:"attempts"`
+	Audits   []costAuditAPIResponse          `json:"audits"`
+}
+
+type costAnomalyAPIResponse struct {
+	Kind       string                        `json:"kind"`
+	Request    costRequestLedgerAPIResponse  `json:"request"`
+	Attempt    *costAttemptLedgerAPIResponse `json:"attempt,omitempty"`
+	OccurredAt int64                         `json:"occurred_at"`
+}
+
+func costProfitSummaryResponse(summary service.CostProfitSummary) costProfitSummaryAPIResponse {
+	return costProfitSummaryAPIResponse{
+		RealizedRevenueNanoUSD:     strconv.FormatInt(summary.RealizedRevenueNanoUSD, 10),
+		RealizedCostNanoUSD:        strconv.FormatInt(summary.RealizedCostNanoUSD, 10),
+		RealizedProfitNanoUSD:      strconv.FormatInt(summary.RealizedProfitNanoUSD, 10),
+		GrossMarginPPM:             costAccountingInt64StringPointer(summary.GrossMarginPPM),
+		KnownIncompleteCostNanoUSD: strconv.FormatInt(summary.KnownIncompleteCostNanoUSD, 10),
+		CompleteRequestCount:       summary.CompleteRequestCount,
+		NegativeProfitRequestCount: summary.NegativeProfitRequestCount,
+		RetryAttemptCount:          summary.RetryAttemptCount,
+		AwaitingMeterCount:         summary.AwaitingMeterCount,
+		UnknownCostCount:           summary.UnknownCostCount,
+		SettlementFailedCount:      summary.SettlementFailedCount,
+		RevenueFailedCount:         summary.RevenueFailedCount,
+	}
+}
+
+func costProfitBreakdownResponses(rows []service.CostProfitBreakdownRow) []costProfitBreakdownAPIResponse {
+	response := make([]costProfitBreakdownAPIResponse, 0, len(rows))
+	for _, row := range rows {
+		response = append(response, costProfitBreakdownAPIResponse{
+			ChannelID: row.ChannelID, ChannelName: row.ChannelName,
+			BillableUpstreamModel:      row.BillableUpstreamModel,
+			RealizedRevenueNanoUSD:     strconv.FormatInt(row.RealizedRevenueNanoUSD, 10),
+			RealizedCostNanoUSD:        strconv.FormatInt(row.RealizedCostNanoUSD, 10),
+			RealizedProfitNanoUSD:      strconv.FormatInt(row.RealizedProfitNanoUSD, 10),
+			GrossMarginPPM:             costAccountingInt64StringPointer(row.GrossMarginPPM),
+			KnownIncompleteCostNanoUSD: strconv.FormatInt(row.KnownIncompleteCostNanoUSD, 10),
+			CompleteRequestCount:       row.CompleteRequestCount,
+			NegativeProfitRequestCount: row.NegativeProfitRequestCount,
+			AttemptCount:               row.AttemptCount, RetryAttemptCount: row.RetryAttemptCount,
+			AwaitingMeterCount: row.AwaitingMeterCount, UnknownCostCount: row.UnknownCostCount,
+			SettlementFailedCount: row.SettlementFailedCount, RevenueFailedCount: row.RevenueFailedCount,
+		})
+	}
+	return response
+}
+
+func costRequestDetailResponse(detail service.CostRequestDetail) costRequestDetailAPIResponse {
+	attempts := make([]costRequestAttemptAPIResponse, 0, len(detail.Attempts))
+	for _, attempt := range detail.Attempts {
+		attempts = append(attempts, costRequestAttemptAPIResponse{
+			Attempt: costAttemptLedgerResponse(attempt.Attempt), Winning: attempt.Winning,
+		})
+	}
+	audits := make([]costAuditAPIResponse, 0, len(detail.Audits))
+	for _, audit := range detail.Audits {
+		audits = append(audits, costAuditAPIResponse{
+			CostAccountingAudit: audit,
+			OldAmountNanoUSD:    costAccountingInt64StringPointer(audit.OldAmountNanoUSD),
+			NewAmountNanoUSD:    costAccountingInt64StringPointer(audit.NewAmountNanoUSD),
+		})
+	}
+	return costRequestDetailAPIResponse{
+		Request: costRequestLedgerResponse(detail.Request), Attempts: attempts, Audits: audits,
+	}
+}
+
+func costAnomalyResponse(row service.CostAnomalyRow) costAnomalyAPIResponse {
+	response := costAnomalyAPIResponse{
+		Kind: row.Kind, Request: costRequestLedgerResponse(row.Request), OccurredAt: row.OccurredAt,
+	}
+	if row.Attempt != nil {
+		attempt := costAttemptLedgerResponse(*row.Attempt)
+		response.Attempt = &attempt
+	}
+	return response
+}
+
+func costRequestLedgerResponse(request model.CostAccountingRequest) costRequestLedgerAPIResponse {
+	return costRequestLedgerAPIResponse{
+		CostAccountingRequest:          request,
+		BilledRevenueEquivalentNanoUSD: costAccountingInt64StringPointer(request.BilledRevenueEquivalentNanoUSD),
+		ConfirmedCostNanoUSD:           strconv.FormatInt(request.ConfirmedCostNanoUSD, 10),
+		BilledGrossProfitNanoUSD:       costAccountingInt64StringPointer(request.BilledGrossProfitNanoUSD),
+	}
+}
+
+func costAttemptLedgerResponse(attempt model.CostAccountingAttempt) costAttemptLedgerAPIResponse {
+	return costAttemptLedgerAPIResponse{
+		CostAccountingAttempt: attempt,
+		CostNanoUSD:           costAccountingInt64StringPointer(attempt.CostNanoUSD),
+	}
+}
+
+func costCoverageResponse(row service.CostCoverageRow) dto.CostCoverageItem {
+	return dto.CostCoverageItem{
+		ChannelID: row.ChannelID, OriginModel: row.OriginModel,
+		PredictedUpstreamModel: row.BillableUpstreamModel, Covered: row.Covered, Reason: row.Reason,
+	}
+}
+
+func costAccountingInt64StringPointer(value *int64) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := strconv.FormatInt(*value, 10)
+	return &formatted
+}
+
+func costReportFilterFromQuery(c *gin.Context) (service.CostReportFilter, error) {
+	channelID, err := optionalCostAccountingQueryInt(c, "channel_id")
+	if err != nil {
+		return service.CostReportFilter{}, err
+	}
+	startTime, err := optionalCostAccountingQueryInt64(c, "start_time")
+	if err != nil {
+		return service.CostReportFilter{}, err
+	}
+	endTime, err := optionalCostAccountingQueryInt64(c, "end_time")
+	if err != nil {
+		return service.CostReportFilter{}, err
+	}
+	if startTime > 0 && endTime > 0 && startTime > endTime {
+		return service.CostReportFilter{}, errors.New("cost report start time must not exceed end time")
+	}
+	return service.CostReportFilter{
+		TimeBasis: c.Query("time_basis"), StartTime: startTime, EndTime: endTime,
+		ChannelID: channelID, BillableUpstreamModel: c.Query("billable_upstream_model"),
+		OriginModelName: c.Query("origin_model"), UserGroup: c.Query("user_group"),
+		UsingGroup: c.Query("using_group"), BillingSource: c.Query("billing_source"),
+		Status: c.Query("status"),
+	}, nil
+}
+
+func optionalCostAccountingQueryInt(c *gin.Context, key string) (int, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return 0, errors.New("invalid " + key)
+	}
+	return parsed, nil
+}
+
+func optionalCostAccountingQueryInt64(c *gin.Context, key string) (int64, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0, errors.New("invalid " + key)
+	}
+	return parsed, nil
 }
 
 func costRuleResponses(rules []model.ChannelModelCostRule) ([]dto.CostRuleResponse, error) {
@@ -379,14 +677,6 @@ func costAccountingID(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
-func writeCostAccountingNotImplemented(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"success": false,
-		"message": "this cost accounting query is not implemented yet",
-		"code":    "not_implemented",
-	})
-}
-
 func writeCostAccountingError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	code := "invalid_request"
@@ -396,6 +686,12 @@ func writeCostAccountingError(c *gin.Context, err error) {
 	} else if errors.Is(err, model.ErrCostStateConflict) || errors.Is(err, model.ErrCostRuleStateConflict) || errors.Is(err, model.ErrCostActiveRuleConflict) {
 		status = http.StatusConflict
 		code = "state_conflict"
+	} else if errors.Is(err, service.ErrCostReportOverflow) {
+		status = http.StatusInternalServerError
+		code = "cost_report_overflow"
+	} else if errors.Is(err, service.ErrCostReportInconsistent) {
+		status = http.StatusInternalServerError
+		code = "cost_report_inconsistent"
 	}
 	message := strings.TrimSpace(err.Error())
 	if status >= http.StatusInternalServerError {

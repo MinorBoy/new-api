@@ -74,7 +74,18 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
   const { t } = useTranslation()
   const target = props.form.watch(`targets.${props.index}`)
   const model = props.form.watch('model')
-  const durationValues = target?.durations.values ?? []
+  const channelName = props.form.watch(
+    `targets.${props.index}.channel_name` as const
+  )
+  const outputResolutions = props.form.watch(
+    `targets.${props.index}.output_resolutions` as const
+  )
+  const durations = props.form.watch(
+    `targets.${props.index}.durations` as const
+  )
+  const namePath = `targets.${props.index}.name` as const
+  const currentName = props.form.watch(namePath)
+  const durationValues = durations.values
   const previousGeneratedName = useRef<string | undefined>(undefined)
   const candidateOptions = props.candidates.map((candidate) => ({
     value: String(candidate.id),
@@ -84,23 +95,17 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
   }))
 
   useEffect(() => {
-    if (!target) {
-      return
-    }
-
     const generatedName = buildRoutingTargetName({
       date: new Date(),
-      channelName: target.channel_name,
+      channelName,
       model,
-      outputResolutions: target.output_resolutions,
-      durations: target.durations,
+      outputResolutions,
+      durations,
     })
     if (generatedName === undefined) {
       return
     }
 
-    const namePath = `targets.${props.index}.name` as const
-    const currentName = props.form.getValues(namePath)
     if (
       !shouldUpdateRoutingTargetName(currentName, previousGeneratedName.current)
     ) {
@@ -111,7 +116,16 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
     if (currentName !== generatedName) {
       props.form.setValue(namePath, generatedName, { shouldValidate: true })
     }
-  }, [model, props.form, props.index, target])
+  }, [
+    channelName,
+    currentName,
+    durations,
+    model,
+    namePath,
+    outputResolutions,
+    props.form,
+    props.index,
+  ])
 
   const setDurationMode = (mode: 'values' | 'range') => {
     if (mode === target?.durations.mode) {

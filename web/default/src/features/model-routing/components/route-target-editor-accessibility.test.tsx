@@ -74,3 +74,21 @@ test('target action buttons keep accessible labels, tooltips, and hit areas', ()
     assert.match(match[0], /title="(?:Copy|Delete)"/)
   }
 })
+
+test('target model mapping fields explain management and replacement values', () => {
+  const html = renderToStaticMarkup(
+    createElement(I18nextProvider, { i18n }, createElement(TargetEditorFixture))
+  )
+
+  assert.match(html, />Upstream channel</)
+  assert.match(html, />Route target name</)
+  assert.match(html, />Channel model mapping \(replacement model\)</)
+  assert.match(
+    html,
+    />Used only to identify this route target in the admin UI; it is not sent upstream\.</
+  )
+  assert.match(
+    html,
+    />The exact model ID configured by the selected channel\. A matched request replaces the canonical model with this value\.</
+  )
+})

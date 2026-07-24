@@ -25,6 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
 import {
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -187,7 +188,7 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
           name={`targets.${props.index}.channel_id`}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('Channel')}</FormLabel>
+              <FormLabel>{t('Upstream channel')}</FormLabel>
               <Combobox
                 options={candidateOptions}
                 value={field.value > 0 ? String(field.value) : ''}
@@ -244,10 +245,15 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
           name={`targets.${props.index}.name`}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('Name')}</FormLabel>
+              <FormLabel>{t('Route target name')}</FormLabel>
               <FormControl>
                 <Input {...field} />
               </FormControl>
+              <FormDescription className='text-xs'>
+                {t(
+                  'Used only to identify this route target in the admin UI; it is not sent upstream.'
+                )}
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -258,10 +264,17 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
           name={`targets.${props.index}.upstream_model`}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('Upstream model')}</FormLabel>
+              <FormLabel>
+                {t('Channel model mapping (replacement model)')}
+              </FormLabel>
               <FormControl>
                 <Input className='font-mono text-xs' {...field} />
               </FormControl>
+              <FormDescription className='text-xs'>
+                {t(
+                  'The exact model ID configured by the selected channel. A matched request replaces the canonical model with this value.'
+                )}
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )}

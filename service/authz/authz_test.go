@@ -49,8 +49,14 @@ func TestInitSeedsBuiltInRolesAndPoliciesOnce(t *testing.T) {
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelRead))
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelOperate))
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, CostAccountingRead))
+	assert.True(t, Can(2, common.RoleAdminUser, CostAccountingWrite))
+	assert.True(t, Can(2, common.RoleAdminUser, CostAccountingReconcile))
 	assert.False(t, Can(2, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(3, common.RoleCommonUser, ChannelRead))
+	assert.False(t, Can(3, common.RoleCommonUser, CostAccountingRead))
+	assert.False(t, Can(3, common.RoleCommonUser, CostAccountingWrite))
+	assert.False(t, Can(3, common.RoleCommonUser, CostAccountingReconcile))
 }
 
 func TestInitOnSlaveOnlyLoadsPolicies(t *testing.T) {
@@ -105,6 +111,11 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionSensitiveWrite: true,
 			ActionSecretView:     false,
 		},
+		ResourceCostAccounting: {
+			ActionRead:      true,
+			ActionWrite:     true,
+			ActionReconcile: true,
+		},
 	}, ExplicitUserPermissions(42))
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
@@ -132,6 +143,11 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionWrite:          true,
 			ActionSensitiveWrite: false,
 			ActionSecretView:     false,
+		},
+		ResourceCostAccounting: {
+			ActionRead:      true,
+			ActionWrite:     true,
+			ActionReconcile: true,
 		},
 	}, ExplicitUserPermissions(42))
 	assert.Empty(t, ExplicitUserOverrides(42))

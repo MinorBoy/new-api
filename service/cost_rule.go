@@ -50,6 +50,14 @@ type CostContractTarget struct {
 	TaskPlatform constant.TaskPlatform
 }
 
+type CostCoverageResult struct {
+	ChannelID              int
+	OriginModel            string
+	PredictedUpstreamModel string
+	Covered                bool
+	Reason                 string
+}
+
 type costCoverageKey struct {
 	channelID int
 	model     string
@@ -274,6 +282,95 @@ func InvalidateCostCoverage(channelID int, billableModel string) {
 	})
 }
 
+func GetCostRule(id int64) (*model.ChannelModelCostRule, error) {
+	var rule model.ChannelModelCostRule
+	if err := model.DB.Where("id = ?", id).First(&rule).Error; err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+func ListCostRules(channelID int, billableModel string) ([]model.ChannelModelCostRule, error) {
+	query := model.DB.Model(&model.ChannelModelCostRule{})
+	if channelID > 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+	if strings.TrimSpace(billableModel) != "" {
+		query = query.Where("billable_upstream_model = ?", strings.TrimSpace(billableModel))
+	}
+	var rules []model.ChannelModelCostRule
+	err := query.Order("channel_id ASC, billable_upstream_model ASC, version DESC").Find(&rules).Error
+	return rules, err
+}
+
+func CostRuleHistory(id int64) ([]model.ChannelModelCostRule, error) {
+	rule, err := GetCostRule(id)
+	if err != nil {
+		return nil, err
+	}
+	return ListCostRules(rule.ChannelID, rule.BillableUpstreamModel)
+}
+
+func ValidateCostRuleByID(id int64) (types.CostRuleConfigV1, error) {
+	rule, err := GetCostRule(id)
+	if err != nil {
+		return types.CostRuleConfigV1{}, err
+	}
+	channel, err := model.GetChannelById(rule.ChannelID, false)
+	if err != nil {
+		return types.CostRuleConfigV1{}, err
+	}
+	capabilities, err := lookupCostCapabilities(channel.Type, "", "")
+	if err != nil {
+		return types.CostRuleConfigV1{}, err
+	}
+	return ValidateCostRuleDraft(rule, capabilities)
+}
+
+func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
+	abilities, err := model.GetAllEnableAbilityWithChannels()
+	if err != nil {
+		return nil, err
+	}
+	results := make([]CostCoverageResult, 0, len(abilities))
+	seen := make(map[costCoverageKey]struct{}, len(abilities))
+	for _, ability := range abilities {
+		channel, err := model.GetChannelById(ability.ChannelId, false)
+		if err != nil {
+			return nil, err
+		}
+		predictedModel, err := predictedCostModel(channel.GetModelMapping(), ability.Model)
+		result := CostCoverageResult{
+			ChannelID:              ability.ChannelId,
+			OriginModel:            ability.Model,
+			PredictedUpstreamModel: predictedModel,
+		}
+		if err != nil {
+			result.Reason = "invalid_model_mapping"
+			results = append(results, result)
+			continue
+		}
+		key := costCoverageKey{channelID: ability.ChannelId, model: predictedModel}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result.Covered, err = CheckPredictedCostCoverage(PredictedCoverageInput{
+			ChannelID:              ability.ChannelId,
+			PredictedUpstreamModel: predictedModel,
+			Authoritative:          true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !result.Covered {
+			result.Reason = "missing_or_incompatible_cost_rule"
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
 func buildCostRuleDraft(input CreateCostRuleInput, capabilities types.CostCapabilities) (*model.ChannelModelCostRule, error) {
 	normalized, err := NormalizeCostRuleConfig(input.CostMode, input.Config)
 	if err != nil {
@@ -435,4 +532,27 @@ func validatePositiveCostPrice(original, normalized *string) error {
 		return fmt.Errorf("normalized USD price is unsupported: %w", err)
 	}
 	return nil
+}
+
+func predictedCostModel(mappingJSON, originModel string) (string, error) {
+	if strings.TrimSpace(mappingJSON) == "" || strings.TrimSpace(mappingJSON) == "{}" {
+		return originModel, nil
+	}
+	var mapping map[string]string
+	if err := common.UnmarshalJsonStr(mappingJSON, &mapping); err != nil {
+		return "", err
+	}
+	current := originModel
+	visited := map[string]struct{}{current: {}}
+	for {
+		next := strings.TrimSpace(mapping[current])
+		if next == "" || next == current {
+			return current, nil
+		}
+		if _, ok := visited[next]; ok {
+			return "", errors.New("model mapping contains a cycle")
+		}
+		visited[next] = struct{}{}
+		current = next
+	}
 }

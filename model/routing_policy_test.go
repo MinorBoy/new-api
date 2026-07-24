@@ -159,7 +159,9 @@ func TestChannelDeletePathsCleanRoutingTargetsAndAbilities(t *testing.T) {
 			name:   "batch delete",
 			status: common.ChannelStatusEnabled,
 			remove: func(t *testing.T, channel *model.Channel) {
-				require.NoError(t, model.BatchDeleteChannels([]int{channel.Id}))
+				rows, err := model.BatchDeleteChannels([]int{channel.Id})
+				require.NoError(t, err)
+				assert.Equal(t, int64(1), rows)
 			},
 		},
 		{

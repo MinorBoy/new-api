@@ -512,7 +512,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					assert.Equal(t, terminalCase.errorCode, errorFields["code"])
 					assert.Equal(t, terminalCase.errorMessage, errorFields["message"])
 					assert.Equal(t, string(model.TaskStatusFailure), string(task.Status))
-					assert.Equal(t, preConsumedQuota, task.Quota)
+					assert.Zero(t, task.Quota)
 					assert.Equal(t, 2_000_000_000, user.Quota)
 					assert.Zero(t, user.UsedQuota)
 					assert.Zero(t, channel.UsedQuota)
@@ -822,7 +822,7 @@ func TestSeedanceNativeFailedTaskResponseAndRefundE2E(t *testing.T) {
 	assert.Equal(t, string(model.TaskStatusFailure), string(task.Status))
 	assert.Equal(t, "100%", task.Progress)
 	assert.Equal(t, response.Error.Message, task.FailReason)
-	assert.Equal(t, preConsumedQuota, task.Quota)
+	assert.Zero(t, task.Quota)
 
 	var refundedUser model.User
 	var refundedChannel model.Channel

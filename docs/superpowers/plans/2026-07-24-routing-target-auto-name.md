@@ -68,7 +68,7 @@ export function shouldUpdateRoutingTargetName(
 ): boolean
 ```
 
-Format the date with local `getFullYear/getMonth/getDate`, derive speed from `-fast-` and `-mini-`, preserve the resolution array order, sort and deduplicate discrete durations, and return `undefined` when `channelName.trim()` is empty. Keep the helper independent of React and do not parse `upstream_model`.
+Format the date with local `getFullYear/getMonth/getDate`, derive speed from `-fast-` and `-mini-`, sort resolutions by `OUTPUT_RESOLUTIONS`, sort and deduplicate discrete durations, and return `undefined` when `channelName.trim()` is empty. Keep the helper independent of React and do not parse `upstream_model`.
 
 - [ ] **Step 2: Run the focused tests and verify GREEN**
 

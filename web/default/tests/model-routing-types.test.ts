@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  buildRoutingTargetName,
   clearUnavailableTargetChannels,
   copyPolicyForm,
   copyTargetForm,
@@ -10,6 +11,7 @@ import {
   normalizeRoutingGroups,
   routingPolicyFormSchema,
   routingPolicyResponseSchema,
+  shouldUpdateRoutingTargetName,
   toWriteRequest,
 } from '../src/features/model-routing/types'
 
@@ -224,5 +226,68 @@ describe('model routing data contract', () => {
       'legacy-group',
       'vip',
     ])
+  })
+
+  test('builds a routing target name from channel and capability fields', () => {
+    expect(
+      buildRoutingTargetName({
+        date: new Date(2026, 6, 24),
+        channelName: 'A1',
+        model: 'doubao-seedance-2-0-fast-260128',
+        outputResolutions: ['1080p', '720p'],
+        durations: { mode: 'range', values: [], min: 4, max: 15 },
+      })
+    ).toBe('20260724-A1-720p+1080p-fast-4-15s')
+
+    expect(
+      buildRoutingTargetName({
+        date: new Date(2026, 6, 24),
+        channelName: 'A1_copy',
+        model: 'doubao-seedance-2-0-mini-260615',
+        outputResolutions: ['1080p'],
+        durations: { mode: 'values', values: [15, 5, 10, 10] },
+      })
+    ).toBe('20260724-A1_copy-1080p-mini-5+10+15s')
+
+    expect(
+      buildRoutingTargetName({
+        date: new Date(2026, 6, 24),
+        channelName: 'A1',
+        model: 'doubao-seedance-2-0-260128',
+        outputResolutions: ['720p'],
+        durations: { mode: 'range', values: [], min: 4, max: 15 },
+      })
+    ).toBe('20260724-A1-720p-standard-4-15s')
+  })
+
+  test('waits for a channel before generating a target name', () => {
+    expect(
+      buildRoutingTargetName({
+        date: new Date(2026, 6, 24),
+        channelName: '  ',
+        model: 'doubao-seedance-2-0-260128',
+        outputResolutions: ['720p'],
+        durations: { mode: 'range', values: [], min: 4, max: 15 },
+      })
+    ).toBeUndefined()
+  })
+
+  test('updates only empty or previously generated target names', () => {
+    expect(shouldUpdateRoutingTargetName('', undefined)).toBe(true)
+    expect(
+      shouldUpdateRoutingTargetName(
+        '20260724-A1-720p-fast-4-15s',
+        '20260724-A1-720p-fast-4-15s'
+      )
+    ).toBe(true)
+    expect(
+      shouldUpdateRoutingTargetName(
+        'custom target name',
+        '20260724-A1-720p-fast-4-15s'
+      )
+    ).toBe(false)
+    expect(shouldUpdateRoutingTargetName('existing target', undefined)).toBe(
+      false
+    )
   })
 })

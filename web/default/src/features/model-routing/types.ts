@@ -273,6 +273,73 @@ export type RoutingPolicyListParams = {
   page_size?: number
 }
 
+export function buildRoutingTargetName(input: {
+  date: Date
+  channelName: string
+  model: RoutingPolicyFormValues['model']
+  outputResolutions: RouteTargetFormValues['output_resolutions']
+  durations: RouteTargetFormValues['durations']
+}): string | undefined {
+  const channelName = input.channelName.trim()
+  if (channelName === '') {
+    return undefined
+  }
+
+  const resolutionOrder = new Map(
+    OUTPUT_RESOLUTIONS.map((resolution, index) => [resolution, index])
+  )
+  const resolutions = [...new Set(input.outputResolutions)].sort(
+    (left, right) =>
+      (resolutionOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (resolutionOrder.get(right) ?? Number.MAX_SAFE_INTEGER)
+  )
+  if (resolutions.length === 0) {
+    return undefined
+  }
+
+  let duration: string
+  if (input.durations.mode === 'values') {
+    const values = [...new Set(input.durations.values)].sort(
+      (left, right) => left - right
+    )
+    if (values.length === 0) {
+      return undefined
+    }
+    duration = `${values.join('+')}s`
+  } else {
+    if (
+      input.durations.min === undefined ||
+      input.durations.max === undefined
+    ) {
+      return undefined
+    }
+    duration = `${input.durations.min}-${input.durations.max}s`
+  }
+
+  let speed = 'standard'
+  if (input.model.includes('-fast-')) {
+    speed = 'fast'
+  } else if (input.model.includes('-mini-')) {
+    speed = 'mini'
+  }
+
+  const year = String(input.date.getFullYear())
+  const month = String(input.date.getMonth() + 1).padStart(2, '0')
+  const day = String(input.date.getDate()).padStart(2, '0')
+  return `${year}${month}${day}-${channelName}-${resolutions.join('+')}-${speed}-${duration}`
+}
+
+export function shouldUpdateRoutingTargetName(
+  currentName: string,
+  previousGeneratedName: string | undefined
+): boolean {
+  return (
+    currentName.trim() === '' ||
+    (previousGeneratedName !== undefined &&
+      currentName === previousGeneratedName)
+  )
+}
+
 export function createEmptyPolicyForm(): RoutingPolicyFormValues {
   return {
     group_name: '',

@@ -78,12 +78,18 @@ func TestCostAccountingRevenueReconcileEndpointRepairsFailedRevenue(t *testing.T
 	sqlDB.SetMaxOpenConns(1)
 	previousDB := model.DB
 	previousLogDB := model.LOG_DB
+	previousRedisEnabled := common.RedisEnabled
+	previousMainDatabaseType := common.MainDatabaseType()
+	previousLogDatabaseType := common.LogDatabaseType()
 	model.DB = db
 	model.LOG_DB = db
+	common.RedisEnabled = false
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	t.Cleanup(func() {
 		model.DB = previousDB
 		model.LOG_DB = previousLogDB
+		common.RedisEnabled = previousRedisEnabled
+		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
 		require.NoError(t, sqlDB.Close())
 	})
 	require.NoError(t, db.AutoMigrate(

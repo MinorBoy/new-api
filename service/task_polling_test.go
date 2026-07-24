@@ -20,6 +20,7 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type taskPollingFetchAdaptor struct {
@@ -726,4 +727,242 @@ func TestSweepUnrefundedFailedTasksRestoresMarkerAfterFundingFailure(t *testing.
 	assert.Zero(t, afterSuccessfulRetry.Quota)
 	assert.Equal(t, subscriptionUsed-int64(taskQuota), getSubscriptionUsed(t, subscriptionID))
 	assert.Equal(t, int64(1), countLogs(t))
+}
+
+func TestSweepUnrefundedFailedTasksAdjustsRecognizedCostRevenue(t *testing.T) {
+	truncate(t)
+
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+	const userID, taskQuota = 11, 1_200
+	seedUser(t, userID, 10_000)
+	task.UserId = userID
+	task.Quota = taskQuota
+	task.Status = model.TaskStatusFailure
+	task.Progress = "100%"
+	task.SubmitTime = model.TaskRefundLegacyCutoff
+	task.UpdatedAt = time.Now().Add(-time.Minute).Unix()
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, recordPendingAsyncCostSettlement(context.Background(), handle.CostRequestID, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusFailure),
+	}))
+
+	callbackName := "test:fail_refund_revenue_recognition"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "CostAccountingRequest" {
+			tx.AddError(fmt.Errorf("injected refund revenue recognition failure"))
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Update().Remove(callbackName)
+		}
+	})
+	sweepUnrefundedFailedTasks(context.Background())
+	require.NoError(t, model.DB.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+
+	var refunded model.Task
+	require.NoError(t, model.DB.First(&refunded, task.ID).Error)
+	assert.Zero(t, refunded.Quota)
+	request := loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostRevenuePending), request.RevenueStatus)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptAwaitingMeter), attempt.Status)
+
+	summary, err := RecoverStaleCostAccounting(context.Background(), time.Now(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AwaitingSettled)
+
+	request = loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostRevenueConfirmedZero), request.RevenueStatus)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Zero(t, *request.FinalUserQuota)
+	require.NotNil(t, request.BilledRevenueEquivalentNanoUSD)
+	assert.Zero(t, *request.BilledRevenueEquivalentNanoUSD)
+	assert.Equal(t, string(types.CostProfitComplete), request.ProfitStatus)
+	require.NotNil(t, request.BilledGrossProfitNanoUSD)
+	assert.Zero(t, *request.BilledGrossProfitNanoUSD)
+}
+
+func TestTaskPollingKeepsTaskRetryableWhenPendingCostMeterPersistenceFails(t *testing.T) {
+	truncate(t)
+
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	task.Platform = constant.TaskPlatform("kling")
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "30%"
+	task.PrivateData.UpstreamTaskID = "upstream-cost-persist-retry"
+	require.NoError(t, model.DB.Create(task).Error)
+
+	callbackName := "test:fail_pending_cost_meter"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "CostAccountingAttempt" {
+			tx.AddError(fmt.Errorf("injected pending cost meter failure"))
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Update().Remove(callbackName)
+		}
+	})
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status:             string(model.TaskStatusSuccess),
+		TotalTokens:        250_000,
+		TotalTokensPresent: true,
+	}}
+
+	require.Error(t, runSinglePollingUpdate(t, adaptor, task))
+	var retryable model.Task
+	require.NoError(t, model.DB.First(&retryable, task.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), retryable.Status)
+	assert.Empty(t, loadCostAttempt(t, handle.AttemptID).ActualMeterJSON)
+
+	require.NoError(t, model.DB.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, &retryable))
+	require.NoError(t, model.DB.First(&retryable, task.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), retryable.Status)
+	assert.Equal(t, string(types.CostAttemptSettled), loadCostAttempt(t, handle.AttemptID).Status)
+}
+
+func TestSweepTimedOutTasksAdjustsRecognizedCostRevenue(t *testing.T) {
+	truncate(t)
+
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+	const userID, taskQuota = 11, 1_800
+	seedUser(t, userID, 10_000)
+	task.UserId = userID
+	task.Quota = taskQuota
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "50%"
+	task.SubmitTime = time.Now().Add(-2 * time.Minute).Unix()
+	task.UpdatedAt = task.SubmitTime
+	require.NoError(t, model.DB.Create(task).Error)
+
+	previousTimeout := constant.TaskTimeoutMinutes
+	constant.TaskTimeoutMinutes = 1
+	t.Cleanup(func() { constant.TaskTimeoutMinutes = previousTimeout })
+	sweepTimedOutTasks(context.Background())
+
+	request := loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostRevenueConfirmedZero), request.RevenueStatus)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Zero(t, *request.FinalUserQuota)
+	require.NotNil(t, request.BilledRevenueEquivalentNanoUSD)
+	assert.Zero(t, *request.BilledRevenueEquivalentNanoUSD)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptUnknown), attempt.Status)
+	assert.Equal(t, "task_polling_timed_out", attempt.FailureCode)
+	assert.Equal(t, string(types.CostProfitIncompleteCost), request.ProfitStatus)
+}
+
+func TestTaskPollingCostDefersSettlementUntilRevenueAdjustmentRecovers(t *testing.T) {
+	truncate(t)
+
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	task.UserId = 11
+	task.Quota = 250_000
+	task.Status = model.TaskStatusSuccess
+	task.Progress = "100%"
+	require.NoError(t, model.DB.Create(task).Error)
+
+	callbackName := "test:fail_async_revenue_adjustment"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "CostAccountingRequest" {
+			tx.AddError(fmt.Errorf("injected async revenue adjustment failure"))
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Update().Remove(callbackName)
+		}
+	})
+
+	result := &relaycommon.TaskInfo{
+		Status:             string(model.TaskStatusSuccess),
+		TotalTokens:        250_000,
+		TotalTokensPresent: true,
+	}
+	settlePolledTaskCost(context.Background(), &taskPollingFetchAdaptor{}, task, result)
+
+	require.NoError(t, model.DB.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptAwaitingMeter), attempt.Status)
+	assert.Contains(t, attempt.ActualMeterJSON, `"total_tokens":250000`)
+	request := loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostProfitIncompleteRevenue), request.ProfitStatus)
+	assert.Equal(t, string(types.CostRevenuePending), request.RevenueStatus)
+	assert.Nil(t, request.FinalUserQuota)
+
+	summary, err := RecoverStaleCostAccounting(context.Background(), time.Now(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AwaitingSettled)
+	attempt = loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	request = loadCostRevenueRequest(t, handle.CostRequestID)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Equal(t, int64(task.Quota), *request.FinalUserQuota)
+	assert.Equal(t, string(types.CostProfitComplete), request.ProfitStatus)
+}
+
+func TestFailedTaskCostDefersZeroConfirmationUntilRevenueAdjustmentRecovers(t *testing.T) {
+	truncate(t)
+
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+	task.Quota = 0
+	task.Status = model.TaskStatusFailure
+	task.Progress = "100%"
+	require.NoError(t, model.DB.Create(task).Error)
+
+	callbackName := "test:fail_failed_task_revenue_adjustment"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "CostAccountingRequest" {
+			tx.AddError(fmt.Errorf("injected failed task revenue adjustment failure"))
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Update().Remove(callbackName)
+		}
+	})
+
+	settlePolledTaskCost(context.Background(), nil, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusFailure),
+	})
+
+	require.NoError(t, model.DB.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptAwaitingMeter), attempt.Status)
+	assert.JSONEq(t, `{}`, attempt.ActualMeterJSON)
+	request := loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostProfitIncompleteRevenue), request.ProfitStatus)
+	assert.Equal(t, string(types.CostRevenuePending), request.RevenueStatus)
+	assert.Nil(t, request.FinalUserQuota)
+
+	summary, err := RecoverStaleCostAccounting(context.Background(), time.Now(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AwaitingSettled)
+	attempt = loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptConfirmedZero), attempt.Status)
+	request = loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostRevenueConfirmedZero), request.RevenueStatus)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Zero(t, *request.FinalUserQuota)
+	assert.Equal(t, string(types.CostProfitComplete), request.ProfitStatus)
 }

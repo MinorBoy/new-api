@@ -83,12 +83,14 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			}
 			return err
 		}
-		if err := RecognizeBilledRevenue(billingCtx, relayInfo, actualQuota); err != nil {
-			logger.LogWarn(ctx, fmt.Sprintf("failed to recognize billed revenue: request_id=%s cost_request_id=%d error=%v",
-				relayInfo.RequestId, relayInfo.CostRequestID, err))
-			if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, "revenue_recognition_failed"); accountingErr != nil {
-				logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue recognition failure: request_id=%s cost_request_id=%d error=%v",
-					relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+		if relayInfo.TaskRelayInfo == nil {
+			if err := RecognizeBilledRevenue(billingCtx, relayInfo, actualQuota); err != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("failed to recognize billed revenue: request_id=%s cost_request_id=%d error=%v",
+					relayInfo.RequestId, relayInfo.CostRequestID, err))
+				if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, costRevenueRecognitionFailureCode); accountingErr != nil {
+					logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue recognition failure: request_id=%s cost_request_id=%d error=%v",
+						relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+				}
 			}
 		}
 
@@ -114,12 +116,14 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			return err
 		}
 	}
-	if err := RecognizeBilledRevenue(billingCtx, relayInfo, actualQuota); err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("failed to recognize billed revenue: request_id=%s cost_request_id=%d error=%v",
-			relayInfo.RequestId, relayInfo.CostRequestID, err))
-		if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, "revenue_recognition_failed"); accountingErr != nil {
-			logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue recognition failure: request_id=%s cost_request_id=%d error=%v",
-				relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+	if relayInfo.TaskRelayInfo == nil {
+		if err := RecognizeBilledRevenue(billingCtx, relayInfo, actualQuota); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("failed to recognize billed revenue: request_id=%s cost_request_id=%d error=%v",
+				relayInfo.RequestId, relayInfo.CostRequestID, err))
+			if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, costRevenueRecognitionFailureCode); accountingErr != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue recognition failure: request_id=%s cost_request_id=%d error=%v",
+					relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+			}
 		}
 	}
 	return nil

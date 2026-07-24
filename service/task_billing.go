@@ -17,6 +17,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	taskSucceededPendingCostSettlement = "task_succeeded_pending_settlement"
+	taskFailedPendingCostSettlement    = "task_failed_pending_settlement"
+)
+
+var errAsyncRevenueManualReconciliation = errors.New("async revenue requires manual reconciliation")
+
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
@@ -99,17 +106,8 @@ func SettleAsyncCostAttempt(ctx context.Context, costRequestID int64, task *mode
 
 	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
 	defer cancel()
-	db := model.DB.WithContext(persistenceCtx)
-	var request model.CostAccountingRequest
-	if err := db.Select("id", "task_id", "winning_attempt_id").Where("id = ?", costRequestID).First(&request).Error; err != nil {
-		return err
-	}
-	if request.TaskID == nil || *request.TaskID != task.TaskID || request.WinningAttemptID == nil {
-		return model.ErrCostStateConflict
-	}
-
-	var attempt model.CostAccountingAttempt
-	if err := db.Where("id = ? AND cost_request_id = ?", *request.WinningAttemptID, request.ID).First(&attempt).Error; err != nil {
+	request, attempt, err := loadAsyncCostTaskAttempt(persistenceCtx, costRequestID, task)
+	if err != nil {
 		return err
 	}
 	status := types.CostAttemptStatus(attempt.Status)
@@ -130,23 +128,7 @@ func SettleAsyncCostAttempt(ctx context.Context, costRequestID int64, task *mode
 		if status != types.CostAttemptAwaitingMeter {
 			return model.ErrCostStateConflict
 		}
-		meter := types.CostMeter{}
-		if result.CostMeter != nil {
-			meter = *result.CostMeter
-		}
-		if types.CostMeterSource(attempt.MeterSource) == types.CostMeterUpstreamUsage &&
-			(result.CompletionTokensPresent || result.TotalTokensPresent) {
-			meter = types.CostMeter{Source: types.CostMeterUpstreamUsage}
-			if result.CompletionTokensPresent {
-				completion := int64(result.CompletionTokens)
-				meter.OutputTokens = &completion
-				meter.CompletionTokens = &completion
-			}
-			if result.TotalTokensPresent {
-				total := int64(result.TotalTokens)
-				meter.TotalTokens = &total
-			}
-		}
+		meter := asyncTaskCostMeter(attempt, result)
 		return SettleSyncCostAttempt(persistenceCtx, &types.CostAttemptHandle{
 			CostRequestID: request.ID,
 			AttemptID:     attempt.ID,
@@ -174,6 +156,113 @@ func SettleAsyncCostAttempt(ctx context.Context, costRequestID int64, task *mode
 		})
 	default:
 		return nil
+	}
+}
+
+func recordPendingAsyncCostSettlement(ctx context.Context, costRequestID int64, task *model.Task, result *relaycommon.TaskInfo) error {
+	if costRequestID == 0 {
+		return nil
+	}
+	if task == nil || result == nil {
+		return errors.New("pending task cost settlement requires task and result")
+	}
+
+	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+	defer cancel()
+	_, attempt, err := loadAsyncCostTaskAttempt(persistenceCtx, costRequestID, task)
+	if err != nil {
+		return err
+	}
+	if types.CostChargeEvent(attempt.ChargeEvent) != types.CostChargeTaskSucceeded {
+		return nil
+	}
+	status := types.CostAttemptStatus(attempt.Status)
+	if status == types.CostAttemptSettled || status == types.CostAttemptConfirmedZero ||
+		status == types.CostAttemptUnknown || status == types.CostAttemptSettlementFailed {
+		return nil
+	}
+	if status != types.CostAttemptAwaitingMeter {
+		return model.ErrCostStateConflict
+	}
+
+	meterJSON := []byte("{}")
+	failureCode := taskFailedPendingCostSettlement
+	switch model.TaskStatus(result.Status) {
+	case model.TaskStatusSuccess:
+		meterJSON, err = common.Marshal(asyncTaskCostMeter(attempt, result))
+		if err != nil {
+			return err
+		}
+		failureCode = taskSucceededPendingCostSettlement
+	case model.TaskStatusFailure:
+	default:
+		return errors.New("pending task cost settlement requires a terminal task")
+	}
+	return model.RecordPendingCostMeterWithContext(persistenceCtx, attempt.ID, string(meterJSON), failureCode)
+}
+
+func loadAsyncCostTaskAttempt(ctx context.Context, costRequestID int64, task *model.Task) (*model.CostAccountingRequest, *model.CostAccountingAttempt, error) {
+	db := model.DB.WithContext(ctx)
+	var request model.CostAccountingRequest
+	if err := db.Select("id", "task_id", "winning_attempt_id").Where("id = ?", costRequestID).First(&request).Error; err != nil {
+		return nil, nil, err
+	}
+	if task == nil || request.TaskID == nil || *request.TaskID != task.TaskID || request.WinningAttemptID == nil {
+		return nil, nil, model.ErrCostStateConflict
+	}
+
+	var attempt model.CostAccountingAttempt
+	if err := db.Where("id = ? AND cost_request_id = ?", *request.WinningAttemptID, request.ID).First(&attempt).Error; err != nil {
+		return nil, nil, err
+	}
+	return &request, &attempt, nil
+}
+
+func asyncTaskCostMeter(attempt *model.CostAccountingAttempt, result *relaycommon.TaskInfo) types.CostMeter {
+	meter := types.CostMeter{}
+	if result.CostMeter != nil {
+		meter = *result.CostMeter
+	}
+	if types.CostMeterSource(attempt.MeterSource) != types.CostMeterUpstreamUsage ||
+		(!result.CompletionTokensPresent && !result.TotalTokensPresent) {
+		return meter
+	}
+
+	meter = types.CostMeter{Source: types.CostMeterUpstreamUsage}
+	if result.CompletionTokensPresent {
+		completion := int64(result.CompletionTokens)
+		meter.OutputTokens = &completion
+		meter.CompletionTokens = &completion
+	}
+	if result.TotalTokensPresent {
+		total := int64(result.TotalTokens)
+		meter.TotalTokens = &total
+	}
+	return meter
+}
+
+func markTimedOutAsyncCostAttempt(ctx context.Context, costRequestID int64, task *model.Task) error {
+	if costRequestID == 0 {
+		return nil
+	}
+	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+	defer cancel()
+	_, attempt, err := loadAsyncCostTaskAttempt(persistenceCtx, costRequestID, task)
+	if err != nil {
+		return err
+	}
+	status := types.CostAttemptStatus(attempt.Status)
+	switch status {
+	case types.CostAttemptAwaitingMeter:
+		now := common.GetTimestamp()
+		return model.TransitionCostAttemptWithContext(persistenceCtx, attempt.ID, status, types.CostAttemptUnknown, map[string]any{
+			"failure_code": "task_polling_timed_out",
+			"terminal_at":  now,
+		})
+	case types.CostAttemptSettled, types.CostAttemptConfirmedZero, types.CostAttemptUnknown, types.CostAttemptSettlementFailed:
+		return nil
+	default:
+		return model.ErrCostStateConflict
 	}
 }
 
@@ -354,8 +443,16 @@ func taskModelName(task *model.Task) string {
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 // 返回资金来源是否已成功退还；失败时保留 quota 作为后续对账标记。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
+	if err := recordPendingAsyncCostSettlement(ctx, task.PrivateData.CostRequestID, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusFailure), Reason: reason,
+	}); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("record refunded task cost settlement failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+	}
 	quota := task.Quota
 	if quota == 0 {
+		if err := settleRefundedTaskCostAccounting(ctx, task, reason); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("settle refunded task cost accounting failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+		}
 		return true
 	}
 
@@ -395,7 +492,49 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
+	if err := settleRefundedTaskCostAccounting(ctx, task, reason); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("settle refunded task cost accounting failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+	}
 	return true
+}
+
+func settleRefundedTaskCostAccounting(ctx context.Context, task *model.Task, reason string) error {
+	if task == nil || task.PrivateData.CostRequestID == 0 {
+		return nil
+	}
+	result := &relaycommon.TaskInfo{Status: string(model.TaskStatusFailure), Reason: reason}
+	if err := recordPendingAsyncCostSettlement(ctx, task.PrivateData.CostRequestID, task, result); err != nil {
+		return err
+	}
+	if err := recognizeAsyncBilledRevenue(ctx, task.PrivateData.CostRequestID, 0); err != nil &&
+		!errors.Is(err, errAsyncRevenueManualReconciliation) {
+		return err
+	}
+	err := SettleAsyncCostAttempt(ctx, task.PrivateData.CostRequestID, task, result)
+	if errors.Is(err, model.ErrCostStateConflict) {
+		return nil
+	}
+	return err
+}
+
+func recognizeAsyncBilledRevenue(ctx context.Context, costRequestID int64, finalQuota int) error {
+	info := &relaycommon.RelayInfo{CostRequestID: costRequestID}
+	if err := RecognizeBilledRevenue(ctx, info, finalQuota); err != nil {
+		persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+		defer cancel()
+		var request model.CostAccountingRequest
+		if queryErr := model.DB.WithContext(persistenceCtx).
+			Select("revenue_status", "failure_code").
+			Where("id = ?", costRequestID).
+			First(&request).Error; queryErr == nil &&
+			types.CostRevenueStatus(request.RevenueStatus) == types.CostRevenueFailed &&
+			request.FailureCode != costRevenueRecognitionFailureCode {
+			return fmt.Errorf("%w: %s", errAsyncRevenueManualReconciliation, request.FailureCode)
+		}
+		_ = MarkCostRevenueFailed(ctx, info, costRevenueRecognitionFailureCode)
+		return err
+	}
+	return nil
 }
 
 // RecalculateTaskQuota 通用的异步差额结算。

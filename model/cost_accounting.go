@@ -304,6 +304,56 @@ func TransitionCostAttemptWithContext(ctx context.Context, id int64, from, to ty
 	return transitionCostAttempt(DB.WithContext(ctx), id, from, to, updates)
 }
 
+func RecordPendingCostMeterWithContext(ctx context.Context, attemptID int64, meterJSON string, failureCode string) error {
+	if ctx == nil {
+		return errors.New("cost meter context is required")
+	}
+	meterJSON = strings.TrimSpace(meterJSON)
+	failureCode = strings.TrimSpace(failureCode)
+	if attemptID <= 0 || meterJSON == "" {
+		return errors.New("pending cost meter is required")
+	}
+	if failureCode == "" || len(failureCode) > 64 {
+		return errors.New("pending cost meter failure code is invalid")
+	}
+
+	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var attempt CostAccountingAttempt
+		if err := lockForUpdate(tx).Where("id = ?", attemptID).First(&attempt).Error; err != nil {
+			return err
+		}
+		if types.CostAttemptStatus(attempt.Status) != types.CostAttemptAwaitingMeter {
+			if (types.CostAttemptStatus(attempt.Status) == types.CostAttemptSettled ||
+				types.CostAttemptStatus(attempt.Status) == types.CostAttemptConfirmedZero) &&
+				attempt.ActualMeterJSON == meterJSON {
+				return nil
+			}
+			return ErrCostStateConflict
+		}
+		if attempt.ActualMeterJSON != "" {
+			if attempt.ActualMeterJSON == meterJSON && attempt.FailureCode == failureCode {
+				return nil
+			}
+			return ErrCostStateConflict
+		}
+
+		result := tx.Model(&CostAccountingAttempt{}).
+			Where("id = ? AND status = ? AND actual_meter_json = ?", attempt.ID, types.CostAttemptAwaitingMeter, "").
+			Updates(map[string]any{
+				"actual_meter_json": meterJSON,
+				"failure_code":      failureCode,
+				"updated_at":        common.GetTimestamp(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrCostStateConflict
+		}
+		return nil
+	})
+}
+
 func transitionCostAttempt(db *gorm.DB, id int64, from, to types.CostAttemptStatus, updates map[string]any) error {
 	if !costAttemptTransitionAllowed(from, to) {
 		return ErrCostStateConflict
@@ -723,9 +773,8 @@ func recomputeCostAccountingRequest(tx *gorm.DB, requestID int64, now int64) err
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected != 1 {
-		return ErrCostStateConflict
-	}
+	// The request row is locked above. MySQL reports zero affected rows for a
+	// successful no-op update, so RowsAffected is not a second CAS here.
 	return nil
 }
 

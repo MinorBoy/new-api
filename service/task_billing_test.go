@@ -1405,6 +1405,7 @@ func prepareTaskPollingCostAttempt(t *testing.T, mode types.CostMode, config typ
 	input.TaskID = &taskID
 	input.TaskPlatform = constant.TaskPlatform("task-test")
 	input.RequestPath = "/v1/video/generations"
+	input.FinalUserQuota = nil
 	handle, err := PrepareCostAttempt(context.Background(), input)
 	require.NoError(t, err)
 	require.NoError(t, AuthorizeCostDispatch(context.Background(), handle))
@@ -1414,6 +1415,8 @@ func prepareTaskPollingCostAttempt(t *testing.T, mode types.CostMode, config typ
 	require.NoError(t, MarkWinningCostAttempt(context.Background(), handle))
 	return &model.Task{
 		TaskID: taskID,
+		UserId: 11,
+		Quota:  500_000,
 		PrivateData: model.TaskPrivateData{
 			CostRequestID: handle.CostRequestID,
 		},

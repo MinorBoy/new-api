@@ -94,6 +94,10 @@ func sweepTimedOutTasks(ctx context.Context) {
 		} else {
 			task.FailReason = reason
 		}
+		if err := markTimedOutAsyncCostAttempt(ctx, task.PrivateData.CostRequestID, task); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("sweepTimedOutTasks cost preparation error for task %s: %v", task.TaskID, err))
+			continue
+		}
 
 		won, err := task.UpdateWithStatus(oldStatus)
 		if err != nil {
@@ -357,6 +361,14 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			task.Progress = "100%"
 		}
 		task.Data = responseItem.Data
+		terminal := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+		result := &relaycommon.TaskInfo{Status: string(task.Status), Reason: task.FailReason}
+		if terminal {
+			if err := preparePolledTaskCostSettlement(ctx, adaptor, task, result); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("prepare Suno task cost settlement failed for task %s: %v", task.TaskID, err))
+				continue
+			}
+		}
 
 		// 持久化走 CAS，防止重叠轮询/sweep/多实例/持久化失败重试导致重复退款或覆盖终态。
 		won, err := task.UpdateWithStatus(prevStatus)
@@ -368,10 +380,8 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			if isFailure && prevStatus != model.TaskStatusFailure && task.Quota != 0 {
 				RefundTaskQuota(ctx, task, task.FailReason)
 			}
-			if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
-				settlePolledTaskCost(ctx, adaptor, task, &relaycommon.TaskInfo{
-					Status: string(task.Status), Reason: task.FailReason,
-				})
+			if terminal {
+				settlePolledTaskCost(ctx, adaptor, task, result)
 			}
 		}
 	}
@@ -640,6 +650,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
 	if isDone && snap.Status != task.Status {
+		if err := preparePolledTaskCostSettlement(ctx, adaptor, task, taskResult); err != nil {
+			return fmt.Errorf("prepare task cost settlement for task %s: %w", task.TaskID, err)
+		}
 		won, err := task.UpdateWithStatus(snap.Status)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("UpdateWithStatus failed for task %s: %s", task.TaskID, err.Error()))
@@ -678,6 +691,24 @@ func settlePolledTaskCost(ctx context.Context, adaptor TaskPollingAdaptor, task 
 	if task == nil || task.PrivateData.CostRequestID == 0 || result == nil {
 		return
 	}
+	if err := preparePolledTaskCostSettlement(ctx, adaptor, task, result); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("record pending task cost settlement failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+		return
+	}
+	if err := recognizeAsyncBilledRevenue(ctx, task.PrivateData.CostRequestID, task.Quota); err != nil &&
+		!errors.Is(err, errAsyncRevenueManualReconciliation) {
+		logger.LogWarn(ctx, fmt.Sprintf("recognize task cost revenue failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+		return
+	}
+	if err := SettleAsyncCostAttempt(ctx, task.PrivateData.CostRequestID, task, result); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("settle task cost failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+	}
+}
+
+func preparePolledTaskCostSettlement(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, result *relaycommon.TaskInfo) error {
+	if task == nil || task.PrivateData.CostRequestID == 0 || result == nil {
+		return nil
+	}
 	if model.TaskStatus(result.Status) == model.TaskStatusSuccess {
 		normalizer, ok := adaptor.(taskCostMeterNormalizer)
 		if ok {
@@ -689,9 +720,7 @@ func settlePolledTaskCost(ctx context.Context, adaptor TaskPollingAdaptor, task 
 			}
 		}
 	}
-	if err := SettleAsyncCostAttempt(ctx, task.PrivateData.CostRequestID, task, result); err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("settle task cost failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
-	}
+	return recordPendingAsyncCostSettlement(ctx, task.PrivateData.CostRequestID, task, result)
 }
 
 func redactVideoResponseBody(body []byte) []byte {

@@ -94,6 +94,53 @@ func TestCostRecoveryRespectsLimitAndOldestFirst(t *testing.T) {
 	assert.Equal(t, string(types.CostAttemptPrepared), loadCostAttempt(t, newer.AttemptID).Status)
 }
 
+func TestCostRecoveryRecognizesTerminalTaskRevenueWithoutAwaitingMeter(t *testing.T) {
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeSubmitAccepted
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+	require.NoError(t, SettleSyncCostAttempt(context.Background(), handle, types.CostMeter{}))
+	task.Status = model.TaskStatusSuccess
+	task.Progress = "100%"
+	task.Quota = 1_500
+	require.NoError(t, model.DB.Create(task).Error)
+
+	summary, err := RecoverStaleCostAccounting(context.Background(), time.Now(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.RevenueSettled)
+	request := loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostRevenueSettled), request.RevenueStatus)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Equal(t, int64(task.Quota), *request.FinalUserQuota)
+	assert.Equal(t, string(types.CostProfitComplete), request.ProfitStatus)
+}
+
+func TestCostRecoveryLeavesUserBillingFailureForManualReconciliation(t *testing.T) {
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeSubmitAccepted
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+	require.NoError(t, SettleSyncCostAttempt(context.Background(), handle, types.CostMeter{}))
+	require.NoError(t, model.RecognizeCostRevenue(model.RecognizeCostRevenueInput{
+		CostRequestID: handle.CostRequestID,
+		From:          types.CostRevenuePending,
+		To:            types.CostRevenueFailed,
+		FailureCode:   "user_billing_settlement_failed",
+	}))
+	task.Status = model.TaskStatusSuccess
+	task.Progress = "100%"
+	task.Quota = 1_500
+	require.NoError(t, model.DB.Create(task).Error)
+
+	recoverable, err := HasRecoverableCostAccounting(context.Background(), time.Now())
+	require.NoError(t, err)
+	assert.False(t, recoverable)
+	summary, err := RecoverStaleCostAccounting(context.Background(), time.Now(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, CostRecoverySummary{}, summary)
+	request := loadCostRevenueRequest(t, handle.CostRequestID)
+	assert.Equal(t, string(types.CostRevenueFailed), request.RevenueStatus)
+	assert.Equal(t, "user_billing_settlement_failed", request.FailureCode)
+}
+
 func TestCostReconcileAttemptUsesFrozenSnapshotAndAppendsOneAudit(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	config := validDurationCostConfig(types.CostMeterUpstreamActual)

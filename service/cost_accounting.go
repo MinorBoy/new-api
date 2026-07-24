@@ -39,6 +39,8 @@ type PrepareCostAttemptInput struct {
 	RequestMeter           *types.CostMeter
 }
 
+const costRevenueRecognitionFailureCode = "revenue_recognition_failed"
+
 type CostCoverageError struct {
 	ChannelID int
 }
@@ -361,6 +363,9 @@ func RecognizeBilledRevenue(ctx context.Context, info *relaycommon.RelayInfo, fi
 		return model.ErrCostStateConflict
 	}
 	if current != types.CostRevenuePending && current != types.CostRevenueFailed {
+		return model.ErrCostStateConflict
+	}
+	if current == types.CostRevenueFailed && request.FailureCode != costRevenueRecognitionFailureCode {
 		return model.ErrCostStateConflict
 	}
 

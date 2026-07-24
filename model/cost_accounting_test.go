@@ -287,6 +287,47 @@ func TestRecognizeCostRevenueFailureKeepsValidUpdateTimestamp(t *testing.T) {
 	assert.Positive(t, request.UpdatedAt)
 }
 
+func TestRecognizeCostRevenueDoesNotRewriteConfirmedAmounts(t *testing.T) {
+	prepareCostAccountingDB(t)
+	initialQuota := int64(500)
+	initialRevenue := int64(1_000)
+	profitRecognizedAt := int64(200)
+	request := CostAccountingRequest{
+		RequestID:                      "request-adjust-revenue",
+		RevenueStatus:                  string(types.CostRevenueSettled),
+		FinalUserQuota:                 &initialQuota,
+		QuotaPerUnitSnapshot:           "500000",
+		BilledRevenueEquivalentNanoUSD: &initialRevenue,
+		ProfitRecognizedAt:             &profitRecognizedAt,
+	}
+	attempt := preparedCostAttempt(1)
+	require.NoError(t, PrepareCostAttempt(&request, &attempt))
+	require.NoError(t, TransitionCostAttempt(attempt.ID, types.CostAttemptPrepared, types.CostAttemptDispatching, nil))
+	cost := int64(250)
+	require.NoError(t, SettleCostAttempt(SettleCostAttemptInput{
+		AttemptID: attempt.ID, From: types.CostAttemptDispatching, To: types.CostAttemptSettled,
+		OriginalCost: "0.00000025", CostNanoUSD: &cost, SettledAt: 200,
+	}))
+
+	zero := int64(0)
+	require.ErrorIs(t, RecognizeCostRevenueWithContext(context.Background(), RecognizeCostRevenueInput{
+		CostRequestID: request.ID, From: types.CostRevenueSettled, To: types.CostRevenueConfirmedZero,
+		FinalUserQuota: &zero, QuotaPerUnitSnapshot: "500000", RevenueNanoUSD: &zero, SettledAt: 300,
+	}), ErrCostStateConflict)
+
+	require.NoError(t, DB.First(&request, request.ID).Error)
+	assert.Equal(t, string(types.CostRevenueSettled), request.RevenueStatus)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Equal(t, initialQuota, *request.FinalUserQuota)
+	require.NotNil(t, request.BilledRevenueEquivalentNanoUSD)
+	assert.Equal(t, initialRevenue, *request.BilledRevenueEquivalentNanoUSD)
+	assert.Equal(t, string(types.CostProfitComplete), request.ProfitStatus)
+	require.NotNil(t, request.BilledGrossProfitNanoUSD)
+	assert.Equal(t, initialRevenue-cost, *request.BilledGrossProfitNanoUSD)
+	require.NotNil(t, request.ProfitRecognizedAt)
+	assert.Equal(t, profitRecognizedAt, *request.ProfitRecognizedAt)
+}
+
 func TestReconcileCostAttemptAppendsAuditAndRecomputesRequest(t *testing.T) {
 	prepareCostAccountingDB(t)
 	revenue := int64(1_000)

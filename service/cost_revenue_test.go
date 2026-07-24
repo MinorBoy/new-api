@@ -57,6 +57,25 @@ func TestRecognizeBilledRevenueIsIdempotentForSameFrozenValues(t *testing.T) {
 	assert.Equal(t, int64(1_000_000_000), *request.BilledRevenueEquivalentNanoUSD)
 }
 
+func TestRecognizeBilledRevenueDoesNotAutoRepairUserBillingFailure(t *testing.T) {
+	prepareCostRevenueDB(t)
+	request := seedPendingCostRevenue(t, "revenue-user-billing-manual", BillingSourceWallet, "500000")
+	require.NoError(t, model.RecognizeCostRevenue(model.RecognizeCostRevenueInput{
+		CostRequestID: request.ID,
+		From:          types.CostRevenuePending,
+		To:            types.CostRevenueFailed,
+		FailureCode:   "user_billing_settlement_failed",
+	}))
+
+	require.ErrorIs(t, RecognizeBilledRevenue(context.Background(), &relaycommon.RelayInfo{
+		CostRequestID: request.ID,
+	}, 500_000), model.ErrCostStateConflict)
+	request = loadCostRevenueRequest(t, request.ID)
+	assert.Equal(t, string(types.CostRevenueFailed), request.RevenueStatus)
+	assert.Equal(t, "user_billing_settlement_failed", request.FailureCode)
+	assert.Nil(t, request.BilledRevenueEquivalentNanoUSD)
+}
+
 func TestRecognizeBilledRevenueWaitsForCostAndAllowsNegativeProfit(t *testing.T) {
 	prepareCostRevenueDB(t)
 	request := seedPendingCostRevenue(t, "revenue-negative-profit", BillingSourceWallet, "500000")
@@ -126,6 +145,25 @@ func TestCostRevenueSettleBillingFallbackRecognizesRevenueWhenNoQuotaAdjustmentI
 	assert.Equal(t, string(types.CostRevenueSettled), request.RevenueStatus)
 	require.NotNil(t, request.BilledRevenueEquivalentNanoUSD)
 	assert.Equal(t, int64(400_000), *request.BilledRevenueEquivalentNanoUSD)
+}
+
+func TestCostRevenueSettleBillingDefersAsyncRecognitionUntilTerminalState(t *testing.T) {
+	prepareCostRevenueDB(t)
+	request := seedPendingCostRevenue(t, "revenue-async-deferred", BillingSourceWallet, "500000")
+	billing := &costRevenueBillingStub{preConsumed: 100}
+	info := &relaycommon.RelayInfo{
+		CostRequestID: request.ID,
+		Billing:       billing,
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	require.NoError(t, SettleBilling(ctx, info, 200))
+	assert.Equal(t, 200, billing.settledQuota)
+	request = loadCostRevenueRequest(t, request.ID)
+	assert.Equal(t, string(types.CostRevenuePending), request.RevenueStatus)
+	assert.Nil(t, request.FinalUserQuota)
+	assert.Nil(t, request.BilledRevenueEquivalentNanoUSD)
 }
 
 func TestCostRevenueSettleBillingKeepsSuccessWhenRevenuePersistenceFails(t *testing.T) {

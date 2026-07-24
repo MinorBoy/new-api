@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -56,6 +57,63 @@ func TestCostAccountingReconcileBindingPreservesMissingAndExplicitZero(t *testin
 			assert.Equal(t, tt.totalTokens, request.Meter.TotalTokens)
 		})
 	}
+}
+
+func TestCostAccountingRevenueReconcileBindingPreservesExplicitZero(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"action":"settle","final_user_quota":0,"reason":"billing receipt"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	request, err := bindReconcileCostRevenueRequest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, request.FinalUserQuota)
+	assert.Zero(t, *request.FinalUserQuota)
+}
+
+func TestCostAccountingRevenueReconcileEndpointRepairsFailedRevenue(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	model.DB = db
+	model.LOG_DB = db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, db.AutoMigrate(
+		&model.CostAccountingRequest{}, &model.CostAccountingAttempt{}, &model.CostAccountingAudit{},
+		&model.User{}, &model.Log{},
+	))
+	now := common.GetTimestamp()
+	request := model.CostAccountingRequest{
+		RequestID: "controller-revenue-reconcile", QuotaPerUnitSnapshot: "500000",
+		RevenueStatus: string(types.CostRevenueFailed), ProfitStatus: string(types.CostProfitIncompleteRevenue),
+		FailureCode: "revenue_settlement_failed", RequestedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(&request).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(request.ID, 10)}}
+	ctx.Set("id", 92)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/cost-accounting/requests/1/reconcile-revenue", strings.NewReader(`{"action":"settle","final_user_quota":200,"reason":"billing receipt"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ReconcileCostRevenue(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	require.NoError(t, db.First(&request, request.ID).Error)
+	assert.Equal(t, string(types.CostRevenueSettled), request.RevenueStatus)
+	require.NotNil(t, request.BilledRevenueEquivalentNanoUSD)
+	assert.Equal(t, int64(400_000), *request.BilledRevenueEquivalentNanoUSD)
+	var auditCount int64
+	require.NoError(t, db.Model(&model.CostAccountingAudit{}).Where("cost_request_id = ?", request.ID).Count(&auditCount).Error)
+	assert.Equal(t, int64(1), auditCount)
 }
 
 func TestCostPreviewResponseSerializesNanoUSDAsStrings(t *testing.T) {

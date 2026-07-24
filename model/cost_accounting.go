@@ -149,6 +149,18 @@ type ReconcileCostAttemptInput struct {
 	CreatedAt    int64
 }
 
+type ReconcileCostRevenueInput struct {
+	CostRequestID        int64
+	AdminID              int
+	To                   types.CostRevenueStatus
+	FinalUserQuota       int64
+	QuotaPerUnitSnapshot string
+	RevenueNanoUSD       int64
+	MeterJSON            string
+	Reason               string
+	CreatedAt            int64
+}
+
 func PrepareCostAttempt(request *CostAccountingRequest, attempt *CostAccountingAttempt) error {
 	return prepareCostAttempt(DB, request, attempt, nil)
 }
@@ -462,6 +474,17 @@ func recognizeCostRevenue(db *gorm.DB, input RecognizeCostRevenueInput) error {
 }
 
 func ReconcileCostAttempt(input ReconcileCostAttemptInput) error {
+	return reconcileCostAttempt(DB, input)
+}
+
+func ReconcileCostAttemptWithContext(ctx context.Context, input ReconcileCostAttemptInput) error {
+	if ctx == nil {
+		return errors.New("cost reconciliation context is required")
+	}
+	return reconcileCostAttempt(DB.WithContext(ctx), input)
+}
+
+func reconcileCostAttempt(db *gorm.DB, input ReconcileCostAttemptInput) error {
 	input.Reason = strings.TrimSpace(input.Reason)
 	if input.Reason == "" {
 		return errors.New("reconciliation reason is required")
@@ -486,7 +509,7 @@ func ReconcileCostAttempt(input ReconcileCostAttemptInput) error {
 		input.CreatedAt = common.GetTimestamp()
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		var attempt CostAccountingAttempt
 		if err := lockForUpdate(tx).Where("id = ?", input.AttemptID).First(&attempt).Error; err != nil {
 			return err
@@ -531,6 +554,82 @@ func ReconcileCostAttempt(input ReconcileCostAttemptInput) error {
 			RuleVersion:      attempt.RuleVersion,
 			OldAmountNanoUSD: attempt.CostNanoUSD,
 			NewAmountNanoUSD: input.CostNanoUSD,
+			Reason:           input.Reason,
+			CreatedAt:        input.CreatedAt,
+		}
+		if err := tx.Create(&audit).Error; err != nil {
+			return err
+		}
+		return recomputeCostAccountingRequest(tx, request.ID, input.CreatedAt)
+	})
+}
+
+func ReconcileCostRevenueWithContext(ctx context.Context, input ReconcileCostRevenueInput) error {
+	if ctx == nil {
+		return errors.New("cost reconciliation context is required")
+	}
+	return reconcileCostRevenue(DB.WithContext(ctx), input)
+}
+
+func reconcileCostRevenue(db *gorm.DB, input ReconcileCostRevenueInput) error {
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.Reason == "" {
+		return errors.New("reconciliation reason is required")
+	}
+	if input.To != types.CostRevenueSettled && input.To != types.CostRevenueConfirmedZero {
+		return ErrCostStateConflict
+	}
+	if input.FinalUserQuota < 0 || input.RevenueNanoUSD < 0 {
+		return errors.New("reconciled revenue values must be non-negative")
+	}
+	input.QuotaPerUnitSnapshot = strings.TrimSpace(input.QuotaPerUnitSnapshot)
+	if input.QuotaPerUnitSnapshot == "" {
+		return errors.New("quota-per-unit snapshot is required")
+	}
+	if input.To == types.CostRevenueConfirmedZero && (input.FinalUserQuota != 0 || input.RevenueNanoUSD != 0) {
+		return errors.New("confirmed-zero revenue values must be zero")
+	}
+	if input.CreatedAt == 0 {
+		input.CreatedAt = common.GetTimestamp()
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var request CostAccountingRequest
+		if err := lockForUpdate(tx).Where("id = ?", input.CostRequestID).First(&request).Error; err != nil {
+			return err
+		}
+		if types.CostRevenueStatus(request.RevenueStatus) != types.CostRevenueFailed ||
+			request.QuotaPerUnitSnapshot != input.QuotaPerUnitSnapshot {
+			return ErrCostStateConflict
+		}
+
+		result := tx.Model(&CostAccountingRequest{}).
+			Where("id = ? AND revenue_status = ?", request.ID, types.CostRevenueFailed).
+			Updates(map[string]any{
+				"revenue_status":                     string(input.To),
+				"final_user_quota":                   input.FinalUserQuota,
+				"quota_per_unit_snapshot":            input.QuotaPerUnitSnapshot,
+				"billed_revenue_equivalent_nano_usd": input.RevenueNanoUSD,
+				"failure_code":                       "",
+				"revenue_settled_at":                 input.CreatedAt,
+				"updated_at":                         input.CreatedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrCostStateConflict
+		}
+
+		newAmount := input.RevenueNanoUSD
+		audit := CostAccountingAudit{
+			CostRequestID:    request.ID,
+			AdminID:          input.AdminID,
+			OldState:         request.RevenueStatus,
+			NewState:         string(input.To),
+			MeterJSON:        input.MeterJSON,
+			OldAmountNanoUSD: request.BilledRevenueEquivalentNanoUSD,
+			NewAmountNanoUSD: &newAmount,
 			Reason:           input.Reason,
 			CreatedAt:        input.CreatedAt,
 		}

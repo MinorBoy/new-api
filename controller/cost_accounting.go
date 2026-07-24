@@ -253,70 +253,7 @@ func ReconcileCostAttempt(c *gin.Context) {
 		writeCostAccountingError(c, err)
 		return
 	}
-	var attempt model.CostAccountingAttempt
-	if err := model.DB.Where("id = ?", id).First(&attempt).Error; err != nil {
-		writeCostAccountingError(c, err)
-		return
-	}
-	var config types.CostRuleConfigV1
-	if err := common.UnmarshalJsonStr(attempt.RuleConfigJSON, &config); err != nil {
-		writeCostAccountingError(c, err)
-		return
-	}
-
-	input := model.ReconcileCostAttemptInput{
-		AttemptID: id, AdminID: c.GetInt("id"), Reason: request.Reason,
-	}
-	switch request.Action {
-	case "settle":
-		mode := types.CostMode(attempt.CostMode)
-		meterRequired := mode == types.CostModePerDuration || mode == types.CostModePerToken
-		if request.Meter == nil && meterRequired {
-			writeCostAccountingError(c, errors.New("meter is required for settlement"))
-			return
-		}
-		meter := types.CostMeter{}
-		if request.Meter != nil {
-			meter = *request.Meter
-		}
-		if attempt.MeterSource != "" && meter.Source != types.CostMeterSource(attempt.MeterSource) {
-			writeCostAccountingError(c, errors.New("meter source does not match the attempt snapshot"))
-			return
-		}
-		originalCost, costNanoUSD, err := service.CalculateAttemptCost(mode, config, meter)
-		if err != nil {
-			writeCostAccountingError(c, err)
-			return
-		}
-		if request.Meter != nil {
-			meterJSON, err := common.Marshal(request.Meter)
-			if err != nil {
-				writeCostAccountingError(c, err)
-				return
-			}
-			input.MeterJSON = string(meterJSON)
-		}
-		input.To = types.CostAttemptSettled
-		input.OriginalCost = originalCost
-		input.CostNanoUSD = &costNanoUSD
-	case "confirm_zero":
-		zero := int64(0)
-		input.To = types.CostAttemptConfirmedZero
-		input.OriginalCost = "0"
-		input.CostNanoUSD = &zero
-		if request.Meter != nil {
-			meterJSON, err := common.Marshal(request.Meter)
-			if err != nil {
-				writeCostAccountingError(c, err)
-				return
-			}
-			input.MeterJSON = string(meterJSON)
-		}
-	default:
-		writeCostAccountingError(c, errors.New("unsupported reconciliation action"))
-		return
-	}
-	if err := model.ReconcileCostAttempt(input); err != nil {
+	if err := service.ReconcileCostAttempt(c.Request.Context(), id, c.GetInt("id"), request.Action, request.Meter, request.Reason); err != nil {
 		writeCostAccountingError(c, err)
 		return
 	}
@@ -325,7 +262,42 @@ func ReconcileCostAttempt(c *gin.Context) {
 }
 
 func ReconcileCostRevenue(c *gin.Context) {
-	writeCostAccountingNotImplemented(c)
+	id, ok := costAccountingID(c)
+	if !ok {
+		return
+	}
+	request, err := bindReconcileCostRevenueRequest(c)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	if request.QuotaPerUnitSnapshot != nil {
+		writeCostAccountingError(c, errors.New("quota-per-unit snapshot cannot be overridden during reconciliation"))
+		return
+	}
+	var finalQuota int64
+	switch strings.TrimSpace(request.Action) {
+	case "settle":
+		if request.FinalUserQuota == nil {
+			writeCostAccountingError(c, errors.New("final user quota is required"))
+			return
+		}
+		finalQuota = *request.FinalUserQuota
+	case "confirm_zero":
+		if request.FinalUserQuota != nil && *request.FinalUserQuota != 0 {
+			writeCostAccountingError(c, errors.New("confirm-zero final user quota must be zero"))
+			return
+		}
+	default:
+		writeCostAccountingError(c, errors.New("unsupported reconciliation action"))
+		return
+	}
+	if err := service.ReconcileCostRevenue(c.Request.Context(), id, c.GetInt("id"), finalQuota, request.Reason); err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	recordManageAudit(c, "cost_accounting.revenue_reconcile", map[string]interface{}{"request_id": id, "action": request.Action})
+	common.ApiSuccess(c, nil)
 }
 
 func GetCostAccountingRequest(c *gin.Context) {
@@ -346,6 +318,12 @@ func GetCostReportBreakdown(c *gin.Context) {
 
 func bindReconcileCostAttemptRequest(c *gin.Context) (dto.ReconcileCostAttemptRequest, error) {
 	var request dto.ReconcileCostAttemptRequest
+	err := c.ShouldBindJSON(&request)
+	return request, err
+}
+
+func bindReconcileCostRevenueRequest(c *gin.Context) (dto.ReconcileCostRevenueRequest, error) {
+	var request dto.ReconcileCostRevenueRequest
 	err := c.ShouldBindJSON(&request)
 	return request, err
 }

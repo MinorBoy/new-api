@@ -9,7 +9,9 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 )
 
 // RegisterScheduledSystemTasks wires the periodic channel test, upstream model
@@ -22,6 +24,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(costAccountingRecoveryHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -149,6 +152,48 @@ func (asyncTaskPollHandler) NewPayload() any { return nil }
 
 func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	summary := service.RunTaskPollingOnce(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+type costAccountingRecoveryHandler struct{}
+
+type costAccountingRecoveryTaskPayload struct {
+	Limit int `json:"limit"`
+}
+
+func (costAccountingRecoveryHandler) Type() string {
+	return model.SystemTaskTypeCostAccountingRecovery
+}
+
+func (costAccountingRecoveryHandler) Enabled() bool {
+	if cost_setting.Runtime().Mode == types.CostAccountingStrict {
+		return true
+	}
+	recoverable, err := service.HasRecoverableCostAccounting(context.Background(), time.Now())
+	if err != nil {
+		common.SysLog(fmt.Sprintf("cost accounting recovery readiness check failed: %v", err))
+		return false
+	}
+	return recoverable
+}
+
+func (costAccountingRecoveryHandler) Interval() time.Duration { return time.Minute }
+
+func (costAccountingRecoveryHandler) NewPayload() any {
+	return costAccountingRecoveryTaskPayload{Limit: 100}
+}
+
+func (costAccountingRecoveryHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := costAccountingRecoveryTaskPayload{Limit: 100}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	summary, err := service.RecoverStaleCostAccounting(ctx, time.Now(), payload.Limit)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 

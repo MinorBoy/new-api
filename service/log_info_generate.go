@@ -34,6 +34,18 @@ func attachQuotaSaturationToOther(other map[string]interface{}, clamp *common.Qu
 	adminInfo["quota_saturation"] = clamp.AuditMap()
 }
 
+func attachCostAccountingAdminInfo(info *relaycommon.RelayInfo, other map[string]interface{}) {
+	if info == nil || info.CostRequestID == 0 || other == nil {
+		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+	}
+	adminInfo["cost_accounting_request_id"] = info.CostRequestID
+	other["admin_info"] = adminInfo
+}
+
 func appendRoutingAdminInfo(other map[string]interface{}, routing *modelrouting.Audit) {
 	if other == nil || routing == nil {
 		return

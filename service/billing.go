@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -49,6 +50,10 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	billingCtx := context.Background()
+	if ctx != nil && ctx.Request != nil {
+		billingCtx = ctx.Request.Context()
+	}
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
@@ -72,7 +77,19 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		}
 
 		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+			if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, "user_billing_settlement_failed"); accountingErr != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue settlement failure: request_id=%s cost_request_id=%d error=%v",
+					relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+			}
 			return err
+		}
+		if err := RecognizeBilledRevenue(billingCtx, relayInfo, actualQuota); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("failed to recognize billed revenue: request_id=%s cost_request_id=%d error=%v",
+				relayInfo.RequestId, relayInfo.CostRequestID, err))
+			if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, "revenue_recognition_failed"); accountingErr != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue recognition failure: request_id=%s cost_request_id=%d error=%v",
+					relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+			}
 		}
 
 		// 发送额度通知（订阅计费使用订阅剩余额度）
@@ -89,7 +106,21 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	// 回退：无 BillingSession 时使用旧路径
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+		if err := PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true); err != nil {
+			if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, "user_billing_settlement_failed"); accountingErr != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue settlement failure: request_id=%s cost_request_id=%d error=%v",
+					relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+			}
+			return err
+		}
+	}
+	if err := RecognizeBilledRevenue(billingCtx, relayInfo, actualQuota); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("failed to recognize billed revenue: request_id=%s cost_request_id=%d error=%v",
+			relayInfo.RequestId, relayInfo.CostRequestID, err))
+		if accountingErr := MarkCostRevenueFailed(billingCtx, relayInfo, "revenue_recognition_failed"); accountingErr != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("failed to mark cost revenue recognition failure: request_id=%s cost_request_id=%d error=%v",
+				relayInfo.RequestId, relayInfo.CostRequestID, accountingErr))
+		}
 	}
 	return nil
 }

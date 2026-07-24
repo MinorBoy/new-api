@@ -50,3 +50,21 @@ func TestFormatUserLogsStripsCapabilityRouting(t *testing.T) {
 	require.NotContains(t, parsed, "admin_info")
 	require.NotContains(t, logs[0].Other, "provider-1080p")
 }
+
+func TestFormatUserLogsStripsCostAccountingAdminInfo(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"billing_source": "wallet",
+		"admin_info": map[string]interface{}{
+			"cost_accounting_request_id": int64(42),
+		},
+	})
+	logs := []*Log{{Other: other}}
+
+	formatUserLogs(logs, 0)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, parsed, "admin_info")
+	require.NotContains(t, logs[0].Other, "cost_accounting_request_id")
+	require.Contains(t, parsed, "billing_source")
+}

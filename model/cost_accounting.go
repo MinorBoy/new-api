@@ -401,6 +401,17 @@ func settleCostAttempt(db *gorm.DB, input SettleCostAttemptInput) error {
 }
 
 func RecognizeCostRevenue(input RecognizeCostRevenueInput) error {
+	return recognizeCostRevenue(DB, input)
+}
+
+func RecognizeCostRevenueWithContext(ctx context.Context, input RecognizeCostRevenueInput) error {
+	if ctx == nil {
+		return errors.New("cost revenue context is required")
+	}
+	return recognizeCostRevenue(DB.WithContext(ctx), input)
+}
+
+func recognizeCostRevenue(db *gorm.DB, input RecognizeCostRevenueInput) error {
 	if !costRevenueTransitionAllowed(input.From, input.To) {
 		return ErrCostStateConflict
 	}
@@ -435,7 +446,7 @@ func RecognizeCostRevenue(input RecognizeCostRevenueInput) error {
 		updates["updated_at"] = input.SettledAt
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&CostAccountingRequest{}).
 			Where("id = ? AND revenue_status = ?", input.CostRequestID, input.From).
 			Updates(updates)

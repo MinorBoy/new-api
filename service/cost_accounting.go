@@ -321,6 +321,119 @@ func MarkWinningCostAttempt(ctx context.Context, handle *types.CostAttemptHandle
 	return nil
 }
 
+func RecognizeBilledRevenue(ctx context.Context, info *relaycommon.RelayInfo, finalQuota int) error {
+	if info == nil || info.CostRequestID == 0 {
+		return nil
+	}
+	if finalQuota < 0 {
+		return errors.New("final user quota cannot be negative")
+	}
+
+	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+	defer cancel()
+	db := model.DB.WithContext(persistenceCtx)
+	var request model.CostAccountingRequest
+	if err := db.Select(
+		"id", "final_user_quota", "quota_per_unit_snapshot",
+		"billed_revenue_equivalent_nano_usd", "revenue_status", "failure_code",
+	).Where("id = ?", info.CostRequestID).First(&request).Error; err != nil {
+		return err
+	}
+
+	quotaSnapshot := strings.TrimSpace(request.QuotaPerUnitSnapshot)
+	revenueNanoUSD, err := RevenueEquivalentNanoUSD(int64(finalQuota), quotaSnapshot)
+	if err != nil {
+		return err
+	}
+	target := types.CostRevenueSettled
+	if finalQuota == 0 {
+		target = types.CostRevenueConfirmedZero
+	}
+	current := types.CostRevenueStatus(request.RevenueStatus)
+	if current == target {
+		if request.FinalUserQuota != nil && *request.FinalUserQuota == int64(finalQuota) &&
+			request.BilledRevenueEquivalentNanoUSD != nil && *request.BilledRevenueEquivalentNanoUSD == revenueNanoUSD &&
+			request.FailureCode == "" {
+			return nil
+		}
+		return model.ErrCostStateConflict
+	}
+	if current != types.CostRevenuePending && current != types.CostRevenueFailed {
+		return model.ErrCostStateConflict
+	}
+
+	finalQuotaSnapshot := int64(finalQuota)
+	err = model.RecognizeCostRevenueWithContext(persistenceCtx, model.RecognizeCostRevenueInput{
+		CostRequestID:        request.ID,
+		From:                 current,
+		To:                   target,
+		FinalUserQuota:       &finalQuotaSnapshot,
+		QuotaPerUnitSnapshot: quotaSnapshot,
+		RevenueNanoUSD:       &revenueNanoUSD,
+	})
+	if !errors.Is(err, model.ErrCostStateConflict) {
+		return err
+	}
+
+	if reloadErr := db.Select(
+		"final_user_quota", "billed_revenue_equivalent_nano_usd", "revenue_status", "failure_code",
+	).Where("id = ?", request.ID).First(&request).Error; reloadErr != nil {
+		return reloadErr
+	}
+	if types.CostRevenueStatus(request.RevenueStatus) == target &&
+		request.FinalUserQuota != nil && *request.FinalUserQuota == finalQuotaSnapshot &&
+		request.BilledRevenueEquivalentNanoUSD != nil && *request.BilledRevenueEquivalentNanoUSD == revenueNanoUSD &&
+		request.FailureCode == "" {
+		return nil
+	}
+	return err
+}
+
+func MarkCostRevenueFailed(ctx context.Context, info *relaycommon.RelayInfo, failureCode string) error {
+	if info == nil || info.CostRequestID == 0 {
+		return nil
+	}
+	failureCode = strings.TrimSpace(failureCode)
+	if failureCode == "" || len(failureCode) > 64 {
+		return errors.New("cost revenue failure code is invalid")
+	}
+
+	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+	defer cancel()
+	db := model.DB.WithContext(persistenceCtx)
+	var request model.CostAccountingRequest
+	if err := db.Select("id", "revenue_status", "failure_code").Where("id = ?", info.CostRequestID).First(&request).Error; err != nil {
+		return err
+	}
+	current := types.CostRevenueStatus(request.RevenueStatus)
+	if current == types.CostRevenueFailed {
+		if request.FailureCode == failureCode {
+			return nil
+		}
+		return model.ErrCostStateConflict
+	}
+	if current != types.CostRevenuePending {
+		return model.ErrCostStateConflict
+	}
+
+	err := model.RecognizeCostRevenueWithContext(persistenceCtx, model.RecognizeCostRevenueInput{
+		CostRequestID: request.ID,
+		From:          current,
+		To:            types.CostRevenueFailed,
+		FailureCode:   failureCode,
+	})
+	if !errors.Is(err, model.ErrCostStateConflict) {
+		return err
+	}
+	if reloadErr := db.Select("revenue_status", "failure_code").Where("id = ?", request.ID).First(&request).Error; reloadErr != nil {
+		return reloadErr
+	}
+	if types.CostRevenueStatus(request.RevenueStatus) == types.CostRevenueFailed && request.FailureCode == failureCode {
+		return nil
+	}
+	return err
+}
+
 func settleCostAttemptFromSnapshot(ctx context.Context, attempt *model.CostAccountingAttempt, from types.CostAttemptStatus, meter types.CostMeter) error {
 	var config types.CostRuleConfigV1
 	if err := common.UnmarshalJsonStr(attempt.RuleConfigJSON, &config); err != nil {

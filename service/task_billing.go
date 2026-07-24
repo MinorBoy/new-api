@@ -70,6 +70,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	appendRoutingAdminInfo(other, info.Routing)
 	AppendRoutingAdminInfoFromContext(c, other)
 	attachQuotaSaturation(c, info, other)
+	attachCostAccountingAdminInfo(info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
 		ModelName: info.OriginModelName,

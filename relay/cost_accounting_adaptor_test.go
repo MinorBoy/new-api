@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -50,6 +52,37 @@ func TestCostCapabilitiesExcludeUnsupportedRealtimePath(t *testing.T) {
 	assert.False(t, uncovered.CanResolveBillableModel)
 	assert.Empty(t, uncovered.ChargeEvents)
 	assert.Empty(t, uncovered.MeterSources)
+}
+
+func TestTaskCostCapabilitiesAreRegisteredPerPlatform(t *testing.T) {
+	tests := []struct {
+		name     string
+		channel  int
+		expected []types.CostMeterSource
+	}{
+		{name: "new api video", channel: constant.ChannelTypeNewAPIVideo, expected: []types.CostMeterSource{
+			types.CostMeterValidatedRequest, types.CostMeterUpstreamActual, types.CostMeterUpstreamUsage,
+		}},
+		{name: "doubao usage", channel: constant.ChannelTypeDoubaoVideo, expected: []types.CostMeterSource{
+			types.CostMeterUpstreamUsage,
+		}},
+		{name: "dimensio validated duration", channel: constant.ChannelTypeDimensio, expected: []types.CostMeterSource{
+			types.CostMeterValidatedRequest,
+		}},
+		{name: "kling per request only", channel: constant.ChannelTypeKling},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			capabilities := CostCapabilitiesForRoute(
+				test.channel,
+				"/v1/video/generations",
+				constant.TaskPlatform(strconv.Itoa(test.channel)),
+			)
+
+			assert.True(t, capabilities.CanResolveBillableModel)
+			assert.ElementsMatch(t, test.expected, capabilities.MeterSources)
+		})
+	}
 }
 
 func TestNormalizeCostMeterRequiresAuthoritativeBillingUsage(t *testing.T) {

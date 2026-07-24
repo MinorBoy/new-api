@@ -134,16 +134,18 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		if err != nil {
 			return &CostCoverageError{ChannelID: input.ChannelID}
 		}
-		if input.RequestMeter != nil && config.MeterSource != "" && input.RequestMeter.Source != config.MeterSource {
-			return errors.New("request cost meter source does not match the rule snapshot")
-		}
 		if types.CostMode(lockedRule.CostMode) == types.CostModePerDuration && config.MeterSource == types.CostMeterValidatedRequest {
 			if input.RequestMeter == nil {
 				return errors.New("validated request duration meter is required")
 			}
+			if input.RequestMeter.Source != types.CostMeterValidatedRequest {
+				return errors.New("request cost meter source does not match the rule snapshot")
+			}
 			if _, _, err := CalculateAttemptCost(types.CostMode(lockedRule.CostMode), config, *input.RequestMeter); err != nil {
 				return err
 			}
+		} else {
+			attempt.RequestMeterJSON = "{}"
 		}
 		ruleConfigJSON, err := common.Marshal(config)
 		if err != nil {

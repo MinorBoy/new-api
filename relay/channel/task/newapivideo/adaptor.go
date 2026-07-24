@@ -15,6 +15,7 @@ import (
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,6 +27,14 @@ type TaskAdaptor struct {
 	taskcommon.BaseBilling
 	apiKey  string
 	baseURL string
+}
+
+func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
+	return taskcommon.TaskCostCapabilities(
+		types.CostMeterValidatedRequest,
+		types.CostMeterUpstreamActual,
+		types.CostMeterUpstreamUsage,
+	)
 }
 
 type upstreamSubmitResponse struct {

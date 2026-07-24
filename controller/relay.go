@@ -677,6 +677,13 @@ func RelayTask(c *gin.Context) {
 		if taskErr == nil {
 			break
 		}
+		if safeErr, retry, handled := handleTaskCostCoverageFailure(retryParam, relayInfo, taskErr); handled {
+			taskErr = safeErr
+			if retry {
+				continue
+			}
+			break
+		}
 
 		if !taskErr.LocalError {
 			processChannelError(c,
@@ -706,44 +713,7 @@ func RelayTask(c *gin.Context) {
 			common.SysError("settle task billing error: " + settleErr.Error())
 		}
 		service.LogTaskConsumption(c, relayInfo)
-
-		task := model.InitTask(result.Platform, relayInfo)
-		var generateAudio *bool
-		if value, exists := c.Get(string(constant.ContextKeyTaskGenerateAudio)); exists {
-			if enabled, ok := value.(bool); ok {
-				generateAudio = common.GetPointer(enabled)
-			}
-		}
-		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
-		task.PrivateData.BillingSource = relayInfo.BillingSource
-		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
-		task.PrivateData.TokenId = relayInfo.TokenId
-		task.PrivateData.NodeName = common.NodeName
-		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			BillingMode:              relayInfo.PriceData.BillingMode,
-			DurationPrice:            relayInfo.PriceData.DurationPrice,
-			DurationSource:           relayInfo.PriceData.DurationSource,
-			RequestedDurationSeconds: relayInfo.PriceData.RequestedDurationSeconds,
-			BillableDurationSeconds:  relayInfo.PriceData.BillableDurationSeconds,
-			ModelPrice:               relayInfo.PriceData.ModelPrice,
-			GroupRatio:               relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:               relayInfo.PriceData.ModelRatio,
-			OtherRatios:              relayInfo.PriceData.OtherRatios(),
-			OriginModelName:          relayInfo.OriginModelName,
-			UpstreamModelName:        relayInfo.UpstreamModelName,
-			HasVideoInput:            c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
-			GenerateAudio:            generateAudio,
-			Draft:                    c.GetBool(string(constant.ContextKeyTaskDraft)),
-			ServiceTier:              c.GetString(string(constant.ContextKeyTaskServiceTier)),
-			Resolution:               c.GetString("task_resolution"),
-			PerCallBilling: common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
-				relayInfo.PriceData.UsePrice ||
-				relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration,
-		}
-		task.Quota = result.Quota
-		task.Data = result.TaskData
-		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
+		if insertErr := persistSubmittedTask(c, relayInfo, result); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
 		}
 	}
@@ -751,6 +721,77 @@ func RelayTask(c *gin.Context) {
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
 	}
+}
+
+func handleTaskCostCoverageFailure(retryParam *service.RetryParam, relayInfo *relaycommon.RelayInfo, taskErr *dto.TaskError) (*dto.TaskError, bool, bool) {
+	if retryParam == nil || taskErr == nil || taskErr.Error == nil {
+		return taskErr, false, false
+	}
+	var coverageErr *service.CostCoverageError
+	if !errors.As(taskErr.Error, &coverageErr) {
+		return taskErr, false, false
+	}
+	retryParam.ExcludeChannel(coverageErr.ChannelID)
+	safeErr := service.TaskErrorWrapperLocal(
+		errors.New("available channel is unavailable"),
+		"get_channel_failed",
+		http.StatusServiceUnavailable,
+	)
+	if relayInfo != nil && relayInfo.TaskRelayInfo != nil && relayInfo.LockedChannel != nil {
+		return safeErr, false, true
+	}
+	return safeErr, retryParam.GetRetry() < common.RetryTimes, true
+}
+
+func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) error {
+	if c == nil || relayInfo == nil || result == nil {
+		return errors.New("submitted task persistence requires context, relay info, and result")
+	}
+	task := model.InitTask(result.Platform, relayInfo)
+	var generateAudio *bool
+	if value, exists := c.Get(string(constant.ContextKeyTaskGenerateAudio)); exists {
+		if enabled, ok := value.(bool); ok {
+			generateAudio = common.GetPointer(enabled)
+		}
+	}
+	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	task.PrivateData.BillingSource = relayInfo.BillingSource
+	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+	task.PrivateData.TokenId = relayInfo.TokenId
+	task.PrivateData.NodeName = common.NodeName
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		BillingMode:              relayInfo.PriceData.BillingMode,
+		DurationPrice:            relayInfo.PriceData.DurationPrice,
+		DurationSource:           relayInfo.PriceData.DurationSource,
+		RequestedDurationSeconds: relayInfo.PriceData.RequestedDurationSeconds,
+		BillableDurationSeconds:  relayInfo.PriceData.BillableDurationSeconds,
+		ModelPrice:               relayInfo.PriceData.ModelPrice,
+		GroupRatio:               relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:               relayInfo.PriceData.ModelRatio,
+		OtherRatios:              relayInfo.PriceData.OtherRatios(),
+		OriginModelName:          relayInfo.OriginModelName,
+		UpstreamModelName:        relayInfo.UpstreamModelName,
+		HasVideoInput:            c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
+		GenerateAudio:            generateAudio,
+		Draft:                    c.GetBool(string(constant.ContextKeyTaskDraft)),
+		ServiceTier:              c.GetString(string(constant.ContextKeyTaskServiceTier)),
+		Resolution:               c.GetString("task_resolution"),
+		PerCallBilling: common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
+			relayInfo.PriceData.UsePrice ||
+			relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration,
+	}
+	task.Quota = result.Quota
+	task.Data = result.TaskData
+	task.Action = relayInfo.Action
+	if err := task.Insert(); err != nil {
+		requestCtx := c.Request.Context()
+		if markerErr := service.MarkOrphanedCostTask(requestCtx, relayInfo.CostRequestID, result.UpstreamTaskID, "orphaned_task_insert_failed"); markerErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("mark orphaned task cost failed: request_id=%s task_id=%s upstream_task_id=%s cost_request_id=%d error=%v", relayInfo.RequestId, relayInfo.PublicTaskID, result.UpstreamTaskID, relayInfo.CostRequestID, markerErr))
+		}
+		logger.LogWarn(c, fmt.Sprintf("accepted upstream task was not persisted: request_id=%s task_id=%s upstream_task_id=%s cost_request_id=%d error=%v", relayInfo.RequestId, relayInfo.PublicTaskID, result.UpstreamTaskID, relayInfo.CostRequestID, err))
+		return err
+	}
+	return nil
 }
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）

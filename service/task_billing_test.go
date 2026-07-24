@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -1256,4 +1257,165 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestTaskPrivateDataCarriesCostRequestID(t *testing.T) {
+	data := model.TaskPrivateData{CostRequestID: 42}
+	raw, err := common.Marshal(data)
+	require.NoError(t, err)
+
+	var decoded model.TaskPrivateData
+	require.NoError(t, common.Unmarshal(raw, &decoded))
+	assert.Equal(t, int64(42), decoded.CostRequestID)
+}
+
+func TestTaskPollingCostSettlesAuthoritativeTokenMeterFromFrozenRule(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
+		Where("id = ?", loadCostAttempt(t, handle.AttemptID).RuleID).
+		Update("status", types.CostRuleRetired).Error)
+	tokens := int64(250_000)
+	result := &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+		CostMeter: &types.CostMeter{
+			Source: types.CostMeterUpstreamUsage, TotalTokens: &tokens,
+		},
+	}
+
+	require.NoError(t, SettleAsyncCostAttempt(context.Background(), handle.CostRequestID, task, result))
+	require.NoError(t, SettleAsyncCostAttempt(context.Background(), handle.CostRequestID, task, result))
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(250_000_000), *attempt.CostNanoUSD)
+}
+
+func TestTaskPollingCostSelectsFrozenTokenSourceWhenResultAlsoHasDuration(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	tokens := 250_000
+	duration := "6"
+	result := &relaycommon.TaskInfo{
+		Status:             string(model.TaskStatusSuccess),
+		TotalTokens:        tokens,
+		TotalTokensPresent: true,
+		CostMeter: &types.CostMeter{
+			Source: types.CostMeterUpstreamActual, DurationSeconds: &duration,
+		},
+	}
+
+	require.NoError(t, SettleAsyncCostAttempt(context.Background(), handle.CostRequestID, task, result))
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(250_000_000), *attempt.CostNanoUSD)
+}
+
+func TestTaskPollingCostSettlesAuthoritativeDurationMeter(t *testing.T) {
+	config := validDurationCostConfig(types.CostMeterUpstreamActual)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerDuration, config)
+	duration := "6"
+
+	require.NoError(t, SettleAsyncCostAttempt(context.Background(), handle.CostRequestID, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+		CostMeter: &types.CostMeter{
+			Source: types.CostMeterUpstreamActual, DurationSeconds: &duration,
+		},
+	}))
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(600_000_000), *attempt.CostNanoUSD)
+}
+
+func TestTaskPollingCostSettlesExplicitZeroDurationMeter(t *testing.T) {
+	config := validDurationCostConfig(types.CostMeterUpstreamActual)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerDuration, config)
+	duration := "0"
+
+	require.NoError(t, SettleAsyncCostAttempt(context.Background(), handle.CostRequestID, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+		CostMeter: &types.CostMeter{
+			Source: types.CostMeterUpstreamActual, DurationSeconds: &duration,
+		},
+	}))
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Zero(t, *attempt.CostNanoUSD)
+}
+
+func TestTaskPollingCostConfirmsZeroWhenTaskSucceededRuleFails(t *testing.T) {
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+
+	require.NoError(t, SettleAsyncCostAttempt(context.Background(), handle.CostRequestID, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusFailure), Reason: "provider rejected task",
+	}))
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptConfirmedZero), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Zero(t, *attempt.CostNanoUSD)
+}
+
+func TestCostTaskOrphanMarkerPreservesAcceptedAttempt(t *testing.T) {
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeSubmitAccepted
+	_, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+
+	require.NoError(t, SettleSyncCostAttempt(context.Background(), handle, types.CostMeter{}))
+	require.NoError(t, MarkOrphanedCostTask(context.Background(), handle.CostRequestID, "upstream-orphan-id", "orphaned_task_insert_failed"))
+	require.NoError(t, MarkOrphanedCostTask(context.Background(), handle.CostRequestID, "upstream-orphan-id", "orphaned_task_insert_failed"))
+
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(200_000_000), *attempt.CostNanoUSD)
+	var request model.CostAccountingRequest
+	require.NoError(t, model.DB.First(&request, handle.CostRequestID).Error)
+	require.NotNil(t, request.UpstreamTaskID)
+	assert.Equal(t, "upstream-orphan-id", *request.UpstreamTaskID)
+	assert.Equal(t, "orphaned_task_insert_failed", request.FailureCode)
+}
+
+func TestCostTaskOrphanMarkerRejectsInvalidOrConflictingRecoveryIdentity(t *testing.T) {
+	config := validPerRequestCostConfig()
+	config.ChargeEvent = types.CostChargeSubmitAccepted
+	_, handle := prepareTaskPollingCostAttempt(t, types.CostModePerRequest, config)
+
+	require.Error(t, MarkOrphanedCostTask(context.Background(), handle.CostRequestID, "", "orphaned_task_insert_failed"))
+	require.NoError(t, MarkOrphanedCostTask(context.Background(), handle.CostRequestID, "upstream-orphan-id", "orphaned_task_insert_failed"))
+	require.ErrorIs(t, MarkOrphanedCostTask(context.Background(), handle.CostRequestID, "different-upstream-id", "orphaned_task_insert_failed"), model.ErrCostStateConflict)
+}
+
+func prepareTaskPollingCostAttempt(t *testing.T, mode types.CostMode, config types.CostRuleConfigV1) (*model.Task, *types.CostAttemptHandle) {
+	t.Helper()
+	prepareCostAttemptServiceDB(t)
+	seedActiveAttemptRule(t, mode, config)
+	taskID := "task-cost-polling"
+	input := preparedAttemptInput()
+	input.RequestID = "request-" + taskID
+	input.TaskID = &taskID
+	input.TaskPlatform = constant.TaskPlatform("task-test")
+	input.RequestPath = "/v1/video/generations"
+	handle, err := PrepareCostAttempt(context.Background(), input)
+	require.NoError(t, err)
+	require.NoError(t, AuthorizeCostDispatch(context.Background(), handle))
+	require.NoError(t, RecordCostDispatchOutcome(context.Background(), handle, types.CostOutcome{
+		Status: types.CostAttemptAwaitingMeter, UpstreamAccepted: true,
+	}))
+	require.NoError(t, MarkWinningCostAttempt(context.Background(), handle))
+	return &model.Task{
+		TaskID: taskID,
+		PrivateData: model.TaskPrivateData{
+			CostRequestID: handle.CostRequestID,
+		},
+	}, handle
 }

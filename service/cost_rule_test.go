@@ -139,6 +139,62 @@ func TestCreateCostRuleDraftValidatesDurationAndTokenContracts(t *testing.T) {
 	}
 }
 
+func TestCreateCostRuleDraftValidatesSubmitAcceptedMeterAvailability(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+
+	tests := []struct {
+		name    string
+		mode    types.CostMode
+		config  types.CostRuleConfigV1
+		wantErr bool
+	}{
+		{
+			name: "duration upstream actual is unavailable at submit",
+			mode: types.CostModePerDuration,
+			config: func() types.CostRuleConfigV1 {
+				config := validDurationCostConfig(types.CostMeterUpstreamActual)
+				config.ChargeEvent = types.CostChargeSubmitAccepted
+				return config
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "token usage is unavailable at submit",
+			mode: types.CostModePerToken,
+			config: func() types.CostRuleConfigV1 {
+				config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+				config.ChargeEvent = types.CostChargeSubmitAccepted
+				return config
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "validated duration is available at submit",
+			mode: types.CostModePerDuration,
+			config: func() types.CostRuleConfigV1 {
+				config := validDurationCostConfig(types.CostMeterValidatedRequest)
+				config.ChargeEvent = types.CostChargeSubmitAccepted
+				return config
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := validCreateCostRuleInput()
+			input.CostMode = tt.mode
+			input.Config = tt.config
+			rule, err := CreateCostRuleDraft(input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, string(types.CostRuleDraft), rule.Status)
+		})
+	}
+}
+
 func TestValidateCostRuleDraftRejectsInconsistentNormalizedPrice(t *testing.T) {
 	prepareCostRuleServiceDB(t)
 	config := validPerRequestCostConfig()

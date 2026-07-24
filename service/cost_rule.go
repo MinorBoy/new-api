@@ -454,6 +454,9 @@ func validateCostRuleContract(rule *model.ChannelModelCostRule, capabilities typ
 		if stored.TokenMode != "" || !containsCostMeterSource(capabilities.MeterSources, stored.MeterSource) {
 			return types.CostRuleConfigV1{}, errors.New("duration meter source is not supported by the adaptor")
 		}
+		if stored.ChargeEvent == types.CostChargeSubmitAccepted && stored.MeterSource != types.CostMeterValidatedRequest {
+			return types.CostRuleConfigV1{}, errors.New("submit-accepted duration rules require a validated-request meter")
+		}
 		if err := validatePositiveCostPrice(stored.PricePerSecond, stored.NormalizedUSDPrices.PricePerSecond); err != nil {
 			return types.CostRuleConfigV1{}, err
 		}
@@ -463,6 +466,9 @@ func validateCostRuleContract(rule *model.ChannelModelCostRule, capabilities typ
 		}
 		if !containsCostMeterSource(capabilities.MeterSources, stored.MeterSource) {
 			return types.CostRuleConfigV1{}, errors.New("token meter source is not supported by the adaptor")
+		}
+		if stored.ChargeEvent == types.CostChargeSubmitAccepted {
+			return types.CostRuleConfigV1{}, errors.New("token meters are unavailable at submit acceptance")
 		}
 		pricePairs := [][2]*string{}
 		switch stored.TokenMode {

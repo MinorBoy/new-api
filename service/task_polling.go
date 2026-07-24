@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
@@ -37,6 +38,10 @@ type TaskPollingAdaptor interface {
 
 type TaskPollingHTTPErrorParser interface {
 	ParseTaskPollingHTTPError(body []byte, statusCode int) *relaycommon.TaskInfo
+}
+
+type taskCostMeterNormalizer interface {
+	NormalizeTaskCostMeter(task *model.Task, result *relaycommon.TaskInfo) (types.CostMeter, error)
 }
 
 type taskPollingResponseData struct {
@@ -359,8 +364,15 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			logger.LogError(ctx, fmt.Sprintf("UpdateSunoTask task %s error: %v", task.TaskID, err))
 		} else if !won {
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
-		} else if isFailure && prevStatus != model.TaskStatusFailure && task.Quota != 0 {
-			RefundTaskQuota(ctx, task, task.FailReason)
+		} else {
+			if isFailure && prevStatus != model.TaskStatusFailure && task.Quota != 0 {
+				RefundTaskQuota(ctx, task, task.FailReason)
+			}
+			if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+				settlePolledTaskCost(ctx, adaptor, task, &relaycommon.TaskInfo{
+					Status: string(task.Status), Reason: task.FailReason,
+				})
+			}
 		}
 	}
 	return nil
@@ -576,6 +588,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	shouldRefund := false
 	shouldSettle := false
+	terminalCASWinner := false
 	quota := task.Quota
 
 	task.Status = model.TaskStatus(taskResult.Status)
@@ -636,6 +649,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
 			shouldRefund = false
 			shouldSettle = false
+		} else {
+			terminalCASWinner = true
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {
@@ -652,8 +667,31 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if shouldRefund {
 		RefundTaskQuota(ctx, task, task.FailReason)
 	}
+	if terminalCASWinner {
+		settlePolledTaskCost(ctx, adaptor, task, taskResult)
+	}
 
 	return nil
+}
+
+func settlePolledTaskCost(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, result *relaycommon.TaskInfo) {
+	if task == nil || task.PrivateData.CostRequestID == 0 || result == nil {
+		return
+	}
+	if model.TaskStatus(result.Status) == model.TaskStatusSuccess {
+		normalizer, ok := adaptor.(taskCostMeterNormalizer)
+		if ok {
+			meter, err := normalizer.NormalizeTaskCostMeter(task, result)
+			if err != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("normalize task cost meter failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+			} else {
+				result.CostMeter = &meter
+			}
+		}
+	}
+	if err := SettleAsyncCostAttempt(ctx, task.PrivateData.CostRequestID, task, result); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("settle task cost failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
+	}
 }
 
 func redactVideoResponseBody(body []byte) []byte {

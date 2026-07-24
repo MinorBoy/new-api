@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +63,26 @@ func TestParseTaskResultDetailedReport(t *testing.T) {
 	assert.True(t, result.TotalTokensPresent)
 	assert.Equal(t, "720p", result.Resolution)
 	assert.Nil(t, result.BillingClamp)
+}
+
+func TestParseTaskResultProvidesAuthoritativeDurationCostMeter(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(detailedSuccessBody))
+
+	require.NoError(t, err)
+	require.NotNil(t, result.CostMeter)
+	assert.Equal(t, types.CostMeterUpstreamActual, result.CostMeter.Source)
+	require.NotNil(t, result.CostMeter.DurationSeconds)
+	assert.Equal(t, "5", *result.CostMeter.DurationSeconds)
+}
+
+func TestParseTaskResultPreservesExplicitZeroDurationCostMeter(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"status":"succeeded","metadata":{"url":"https://x/v.mp4"},"duration":0}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, result.CostMeter)
+	assert.Equal(t, types.CostMeterUpstreamActual, result.CostMeter.Source)
+	require.NotNil(t, result.CostMeter.DurationSeconds)
+	assert.Equal(t, "0", *result.CostMeter.DurationSeconds)
 }
 
 func TestParseTaskResultPreservesZeroAndClampsOversizedUsage(t *testing.T) {

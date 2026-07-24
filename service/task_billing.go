@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -83,6 +84,139 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+}
+
+func SettleAsyncCostAttempt(ctx context.Context, costRequestID int64, task *model.Task, result *relaycommon.TaskInfo) error {
+	if costRequestID == 0 {
+		return nil
+	}
+	if task == nil || result == nil {
+		return errors.New("task cost settlement requires task and result")
+	}
+	if task.PrivateData.CostRequestID != 0 && task.PrivateData.CostRequestID != costRequestID {
+		return model.ErrCostStateConflict
+	}
+
+	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+	defer cancel()
+	db := model.DB.WithContext(persistenceCtx)
+	var request model.CostAccountingRequest
+	if err := db.Select("id", "task_id", "winning_attempt_id").Where("id = ?", costRequestID).First(&request).Error; err != nil {
+		return err
+	}
+	if request.TaskID == nil || *request.TaskID != task.TaskID || request.WinningAttemptID == nil {
+		return model.ErrCostStateConflict
+	}
+
+	var attempt model.CostAccountingAttempt
+	if err := db.Where("id = ? AND cost_request_id = ?", *request.WinningAttemptID, request.ID).First(&attempt).Error; err != nil {
+		return err
+	}
+	status := types.CostAttemptStatus(attempt.Status)
+	if types.CostChargeEvent(attempt.ChargeEvent) != types.CostChargeTaskSucceeded {
+		switch status {
+		case types.CostAttemptSettled, types.CostAttemptConfirmedZero:
+			return nil
+		default:
+			return model.ErrCostStateConflict
+		}
+	}
+
+	switch model.TaskStatus(result.Status) {
+	case model.TaskStatusSuccess:
+		if status == types.CostAttemptSettled || status == types.CostAttemptConfirmedZero {
+			return nil
+		}
+		if status != types.CostAttemptAwaitingMeter {
+			return model.ErrCostStateConflict
+		}
+		meter := types.CostMeter{}
+		if result.CostMeter != nil {
+			meter = *result.CostMeter
+		}
+		if types.CostMeterSource(attempt.MeterSource) == types.CostMeterUpstreamUsage &&
+			(result.CompletionTokensPresent || result.TotalTokensPresent) {
+			meter = types.CostMeter{Source: types.CostMeterUpstreamUsage}
+			if result.CompletionTokensPresent {
+				completion := int64(result.CompletionTokens)
+				meter.OutputTokens = &completion
+				meter.CompletionTokens = &completion
+			}
+			if result.TotalTokensPresent {
+				total := int64(result.TotalTokens)
+				meter.TotalTokens = &total
+			}
+		}
+		return SettleSyncCostAttempt(persistenceCtx, &types.CostAttemptHandle{
+			CostRequestID: request.ID,
+			AttemptID:     attempt.ID,
+			AttemptNo:     attempt.AttemptNo,
+			CostMode:      types.CostMode(attempt.CostMode),
+			ChargeEvent:   types.CostChargeEvent(attempt.ChargeEvent),
+		}, meter)
+	case model.TaskStatusFailure:
+		if status == types.CostAttemptConfirmedZero || status == types.CostAttemptSettled {
+			return nil
+		}
+		if status != types.CostAttemptAwaitingMeter {
+			return model.ErrCostStateConflict
+		}
+		now := common.GetTimestamp()
+		return model.SettleCostAttemptWithContext(persistenceCtx, model.SettleCostAttemptInput{
+			AttemptID:        attempt.ID,
+			From:             types.CostAttemptAwaitingMeter,
+			To:               types.CostAttemptConfirmedZero,
+			ActualMeterJSON:  "{}",
+			UpstreamAccepted: true,
+			FailureCode:      "task_failed_no_charge",
+			TerminalAt:       &now,
+			SettledAt:        now,
+		})
+	default:
+		return nil
+	}
+}
+
+func MarkOrphanedCostTask(ctx context.Context, costRequestID int64, upstreamTaskID string, failureCode string) error {
+	if costRequestID == 0 {
+		return nil
+	}
+	upstreamTaskID = strings.TrimSpace(upstreamTaskID)
+	if upstreamTaskID == "" || len(upstreamTaskID) > 191 {
+		return errors.New("orphaned cost task upstream task ID is invalid")
+	}
+	failureCode = strings.TrimSpace(failureCode)
+	if failureCode == "" || len(failureCode) > 64 {
+		return errors.New("orphaned cost task failure code is invalid")
+	}
+
+	persistenceCtx, cancel := costAccountingPersistenceContext(ctx)
+	defer cancel()
+	db := model.DB.WithContext(persistenceCtx)
+	var request model.CostAccountingRequest
+	if err := db.Select("id", "upstream_task_id", "failure_code").Where("id = ?", costRequestID).First(&request).Error; err != nil {
+		return err
+	}
+	if request.UpstreamTaskID != nil && *request.UpstreamTaskID == upstreamTaskID && request.FailureCode == failureCode {
+		return nil
+	}
+	if request.UpstreamTaskID != nil || request.FailureCode != "" {
+		return model.ErrCostStateConflict
+	}
+	result := db.Model(&model.CostAccountingRequest{}).
+		Where("id = ? AND upstream_task_id IS NULL AND failure_code = ?", request.ID, "").
+		Updates(map[string]any{
+			"upstream_task_id": upstreamTaskID,
+			"failure_code":     failureCode,
+			"updated_at":       common.GetTimestamp(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return model.ErrCostStateConflict
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

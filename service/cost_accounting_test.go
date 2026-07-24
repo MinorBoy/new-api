@@ -53,6 +53,26 @@ func TestPrepareCostAttemptRejectsMissingCoverage(t *testing.T) {
 	assert.Zero(t, requestCount)
 }
 
+func TestPrepareCostAttemptIgnoresValidatedDurationCandidateForUpstreamActualRule(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	config := validDurationCostConfig(types.CostMeterUpstreamActual)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	seedActiveAttemptRule(t, types.CostModePerDuration, config)
+	duration := "6"
+	input := preparedAttemptInput()
+	input.TaskPlatform = constant.TaskPlatform("task-test")
+	input.RequestPath = "/v1/video/generations"
+	input.RequestMeter = &types.CostMeter{
+		Source: types.CostMeterValidatedRequest, DurationSeconds: &duration,
+	}
+
+	handle, err := PrepareCostAttempt(context.Background(), input)
+
+	require.NoError(t, err)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.JSONEq(t, `{}`, attempt.RequestMeterJSON)
+}
+
 func TestRecordCostDispatchOutcomeClassifiesZeroAndAmbiguousFailures(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	seedActiveAttemptRule(t, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})

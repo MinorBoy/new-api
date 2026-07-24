@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 )
 
@@ -36,7 +37,7 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 	if err != nil {
 		return nil, err
 	}
-	return &relaycommon.TaskInfo{
+	result := &relaycommon.TaskInfo{
 		Code:                    0,
 		Status:                  string(parsed.Status),
 		Reason:                  parsed.Reason,
@@ -49,7 +50,19 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 		CompletionTokensPresent: parsed.CompletionTokensPresent,
 		TotalTokensPresent:      parsed.TotalTokensPresent,
 		BillingClamp:            parsed.BillingClamp,
-	}, nil
+	}
+	if parsed.Nested.Duration != nil {
+		duration := strings.TrimSpace(parsed.Nested.Duration.String())
+		value, durationErr := decimal.NewFromString(duration)
+		if durationErr == nil && !value.IsNegative() &&
+			value.LessThanOrEqual(decimal.NewFromInt(relaycommon.MaxTaskDurationSeconds)) {
+			result.CostMeter = &types.CostMeter{
+				Source:          types.CostMeterUpstreamActual,
+				DurationSeconds: &duration,
+			}
+		}
+	}
+	return result, nil
 }
 
 func (a *TaskAdaptor) ParseTaskPollingHTTPError(body []byte, statusCode int) *relaycommon.TaskInfo {

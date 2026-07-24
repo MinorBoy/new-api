@@ -115,6 +115,10 @@ type TaskAdaptor struct {
 	baseURL     string
 }
 
+func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
+	return taskcommon.TaskCostCapabilities(types.CostMeterUpstreamUsage)
+}
+
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
 	a.baseURL = info.ChannelBaseUrl

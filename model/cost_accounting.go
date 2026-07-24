@@ -32,6 +32,7 @@ type CostAccountingRequest struct {
 	ID                             int64   `json:"id" gorm:"primaryKey"`
 	RequestID                      string  `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
 	TaskID                         *string `json:"task_id,omitempty" gorm:"type:varchar(191);uniqueIndex"`
+	UpstreamTaskID                 *string `json:"upstream_task_id,omitempty" gorm:"type:varchar(191)"`
 	UserID                         int     `json:"user_id" gorm:"index"`
 	TokenID                        int     `json:"token_id"`
 	UserGroup                      string  `json:"user_group" gorm:"type:varchar(64);index"`

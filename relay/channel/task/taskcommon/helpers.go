@@ -3,11 +3,13 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -94,4 +96,76 @@ func (BaseBilling) AdjustBillingOnSubmit(_ *relaycommon.RelayInfo, _ []byte) map
 // AdjustBillingOnComplete returns 0 (keep pre-charged amount).
 func (BaseBilling) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return 0
+}
+
+func (BaseBilling) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
+	return TaskCostCapabilities()
+}
+
+func TaskCostCapabilities(meterSources ...types.CostMeterSource) types.CostCapabilities {
+	return types.CostCapabilities{
+		CanResolveBillableModel: true,
+		ChargeEvents: []types.CostChargeEvent{
+			types.CostChargeSubmitAccepted,
+			types.CostChargeTaskSucceeded,
+		},
+		MeterSources: append([]types.CostMeterSource(nil), meterSources...),
+	}
+}
+
+func (BaseBilling) ConfirmTaskCostIdentity(info *relaycommon.RelayInfo) error {
+	if info == nil || info.ChannelMeta == nil {
+		return fmt.Errorf("final billable task model is not confirmed")
+	}
+	modelName := strings.TrimSpace(info.ChannelMeta.UpstreamModelName)
+	if modelName == "" {
+		return fmt.Errorf("final billable task model is not confirmed")
+	}
+	info.BillableUpstreamModel = modelName
+	return nil
+}
+
+func (BaseBilling) NormalizeTaskCostMeter(_ *model.Task, result *relaycommon.TaskInfo) (types.CostMeter, error) {
+	if result == nil {
+		return types.CostMeter{}, fmt.Errorf("authoritative task cost meter is unavailable")
+	}
+	if result.CostMeter != nil {
+		meter := *result.CostMeter
+		if err := validateTaskCostTokenBounds(meter); err != nil {
+			return types.CostMeter{}, err
+		}
+		return meter, nil
+	}
+	if !result.CompletionTokensPresent && !result.TotalTokensPresent {
+		return types.CostMeter{}, fmt.Errorf("authoritative task cost meter is unavailable")
+	}
+
+	meter := types.CostMeter{Source: types.CostMeterUpstreamUsage}
+	if result.CompletionTokensPresent {
+		completion := int64(result.CompletionTokens)
+		meter.OutputTokens = &completion
+		meter.CompletionTokens = &completion
+	}
+	if result.TotalTokensPresent {
+		total := int64(result.TotalTokens)
+		meter.TotalTokens = &total
+	}
+	if err := validateTaskCostTokenBounds(meter); err != nil {
+		return types.CostMeter{}, err
+	}
+	return meter, nil
+}
+
+func validateTaskCostTokenBounds(meter types.CostMeter) error {
+	for name, value := range map[string]*int64{
+		"input tokens":      meter.InputTokens,
+		"output tokens":     meter.OutputTokens,
+		"completion tokens": meter.CompletionTokens,
+		"total tokens":      meter.TotalTokens,
+	} {
+		if value != nil && (*value < 0 || *value > int64(relaycommon.MaxTokensLimit)) {
+			return fmt.Errorf("%s exceeds the supported task cost meter range", name)
+		}
+	}
+	return nil
 }

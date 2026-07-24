@@ -14,13 +14,16 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type taskPollingFetchAdaptor struct {
+	taskcommon.BaseBilling
 	mu           sync.Mutex
 	taskIDs      []string
 	fetched      chan string
@@ -325,6 +328,54 @@ func TestUpdateVideoSingleTaskDetailedWrapperPreservesBodyAndResultURL(t *testin
 	assert.Contains(t, string(task.Data), `"usage"`)
 	assert.Contains(t, string(task.Data), `"future_field":{"keep":true}`)
 	assert.Equal(t, []string{"upstream_detailed"}, adaptor.fetchedTaskIDs())
+}
+
+func TestTaskPollingCostSettlesOnlyOnTerminalCASWinner(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	task.Platform = constant.TaskPlatform("kling")
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "30%"
+	task.PrivateData.UpstreamTaskID = "upstream-cost-cas"
+	require.NoError(t, model.DB.Create(task).Error)
+
+	firstPoll := *task
+	stalePoll := *task
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status:             string(model.TaskStatusSuccess),
+		TotalTokens:        250_000,
+		TotalTokensPresent: true,
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, &firstPoll))
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, &stalePoll))
+
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(250_000_000), *attempt.CostNanoUSD)
+}
+
+func TestTaskPollingCostMissingAuthoritativeMeterFailsSettlement(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	task.Platform = constant.TaskPlatform("kling")
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "30%"
+	task.PrivateData.UpstreamTaskID = "upstream-cost-missing-meter"
+	require.NoError(t, model.DB.Create(task).Error)
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status:      string(model.TaskStatusSuccess),
+		TotalTokens: 250_000,
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettlementFailed), attempt.Status)
+	assert.Nil(t, attempt.CostNanoUSD)
 }
 
 func TestUpdateVideoSingleTaskDirectInProgressIgnoresCompletedAt(t *testing.T) {

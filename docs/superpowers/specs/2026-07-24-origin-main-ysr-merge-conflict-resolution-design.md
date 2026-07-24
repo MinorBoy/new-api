@@ -52,7 +52,7 @@ Known backend resolutions are:
 | --- | --- |
 | `controller/channel.go` | Keep routing-policy snapshot refreshes. Preserve upstream targeted proxy invalidation when proxy configuration changes and the broader proxy-cache reset required by channel status changes. Avoid duplicate invalidation. |
 | `model/channel.go` | Keep upstream's `(int64, error)` deletion result and actual deleted count. Also delete routing targets owned by the removed channels and refresh the routing cache only after a successful database operation. |
-| `model/option.go` | Keep upstream option behavior and the `ysr` theme/video post-update synchronization. Each synchronization runs only for its relevant option keys. |
+| `model/option.go` | Keep upstream's retirement of `theme.frontend`, including removal from the runtime option map. Do not retain the deleted theme configuration registration or theme synchronization. Preserve the independent `home.style` option and the `ysr` video-setting post-update synchronization. |
 | `controller/model_list_test.go` | Preserve the union of meaningful test fixtures and assertions. Let compilation and `gofmt` identify unused imports rather than dropping either side's coverage by default. |
 | `service/task_billing_test.go` | Preserve duration-billing context and quota-data fixtures together with upstream assertions that settled tasks clear reserved quota. |
 
@@ -65,6 +65,8 @@ Known frontend content conflicts fall into three groups:
 3. Locale JSON files. Parse and merge them structurally, keeping upstream keys and all routing/duration/Seedance keys. The English-source-key convention and all supported locales remain intact. Run the project's i18n synchronization after the structural merge.
 
 Frontend conflict resolution must preserve the current component conventions in `web/AGENTS.md`, existing Base UI/Tailwind styling, accessibility behavior, and i18n calls. Generated files such as the route tree and lockfile are regenerated through project tooling after their source files are correct.
+
+Because the classic frontend is removed, frontend settings conflicts must remove `theme.frontend` fields and controls while retaining the independent `home.style` selector and its `default`/`living-system` values. The obsolete `setting/system_setting/theme.go` deletion is accepted. Backend validation continues to reject attempts to restore a non-default retired theme.
 
 ## Protected Working Changes
 

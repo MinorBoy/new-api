@@ -26,6 +26,7 @@ func TestModelMappedHelperPrefersCapabilityTarget(t *testing.T) {
 	require.NoError(t, ModelMappedHelper(c, info, request))
 	assert.Equal(t, modelrouting.Seedance20, info.OriginModelName)
 	assert.Equal(t, "provider-1080p", info.UpstreamModelName)
+	assert.Equal(t, "provider-1080p", info.PredictedUpstreamModel)
 	assert.Equal(t, "provider-1080p", request.Model)
 	assert.True(t, info.IsModelMapped)
 }

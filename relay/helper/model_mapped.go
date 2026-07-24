@@ -14,6 +14,12 @@ import (
 )
 
 func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request) error {
+	defer func() {
+		info.PredictedUpstreamModel = info.UpstreamModelName
+		if info.PredictedUpstreamModel == "" {
+			info.PredictedUpstreamModel = info.OriginModelName
+		}
+	}()
 	if info.ChannelMeta == nil {
 		info.ChannelMeta = &relaycommon.ChannelMeta{}
 	}

@@ -31,6 +31,19 @@ type Adaptor interface {
 	ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error)
 }
 
+type CostAccountingAdaptor interface {
+	CostCapabilities(info *relaycommon.RelayInfo) types.CostCapabilities
+	ConfirmCostIdentity(info *relaycommon.RelayInfo, finalRequestBody []byte) error
+	NormalizeCostMeter(info *relaycommon.RelayInfo, usage any) (types.CostMeter, error)
+	ClassifyCostOutcome(info *relaycommon.RelayInfo, response *http.Response, requestErr error) types.CostOutcome
+}
+
+type TaskCostAccountingAdaptor interface {
+	CostCapabilities(info *relaycommon.RelayInfo) types.CostCapabilities
+	ConfirmTaskCostIdentity(info *relaycommon.RelayInfo) error
+	NormalizeTaskCostMeter(task *model.Task, result *relaycommon.TaskInfo) (types.CostMeter, error)
+}
+
 type TaskAdaptor interface {
 	Init(info *relaycommon.RelayInfo)
 

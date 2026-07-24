@@ -135,6 +135,7 @@ func main() {
 		}
 		return a
 	}
+	service.CostCapabilityLookup = relay.CostCapabilitiesForRoute
 
 	// Register the periodic channel test, upstream model update, and async task
 	// polling (Midjourney / Suno / video) jobs as scheduled system tasks

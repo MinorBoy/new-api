@@ -55,6 +55,14 @@ import (
 )
 
 func GetAdaptor(apiType int) channel.Adaptor {
+	adaptor := getBaseAdaptor(apiType)
+	if adaptor == nil {
+		return nil
+	}
+	return newCostAccountingAdaptor(adaptor, apiType)
+}
+
+func getBaseAdaptor(apiType int) channel.Adaptor {
 	switch apiType {
 	case constant.APITypeAli:
 		return &ali.Adaptor{}

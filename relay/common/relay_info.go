@@ -165,6 +165,11 @@ type RelayInfo struct {
 
 	PriceData types.PriceData
 
+	PredictedUpstreamModel string
+	BillableUpstreamModel  string
+	CostRequestID          int64
+	CostAttempt            *types.CostAttemptHandle
+
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.
 	// It is surfaced onto the consume/task log's admin_info for auditing.
@@ -807,6 +812,7 @@ type TaskInfo struct {
 	CompletionTokensPresent bool               `json:"-"`
 	TotalTokensPresent      bool               `json:"-"`
 	BillingClamp            *common.QuotaClamp `json:"-"`
+	CostMeter               *types.CostMeter   `json:"-"`
 }
 
 func FailTaskInfo(reason string) *TaskInfo {

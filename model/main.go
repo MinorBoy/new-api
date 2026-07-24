@@ -308,6 +308,10 @@ func migrateDB() error {
 		&SystemTaskLock{},
 		&CasbinRule{},
 		&AuthzRole{},
+		&ChannelModelCostRule{},
+		&CostAccountingRequest{},
+		&CostAccountingAttempt{},
+		&CostAccountingAudit{},
 	)
 	if err != nil {
 		return err
@@ -371,6 +375,10 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
+		{&ChannelModelCostRule{}, "ChannelModelCostRule"},
+		{&CostAccountingRequest{}, "CostAccountingRequest"},
+		{&CostAccountingAttempt{}, "CostAccountingAttempt"},
+		{&CostAccountingAudit{}, "CostAccountingAudit"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

@@ -238,6 +238,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			relayInfo.LastError = nil
 			return
 		}
+		var coverageErr *service.CostCoverageError
+		if errors.As(newAPIError, &coverageErr) {
+			retryParam.ExcludeChannel(coverageErr.ChannelID)
+			newAPIError = costCoverageUnavailableError()
+			if retryParam.GetRetry() < common.RetryTimes {
+				continue
+			}
+			break
+		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError

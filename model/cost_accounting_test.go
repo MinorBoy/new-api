@@ -1,8 +1,11 @@
 package model
 
 import (
+	"context"
 	"math"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -69,6 +72,64 @@ func TestTransitionCostAttemptRequiresExpectedState(t *testing.T) {
 	require.NoError(t, TransitionCostAttempt(attempt.ID, types.CostAttemptPrepared, types.CostAttemptDispatching, nil))
 	err := TransitionCostAttempt(attempt.ID, types.CostAttemptPrepared, types.CostAttemptDispatching, nil)
 	assert.ErrorIs(t, err, ErrCostStateConflict)
+}
+
+func TestTransitionCostAttemptWithContextHonorsCancellation(t *testing.T) {
+	prepareCostAccountingDB(t)
+	attempt := seedPreparedAttempt(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := TransitionCostAttemptWithContext(ctx, attempt.ID, types.CostAttemptPrepared, types.CostAttemptDispatching, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, DB.First(&attempt, attempt.ID).Error)
+	assert.Equal(t, string(types.CostAttemptPrepared), attempt.Status)
+}
+
+func TestPrepareCostAttemptAllocatesConcurrentMonotonicNumbers(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:cost-attempt-concurrent?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(8)
+	previousDB := DB
+	DB = db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		DB = previousDB
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, db.AutoMigrate(&CostAccountingRequest{}, &CostAccountingAttempt{}))
+
+	const attemptCount = 8
+	numbers := make(chan int, attemptCount)
+	errorsByAttempt := make(chan error, attemptCount)
+	var group sync.WaitGroup
+	for range attemptCount {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			request := CostAccountingRequest{RequestID: "concurrent-request"}
+			attempt := preparedCostAttempt(0)
+			if err := PrepareCostAttempt(&request, &attempt); err != nil {
+				errorsByAttempt <- err
+				return
+			}
+			numbers <- attempt.AttemptNo
+		}()
+	}
+	group.Wait()
+	close(errorsByAttempt)
+	close(numbers)
+	for err := range errorsByAttempt {
+		require.NoError(t, err)
+	}
+	actual := make([]int, 0, attemptCount)
+	for number := range numbers {
+		actual = append(actual, number)
+	}
+	sort.Ints(actual)
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8}, actual)
 }
 
 func TestSettleCostAttemptRecomputesRequestAtomically(t *testing.T) {

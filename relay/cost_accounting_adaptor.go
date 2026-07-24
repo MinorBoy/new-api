@@ -1,17 +1,22 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -37,14 +42,112 @@ func newCostAccountingAdaptor(adaptor channel.Adaptor, apiType int) *costAccount
 }
 
 func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	if cost_setting.Runtime().Mode == types.CostAccountingStrict && strings.TrimSpace(info.BillableUpstreamModel) == "" {
+	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
+		return a.Adaptor.DoRequest(c, info, requestBody)
+	}
+	if info == nil || strings.TrimSpace(info.BillableUpstreamModel) == "" {
 		return nil, ErrCostIdentityUnconfirmed
 	}
-	return a.Adaptor.DoRequest(c, info, requestBody)
+
+	billingSource := strings.TrimSpace(info.BillingSource)
+	if billingSource == "" {
+		billingSource = service.BillingSourceWallet
+	}
+	requestCtx := context.Background()
+	channelName := ""
+	if c != nil && c.Request != nil {
+		requestCtx = c.Request.Context()
+	}
+	if c != nil {
+		channelName = c.GetString(string(constant.ContextKeyChannelName))
+	}
+	handle, err := service.PrepareCostAttempt(requestCtx, service.PrepareCostAttemptInput{
+		RequestID:              info.RequestId,
+		UserID:                 info.UserId,
+		TokenID:                info.TokenId,
+		UserGroup:              info.UserGroup,
+		UsingGroup:             info.UsingGroup,
+		OriginModelName:        info.OriginModelName,
+		BillingSource:          billingSource,
+		SubscriptionID:         info.SubscriptionId,
+		SubscriptionPlanID:     info.SubscriptionPlanId,
+		QuotaPerUnitSnapshot:   strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
+		ChannelID:              info.ChannelId,
+		ChannelName:            channelName,
+		ChannelType:            info.ChannelType,
+		PredictedUpstreamModel: info.PredictedUpstreamModel,
+		BillableUpstreamModel:  info.BillableUpstreamModel,
+		RequestPath:            info.RequestURLPath,
+	})
+	if err != nil {
+		var coverageErr *service.CostCoverageError
+		if errors.As(err, &coverageErr) {
+			return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+		}
+		return nil, err
+	}
+	info.CostRequestID = handle.CostRequestID
+	info.CostAttempt = handle
+	if err := service.AuthorizeCostDispatch(requestCtx, handle); err != nil {
+		return nil, err
+	}
+
+	response, requestErr := a.Adaptor.DoRequest(c, info, requestBody)
+	var httpResponse *http.Response
+	if response != nil {
+		httpResponse, _ = response.(*http.Response)
+	}
+	persistenceCtx, cancel := costPersistenceContext()
+	outcomeErr := service.RecordCostDispatchOutcome(persistenceCtx, handle, a.ClassifyCostOutcome(info, httpResponse, requestErr))
+	cancel()
+	if outcomeErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("persist cost dispatch outcome failed: %s", outcomeErr.Error()))
+	}
+	return response, requestErr
 }
 
 func (a *costAccountingAdaptor) DoResponse(c *gin.Context, response *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
-	return a.Adaptor.DoResponse(c, response, info)
+	result, apiErr := a.Adaptor.DoResponse(c, response, info)
+	if info == nil || info.CostAttempt == nil {
+		return result, apiErr
+	}
+
+	if info.CostAttempt.CostMode == types.CostModePerRequest && apiErr != nil {
+		persistenceCtx, cancel := costPersistenceContext()
+		outcomeErr := service.RecordCostDispatchOutcome(persistenceCtx, info.CostAttempt, types.CostOutcome{
+			Status:           types.CostAttemptUnknown,
+			UpstreamAccepted: true,
+			FailureCode:      "upstream_response_invalid",
+		})
+		cancel()
+		if outcomeErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist cost response outcome failed: %s", outcomeErr.Error()))
+		}
+	} else if info.CostAttempt.CostMode == types.CostModePerRequest ||
+		info.CostAttempt.CostMode == types.CostModePerDuration || info.CostAttempt.CostMode == types.CostModePerToken {
+		meter := types.CostMeter{}
+		var meterErr error
+		if apiErr == nil && info.CostAttempt.CostMode != types.CostModePerRequest {
+			meter, meterErr = a.NormalizeCostMeter(info, result)
+		} else {
+			meterErr = apiErr
+		}
+		persistenceCtx, cancel := costPersistenceContext()
+		settleErr := service.SettleSyncCostAttempt(persistenceCtx, info.CostAttempt, meter)
+		cancel()
+		if meterErr != nil || settleErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist cost settlement failed: meter=%v settlement=%v", meterErr, settleErr))
+		}
+	}
+	if apiErr == nil {
+		persistenceCtx, cancel := costPersistenceContext()
+		winnerErr := service.MarkWinningCostAttempt(persistenceCtx, info.CostAttempt)
+		cancel()
+		if winnerErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist winning cost attempt failed: %s", winnerErr.Error()))
+		}
+	}
+	return result, apiErr
 }
 
 func (a *costAccountingAdaptor) CostCapabilities(info *relaycommon.RelayInfo) types.CostCapabilities {
@@ -183,10 +286,23 @@ func (c *jsonCostAccountingContract) NormalizeCostMeter(_ *relaycommon.RelayInfo
 	default:
 		return types.CostMeter{}, ErrAuthoritativeCostMeter
 	}
+	for name, value := range map[string]*int64{
+		"input tokens":      meter.InputTokens,
+		"output tokens":     meter.OutputTokens,
+		"completion tokens": meter.CompletionTokens,
+		"total tokens":      meter.TotalTokens,
+	} {
+		if value != nil && (*value < 0 || *value > int64(relaycommon.MaxTokensLimit)) {
+			return types.CostMeter{}, fmt.Errorf("%s exceeds the supported cost meter range", name)
+		}
+	}
 	return meter, nil
 }
 
 func (c *jsonCostAccountingContract) ClassifyCostOutcome(info *relaycommon.RelayInfo, response *http.Response, requestErr error) types.CostOutcome {
+	if info != nil && info.CostAttempt != nil && info.CostAttempt.CostMode == types.CostModeFree {
+		return types.CostOutcome{Status: types.CostAttemptConfirmedZero, UpstreamAccepted: response != nil}
+	}
 	if requestErr != nil || response == nil {
 		return types.CostOutcome{Status: types.CostAttemptUnknown, FailureCode: "upstream_transport_ambiguous"}
 	}
@@ -194,15 +310,11 @@ func (c *jsonCostAccountingContract) ClassifyCostOutcome(info *relaycommon.Relay
 		return types.CostOutcome{Status: types.CostAttemptUnknown, UpstreamAccepted: true, FailureCode: "upstream_response_rejected"}
 	}
 	outcome := types.CostOutcome{Status: types.CostAttemptAwaitingMeter, UpstreamAccepted: true}
-	if info != nil && info.CostAttempt != nil {
-		switch info.CostAttempt.CostMode {
-		case types.CostModeFree:
-			outcome.Status = types.CostAttemptConfirmedZero
-		case types.CostModePerRequest:
-			outcome.Status = types.CostAttemptSettled
-		}
-	}
 	return outcome
+}
+
+func costPersistenceContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
 func authoritativeBillingUsage(usage any) *dto.BillingUsage {

@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -145,6 +146,9 @@ func validatePrompt(prompt string) *dto.TaskError {
 	}
 	return nil
 }
+
+// MaxTokensLimit caps token counts used as billing multipliers.
+const MaxTokensLimit = math.MaxInt32 / 2
 
 // MaxTaskDurationSeconds caps user-supplied video duration. Duration is used
 // as a billing multiplier (OtherRatio "seconds"); an unbounded value could

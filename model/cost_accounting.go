@@ -1,15 +1,19 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -21,6 +25,8 @@ const (
 	CostReconciliationNone       = "none"
 	CostReconciliationReconciled = "reconciled"
 )
+
+var costAttemptAllocationLocks [256]sync.Mutex
 
 type CostAccountingRequest struct {
 	ID                             int64   `json:"id" gorm:"primaryKey"`
@@ -143,6 +149,30 @@ type ReconcileCostAttemptInput struct {
 }
 
 func PrepareCostAttempt(request *CostAccountingRequest, attempt *CostAccountingAttempt) error {
+	return prepareCostAttempt(DB, request, attempt, nil)
+}
+
+func PrepareCostAttemptWithRuleValidation(
+	ctx context.Context,
+	request *CostAccountingRequest,
+	attempt *CostAccountingAttempt,
+	validateRule func(*ChannelModelCostRule) error,
+) error {
+	if ctx == nil {
+		return errors.New("cost attempt context is required")
+	}
+	if validateRule == nil {
+		return errors.New("cost rule validation is required")
+	}
+	return prepareCostAttempt(DB.WithContext(ctx), request, attempt, validateRule)
+}
+
+func prepareCostAttempt(
+	db *gorm.DB,
+	request *CostAccountingRequest,
+	attempt *CostAccountingAttempt,
+	validateRule func(*ChannelModelCostRule) error,
+) error {
 	if request == nil || attempt == nil || strings.TrimSpace(request.RequestID) == "" {
 		return errors.New("cost request and attempt are required")
 	}
@@ -152,11 +182,18 @@ func PrepareCostAttempt(request *CostAccountingRequest, attempt *CostAccountingA
 	if attempt.BillableRequestCount != 0 && attempt.BillableRequestCount != 1 {
 		return errors.New("billable request count must be one")
 	}
+	if attempt.AttemptNo <= 0 {
+		hash := fnv.New32a()
+		_, _ = hash.Write([]byte(request.RequestID))
+		allocationLock := &costAttemptAllocationLocks[hash.Sum32()%uint32(len(costAttemptAllocationLocks))]
+		allocationLock.Lock()
+		defer allocationLock.Unlock()
+	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		now := common.GetTimestamp()
 		var persisted CostAccountingRequest
-		err := tx.Where("request_id = ?", request.RequestID).First(&persisted).Error
+		err := lockForUpdate(tx).Where("request_id = ?", request.RequestID).First(&persisted).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			persisted = *request
 			if persisted.RevenueStatus == "" {
@@ -172,20 +209,58 @@ func PrepareCostAttempt(request *CostAccountingRequest, attempt *CostAccountingA
 				persisted.CreatedAt = now
 			}
 			persisted.UpdatedAt = now
-			if err := tx.Create(&persisted).Error; err != nil {
-				return err
+			result := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "request_id"}},
+				DoNothing: true,
+			}).Create(&persisted)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				if err := lockForUpdate(tx).Where("request_id = ?", request.RequestID).First(&persisted).Error; err != nil {
+					return err
+				}
 			}
 		} else if err != nil {
 			return err
-		} else if request.TaskID != nil && !sameCostTaskID(request.TaskID, persisted.TaskID) {
+		}
+		if request.TaskID != nil && !sameCostTaskID(request.TaskID, persisted.TaskID) {
 			return errors.New("cost request task ID does not match persisted request")
 		}
 		*request = persisted
+		if validateRule != nil {
+			var activeRules []ChannelModelCostRule
+			if err := lockForUpdate(tx).Where(
+				"channel_id = ? AND billable_upstream_model = ? AND status = ?",
+				attempt.ChannelID, attempt.BillableUpstreamModel, types.CostRuleActive,
+			).Order("version DESC").Limit(2).Find(&activeRules).Error; err != nil {
+				return err
+			}
+			if len(activeRules) == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			if len(activeRules) > 1 {
+				return ErrCostActiveRuleConflict
+			}
+			if err := validateRule(&activeRules[0]); err != nil {
+				return err
+			}
+		}
 
 		if attempt.CostRequestID != 0 && attempt.CostRequestID != persisted.ID {
 			return errors.New("attempt belongs to another cost request")
 		}
 		attempt.CostRequestID = persisted.ID
+		if attempt.AttemptNo <= 0 {
+			var latestAttemptNo int
+			if err := tx.Model(&CostAccountingAttempt{}).
+				Where("cost_request_id = ?", persisted.ID).
+				Select("COALESCE(MAX(attempt_no), 0)").
+				Scan(&latestAttemptNo).Error; err != nil {
+				return err
+			}
+			attempt.AttemptNo = latestAttemptNo + 1
+		}
 		attempt.Status = string(types.CostAttemptPrepared)
 		attempt.BillableRequestCount = 1
 		if attempt.ReconciliationStatus == "" {
@@ -206,6 +281,17 @@ func PrepareCostAttempt(request *CostAccountingRequest, attempt *CostAccountingA
 }
 
 func TransitionCostAttempt(id int64, from, to types.CostAttemptStatus, updates map[string]any) error {
+	return transitionCostAttempt(DB, id, from, to, updates)
+}
+
+func TransitionCostAttemptWithContext(ctx context.Context, id int64, from, to types.CostAttemptStatus, updates map[string]any) error {
+	if ctx == nil {
+		return errors.New("cost transition context is required")
+	}
+	return transitionCostAttempt(DB.WithContext(ctx), id, from, to, updates)
+}
+
+func transitionCostAttempt(db *gorm.DB, id int64, from, to types.CostAttemptStatus, updates map[string]any) error {
 	if !costAttemptTransitionAllowed(from, to) {
 		return ErrCostStateConflict
 	}
@@ -230,7 +316,7 @@ func TransitionCostAttempt(id int64, from, to types.CostAttemptStatus, updates m
 		}
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		var attempt CostAccountingAttempt
 		if err := tx.Select("id", "cost_request_id").Where("id = ?", id).First(&attempt).Error; err != nil {
 			return err
@@ -249,6 +335,17 @@ func TransitionCostAttempt(id int64, from, to types.CostAttemptStatus, updates m
 }
 
 func SettleCostAttempt(input SettleCostAttemptInput) error {
+	return settleCostAttempt(DB, input)
+}
+
+func SettleCostAttemptWithContext(ctx context.Context, input SettleCostAttemptInput) error {
+	if ctx == nil {
+		return errors.New("cost settlement context is required")
+	}
+	return settleCostAttempt(DB.WithContext(ctx), input)
+}
+
+func settleCostAttempt(db *gorm.DB, input SettleCostAttemptInput) error {
 	if input.To != types.CostAttemptSettled && input.To != types.CostAttemptConfirmedZero {
 		return ErrCostStateConflict
 	}
@@ -272,7 +369,7 @@ func SettleCostAttempt(input SettleCostAttemptInput) error {
 		input.SettledAt = common.GetTimestamp()
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		var attempt CostAccountingAttempt
 		if err := tx.Select("id", "cost_request_id").Where("id = ?", input.AttemptID).First(&attempt).Error; err != nil {
 			return err

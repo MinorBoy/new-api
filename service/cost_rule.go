@@ -535,24 +535,10 @@ func validatePositiveCostPrice(original, normalized *string) error {
 }
 
 func predictedCostModel(mappingJSON, originModel string) (string, error) {
-	if strings.TrimSpace(mappingJSON) == "" || strings.TrimSpace(mappingJSON) == "{}" {
-		return originModel, nil
+	mappingJSON = strings.TrimSpace(mappingJSON)
+	if mappingJSON == "" {
+		mappingJSON = "{}"
 	}
-	var mapping map[string]string
-	if err := common.UnmarshalJsonStr(mappingJSON, &mapping); err != nil {
-		return "", err
-	}
-	current := originModel
-	visited := map[string]struct{}{current: {}}
-	for {
-		next := strings.TrimSpace(mapping[current])
-		if next == "" || next == current {
-			return current, nil
-		}
-		if _, ok := visited[next]; ok {
-			return "", errors.New("model mapping contains a cycle")
-		}
-		visited[next] = struct{}{}
-		current = next
-	}
+	mappedModel, _, err := ResolveMappedModel(originModel, mappingJSON)
+	return mappedModel, err
 }

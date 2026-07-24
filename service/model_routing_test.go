@@ -11,6 +11,8 @@ import (
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -62,6 +64,101 @@ func TestSelectCapabilityChannelPreservesLegacyWithoutPolicy(t *testing.T) {
 	assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode))
 }
 
+func TestCostRoutingExcludesChannelWithoutCapabilityPolicy(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	seedRoutingCandidate(t, 11, "higher", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "covered", "分组A", modelrouting.Seedance20, true)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", 11).Update("priority", 200).Error)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", 12).Update("priority", 100).Error)
+
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0),
+	}
+	param.ExcludeChannel(11)
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+}
+
+func TestCostRoutingExcludedKnownChannelWithoutCapabilityPolicy(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	seedRoutingCandidate(t, 11, "known", "分组A", modelrouting.Seedance20, true)
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0),
+	}
+	param.ExcludeChannel(11)
+
+	compatible, err := service.ValidateKnownChannelForRouting(param, "分组A", 11)
+	assert.False(t, compatible)
+	require.Error(t, err)
+}
+
+func TestCostRoutingKnownChannelRequiresStrictCoverage(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "known", "分组A", modelrouting.Seedance20, true)
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0),
+	}
+
+	compatible, err := service.ValidateKnownChannelForRouting(param, "分组A", 11)
+	assert.False(t, compatible)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+}
+
+func TestCostRoutingKnownCapabilityUsesTargetModelForCoverage(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "known", "分组A", modelrouting.Seedance20, true)
+	mapping := `{"` + modelrouting.Seedance20 + `":"wrong-mapped-model"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 11).Update("model_mapping", mapping).Error)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "provider-target", "1080p"))
+	require.NoError(t, err)
+	seedActiveFreeCostRuleForRouting(t, 11, "provider-target")
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}
+	compatible, err := service.ValidateKnownChannelForRouting(param, "分组A", 11)
+	require.NoError(t, err)
+	assert.True(t, compatible)
+	assert.Equal(t, "provider-target", common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingUpstreamModel))
+}
+
+func TestCostRoutingRechecksExcludedMissesAuthoritatively(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "candidate", "分组A", modelrouting.Seedance20, true)
+	mapping := `{"` + modelrouting.Seedance20 + `":"provider-late"}`
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 11).Update("model_mapping", mapping).Error)
+	channel, err := model.GetChannelById(11, false)
+	require.NoError(t, err)
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0),
+	}
+
+	covered, err := service.CheckSelectedChannelCostCoverage(param, channel, "")
+	require.NoError(t, err)
+	assert.False(t, covered)
+	param.ExcludeChannel(channel.Id)
+	seedActiveFreeCostRuleForRouting(t, 11, "provider-late")
+
+	restored, err := service.RecheckCostCoverageMisses(param)
+	require.NoError(t, err)
+	assert.True(t, restored)
+	selected, _, err := service.CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, 11, selected.Id)
+}
+
 func TestSelectCapabilityChannelClassifiesNoMatchAndUnavailable(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -95,7 +192,7 @@ func TestSelectCapabilityChannelClassifiesNoMatchAndUnavailable(t *testing.T) {
 				RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
 			}
 			if tt.excludeChannel {
-				param.ExcludeCapabilityChannel(11)
+				param.ExcludeChannel(11)
 			}
 
 			channel, _, err := service.CacheGetRandomSatisfiedChannel(param)
@@ -244,6 +341,36 @@ func prepareCapabilitySelectionTest(t *testing.T) {
 	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
 }
 
+func prepareStrictCostRoutingServiceTest(t *testing.T) {
+	t.Helper()
+	prepareCapabilitySelectionTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	service.InvalidateCostCoverage(0, "")
+
+	previousLookup := service.CostCapabilityLookup
+	service.CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
+		return types.CostCapabilities{CanResolveBillableModel: true}
+	}
+	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
+	require.NotNil(t, costConfig)
+	previousMode := cost_setting.Runtime().Mode
+	require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
+		cost_setting.KeyMode: string(types.CostAccountingStrict),
+	}))
+	cost_setting.UpdateAndSync()
+
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
+			cost_setting.KeyMode: string(previousMode),
+		}))
+		cost_setting.UpdateAndSync()
+		service.CostCapabilityLookup = previousLookup
+		service.InvalidateCostCoverage(0, "")
+		require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	})
+}
+
 func prepareAutoGroupSelectionTest(t *testing.T) {
 	t.Helper()
 	previousAutoGroups := setting.AutoGroups2JsonString()
@@ -254,6 +381,19 @@ func prepareAutoGroupSelectionTest(t *testing.T) {
 		require.NoError(t, setting.UpdateAutoGroupsByJsonString(previousAutoGroups))
 		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups))
 	})
+}
+
+func seedActiveFreeCostRuleForRouting(t *testing.T, channelID int, modelName string) {
+	t.Helper()
+	configJSON, err := common.Marshal(types.CostRuleConfigV1{ZeroCostReason: "supplier contract"})
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModeFree), SchemaVersion: 1,
+		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error)
 }
 
 func capabilitySelectionContext() *gin.Context {

@@ -3,12 +3,16 @@ package service
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -73,12 +77,12 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 		return nil, result, err
 	}
 	filter := model.ChannelSelectFilter{}
+	filter.ExcludedChannelIDs = param.ExcludedChannelIDs
 	if result.Capability {
 		filter.AllowedChannelIDs = make(map[int]struct{}, len(result.Evaluation.CompatibleByChannel))
 		for channelID := range result.Evaluation.CompatibleByChannel {
 			filter.AllowedChannelIDs[channelID] = struct{}{}
 		}
-		filter.ExcludedChannelIDs = param.ExcludedChannelIDs
 	}
 	channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, priorityRetry, param.RequestPath, filter)
 	if err != nil {
@@ -117,15 +121,13 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	if err != nil {
 		return false, err
 	}
-	if !result.Capability {
-		return true, nil
-	}
-	target, compatible := result.Evaluation.CompatibleByChannel[channelID]
-	if !compatible {
-		return false, nil
-	}
-	if _, excluded := param.ExcludedChannelIDs[channelID]; excluded ||
-		!model.IsChannelEnabledForGroupModel(group, param.ModelName, channelID) {
+	if _, excluded := param.ExcludedChannelIDs[channelID]; excluded {
+		if !result.Capability {
+			return false, &ChannelSelectionError{
+				Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+				Err: errors.New("channel is unavailable"),
+			}
+		}
 		return false, &ChannelSelectionError{
 			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("compatible channel is unavailable"),
@@ -134,8 +136,126 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 			}},
 		}
 	}
-	publishRoutingDecision(param.Ctx, result, target)
+	if result.Capability && !model.IsChannelEnabledForGroupModel(group, param.ModelName, channelID) {
+		return false, &ChannelSelectionError{
+			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Err: errors.New("compatible channel is unavailable"),
+			Diagnostics: []modelrouting.Audit{{
+				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
+			}},
+		}
+	}
+	if result.Capability {
+		target, compatible := result.Evaluation.CompatibleByChannel[channelID]
+		if !compatible {
+			return false, nil
+		}
+		publishRoutingDecision(param.Ctx, result, target)
+	}
+
+	channel, err := model.GetChannelById(channelID, false)
+	if err != nil {
+		return false, &ChannelSelectionError{
+			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Err: errors.New("channel is unavailable"),
+		}
+	}
+	covered, coverageErr := CheckSelectedChannelCostCoverage(param, channel, "")
+	if coverageErr != nil || !covered {
+		param.ExcludeChannel(channelID)
+		selectionErr := &ChannelSelectionError{
+			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Err: errors.New("channel is unavailable"),
+		}
+		if result.Capability {
+			selectionErr.Err = errors.New("compatible channel is unavailable")
+			selectionErr.Diagnostics = []modelrouting.Audit{{
+				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
+			}}
+		}
+		return false, selectionErr
+	}
 	return true, nil
+}
+
+func CheckSelectedChannelCostCoverage(param *RetryParam, channel *model.Channel, taskPlatform constant.TaskPlatform) (bool, error) {
+	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
+		return true, nil
+	}
+	if param == nil || channel == nil {
+		return false, errors.New("selected channel is required")
+	}
+
+	predictedModel := ""
+	if common.GetContextKeyBool(param.Ctx, constant.ContextKeyRoutingCapabilityMode) {
+		predictedModel = strings.TrimSpace(common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingUpstreamModel))
+	}
+	if predictedModel == "" {
+		mappingJSON := strings.TrimSpace(channel.GetModelMapping())
+		if mappingJSON == "" {
+			mappingJSON = "{}"
+		}
+		originModel := param.ModelName
+		if strings.HasSuffix(originModel, ratio_setting.CompactModelSuffix) {
+			originModel = strings.TrimSuffix(originModel, ratio_setting.CompactModelSuffix)
+		}
+		mappedModel, _, err := ResolveMappedModel(originModel, mappingJSON)
+		if err != nil {
+			return false, nil
+		}
+		predictedModel = strings.TrimSpace(mappedModel)
+	}
+	if predictedModel == "" {
+		return false, nil
+	}
+
+	input := PredictedCoverageInput{
+		ChannelID:              channel.Id,
+		PredictedUpstreamModel: predictedModel,
+		RequestPath:            param.RequestPath,
+		TaskPlatform:           taskPlatform,
+	}
+	if input.TaskPlatform == "" && isCostTaskRequestPath(param.RequestPath) {
+		input.TaskPlatform = constant.TaskPlatform(strconv.Itoa(channel.Type))
+	}
+	covered, err := CheckPredictedCostCoverage(input)
+	if err != nil || covered {
+		return covered, err
+	}
+	if param.costCoverageMisses == nil {
+		param.costCoverageMisses = make(map[int]PredictedCoverageInput)
+	}
+	param.costCoverageMisses[channel.Id] = input
+	return false, nil
+}
+
+func isCostTaskRequestPath(requestPath string) bool {
+	path := strings.ToLower(strings.TrimSpace(requestPath))
+	return strings.Contains(path, "/video") || strings.Contains(path, "/suno/") ||
+		strings.Contains(path, "/kling/") || strings.Contains(path, "/jimeng") ||
+		strings.Contains(path, "/contents/generations")
+}
+
+func RecheckCostCoverageMisses(param *RetryParam) (bool, error) {
+	if cost_setting.Runtime().Mode != types.CostAccountingStrict || param == nil || len(param.costCoverageMisses) == 0 {
+		return false, nil
+	}
+
+	restored := false
+	for channelID, input := range param.costCoverageMisses {
+		input.Authoritative = true
+		covered, err := CheckPredictedCostCoverage(input)
+		if err != nil {
+			return false, err
+		}
+		if !covered {
+			continue
+		}
+		delete(param.ExcludedChannelIDs, channelID)
+		delete(param.costCoverageMisses, channelID)
+		restored = true
+	}
+	return restored, nil
 }
 
 func publishRoutingDecision(c *gin.Context, result groupRoutingResult, target modelrouting.Target) {

@@ -22,10 +22,11 @@ type RetryParam struct {
 	Retry              *int
 	RoutingInput       *modelrouting.FactsInput
 	ExcludedChannelIDs map[int]struct{}
+	costCoverageMisses map[int]PredictedCoverageInput
 	resetNextTry       bool
 }
 
-func (p *RetryParam) ExcludeCapabilityChannel(channelID int) {
+func (p *RetryParam) ExcludeChannel(channelID int) {
 	if p.ExcludedChannelIDs == nil {
 		p.ExcludedChannelIDs = map[int]struct{}{}
 	}

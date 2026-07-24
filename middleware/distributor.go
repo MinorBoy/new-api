@@ -69,41 +69,43 @@ func Distribute() func(c *gin.Context) {
 				Ctx: c, TokenGroup: usingGroup, ModelName: modelRequest.Model,
 				RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0), RoutingInput: routingInput,
 			}
-			groups := []string{usingGroup}
-			if usingGroup == "auto" {
-				groups = service.GetUserAutoGroup(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
-			}
-			knownChannelCompatible := false
-			var knownChannelErr error
-			for _, group := range groups {
-				if usingGroup == "auto" && !model.IsChannelEnabledForGroupModel(group, modelRequest.Model, channel.Id) {
-					continue
+			if shouldSelectChannel {
+				groups := []string{usingGroup}
+				if usingGroup == "auto" {
+					groups = service.GetUserAutoGroup(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
 				}
-				compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, group, channel.Id)
-				if routeErr != nil {
-					var selectionErr *service.ChannelSelectionError
-					if errors.As(routeErr, &selectionErr) && selectionErr.Code == types.ErrorCodeRoutingPolicyError {
-						abortRoutingSelectionError(c, routeErr)
-						return
+				knownChannelCompatible := false
+				var knownChannelErr error
+				for _, group := range groups {
+					if usingGroup == "auto" && !model.IsChannelEnabledForGroupModel(group, modelRequest.Model, channel.Id) {
+						continue
 					}
-					knownChannelErr = routeErr
-					continue
-				}
-				if compatible {
-					knownChannelCompatible = true
-					if usingGroup == "auto" {
-						common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
+					compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, group, channel.Id)
+					if routeErr != nil {
+						var selectionErr *service.ChannelSelectionError
+						if errors.As(routeErr, &selectionErr) && selectionErr.Code == types.ErrorCodeRoutingPolicyError {
+							abortRoutingSelectionError(c, routeErr)
+							return
+						}
+						knownChannelErr = routeErr
+						continue
 					}
-					break
+					if compatible {
+						knownChannelCompatible = true
+						if usingGroup == "auto" {
+							common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
+						}
+						break
+					}
 				}
-			}
-			if !knownChannelCompatible {
-				if knownChannelErr != nil {
-					abortRoutingSelectionError(c, knownChannelErr)
-				} else {
-					abortSeedanceRoutingError(c, http.StatusBadRequest, types.ErrorCodeNoCompatibleRoute, "the specific channel is not compatible with this request")
+				if !knownChannelCompatible {
+					if knownChannelErr != nil {
+						abortRoutingSelectionError(c, knownChannelErr)
+					} else {
+						abortSeedanceRoutingError(c, http.StatusBadRequest, types.ErrorCodeNoCompatibleRoute, "the specific channel is not compatible with this request")
+					}
+					return
 				}
-				return
 			}
 		} else {
 			// Select a channel for the user
@@ -223,28 +225,55 @@ func Distribute() func(c *gin.Context) {
 		if channel != nil {
 			for {
 				setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
-				if setupErr == nil {
-					break
-				}
-				if !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
-					abortSeedanceRoutingError(c, setupErr.StatusCode, setupErr.GetErrorCode(), setupErr.Error())
-					return
-				}
-				if specificChannel {
-					abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "the compatible channel is unavailable")
-					return
-				}
-				if setupErr.GetErrorCode() != types.ErrorCodeChannelNoAvailableKey || retryParam == nil {
-					abortSeedanceRoutingError(c, setupErr.StatusCode, setupErr.GetErrorCode(), setupErr.Error())
-					return
-				}
-				retryParam.ExcludeCapabilityChannel(channel.Id)
-				channel, _, err = service.CacheGetRandomSatisfiedChannel(retryParam)
-				if err != nil {
-					if abortRoutingSelectionError(c, err) {
+				if setupErr != nil {
+					if !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+						abortSeedanceRoutingError(c, setupErr.StatusCode, setupErr.GetErrorCode(), setupErr.Error())
 						return
 					}
-					abortSeedanceRoutingError(c, http.StatusInternalServerError, types.ErrorCodeRoutingPolicyError, err.Error())
+					if specificChannel {
+						abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "the compatible channel is unavailable")
+						return
+					}
+					if setupErr.GetErrorCode() != types.ErrorCodeChannelNoAvailableKey || retryParam == nil {
+						abortSeedanceRoutingError(c, setupErr.StatusCode, setupErr.GetErrorCode(), setupErr.Error())
+						return
+					}
+				} else {
+					covered, coverageErr := service.CheckSelectedChannelCostCoverage(retryParam, channel, "")
+					if coverageErr != nil {
+						abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "available channel is unavailable")
+						return
+					}
+					if covered {
+						break
+					}
+					if specificChannel || retryParam == nil {
+						abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "available channel is unavailable")
+						return
+					}
+				}
+				retryParam.ExcludeChannel(channel.Id)
+				for {
+					channel, _, err = service.CacheGetRandomSatisfiedChannel(retryParam)
+					if err == nil && channel != nil {
+						break
+					}
+					restored, recheckErr := service.RecheckCostCoverageMisses(retryParam)
+					if recheckErr != nil {
+						abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "available channel is unavailable")
+						return
+					}
+					if restored {
+						continue
+					}
+					if err != nil {
+						if abortRoutingSelectionError(c, err) {
+							return
+						}
+						abortSeedanceRoutingError(c, http.StatusInternalServerError, types.ErrorCodeRoutingPolicyError, "available channel is unavailable")
+						return
+					}
+					abortSeedanceRoutingError(c, http.StatusServiceUnavailable, types.ErrorCodeCompatibleChannelUnavailable, "available channel is unavailable")
 					return
 				}
 			}

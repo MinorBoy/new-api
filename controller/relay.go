@@ -246,7 +246,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		shouldRetryRequest := shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
 		if shouldRetryRequest && common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
-			retryParam.ExcludeCapabilityChannel(channel.Id)
+			retryParam.ExcludeChannel(channel.Id)
 		}
 		if !shouldRetryRequest {
 			break
@@ -327,6 +327,13 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
 		if err != nil {
+			restored, recheckErr := service.RecheckCostCoverageMisses(retryParam)
+			if recheckErr != nil {
+				return nil, costCoverageUnavailableError()
+			}
+			if restored {
+				continue
+			}
 			var selectionErr *service.ChannelSelectionError
 			if errors.As(err, &selectionErr) {
 				service.RecordRoutingSelectionFailure(c, info.OriginModelName, selectionErr)
@@ -335,20 +342,39 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 		if channel == nil {
+			restored, recheckErr := service.RecheckCostCoverageMisses(retryParam)
+			if recheckErr != nil {
+				return nil, costCoverageUnavailableError()
+			}
+			if restored {
+				continue
+			}
 			return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 
 		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 		if newAPIError == nil {
-			return channel, nil
+			covered, coverageErr := service.CheckSelectedChannelCostCoverage(retryParam, channel, "")
+			if coverageErr != nil {
+				return nil, costCoverageUnavailableError()
+			}
+			if covered {
+				return channel, nil
+			}
+			retryParam.ExcludeChannel(channel.Id)
+			continue
 		}
 		if common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) &&
 			newAPIError.GetErrorCode() == types.ErrorCodeChannelNoAvailableKey {
-			retryParam.ExcludeCapabilityChannel(channel.Id)
+			retryParam.ExcludeChannel(channel.Id)
 			continue
 		}
 		return nil, newAPIError
 	}
+}
+
+func costCoverageUnavailableError() *types.NewAPIError {
+	return types.NewError(errors.New("available channel is unavailable"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 }
 
 func routingSelectionErrorToAPI(err error) *types.NewAPIError {
@@ -652,7 +678,7 @@ func RelayTask(c *gin.Context) {
 
 		shouldRetryRequest := shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry())
 		if shouldRetryRequest && common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
-			retryParam.ExcludeCapabilityChannel(channel.Id)
+			retryParam.ExcludeChannel(channel.Id)
 		}
 		if !shouldRetryRequest {
 			break

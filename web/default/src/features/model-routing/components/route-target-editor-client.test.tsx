@@ -163,7 +163,18 @@ test('preserves a manual name and resumes generation after it is cleared', async
   try {
     await act(async () => {
       mounted.form.setValue('targets.0.channel_name', 'A1')
+    })
+    assert.match(
+      mounted.form.getValues('targets.0.name'),
+      /^\d{8}-A1-720p-standard-4-15s$/
+    )
+
+    await act(async () => {
       mounted.form.setValue('targets.0.name', 'manual target')
+    })
+    assert.equal(mounted.form.getValues('targets.0.name'), 'manual target')
+
+    await act(async () => {
       mounted.form.setValue('targets.0.output_resolutions', ['1080p'])
     })
     assert.equal(mounted.form.getValues('targets.0.name'), 'manual target')

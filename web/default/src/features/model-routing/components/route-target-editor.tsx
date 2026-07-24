@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Copy, Plus, Trash2, X } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import type { UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -44,8 +45,10 @@ import { cn } from '@/lib/utils'
 
 import {
   ASPECT_RATIOS,
+  buildRoutingTargetName,
   MAX_TASK_DURATION_SECONDS,
   OUTPUT_RESOLUTIONS,
+  shouldUpdateRoutingTargetName,
   type RoutingCandidate,
   type RoutingPolicyFormValues,
 } from '../types'
@@ -70,13 +73,45 @@ const ROUTING_SELECTED_CLASS =
 export function RouteTargetEditor(props: RouteTargetEditorProps) {
   const { t } = useTranslation()
   const target = props.form.watch(`targets.${props.index}`)
+  const model = props.form.watch('model')
   const durationValues = target?.durations.values ?? []
+  const previousGeneratedName = useRef<string | undefined>(undefined)
   const candidateOptions = props.candidates.map((candidate) => ({
     value: String(candidate.id),
     label: `${candidate.name} (#${candidate.id}) · ${
       candidate.status === 1 ? t('Enabled') : t('Disabled')
     } · P${candidate.priority} · W${candidate.weight}`,
   }))
+
+  useEffect(() => {
+    if (!target) {
+      return
+    }
+
+    const generatedName = buildRoutingTargetName({
+      date: new Date(),
+      channelName: target.channel_name,
+      model,
+      outputResolutions: target.output_resolutions,
+      durations: target.durations,
+    })
+    if (generatedName === undefined) {
+      return
+    }
+
+    const namePath = `targets.${props.index}.name` as const
+    const currentName = props.form.getValues(namePath)
+    if (
+      !shouldUpdateRoutingTargetName(currentName, previousGeneratedName.current)
+    ) {
+      return
+    }
+
+    previousGeneratedName.current = generatedName
+    if (currentName !== generatedName) {
+      props.form.setValue(namePath, generatedName, { shouldValidate: true })
+    }
+  }, [model, props.form, props.index, target])
 
   const setDurationMode = (mode: 'values' | 'range') => {
     if (mode === target?.durations.mode) {

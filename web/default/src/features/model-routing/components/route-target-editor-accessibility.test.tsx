@@ -82,6 +82,10 @@ test('target model mapping fields explain management and replacement values', ()
 
   assert.match(html, />Upstream channel</)
   assert.match(html, />Route target name</)
+  assert.match(
+    html,
+    /<label[^>]*for="[^"]+">Route target name<\/label>[\s\S]*?<input[^>]*name="targets\.0\.name"[^>]*\/>/
+  )
   assert.match(html, />Channel model mapping \(replacement model\)</)
   assert.match(
     html,

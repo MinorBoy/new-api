@@ -133,9 +133,10 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		BillableRequestCount:   1,
 		RequestMeterJSON:       requestMeterJSON,
 	}
-	err = model.PrepareCostAttemptWithRuleValidation(ctx, request, attempt, input.CostProfitRecheckSnapshot, func(lockedRule *model.ChannelModelCostRule) error {
+	runtimeMinimumExpectedMarginBPS := 0
+	validateRule := func(lockedRule *model.ChannelModelCostRule) error {
 		if snapshot := input.CostProfitRecheckSnapshot; snapshot != nil &&
-			cost_setting.Runtime().MinimumExpectedMarginBPS != snapshot.GlobalMinimumExpectedMarginBPS {
+			runtimeMinimumExpectedMarginBPS != snapshot.GlobalMinimumExpectedMarginBPS {
 			return &ProfitEligibilityError{ChannelID: input.ChannelID, Reason: ProfitReasonCalculationError}
 		}
 		config, err := validateCostRuleContract(lockedRule, capabilities)
@@ -167,9 +168,18 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		attempt.ChargeEvent = string(config.ChargeEvent)
 		attempt.MeterSource = string(config.MeterSource)
 		return nil
-	})
+	}
+	if input.CostProfitRecheckSnapshot != nil {
+		err = cost_setting.WithRuntimeReadLock(func(runtime cost_setting.RuntimeSnapshot) error {
+			runtimeMinimumExpectedMarginBPS = runtime.MinimumExpectedMarginBPS
+			return model.PrepareCostAttemptWithRuleValidation(ctx, request, attempt, input.CostProfitRecheckSnapshot, validateRule)
+		})
+	} else {
+		err = model.PrepareCostAttemptWithRuleValidation(ctx, request, attempt, nil, validateRule)
+	}
 	if err != nil {
-		if errors.Is(err, model.ErrCostRuleSnapshotConflict) {
+		if errors.Is(err, model.ErrCostRuleSnapshotConflict) ||
+			(input.CostProfitRecheckSnapshot != nil && model.IsCostSnapshotTransactionConflict(err)) {
 			return nil, &ProfitEligibilityError{ChannelID: input.ChannelID, Reason: ProfitReasonCalculationError}
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {

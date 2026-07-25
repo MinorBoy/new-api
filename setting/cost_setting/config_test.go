@@ -85,6 +85,21 @@ func TestRuntimePreservesExplicitZeroMargin(t *testing.T) {
 	assert.Zero(t, Runtime().MinimumExpectedMarginBPS)
 }
 
+func TestWithRuntimeReadLockBlocksRuntimeWriter(t *testing.T) {
+	withCostSettingConfig(t, map[string]string{
+		KeyMode:                     string(types.CostAccountingStrict),
+		KeyMinimumExpectedMarginBPS: "1250",
+	})
+
+	require.NoError(t, WithRuntimeReadLock(func(snapshot RuntimeSnapshot) error {
+		assert.Equal(t, 1250, snapshot.MinimumExpectedMarginBPS)
+		assert.False(t, runtimeUpdateGuard.TryLock(), "runtime updates must wait for a profit snapshot guard")
+		return nil
+	}))
+	require.True(t, runtimeUpdateGuard.TryLock())
+	runtimeUpdateGuard.Unlock()
+}
+
 func TestInvalidRuntimeMarginFallsBackToZero(t *testing.T) {
 	withCostSettingConfig(t, map[string]string{
 		KeyMode:                     string(types.CostAccountingStrict),

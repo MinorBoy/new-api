@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestAuthorizeDispatchBeforeTransport(t *testing.T) {
@@ -107,6 +109,36 @@ func TestPrepareCostAttemptRejectsChangedProfitRecheckGlobalThreshold(t *testing
 		cost_setting.KeyMinimumExpectedMarginBPS: "200",
 	}))
 	cost_setting.UpdateAndSync()
+	input := preparedAttemptInput()
+	input.CostProfitRecheckSnapshot = info.CostProfitRecheckSnapshot
+
+	_, err := PrepareCostAttempt(context.Background(), input)
+
+	require.ErrorIs(t, err, ErrProfitEligibility)
+	var coverageErr *CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, input.ChannelID, coverageErr.ChannelID)
+	assertNoPreparedCostRequest(t, input.RequestID)
+}
+
+func TestPrepareCostAttemptMapsSnapshotLockConflictToProfitEligibility(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	seedActiveAttemptRule(t, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})
+	configureProfitRecheckSettings(t, 0)
+
+	info := profitRecheckRelayInfo(0, 0)
+	setProfitRecheckRevenue(t)
+	require.NoError(t, RecheckSelectedChannelProfit(nil, info))
+	require.NotNil(t, info.CostProfitRecheckSnapshot)
+	callbackName := "profit_recheck_snapshot_sqlite_locked"
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "channel_model_cost_rules" {
+			tx.AddError(errors.New("database is locked"))
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	})
 	input := preparedAttemptInput()
 	input.CostProfitRecheckSnapshot = info.CostProfitRecheckSnapshot
 

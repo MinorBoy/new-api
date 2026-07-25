@@ -2,6 +2,7 @@ package cost_setting
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
@@ -28,6 +29,7 @@ type RuntimeSnapshot struct {
 var costSetting = CostSetting{Mode: types.CostAccountingDisabled}
 
 var runtimeSnapshot atomic.Value
+var runtimeUpdateGuard sync.RWMutex
 
 func init() {
 	config.GlobalConfig.Register(ConfigName, &costSetting)
@@ -51,6 +53,18 @@ func ValidateMinimumExpectedMarginBPS(value int) error {
 }
 
 func Runtime() RuntimeSnapshot {
+	runtimeUpdateGuard.RLock()
+	defer runtimeUpdateGuard.RUnlock()
+	return runtimeSnapshotValue()
+}
+
+func WithRuntimeReadLock(fn func(RuntimeSnapshot) error) error {
+	runtimeUpdateGuard.RLock()
+	defer runtimeUpdateGuard.RUnlock()
+	return fn(runtimeSnapshotValue())
+}
+
+func runtimeSnapshotValue() RuntimeSnapshot {
 	if loaded := runtimeSnapshot.Load(); loaded != nil {
 		if snapshot, ok := loaded.(RuntimeSnapshot); ok {
 			return snapshot
@@ -60,6 +74,9 @@ func Runtime() RuntimeSnapshot {
 }
 
 func UpdateAndSync() {
+	runtimeUpdateGuard.Lock()
+	defer runtimeUpdateGuard.Unlock()
+
 	mode := costSetting.Mode
 	if err := ValidateMode(mode); err != nil {
 		common.SysError(err.Error() + "; using disabled mode")

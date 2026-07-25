@@ -29,6 +29,31 @@ const (
 
 var costAttemptAllocationLocks [256]sync.Mutex
 
+func IsCostSnapshotTransactionConflict(err error) bool {
+	for err != nil {
+		message := strings.ToLower(err.Error())
+		for _, marker := range []string{
+			"database is locked",
+			"database table is locked",
+			"database is busy",
+			"sqlite_busy",
+			"sqlite_locked",
+			"serialization failure",
+			"could not serialize",
+			"deadlock detected",
+			"deadlock found",
+			"lock wait timeout",
+			"try restarting transaction",
+		} {
+			if strings.Contains(message, marker) {
+				return true
+			}
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
 type CostAccountingRequest struct {
 	ID                             int64   `json:"id" gorm:"primaryKey"`
 	RequestID                      string  `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`

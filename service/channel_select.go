@@ -31,6 +31,10 @@ type RetryParam struct {
 	// never trigger a metadata lookup. The state, and the URLs it holds, stay in
 	// request memory: they are not copied onto Facts, Audit, diagnostics or logs.
 	profitRoutingState *ProfitRoutingRequestState
+	// profitExclusions records the admin-only exclusion reason for each channel the
+	// profit filter dropped, so the controller/diagnostics layer can surface a stable
+	// reason without leaking amounts, thresholds or rule versions to ordinary users.
+	profitExclusions map[int]ProfitExclusionReason
 }
 
 // ProfitRoutingState returns the request-level metadata state, building it lazily

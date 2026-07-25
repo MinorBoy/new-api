@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -157,6 +158,135 @@ func TestCostRoutingRechecksExcludedMissesAuthoritatively(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, selected)
 	assert.Equal(t, 11, selected.Id)
+}
+
+// TestProfitRoutingExcludesBelowMarginCapabilityCandidate asserts the candidate-stage
+// profit filter narrows the capability candidate set by predicted margin. Two channels
+// both satisfy the capability policy; the one seeded with a per-request cost above the
+// (fixed) preview revenue is excluded as margin_below_threshold, so only the free-cost
+// channel can be selected.
+func TestProfitRoutingExcludesBelowMarginCapabilityCandidate(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "cheap", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "expensive", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, multiTargetPolicyRequest("分组A", modelrouting.Seedance20, "1080p",
+		[]policyTarget{{ChannelID: 11, UpstreamModel: "cheap-model"}, {ChannelID: 12, UpstreamModel: "expensive-model"}}))
+	require.NoError(t, err)
+	seedActiveFreeCostRuleForRouting(t, 11, "cheap-model")
+	seedPerRequestCostRuleForRouting(t, 12, "expensive-model", "100") // $100/req >> ~$2 preview revenue
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}
+	// The expensive channel must never be selected across several attempts because the
+	// profit filter excludes it before the weighted random pick runs.
+	for attempt := 0; attempt < 10; attempt++ {
+		param.SetRetry(0)
+		selected, _, selectErr := service.CacheGetRandomSatisfiedChannel(param)
+		require.NoError(t, selectErr)
+		require.NotNil(t, selected, "free-cost candidate must remain selectable")
+		assert.Equal(t, 11, selected.Id, "expensive candidate must be excluded by the margin gate")
+	}
+}
+
+// TestProfitRoutingNoOpOutsideStrictMode asserts the filter is inert when cost
+// accounting is disabled: both channels remain selectable even though one carries a
+// cost that would fail the margin gate under strict mode.
+func TestProfitRoutingNoOpOutsideStrictMode(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	service.InvalidateCostCoverage(0, "")
+	t.Cleanup(func() {
+		service.InvalidateCostCoverage(0, "")
+		model.DB.Exec("DELETE FROM channel_model_cost_rules")
+	})
+	seedRoutingCandidate(t, 11, "cheap", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "expensive", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, multiTargetPolicyRequest("分组A", modelrouting.Seedance20, "1080p",
+		[]policyTarget{{ChannelID: 11, UpstreamModel: "cheap-model"}, {ChannelID: 12, UpstreamModel: "expensive-model"}}))
+	require.NoError(t, err)
+	seedPerRequestCostRuleForRouting(t, 12, "expensive-model", "100")
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}
+	seen := map[int]bool{}
+	for attempt := 0; attempt < 20; attempt++ {
+		param.SetRetry(0)
+		selected, _, selectErr := service.CacheGetRandomSatisfiedChannel(param)
+		require.NoError(t, selectErr)
+		require.NotNil(t, selected)
+		seen[selected.Id] = true
+	}
+	// Both candidates must be reachable because the margin filter is a no-op outside
+	// strict mode; the weighted random pick keeps its full candidate set.
+	assert.True(t, seen[11] && seen[12], "both candidates must remain selectable outside strict mode")
+}
+
+type policyTarget struct {
+	ChannelID     int
+	UpstreamModel string
+}
+
+func multiTargetPolicyRequest(group, modelName, resolution string, targets []policyTarget) service.RoutingPolicyWriteRequest {
+	supportsRealPerson := true
+	request := service.RoutingPolicyWriteRequest{
+		GroupName: group,
+		Model:     modelName,
+		Enabled:   true,
+		Defaults: modelrouting.Defaults{
+			OutputResolution: resolution,
+			DurationSeconds:  10,
+			AspectRatio:      "16:9",
+		},
+	}
+	for _, target := range targets {
+		request.Targets = append(request.Targets, service.RouteTargetWriteRequest{
+			ChannelID:      target.ChannelID,
+			Name:           target.UpstreamModel,
+			UpstreamModel:  target.UpstreamModel,
+			TargetPriority: 100,
+			Enabled:        true,
+			Constraints: modelrouting.Constraints{
+				OutputResolutions:  []string{resolution},
+				Durations:          modelrouting.DurationConstraint{Min: serviceIntPtr(4), Max: serviceIntPtr(15)},
+				AspectRatios:       []string{"16:9", "9:16"},
+				ReferenceLimits:    modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+				SupportsRealPerson: &supportsRealPerson,
+			},
+		})
+	}
+	return request
+}
+
+func seedPerRequestCostRuleForRouting(t *testing.T, channelID int, modelName, unitPriceUSD string) {
+	t.Helper()
+	config := types.CostRuleConfigV1{
+		Currency:              "USD",
+		BillingMultiplier:     "1",
+		PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1",
+		FeeRate:               "0",
+		CurrencyToUSDRate:     "1",
+		UnitPrice:             &unitPriceUSD,
+		ChargeEvent:           types.CostChargeResponseSucceeded,
+	}
+	normalized, err := service.NormalizeCostRuleConfig(types.CostModePerRequest, config)
+	require.NoError(t, err)
+	configJSON, err := common.Marshal(normalized)
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
+		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error)
 }
 
 func TestSelectCapabilityChannelClassifiesNoMatchAndUnavailable(t *testing.T) {
@@ -360,12 +490,23 @@ func prepareStrictCostRoutingServiceTest(t *testing.T) {
 	}))
 	cost_setting.UpdateAndSync()
 
+	// Inject a revenue preview callback so strict-mode profit routing has a positive
+	// revenue to compare against the (typically free) cost rule these tests seed. The
+	// callback mirrors the production wiring (main.go) but returns a fixed positive
+	// quota so free-cost candidates pass the margin gate; pure profit-margin behavior
+	// is asserted in dedicated profit_routing tests instead.
+	previousRevenueHook := service.RevenuePreviewHookForTest()
+	service.SetRoutingRevenuePreview(func(_ context.Context, _ service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return 1_000_000, "500000", nil
+	})
+
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
 			cost_setting.KeyMode: string(previousMode),
 		}))
 		cost_setting.UpdateAndSync()
 		service.CostCapabilityLookup = previousLookup
+		service.SetRoutingRevenuePreview(previousRevenueHook)
 		service.InvalidateCostCoverage(0, "")
 		require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
 	})

@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 )
@@ -281,6 +285,15 @@ func SetRoutingRevenuePreview(hook RoutingRevenuePreviewFunc) {
 	routingRevenuePreviewHolder.hook = hook
 }
 
+// RevenuePreviewHookForTest returns the currently installed revenue preview callback.
+// It exists so tests can save and restore the hook around strict-mode fixtures without
+// reaching into package-private state.
+func RevenuePreviewHookForTest() RoutingRevenuePreviewFunc {
+	routingRevenuePreviewHolder.mu.RLock()
+	defer routingRevenuePreviewHolder.mu.RUnlock()
+	return routingRevenuePreviewHolder.hook
+}
+
 // currentRoutingRevenuePreview returns the installed callback or nil.
 func currentRoutingRevenuePreview() RoutingRevenuePreviewFunc {
 	routingRevenuePreviewHolder.mu.RLock()
@@ -302,4 +315,224 @@ func PreviewRoutingRevenue(ctx context.Context, input RoutingRevenuePreviewInput
 		return 0, err
 	}
 	return RevenueEquivalentNanoUSD(finalUserQuota, quotaPerUnitSnapshot)
+}
+
+// ProfitRoutingCandidate describes one channel the candidate stage is considering. The
+// predicted billable upstream model is the model the adapter will actually send
+// upstream after model mapping — either the capability-routing Target.UpstreamModel
+// or the legacy ResolveMappedModel result. An empty predicted model excludes the
+// candidate as cost_rule_missing (we cannot price what we cannot identify).
+type ProfitRoutingCandidate struct {
+	ChannelID              int
+	PredictedUpstreamModel string
+	// TargetThresholdBPS is the route-target override (nil = inherit the global threshold).
+	TargetThresholdBPS *int
+}
+
+// ProfitChannelFilterInput carries everything the candidate filter needs: the request
+// facts (already metadata-resolved), the global threshold, the per-candidate threshold
+// overrides, and the revenue for this group's request. The revenue is computed once
+// per (group, request) and reused across every candidate in that group.
+type ProfitChannelFilterInput struct {
+	Ctx             context.Context
+	Facts           ProfitRoutingFacts
+	RevenueNanoUSD  int64
+	HasRevenue      bool
+	GlobalMarginBPS int
+	Candidates      []ProfitRoutingCandidate
+	// MetadataState, when non-nil, is asked to resolve input reference video durations
+	// before any token-priced candidate is evaluated. It is nil for requests without
+	// reference videos.
+	MetadataState *ProfitRoutingRequestState
+}
+
+// ProfitChannelFilterResult is the filtered candidate set plus admin-only diagnostics
+// for each excluded candidate. Surviving channel IDs are written into
+// ChannelSelectFilter.AllowedChannelIDs by the caller; the diagnostics feed the
+// routing_diagnostics admin log and never reach ordinary users.
+type ProfitChannelFilterResult struct {
+	AllowedChannelIDs map[int]struct{}
+	Exclusions        []ProfitChannelExclusion
+}
+
+type ProfitChannelExclusion struct {
+	ChannelID     int
+	UpstreamModel string
+	Reason        ProfitExclusionReason
+}
+
+// FilterProfitEligibleChannels evaluates each candidate's predicted margin and returns
+// the survivors. It is the single entry point the normal, auto, affinity, specified
+// and retry paths must all call, so none of them can bypass the minimum-margin gate.
+//
+// The filter never reorders candidates or changes priority/weight: it only intersects
+// the candidate set with the margin survivors, and GetRandomSatisfiedChannel still
+// performs the original weighted random pick on the result. When the cost-accounting
+// mode is not strict, the filter is a no-op and returns every candidate (the caller
+// decides strictness so this function stays pure and testable).
+//
+// Fail-closed semantics: unknown revenue, a missing active cost rule, an unknown meter
+// (e.g. token cost without a resolvable duration), a metadata-service failure that
+// blocks token prediction, or any calculation overflow all exclude the candidate.
+func FilterProfitEligibleChannels(input ProfitChannelFilterInput, rules map[CostRuleCandidate]*model.ChannelModelCostRule) ProfitChannelFilterResult {
+	result := ProfitChannelFilterResult{
+		AllowedChannelIDs: make(map[int]struct{}, len(input.Candidates)),
+	}
+	if len(input.Candidates) == 0 {
+		return result
+	}
+
+	// Resolve input reference video metadata once for the whole filter pass, but only
+	// if at least one candidate needs it (per-token cost). A failure here is recorded
+	// per-candidate as metadata_unavailable so token-priced candidates are excluded
+	// while per-request/per-duration/free candidates keep working.
+	var metadataDurationMS int64
+	var metadataResolved bool
+	var metadataErr error
+	needsMetadata := false
+	for _, candidate := range input.Candidates {
+		rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel}]
+		if rule != nil && types.CostMode(rule.CostMode) == types.CostModePerToken && input.Facts.InputDurationMS > 0 {
+			needsMetadata = true
+			break
+		}
+	}
+	if needsMetadata && input.MetadataState != nil {
+		metadata, err := input.MetadataState.Metadata(input.Ctx)
+		if err != nil {
+			metadataErr = err
+		} else {
+			metadataDurationMS = metadata.TotalDurationMS
+			metadataResolved = true
+		}
+	}
+
+	for _, candidate := range input.Candidates {
+		exclusion := evaluateCandidateProfit(input, rules, candidate, metadataDurationMS, metadataResolved, metadataErr)
+		if exclusion.Reason != "" {
+			result.Exclusions = append(result.Exclusions, exclusion)
+			continue
+		}
+		result.AllowedChannelIDs[candidate.ChannelID] = struct{}{}
+	}
+	return result
+}
+
+func evaluateCandidateProfit(
+	input ProfitChannelFilterInput,
+	rules map[CostRuleCandidate]*model.ChannelModelCostRule,
+	candidate ProfitRoutingCandidate,
+	metadataDurationMS int64,
+	metadataResolved bool,
+	metadataErr error,
+) ProfitChannelExclusion {
+	exclusion := ProfitChannelExclusion{ChannelID: candidate.ChannelID, UpstreamModel: candidate.PredictedUpstreamModel}
+	if !input.HasRevenue || input.RevenueNanoUSD <= 0 {
+		exclusion.Reason = ProfitReasonRevenueUnknown
+		return exclusion
+	}
+	predictedModel := strings.TrimSpace(candidate.PredictedUpstreamModel)
+	if predictedModel == "" {
+		exclusion.Reason = ProfitReasonCostRuleMissing
+		return exclusion
+	}
+	rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: predictedModel}]
+	if rule == nil {
+		exclusion.Reason = ProfitReasonCostRuleMissing
+		return exclusion
+	}
+
+	facts := input.Facts
+	if metadataResolved {
+		facts.InputDurationMS = metadataDurationMS
+	}
+	meter, err := BuildProfitCostMeter(types.CostMode(rule.CostMode), facts)
+	if err != nil {
+		exclusion.Reason = ProfitReasonMeterUnknown
+		return exclusion
+	}
+	// Token-priced candidates whose input duration is unknown (no reference videos, or
+	// the metadata service failed) cannot be priced safely — exclude rather than price
+	// at zero tokens.
+	if types.CostMode(rule.CostMode) == types.CostModePerToken && facts.InputDurationMS <= 0 {
+		if metadataErr != nil {
+			exclusion.Reason = ProfitReasonMetadataUnavailable
+			return exclusion
+		}
+		exclusion.Reason = ProfitReasonMeterUnknown
+		return exclusion
+	}
+
+	config, err := parseCostRuleConfigForProfit(rule)
+	if err != nil {
+		exclusion.Reason = ProfitReasonCalculationError
+		return exclusion
+	}
+	_, costNanoUSD, err := CalculateAttemptCost(types.CostMode(rule.CostMode), config, meter)
+	if err != nil {
+		exclusion.Reason = ProfitReasonCalculationError
+		return exclusion
+	}
+
+	threshold := input.GlobalMarginBPS
+	if candidate.TargetThresholdBPS != nil {
+		threshold = *candidate.TargetThresholdBPS
+	}
+	eligibility := EvaluateProfitEligibility(ProfitRoutingInput{
+		RevenueNanoUSD: input.RevenueNanoUSD,
+		CostNanoUSD:    costNanoUSD,
+		ThresholdBPS:   threshold,
+		RuleID:         rule.ID,
+		RuleVersion:    rule.Version,
+	})
+	if !eligibility.Eligible {
+		exclusion.Reason = eligibility.Reason
+		return exclusion
+	}
+	return exclusion
+}
+
+// parseCostRuleConfigForProfit reuses validateCostRuleContract to parse and normalize
+// a stored rule's ConfigJSON. Capabilities default to "complete" since the profit
+// filter only needs the price fields; the authoritative contract check still happens
+// at coverage and dispatch time.
+func parseCostRuleConfigForProfit(rule *model.ChannelModelCostRule) (types.CostRuleConfigV1, error) {
+	if rule == nil {
+		return types.CostRuleConfigV1{}, fmt.Errorf("cost rule is nil")
+	}
+	capabilities := CostCapabilityLookup
+	if capabilities == nil {
+		capabilities = func(int, string, constant.TaskPlatform) types.CostCapabilities {
+			return types.CostCapabilities{CanResolveBillableModel: true}
+		}
+	}
+	resolved := capabilities(0, "", constant.TaskPlatform(""))
+	return validateCostRuleContract(rule, resolved)
+}
+
+// EstimateProfitRoutingFacts builds the ProfitRoutingFacts the filter consumes from the
+// routing-layer Facts plus the resolved metadata duration. Width/height/frame-rate
+// come from the shared seedancepricing profile so the predictor and the billing
+// adapter agree on dimensions.
+func EstimateProfitRoutingFacts(resolution string, outputDurationSeconds int, inputDurationMS int64) (ProfitRoutingFacts, error) {
+	profile, ok := seedancepricing.Profile(resolution)
+	if !ok {
+		return ProfitRoutingFacts{}, fmt.Errorf("unsupported output resolution %q", resolution)
+	}
+	facts := ProfitRoutingFacts{
+		OutputDurationSeconds: outputDurationSeconds,
+		InputDurationMS:       inputDurationMS,
+		Width:                 profile.Width,
+		Height:                profile.Height,
+		FrameRateNum:          profile.FrameRateNum,
+		FrameRateDen:          profile.FrameRateDen,
+	}
+	inputTokens, outputTokens, totalTokens, err := EstimateSeedanceTokens(facts)
+	if err != nil {
+		return ProfitRoutingFacts{}, err
+	}
+	facts.InputTokens = inputTokens
+	facts.OutputTokens = outputTokens
+	facts.TotalTokens = totalTokens
+	return facts, nil
 }

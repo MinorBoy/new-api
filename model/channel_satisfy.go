@@ -97,3 +97,50 @@ func isChannelIDInList(list []int, channelID int) bool {
 	}
 	return false
 }
+
+// GroupModelChannelIDs returns the enabled channel IDs for a group+model that also
+// satisfy the request-path filter, WITHOUT performing the weighted random pick. It is
+// the pre-selection candidate list the profit-aware routing layer intersects with its
+// margin survivors; selection itself still runs through GetRandomSatisfiedChannel.
+//
+// The function mirrors GetRandomSatisfiedChannel's filtering (request path + model +
+// ChannelSelectFilter) so the candidate set the profit filter sees is exactly the set
+// the random picker would otherwise choose from. It performs no random selection and
+// preserves the original priority order.
+func GroupModelChannelIDs(group, modelName, requestPath string, filter ChannelSelectFilter) []int {
+	if group == "" || modelName == "" {
+		return nil
+	}
+	if !common.MemoryCacheEnabled {
+		return groupModelChannelIDsDB(group, modelName, requestPath, filter)
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	if group2model2channels == nil {
+		return nil
+	}
+	channels := filterChannelsByRequestPathAndModel(group2model2channels[group][modelName], requestPath, modelName)
+	filtered := filterChannelIDs(channels, filter)
+	if len(filtered) > 0 {
+		return filtered
+	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	if normalized == "" || normalized == modelName {
+		return nil
+	}
+	channels = filterChannelsByRequestPathAndModel(group2model2channels[group][normalized], requestPath, modelName)
+	return filterChannelIDs(channels, filter)
+}
+
+func groupModelChannelIDsDB(group, modelName, requestPath string, filter ChannelSelectFilter) []int {
+	abilities, err := getSelectableAbilities(group, modelName)
+	if err != nil {
+		return nil
+	}
+	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, modelName)
+	channelIDs := make([]int, 0, len(abilities))
+	for _, ability := range abilities {
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+	return filterChannelIDs(channelIDs, filter)
+}

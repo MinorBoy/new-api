@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -71,6 +72,255 @@ func evaluateGroupRouting(group, modelName string, input *modelrouting.FactsInpu
 	return result, nil
 }
 
+// applyProfitFilter narrows filter.AllowedChannelIDs (or the legacy candidate pool when
+// AllowedChannelIDs is empty) to channels whose predicted margin meets the minimum
+// expected margin threshold. It is a no-op outside strict cost-accounting mode and
+// preserves priority/weight/random selection: it only intersects the candidate set.
+//
+// The same function serves the normal, auto, affinity, specified and retry paths so
+// none of them can bypass the margin gate. Unknown revenue, missing cost rule, unknown
+// meter, metadata-service failure and calculation overflow all exclude the candidate
+// (fail-closed). costCoverageMisses diagnostics are kept separate from profit
+// exclusions — unknown cost is never treated as coverage success.
+func applyProfitFilter(param *RetryParam, group string, result groupRoutingResult, filter model.ChannelSelectFilter) model.ChannelSelectFilter {
+	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
+		return filter
+	}
+	if param == nil || param.Ctx == nil {
+		return filter
+	}
+
+	candidates := profitCandidates(param, group, result, filter)
+	if len(candidates) == 0 {
+		return filter
+	}
+
+	facts, revenueNanoUSD, hasRevenue, _ := profitFilterFacts(param, group)
+	rules, err := ActiveCostRules(profitCandidateKeys(candidates), false)
+	if err != nil {
+		common.SysError(fmt.Sprintf("profit routing active rule batch failed: %s", err.Error()))
+		// Fail-closed: drop every candidate so the caller returns 503 instead of
+		// admitting an unpriced channel.
+		return emptyAllowedFilter(filter)
+	}
+
+	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		Ctx:             param.Ctx,
+		Facts:           facts,
+		RevenueNanoUSD:  revenueNanoUSD,
+		HasRevenue:      hasRevenue,
+		GlobalMarginBPS: cost_setting.Runtime().MinimumExpectedMarginBPS,
+		Candidates:      candidates,
+		MetadataState:   param.ProfitRoutingState(),
+	}, rules)
+
+	recordProfitExclusions(param, result, filterResult)
+	if len(filterResult.AllowedChannelIDs) == 0 {
+		return emptyAllowedFilter(filter)
+	}
+	return model.ChannelSelectFilter{
+		AllowedChannelIDs:  filterResult.AllowedChannelIDs,
+		ExcludedChannelIDs: filter.ExcludedChannelIDs,
+	}
+}
+
+// profitCandidates builds the (channelID, predicted model, threshold) list the filter
+// evaluates. For capability routing the predicted model is Target.UpstreamModel and
+// the threshold is the target override; for legacy routing the predicted model comes
+// from ResolveMappedModel per channel and the global threshold applies.
+func profitCandidates(param *RetryParam, group string, result groupRoutingResult, filter model.ChannelSelectFilter) []ProfitRoutingCandidate {
+	if result.Capability {
+		candidates := make([]ProfitRoutingCandidate, 0, len(result.Evaluation.CompatibleByChannel))
+		for channelID, target := range result.Evaluation.CompatibleByChannel {
+			if !filter.Allows(channelID) {
+				continue
+			}
+			candidates = append(candidates, ProfitRoutingCandidate{
+				ChannelID:              channelID,
+				PredictedUpstreamModel: target.UpstreamModel,
+				TargetThresholdBPS:     target.MinimumExpectedMarginBPS,
+			})
+		}
+		return candidates
+	}
+	// Legacy path: no capability target, so resolve the mapped model for each enabled
+	// channel of this group+model. A candidate with no resolvable model is still
+	// included so the filter can record cost_rule_missing rather than silently dropping
+	// it — but it will be excluded by FilterProfitEligibleChannels.
+	channelIDs := model.GroupModelChannelIDs(group, param.ModelName, param.RequestPath, filter)
+	candidates := make([]ProfitRoutingCandidate, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		predictedModel := resolveLegacyPredictedModel(param, channelID)
+		candidates = append(candidates, ProfitRoutingCandidate{
+			ChannelID:              channelID,
+			PredictedUpstreamModel: predictedModel,
+		})
+	}
+	return candidates
+}
+
+func profitCandidateKeys(candidates []ProfitRoutingCandidate) []CostRuleCandidate {
+	keys := make([]CostRuleCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		keys = append(keys, CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel})
+	}
+	return keys
+}
+
+// profitFilterFacts resolves the request-level ProfitRoutingFacts and the predicted
+// user revenue for the given group. Revenue is computed once per (group, request) so
+// every candidate in the group is priced against the same revenue figure.
+//
+// factsErr is non-nil when the facts needed for meter/token estimation are incomplete
+// (missing resolution or duration). The caller still receives the revenue figure so
+// free/per-request cost candidates — which need no per-second or per-token meter — can
+// be priced; per-duration/per-token candidates fail closed via meter_unknown when the
+// facts are missing.
+func profitFilterFacts(param *RetryParam, group string) (ProfitRoutingFacts, int64, bool, error) {
+	facts := ProfitRoutingFacts{}
+	resolution := ""
+	duration := 0
+	factsAvailable := false
+	if param.RoutingInput != nil {
+		if param.RoutingInput.OutputResolution != nil {
+			resolution = *param.RoutingInput.OutputResolution
+		}
+		if param.RoutingInput.DurationSeconds != nil && *param.RoutingInput.DurationSeconds > 0 {
+			duration = *param.RoutingInput.DurationSeconds
+		}
+	}
+	if routingFacts, ok := common.GetContextKeyType[modelrouting.Facts](param.Ctx, constant.ContextKeyRoutingFacts); ok {
+		if routingFacts.OutputResolution != "" {
+			resolution = routingFacts.OutputResolution
+		}
+		if routingFacts.DurationSeconds > 0 {
+			duration = routingFacts.DurationSeconds
+		}
+	}
+
+	var factsErr error
+	if resolution != "" && duration > 0 {
+		inputDurationMS := int64(0)
+		if state := param.ProfitRoutingState(); state != nil {
+			metadata, err := state.Metadata(param.Ctx)
+			if err == nil {
+				inputDurationMS = metadata.TotalDurationMS
+			}
+		}
+		estimated, err := EstimateProfitRoutingFacts(resolution, duration, inputDurationMS)
+		if err != nil {
+			factsErr = err
+		} else {
+			facts = estimated
+			factsAvailable = true
+		}
+	} else {
+		factsErr = fmt.Errorf("routing facts are incomplete")
+	}
+
+	durationSeconds := duration
+	revenueNanoUSD, revenueErr := PreviewRoutingRevenue(param.Ctx, RoutingRevenuePreviewInput{
+		OriginModelName: param.ModelName,
+		Group:           group,
+		RequestPath:     param.RequestPath,
+		RelayMode:       common.GetContextKeyInt(param.Ctx, "relay_mode"),
+		DurationSeconds: &durationSeconds,
+		UserId:          common.GetContextKeyInt(param.Ctx, constant.ContextKeyUserId),
+	})
+	if revenueErr != nil {
+		return ProfitRoutingFacts{}, 0, false, revenueErr
+	}
+	// factsAvailable is folded into the returned facts; when false the caller treats
+	// per-duration/per-token candidates as meter_unknown while free/per-request still
+	// price normally. Return factsErr so the caller can distinguish "no revenue" from
+	// "facts incomplete".
+	_ = factsAvailable
+	return facts, revenueNanoUSD, true, factsErr
+}
+
+func resolveLegacyPredictedModel(param *RetryParam, channelID int) string {
+	channel, err := model.GetChannelById(channelID, false)
+	if err != nil || channel == nil {
+		return ""
+	}
+	mappingJSON := strings.TrimSpace(channel.GetModelMapping())
+	if mappingJSON == "" {
+		return param.ModelName
+	}
+	originModel := param.ModelName
+	if strings.HasSuffix(originModel, ratio_setting.CompactModelSuffix) {
+		originModel = strings.TrimSuffix(originModel, ratio_setting.CompactModelSuffix)
+	}
+	mappedModel, _, err := ResolveMappedModel(originModel, mappingJSON)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(mappedModel)
+}
+
+func emptyAllowedFilter(filter model.ChannelSelectFilter) model.ChannelSelectFilter {
+	return model.ChannelSelectFilter{
+		AllowedChannelIDs:  map[int]struct{}{0: {}},
+		ExcludedChannelIDs: filter.ExcludedChannelIDs,
+	}
+}
+
+func recordProfitExclusions(param *RetryParam, result groupRoutingResult, filterResult ProfitChannelFilterResult) {
+	if len(filterResult.Exclusions) == 0 {
+		return
+	}
+	if param.profitExclusions == nil {
+		param.profitExclusions = make(map[int]ProfitExclusionReason, len(filterResult.Exclusions))
+	}
+	for _, exclusion := range filterResult.Exclusions {
+		param.profitExclusions[exclusion.ChannelID] = exclusion.Reason
+	}
+	_ = result
+}
+
+// knownChannelPassesProfitFilter applies the same margin gate as applyProfitFilter but
+// for a single caller-pinned channel. It returns false (excluding the channel) when
+// strict mode is off OR the channel passes; under strict mode a failing pinned channel
+// returns false so the controller surfaces a generic 503 instead of silently switching.
+func knownChannelPassesProfitFilter(param *RetryParam, group string, result groupRoutingResult, channelID int) bool {
+	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
+		return true
+	}
+	if param == nil || param.Ctx == nil {
+		return true
+	}
+	predictedModel := ""
+	threshold := (*int)(nil)
+	if result.Capability {
+		if target, ok := result.Evaluation.CompatibleByChannel[channelID]; ok {
+			predictedModel = target.UpstreamModel
+			threshold = target.MinimumExpectedMarginBPS
+		}
+	} else {
+		predictedModel = resolveLegacyPredictedModel(param, channelID)
+	}
+	candidate := ProfitRoutingCandidate{ChannelID: channelID, PredictedUpstreamModel: predictedModel, TargetThresholdBPS: threshold}
+
+	facts, revenueNanoUSD, hasRevenue, _ := profitFilterFacts(param, group)
+	rules, err := ActiveCostRules(profitCandidateKeys([]ProfitRoutingCandidate{candidate}), false)
+	if err != nil {
+		common.SysError(fmt.Sprintf("profit routing known-channel active rule failed: %s", err.Error()))
+		return false
+	}
+	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		Ctx:             param.Ctx,
+		Facts:           facts,
+		RevenueNanoUSD:  revenueNanoUSD,
+		HasRevenue:      hasRevenue,
+		GlobalMarginBPS: cost_setting.Runtime().MinimumExpectedMarginBPS,
+		Candidates:      []ProfitRoutingCandidate{candidate},
+		MetadataState:   param.ProfitRoutingState(),
+	}, rules)
+	recordProfitExclusions(param, result, filterResult)
+	_, allowed := filterResult.AllowedChannelIDs[channelID]
+	return allowed
+}
+
 func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (*model.Channel, groupRoutingResult, error) {
 	result, err := evaluateGroupRouting(group, param.ModelName, param.RoutingInput)
 	if err != nil {
@@ -84,6 +334,11 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 			filter.AllowedChannelIDs[channelID] = struct{}{}
 		}
 	}
+	// Profit-aware candidate filter: under strict cost-accounting mode, narrow the
+	// candidate set to channels whose predicted margin meets the minimum threshold.
+	// The filter only intersects the set; it never reorders or changes priority/weight,
+	// so GetRandomSatisfiedChannel below still applies the original selection semantics.
+	filter = applyProfitFilter(param, group, result, filter)
 	channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, priorityRetry, param.RequestPath, filter)
 	if err != nil {
 		return nil, result, &ChannelSelectionError{
@@ -159,6 +414,24 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("channel is unavailable"),
 		}
+	}
+	// Profit-aware gate for a caller-pinned channel. Under strict mode, a pinned channel
+	// that fails the margin threshold must NOT silently switch to another channel: it is
+	// excluded here and the controller returns a generic 503, matching the cost-coverage
+	// path below. The same applyProfitFilter primitive as the random path is reused.
+	if !knownChannelPassesProfitFilter(param, group, result, channelID) {
+		param.ExcludeChannel(channelID)
+		selectionErr := &ChannelSelectionError{
+			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Err: errors.New("channel is unavailable"),
+		}
+		if result.Capability {
+			selectionErr.Err = errors.New("compatible channel is unavailable")
+			selectionErr.Diagnostics = []modelrouting.Audit{{
+				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
+			}}
+		}
+		return false, selectionErr
 	}
 	covered, coverageErr := CheckSelectedChannelCostCoverage(param, channel, "")
 	if coverageErr != nil || !covered {

@@ -338,6 +338,26 @@ func TestCheckPredictedCostCoverageRejectsInconsistentPathContracts(t *testing.T
 	assert.False(t, covered)
 }
 
+func TestCheckAuthoritativeCostCoverageIgnoresAbilitiesForDeletedChannels(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	})
+	require.NoError(t, model.DB.Create(&[]model.Ability{
+		{Group: "default", Model: "valid-model", ChannelId: 7, Enabled: true},
+		{Group: "default", Model: "orphan-model", ChannelId: 999, Enabled: true},
+	}).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, 7, results[0].ChannelID)
+	assert.Equal(t, "valid-model", results[0].OriginModel)
+}
+
 func validCreateCostRuleInput() CreateCostRuleInput {
 	return CreateCostRuleInput{
 		ChannelID:             7,

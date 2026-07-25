@@ -412,22 +412,15 @@ func FilterProfitEligibleChannels(input ProfitChannelFilterInput, rules map[Cost
 		return result
 	}
 
-	// Resolve input reference video metadata once for the whole filter pass, but only
-	// if at least one candidate needs it (per-token cost). A failure here is recorded
-	// per-candidate as metadata_unavailable so token-priced candidates are excluded
-	// while per-request/per-duration/free candidates keep working.
+	// Resolve input reference video metadata once for every request that carries
+	// reference videos. Invalid media is a user-correctable request failure no matter
+	// how a candidate is priced. An unavailable metadata service is still recorded
+	// per-candidate only where token prediction needs the input duration, so
+	// per-request/per-duration/free candidates keep working.
 	var metadataDurationMS int64
 	var metadataResolved bool
 	var metadataErr error
-	needsMetadata := false
-	for _, candidate := range input.Candidates {
-		rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel}]
-		if rule != nil && types.CostMode(rule.CostMode) == types.CostModePerToken && input.Facts.InputDurationMS <= 0 && input.MetadataState != nil {
-			needsMetadata = true
-			break
-		}
-	}
-	if needsMetadata && input.MetadataState != nil {
+	if input.MetadataState != nil {
 		metadata, err := input.MetadataState.Metadata(input.Ctx)
 		if err != nil {
 			var metadataError *VideoMetadataError

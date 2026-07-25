@@ -219,6 +219,106 @@ func TestProfitRoutingRejectsInvalidInputVideo(t *testing.T) {
 	assert.NotContains(t, selectionErr.Err.Error(), "secret")
 }
 
+func TestProfitRoutingRejectsInvalidInputVideoForEveryCostMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		seedRule func(t *testing.T, channelID int, modelName string)
+	}{
+		{
+			name:     "free",
+			seedRule: seedActiveFreeCostRuleForRouting,
+		},
+		{
+			name: "per request",
+			seedRule: func(t *testing.T, channelID int, modelName string) {
+				seedPerRequestCostRuleForRouting(t, channelID, modelName, "1")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prepareStrictCostRoutingServiceTest(t)
+			seedRoutingCandidate(t, 11, "non-token", "分组A", modelrouting.Seedance20, true)
+			_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "non-token-model", "1080p"))
+			require.NoError(t, err)
+			tt.seedRule(t, 11, "non-token-model")
+
+			service.SetVideoMetadataClient(invalidVideoMetadataClient{})
+			t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+			input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+			input.ReferenceVideoURLs = []string{"https://assets.example/invalid.mp4?signature=secret"}
+
+			channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+				Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+				RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+			})
+
+			assert.Nil(t, channel)
+			var selectionErr *service.ChannelSelectionError
+			require.ErrorAs(t, err, &selectionErr)
+			assert.Equal(t, types.ErrorCodeInvalidRequest, selectionErr.Code)
+			assert.Equal(t, http.StatusBadRequest, selectionErr.StatusCode)
+			assert.Equal(t, "input video is not supported", selectionErr.Err.Error())
+			assert.NotContains(t, selectionErr.Err.Error(), "assets.example")
+			assert.NotContains(t, selectionErr.Err.Error(), "secret")
+		})
+	}
+}
+
+func TestProfitRoutingKeepsNonTokenCandidateWhenMetadataIsUnavailable(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "token", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "request", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, multiTargetPolicyRequest("分组A", modelrouting.Seedance20, "1080p",
+		[]policyTarget{{ChannelID: 11, UpstreamModel: "token-model"}, {ChannelID: 12, UpstreamModel: "request-model"}}))
+	require.NoError(t, err)
+	seedTokenCostRuleForRouting(t, 11, "token-model")
+	seedPerRequestCostRuleForRouting(t, 12, "request-model", "1")
+
+	service.SetVideoMetadataClient(unavailableVideoMetadataClient{})
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	input.ReferenceVideoURLs = []string{"https://assets.example/unavailable.mp4?signature=secret"}
+
+	c := capabilitySelectionContext()
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+	diagnostics, ok := common.GetContextKeyType[[]service.ProfitRoutingDiagnostic](c, constant.ContextKeyRoutingDiagnostics)
+	require.True(t, ok)
+	require.Len(t, diagnostics, 1)
+	assert.Equal(t, 11, diagnostics[0].ChannelID)
+	assert.Equal(t, service.ProfitReasonMetadataUnavailable, diagnostics[0].Reason)
+}
+
+func TestProfitRoutingKeepsOnlyNonTokenCandidateWhenMetadataIsUnavailable(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "request", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "request-model", "1080p"))
+	require.NoError(t, err)
+	seedPerRequestCostRuleForRouting(t, 11, "request-model", "1")
+
+	service.SetVideoMetadataClient(unavailableVideoMetadataClient{})
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	input.ReferenceVideoURLs = []string{"https://assets.example/unavailable.mp4?signature=secret"}
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 11, channel.Id)
+}
+
 func TestProfitRoutingReturns503WhenEveryCandidateIsBelowMargin(t *testing.T) {
 	prepareStrictCostRoutingServiceTest(t)
 	seedRoutingCandidate(t, 11, "expensive", "分组A", modelrouting.Seedance20, true)
@@ -297,6 +397,12 @@ type invalidVideoMetadataClient struct{}
 
 func (invalidVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
 	return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataInvalidMedia}
+}
+
+type unavailableVideoMetadataClient struct{}
+
+func (unavailableVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataUnavailable}
 }
 
 // TestProfitRoutingNoOpOutsideStrictMode asserts the filter is inert when cost

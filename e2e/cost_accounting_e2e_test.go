@@ -128,7 +128,7 @@ func setupCostAccountingE2E(t *testing.T) {
 	constant.StreamingTimeout = 300
 	service.CostCapabilityLookup = relay.CostCapabilitiesForRoute
 	service.SetRoutingRevenuePreview(func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
-		return 2_000_000_000, "1000", nil
+		return 1_000_000, "500000", nil
 	})
 	service.InvalidateCostCoverage(0, "")
 
@@ -148,6 +148,16 @@ func setupCostAccountingE2E(t *testing.T) {
 		common.MemoryCacheEnabled = previousMemoryCache
 		constant.StreamingTimeout = previousStreamingTimeout
 	})
+}
+
+func costAccountingSeedanceRequestBody(t *testing.T) string {
+	t.Helper()
+	var request map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(seedance20MultimodalRequestBody, &request))
+	request["resolution"] = "720p"
+	body, err := common.Marshal(request)
+	require.NoError(t, err)
+	return string(body)
 }
 
 func costAccountingE2ERouter() *gin.Engine {
@@ -365,7 +375,7 @@ func TestCostAccountingAsyncChargeEventsE2E(t *testing.T) {
 			seedCostAccountingRule(t, e2eChannelID, "doubao-seedance-2-0-260128", test.chargeEvent, "0.20")
 			engine := costAccountingE2ERouter()
 
-			status, body := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", seedance20MultimodalRequestBody)
+			status, body := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", costAccountingSeedanceRequestBody(t))
 			require.Equal(t, http.StatusOK, status, string(body))
 			var response map[string]any
 			require.NoError(t, common.Unmarshal(body, &response))
@@ -444,7 +454,7 @@ func TestCostAccountingOrphanTaskInsertionE2E(t *testing.T) {
 	}))
 	t.Cleanup(func() { require.NoError(t, model.DB.Callback().Create().Remove(callbackName)) })
 
-	status, body := performJSONRequest(t, costAccountingE2ERouter(), http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", seedance20MultimodalRequestBody)
+	status, body := performJSONRequest(t, costAccountingE2ERouter(), http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", costAccountingSeedanceRequestBody(t))
 	require.Equal(t, http.StatusOK, status, string(body))
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(body, &response))

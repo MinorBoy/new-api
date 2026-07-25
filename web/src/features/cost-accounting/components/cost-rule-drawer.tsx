@@ -70,6 +70,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import type { Channel } from '../../channels/types'
+import { TASK_ONLY_CHANNEL_TYPES } from '../../channels/constants'
 import {
   costAccountingQueryKeys,
   createCostRule,
@@ -216,8 +217,16 @@ function createCostRuleFormValues(
   }
 }
 
-function costRuleFormValues(rule: CostRule | null): CostRuleFormValues {
-  if (!rule) return createCostRuleFormValues('per_request')
+function costRuleFormValues(
+  rule: CostRule | null,
+  taskOnly: boolean
+): CostRuleFormValues {
+  if (!rule) {
+    return createCostRuleFormValues(
+      'per_request',
+      taskOnly ? { charge_event: 'task_succeeded' } : {}
+    )
+  }
   return createCostRuleFormValues(rule.cost_mode, rule.config)
 }
 
@@ -365,9 +374,10 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const isEditingDraft = props.rule?.status === 'draft'
+  const taskOnly = TASK_ONLY_CHANNEL_TYPES.has(props.channel.type)
   const form = useForm<CostRuleFormValues>({
     resolver: zodResolver(costRuleFormSchema) as Resolver<CostRuleFormValues>,
-    defaultValues: costRuleFormValues(props.rule),
+    defaultValues: costRuleFormValues(props.rule, taskOnly),
   })
   const costMode = useWatch({ control: form.control, name: 'cost_mode' })
   const tokenMode = useWatch({ control: form.control, name: 'token_mode' })
@@ -381,9 +391,9 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
 
   useEffect(() => {
     if (!props.open) return
-    form.reset(costRuleFormValues(props.rule))
+    form.reset(costRuleFormValues(props.rule, taskOnly))
     setNote(props.rule?.note ?? '')
-  }, [form, props.open, props.rule])
+  }, [form, props.open, props.rule, taskOnly])
 
   const invalidateCostQueries = async () => {
     await Promise.all([

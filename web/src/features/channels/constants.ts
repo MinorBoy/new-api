@@ -389,6 +389,8 @@ export const GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES = new Set([
   2, 5, 36, 50, 51, 52, 54, 59, 60, 61,
 ])
 
+export const TASK_ONLY_CHANNEL_TYPES = new Set([59, 60, 61])
+
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   15: 'Format: APIKey|SecretKey',
   18: 'Format: APPID|APISecret|APIKey',

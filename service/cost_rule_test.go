@@ -358,6 +358,36 @@ func TestCheckAuthoritativeCostCoverageIgnoresAbilitiesForDeletedChannels(t *tes
 	assert.Equal(t, "valid-model", results[0].OriginModel)
 }
 
+func TestTaskOnlyChannelCostRuleLifecycleUsesTaskAdaptorCapabilities(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 7).Update("type", 59).Error)
+	CostCapabilityLookup = func(_ int, _ string, platform constant.TaskPlatform) types.CostCapabilities {
+		if platform != "59" {
+			return types.CostCapabilities{}
+		}
+		return types.CostCapabilities{
+			CanResolveBillableModel: true,
+			ChargeEvents:            []types.CostChargeEvent{types.CostChargeTaskSucceeded},
+		}
+	}
+	input := validCreateCostRuleInput()
+	input.Config.ChargeEvent = types.CostChargeTaskSucceeded
+
+	rule, err := CreateCostRuleDraft(input)
+	require.NoError(t, err)
+	_, err = ValidateCostRuleByID(rule.ID)
+	require.NoError(t, err)
+	_, err = ActivateCostRule(rule.ID, 42)
+	require.NoError(t, err)
+	covered, err := CheckPredictedCostCoverage(PredictedCoverageInput{
+		ChannelID:              7,
+		PredictedUpstreamModel: "vendor-model",
+		Authoritative:          true,
+	})
+	require.NoError(t, err)
+	assert.True(t, covered)
+}
+
 func validCreateCostRuleInput() CreateCostRuleInput {
 	return CreateCostRuleInput{
 		ChannelID:             7,

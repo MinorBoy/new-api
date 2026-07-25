@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -83,7 +84,7 @@ func CreateCostRuleDraft(input CreateCostRuleInput) (*model.ChannelModelCostRule
 	if err != nil {
 		return nil, fmt.Errorf("load cost rule channel: %w", err)
 	}
-	capabilities, err := lookupCostCapabilities(channel.Type, input.RequestPath, input.TaskPlatform)
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, input.RequestPath, input.TaskPlatform)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +126,7 @@ func UpdateCostRuleDraft(id int64, input UpdateCostRuleInput) (*model.ChannelMod
 	if err != nil {
 		return nil, err
 	}
-	capabilities, err := lookupCostCapabilities(channel.Type, input.RequestPath, input.TaskPlatform)
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, input.RequestPath, input.TaskPlatform)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +177,7 @@ func ActivateCostRule(id int64, adminID int) (*model.ChannelModelCostRule, error
 	if err != nil {
 		return nil, err
 	}
-	capabilities, err := lookupCostCapabilities(channel.Type, "", "")
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +256,7 @@ func CheckPredictedCostCoverage(input PredictedCoverageInput) (bool, error) {
 		targets = []CostContractTarget{{RequestPath: input.RequestPath, TaskPlatform: input.TaskPlatform}}
 	}
 	for _, target := range targets {
-		capabilities, err := lookupCostCapabilities(channel.Type, target.RequestPath, target.TaskPlatform)
+		capabilities, err := lookupChannelCostCapabilities(channel.Type, target.RequestPath, target.TaskPlatform)
 		if err != nil {
 			return false, nil
 		}
@@ -320,7 +321,7 @@ func ValidateCostRuleByID(id int64) (types.CostRuleConfigV1, error) {
 	if err != nil {
 		return types.CostRuleConfigV1{}, err
 	}
-	capabilities, err := lookupCostCapabilities(channel.Type, "", "")
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, "", "")
 	if err != nil {
 		return types.CostRuleConfigV1{}, err
 	}
@@ -498,6 +499,14 @@ func lookupCostCapabilities(channelType int, requestPath string, taskPlatform co
 		return types.CostCapabilities{}, errors.New("cost capability lookup is not registered")
 	}
 	return CostCapabilityLookup(channelType, requestPath, taskPlatform), nil
+}
+
+func lookupChannelCostCapabilities(channelType int, requestPath string, taskPlatform constant.TaskPlatform) (types.CostCapabilities, error) {
+	capabilities, err := lookupCostCapabilities(channelType, requestPath, taskPlatform)
+	if err != nil || requestPath != "" || taskPlatform != "" || capabilities.CanResolveBillableModel {
+		return capabilities, err
+	}
+	return lookupCostCapabilities(channelType, "", constant.TaskPlatform(strconv.Itoa(channelType)))
 }
 
 func validCostChargeEvent(event types.CostChargeEvent) bool {

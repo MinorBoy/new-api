@@ -306,6 +306,25 @@ test('switching cost mode replaces conditional price and meter fields', async ()
   }
 })
 
+test('task-only channels default new rules to task completion', async () => {
+  const mounted = await mount(
+    <CostRuleDrawer
+      open
+      channel={{ ...channel, type: 59, name: 'Dimensio' }}
+      billableModel='vendor-task-model'
+      originModel='client-task-model'
+      rule={null}
+      canWrite
+      onOpenChange={() => {}}
+    />
+  )
+  try {
+    assert.match(browserWindow.document.body.textContent ?? '', /Task succeeded/)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
 test('read-only administrators keep preview and history without write actions', async () => {
   useAuthStore.getState().auth.setUser({
     id: 2,

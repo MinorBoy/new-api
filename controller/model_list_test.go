@@ -166,8 +166,11 @@ func TestListModelsIncludesDurationBillingModel(t *testing.T) {
 		Id: 1005, Username: "duration-model-user", Password: "password",
 		Group: "default", Status: common.UserStatusEnabled,
 	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 1005, Type: constant.ChannelTypeOpenAI, Name: "duration-model-channel",
+	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
-		Group: "default", Model: modelName, ChannelId: 1, Enabled: true,
+		Group: "default", Model: modelName, ChannelId: 1005, Enabled: true,
 	}).Error)
 
 	recorder := httptest.NewRecorder()
@@ -353,11 +356,14 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 		Group:    "default",
 		Status:   common.UserStatusEnabled,
 	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 1001, Type: constant.ChannelTypeOpenAI, Name: "tiered-model-channel",
+	}).Error)
 	require.NoError(t, db.Create(&[]model.Ability{
-		{Group: "default", Model: "zz-tiered-visible-model", ChannelId: 1, Enabled: true},
-		{Group: "default", Model: "zz-tiered-empty-expr-model", ChannelId: 1, Enabled: true},
-		{Group: "default", Model: "zz-tiered-missing-expr-model", ChannelId: 1, Enabled: true},
-		{Group: "default", Model: "zz-unpriced-model", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "zz-tiered-visible-model", ChannelId: 1001, Enabled: true},
+		{Group: "default", Model: "zz-tiered-empty-expr-model", ChannelId: 1001, Enabled: true},
+		{Group: "default", Model: "zz-tiered-missing-expr-model", ChannelId: 1001, Enabled: true},
+		{Group: "default", Model: "zz-unpriced-model", ChannelId: 1001, Enabled: true},
 	}).Error)
 
 	recorder := httptest.NewRecorder()

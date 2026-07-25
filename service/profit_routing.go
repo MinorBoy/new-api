@@ -665,7 +665,7 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	}
 
 	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
-	if strings.Contains(strings.ToLower(info.RequestURLPath), "/video") &&
+	if strings.Contains(strings.ToLower(relaycommon.SafeRequestPath(info.RequestURLPath)), "/video") &&
 		(facts.OutputDurationSeconds <= 0 || facts.Width <= 0 || facts.Height <= 0 || facts.FrameRateNum <= 0 || facts.FrameRateDen <= 0) {
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonMeterUnknown}
 	}
@@ -799,7 +799,7 @@ func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayIn
 	revenueNanoUSD, err := PreviewRoutingRevenue(ctx, RoutingRevenuePreviewInput{
 		OriginModelName: info.OriginModelName,
 		Group:           group,
-		RequestPath:     info.RequestURLPath,
+		RequestPath:     relaycommon.SafeRequestPath(info.RequestURLPath),
 		RelayMode:       info.RelayMode,
 		DurationSeconds: &durationSeconds,
 		UserId:          info.UserId,

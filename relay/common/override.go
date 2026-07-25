@@ -2063,7 +2063,7 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
 	}
 
 	if info.RequestURLPath != "" {
-		requestPath := info.RequestURLPath
+		requestPath := SafeRequestPath(info.RequestURLPath)
 		if requestPath != "" {
 			ctx["request_path"] = requestPath
 		}

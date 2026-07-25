@@ -80,7 +80,7 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		ChannelType:               info.ChannelType,
 		PredictedUpstreamModel:    info.PredictedUpstreamModel,
 		BillableUpstreamModel:     info.BillableUpstreamModel,
-		RequestPath:               info.RequestURLPath,
+		RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
 		CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
 	})
 	if err != nil {
@@ -371,7 +371,7 @@ func ConfirmCostIdentity(adaptor channel.Adaptor, info *relaycommon.RelayInfo, f
 }
 
 func CostCapabilitiesForRoute(channelType int, requestPath string, taskPlatform constant.TaskPlatform) types.CostCapabilities {
-	requestPath = strings.ToLower(strings.TrimSpace(requestPath))
+	requestPath = strings.ToLower(strings.TrimSpace(relaycommon.SafeRequestPath(requestPath)))
 	if strings.Contains(requestPath, "/realtime") || strings.Contains(requestPath, "/mj") {
 		return types.CostCapabilities{}
 	}

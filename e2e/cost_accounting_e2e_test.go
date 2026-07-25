@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	appI18n "github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
@@ -38,6 +39,7 @@ type costE2EOpenAIProvider struct {
 	status          int
 	stream          bool
 	requestCount    int
+	requestQueries  []string
 	clientCancelled chan struct{}
 	cancelOnce      sync.Once
 }
@@ -45,6 +47,7 @@ type costE2EOpenAIProvider struct {
 func (p *costE2EOpenAIProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	p.requestCount++
+	p.requestQueries = append(p.requestQueries, r.URL.RawQuery)
 	p.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 
@@ -88,6 +91,12 @@ func (p *costE2EOpenAIProvider) count() int {
 	return p.requestCount
 }
 
+func (p *costE2EOpenAIProvider) queries() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.requestQueries...)
+}
+
 type cancelOnFirstWriteRecorder struct {
 	*httptest.ResponseRecorder
 	cancel context.CancelFunc
@@ -103,6 +112,7 @@ func (w *cancelOnFirstWriteRecorder) Write(data []byte) (int, error) {
 func setupCostAccountingE2E(t *testing.T) {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	require.NoError(t, appI18n.Init())
 	require.NoError(t, model.DB.AutoMigrate(
 		&model.ChannelModelCostRule{},
 		&model.CostAccountingRequest{},
@@ -112,10 +122,14 @@ func setupCostAccountingE2E(t *testing.T) {
 
 	previousMemoryCache := common.MemoryCacheEnabled
 	previousLookup := service.CostCapabilityLookup
+	previousPreview := service.RevenuePreviewHookForTest()
 	previousStreamingTimeout := constant.StreamingTimeout
 	common.MemoryCacheEnabled = false
 	constant.StreamingTimeout = 300
 	service.CostCapabilityLookup = relay.CostCapabilitiesForRoute
+	service.SetRoutingRevenuePreview(func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return 2_000_000_000, "1000", nil
+	})
 	service.InvalidateCostCoverage(0, "")
 
 	cfg := config.GlobalConfig.Get(cost_setting.ConfigName)
@@ -130,6 +144,7 @@ func setupCostAccountingE2E(t *testing.T) {
 		cost_setting.UpdateAndSync()
 		service.InvalidateCostCoverage(0, "")
 		service.CostCapabilityLookup = previousLookup
+		service.SetRoutingRevenuePreview(previousPreview)
 		common.MemoryCacheEnabled = previousMemoryCache
 		constant.StreamingTimeout = previousStreamingTimeout
 	})
@@ -193,6 +208,34 @@ func seedCostAccountingRule(t *testing.T, channelID int, modelName string, charg
 		EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
 	}).Error)
 	service.InvalidateCostCoverage(channelID, modelName)
+}
+
+func TestCostAccountingPreservesRequestQueryE2E(t *testing.T) {
+	setupCostAccountingE2E(t)
+	provider := &costE2EOpenAIProvider{}
+	server := httptest.NewServer(provider)
+	t.Cleanup(server.Close)
+	seedCostAccountingChatData(t, server.URL)
+	seedCostAccountingRule(t, 101, costE2EChatModel, types.CostChargeResponseSucceeded, "0.10")
+
+	status, response := performJSONRequest(t, costAccountingE2ERouter(), http.MethodPost,
+		"/v1/chat/completions?foo=bar&signature=secret", "Bearer "+costE2EChatToken,
+		`{"model":"cost-e2e-chat","messages":[{"role":"user","content":"hello"}]}`)
+
+	require.Equal(t, http.StatusOK, status, string(response))
+	assert.Equal(t, []string{"foo=bar&signature=secret"}, provider.queries())
+	assert.NotContains(t, string(response), "signature=secret")
+
+	adminLogs, _, err := model.GetAllLogs(model.LogTypeUnknown, 0, 0, costE2EChatModel, "", "", 0, 20, 0, "", "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, adminLogs)
+	for _, log := range adminLogs {
+		assert.NotContains(t, log.Other, "foo=bar")
+		assert.NotContains(t, log.Other, "signature=secret")
+		var other map[string]any
+		require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+		assert.Equal(t, "/v1/chat/completions", other["request_path"])
+	}
 }
 
 func TestCostAccountingSyncRetryAndLogPrivacyE2E(t *testing.T) {

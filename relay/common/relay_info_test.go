@@ -41,14 +41,14 @@ func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
 }
 
-func TestGenRelayInfoStripsQueryFromRequestPath(t *testing.T) {
+func TestGenRelayInfoPreservesQueryButSanitizesString(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/video/generations?signature=secret&asset=https%3A%2F%2Fassets.example%2Finput.mp4", nil)
 
 	info, err := GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 
 	require.NoError(t, err)
-	require.Equal(t, "/v1/video/generations", info.RequestURLPath)
-	require.NotContains(t, info.RequestURLPath, "secret")
+	require.Equal(t, "/v1/video/generations?signature=secret&asset=https%3A%2F%2Fassets.example%2Finput.mp4", info.RequestURLPath)
 	require.NotContains(t, info.ToString(), "assets.example")
+	require.NotContains(t, info.ToString(), "secret")
 }

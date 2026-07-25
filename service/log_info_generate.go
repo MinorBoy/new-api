@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -124,11 +123,7 @@ func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other
 		}
 	}
 	if relayInfo != nil && relayInfo.RequestURLPath != "" {
-		path := relayInfo.RequestURLPath
-		if idx := strings.Index(path, "?"); idx != -1 {
-			path = path[:idx]
-		}
-		other["request_path"] = path
+		other["request_path"] = relaycommon.SafeRequestPath(relayInfo.RequestURLPath)
 	}
 }
 

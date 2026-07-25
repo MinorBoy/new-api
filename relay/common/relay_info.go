@@ -289,7 +289,7 @@ func (info *RelayInfo) ToString() string {
 	fmt.Fprintf(b, "RelayMode: %d, ", info.RelayMode)
 	fmt.Fprintf(b, "IsStream: %t, ", info.IsStream)
 	fmt.Fprintf(b, "IsPlayground: %t, ", info.IsPlayground)
-	fmt.Fprintf(b, "RequestURLPath: %q, ", info.RequestURLPath)
+	fmt.Fprintf(b, "RequestURLPath: %q, ", SafeRequestPath(info.RequestURLPath))
 	fmt.Fprintf(b, "OriginModelName: %q, ", info.OriginModelName)
 	fmt.Fprintf(b, "EstimatePromptTokens: %d, ", info.estimatePromptTokens)
 	fmt.Fprintf(b, "ShouldIncludeUsage: %t, ", info.ShouldIncludeUsage)
@@ -516,7 +516,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
-		RequestURLPath:  c.Request.URL.Path,
+		RequestURLPath:  c.Request.URL.String(),
 		RequestHeaders:  cloneRequestHeaders(c),
 		IsStream:        isStream,
 
@@ -548,6 +548,13 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	}
 
 	return info
+}
+
+// SafeRequestPath removes a request target's query string before it is used in
+// logs, diagnostics, billing, or routing decisions.
+func SafeRequestPath(requestURLPath string) string {
+	path, _, _ := strings.Cut(requestURLPath, "?")
+	return path
 }
 
 func cloneRequestHeaders(c *gin.Context) map[string]string {

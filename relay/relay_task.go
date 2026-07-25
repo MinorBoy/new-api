@@ -313,7 +313,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			ChannelType:               info.ChannelType,
 			PredictedUpstreamModel:    info.PredictedUpstreamModel,
 			BillableUpstreamModel:     info.BillableUpstreamModel,
-			RequestPath:               info.RequestURLPath,
+			RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
 			TaskPlatform:              platform,
 			RequestMeter:              requestMeter,
 			CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,

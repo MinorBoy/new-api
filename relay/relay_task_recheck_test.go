@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // TestProfitRecheckBlocksDispatchAfterRuleChange asserts the pre-dispatch recheck
@@ -156,6 +157,107 @@ func TestProfitRecheckPassesEligibleChannel(t *testing.T) {
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&upstreamCalls), "upstream must be called when the recheck passes")
+}
+
+// TestProfitRecheckRejectsSnapshotChangedBeforePrepare exercises the deterministic
+// equivalent of an administrator activating a new cost rule after the profit recheck
+// has passed but before PrepareCostAttempt locks the active rule. The changed rule
+// must not be silently repriced and dispatched.
+func TestProfitRecheckRejectsSnapshotChangedBeforePrepare(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	withCostAccountingMode(t, types.CostAccountingStrict)
+	configureNewAPIVideoFixedPricing(t, "client-video")
+	setupTaskCostSubmitDB(t)
+
+	const (
+		channelID = 710006
+		requestID = "profit-recheck-snapshot-changed"
+		modelName = "seedance-720p-token"
+	)
+	seedTaskCostSubmitRule(t, channelID, modelName, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "old contract"})
+
+	unitPrice := "100"
+	newConfig, err := service.NormalizeCostRuleConfig(types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &unitPrice, ChargeEvent: types.CostChargeSubmitAccepted,
+	})
+	require.NoError(t, err)
+	newConfigJSON, err := common.Marshal(newConfig)
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	newRule := model.ChannelModelCostRule{
+		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 2,
+		Status: string(types.CostRuleDraft), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
+		ConfigJSON: string(newConfigJSON), Source: "manual", CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, model.DB.Create(&newRule).Error)
+
+	var oldRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.Where("channel_id = ? AND billable_upstream_model = ? AND version = ?", channelID, modelName, 1).First(&oldRule).Error)
+	ruleQueries := switchActiveCostRuleBeforePrepare(t, oldRule, newRule, now)
+
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-task","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
+	c.Set(string(constant.ContextKeyChannelId), channelID)
+	c.Set(string(constant.ContextKeyChannelName), "supplier")
+	info.RequestId = requestID
+	info.RequestURLPath = "/v1/video/generations"
+	info.UserId = 11
+	info.TokenId = 22
+
+	result, taskErr := RelayTaskSubmit(c, info)
+
+	assert.Equal(t, int32(2), ruleQueries.Load(), "PrepareCostAttempt must lock the rule switched after recheck")
+	require.Nil(t, result)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
+	require.ErrorIs(t, taskErr.Error, service.ErrProfitEligibility)
+	var coverageErr *service.CostCoverageError
+	require.ErrorAs(t, taskErr.Error, &coverageErr)
+	assert.Equal(t, channelID, coverageErr.ChannelID)
+	assert.Nil(t, info.CostAttempt, "snapshot rejection must occur before authorization")
+	assert.Zero(t, upstreamCalls.Load(), "snapshot rejection must not call upstream")
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("request_id = ?", requestID).Count(&requestCount).Error)
+	assert.Zero(t, requestCount, "snapshot rejection must not create a cost request")
+	var attemptCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingAttempt{}).Where("cost_request_id IN (SELECT id FROM cost_accounting_requests WHERE request_id = ?)", requestID).Count(&attemptCount).Error)
+	assert.Zero(t, attemptCount, "snapshot rejection must not create a cost attempt")
+}
+
+func switchActiveCostRuleBeforePrepare(t *testing.T, oldRule, newRule model.ChannelModelCostRule, now int64) *atomic.Int32 {
+	t.Helper()
+	var ruleQueries atomic.Int32
+	callbackName := "profit_recheck_switch_active_rule_before_prepare_" + t.Name()
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "channel_model_cost_rules" || ruleQueries.Add(1) != 2 {
+			return
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Model(&model.ChannelModelCostRule{}).
+			Where("id = ? AND status = ?", oldRule.ID, types.CostRuleActive).
+			Updates(map[string]any{"status": string(types.CostRuleRetired), "effective_to": now, "updated_at": now}).Error; err != nil {
+			tx.AddError(err)
+			return
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Model(&model.ChannelModelCostRule{}).
+			Where("id = ? AND status = ?", newRule.ID, types.CostRuleDraft).
+			Updates(map[string]any{"status": string(types.CostRuleActive), "effective_from": now, "updated_at": now}).Error; err != nil {
+			tx.AddError(err)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	})
+	return &ruleQueries
 }
 
 func TestProfitEligibilityErrorSupportsCoverageRetryAndSentinelMatching(t *testing.T) {

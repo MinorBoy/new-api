@@ -11,32 +11,34 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
 type PrepareCostAttemptInput struct {
-	RequestID              string
-	TaskID                 *string
-	UserID                 int
-	TokenID                int
-	UserGroup              string
-	UsingGroup             string
-	OriginModelName        string
-	BillingSource          string
-	SubscriptionID         int
-	SubscriptionPlanID     int
-	FinalUserQuota         *int64
-	QuotaPerUnitSnapshot   string
-	ChannelID              int
-	ChannelName            string
-	ChannelType            int
-	PredictedUpstreamModel string
-	BillableUpstreamModel  string
-	RequestPath            string
-	TaskPlatform           constant.TaskPlatform
-	RequestMeter           *types.CostMeter
+	RequestID                 string
+	TaskID                    *string
+	UserID                    int
+	TokenID                   int
+	UserGroup                 string
+	UsingGroup                string
+	OriginModelName           string
+	BillingSource             string
+	SubscriptionID            int
+	SubscriptionPlanID        int
+	FinalUserQuota            *int64
+	QuotaPerUnitSnapshot      string
+	ChannelID                 int
+	ChannelName               string
+	ChannelType               int
+	PredictedUpstreamModel    string
+	BillableUpstreamModel     string
+	RequestPath               string
+	TaskPlatform              constant.TaskPlatform
+	RequestMeter              *types.CostMeter
+	CostProfitRecheckSnapshot *types.CostProfitRecheckSnapshot
 }
 
 const costRevenueRecognitionFailureCode = "revenue_recognition_failed"
@@ -131,7 +133,11 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		BillableRequestCount:   1,
 		RequestMeterJSON:       requestMeterJSON,
 	}
-	err = model.PrepareCostAttemptWithRuleValidation(ctx, request, attempt, func(lockedRule *model.ChannelModelCostRule) error {
+	err = model.PrepareCostAttemptWithRuleValidation(ctx, request, attempt, input.CostProfitRecheckSnapshot, func(lockedRule *model.ChannelModelCostRule) error {
+		if snapshot := input.CostProfitRecheckSnapshot; snapshot != nil &&
+			cost_setting.Runtime().MinimumExpectedMarginBPS != snapshot.GlobalMinimumExpectedMarginBPS {
+			return &ProfitEligibilityError{ChannelID: input.ChannelID, Reason: ProfitReasonCalculationError}
+		}
 		config, err := validateCostRuleContract(lockedRule, capabilities)
 		if err != nil {
 			return &CostCoverageError{ChannelID: input.ChannelID}
@@ -163,6 +169,9 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, model.ErrCostRuleSnapshotConflict) {
+			return nil, &ProfitEligibilityError{ChannelID: input.ChannelID, Reason: ProfitReasonCalculationError}
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, &CostCoverageError{ChannelID: input.ChannelID}
 		}

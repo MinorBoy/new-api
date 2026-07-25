@@ -607,6 +607,7 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	if info == nil || info.ChannelMeta == nil {
 		return &ProfitEligibilityError{Reason: ProfitReasonCalculationError}
 	}
+	info.CostProfitRecheckSnapshot = nil
 	billableModel := strings.TrimSpace(info.BillableUpstreamModel)
 	channelID := info.ChannelId
 	if billableModel == "" || channelID <= 0 {
@@ -631,12 +632,14 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		(facts.OutputDurationSeconds <= 0 || facts.Width <= 0 || facts.Height <= 0 || facts.FrameRateNum <= 0 || facts.FrameRateDen <= 0) {
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonMeterUnknown}
 	}
-	rules, err := ActiveCostRules([]CostRuleCandidate{{ChannelID: channelID, BillableUpstreamModel: billableModel}}, true)
+	ruleCandidate := CostRuleCandidate{ChannelID: channelID, BillableUpstreamModel: billableModel}
+	rules, err := ActiveCostRules([]CostRuleCandidate{ruleCandidate}, true)
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit recheck active rule lookup failed: %s", err.Error()))
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
 	}
-	threshold, err := currentRecheckMarginThreshold(info, cost_setting.Runtime().MinimumExpectedMarginBPS)
+	globalThreshold := cost_setting.Runtime().MinimumExpectedMarginBPS
+	threshold, targetSnapshot, err := currentRecheckMarginThreshold(info, globalThreshold)
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit recheck routing threshold lookup failed: %s", err.Error()))
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
@@ -662,6 +665,18 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		MetadataState:   metadataState,
 	}, rules)
 	if _, allowed := filterResult.AllowedChannelIDs[channelID]; allowed {
+		rule := rules[ruleCandidate]
+		if rule == nil {
+			return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
+		}
+		info.CostProfitRecheckSnapshot = &types.CostProfitRecheckSnapshot{
+			ChannelID:                      channelID,
+			BillableUpstreamModel:          billableModel,
+			RuleID:                         rule.ID,
+			RuleVersion:                    rule.Version,
+			GlobalMinimumExpectedMarginBPS: globalThreshold,
+			RouteTarget:                    targetSnapshot,
+		}
 		return nil
 	}
 	reason := ProfitReasonMarginBelowThreshold
@@ -674,27 +689,35 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 // currentRecheckMarginThreshold reads the selected target directly from storage rather
 // than reusing the candidate-stage policy snapshot. A deleted or disabled target is
 // not eligible to dispatch under strict accounting, so it fails closed.
-func currentRecheckMarginThreshold(info *relaycommon.RelayInfo, globalThreshold int) (int, error) {
+func currentRecheckMarginThreshold(info *relaycommon.RelayInfo, globalThreshold int) (int, *types.CostRoutingTargetSnapshot, error) {
 	if info == nil || info.Routing == nil {
-		return globalThreshold, nil
+		return globalThreshold, nil, nil
 	}
 	routing := info.Routing
 	if routing.PolicyID <= 0 || routing.TargetID <= 0 || info.ChannelId <= 0 {
-		return 0, fmt.Errorf("selected routing target is incomplete")
+		return 0, nil, fmt.Errorf("selected routing target is incomplete")
 	}
 	var target model.RouteTarget
 	err := model.DB.Where("id = ? AND policy_id = ? AND channel_id = ? AND enabled = ?", routing.TargetID, routing.PolicyID, info.ChannelId, true).
 		First(&target).Error
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if strings.TrimSpace(target.UpstreamModel) != strings.TrimSpace(info.BillableUpstreamModel) {
-		return 0, fmt.Errorf("selected routing target model changed")
+		return 0, nil, fmt.Errorf("selected routing target model changed")
+	}
+	targetSnapshot := &types.CostRoutingTargetSnapshot{
+		ID:            target.ID,
+		PolicyID:      target.PolicyID,
+		ChannelID:     target.ChannelID,
+		UpstreamModel: target.UpstreamModel,
 	}
 	if target.MinimumExpectedMarginBPS != nil {
-		return *target.MinimumExpectedMarginBPS, nil
+		threshold := *target.MinimumExpectedMarginBPS
+		targetSnapshot.MinimumExpectedMarginBPS = &threshold
+		return threshold, targetSnapshot, nil
 	}
-	return globalThreshold, nil
+	return globalThreshold, targetSnapshot, nil
 }
 
 // recheckFacts resolves the ProfitRoutingFacts + revenue for the pre-dispatch recheck.

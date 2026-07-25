@@ -185,6 +185,48 @@ func TestStrictCostAdaptorPersistsDispatchAuthorizationBeforeTransport(t *testin
 	assert.Equal(t, string(types.CostAttemptSettled), loadRelayCostAttempt(t, info.CostAttempt.AttemptID).Status)
 }
 
+func TestStrictCostAdaptorRejectsSnapshotChangedBeforePrepare(t *testing.T) {
+	fake := &costTransportAdaptor{}
+	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-cost-snapshot-changed", fake)
+
+	var oldRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.Where("channel_id = ? AND billable_upstream_model = ? AND version = ?", info.ChannelId, info.BillableUpstreamModel, 1).First(&oldRule).Error)
+	unitPrice := "100"
+	newConfig, err := service.NormalizeCostRuleConfig(types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &unitPrice, ChargeEvent: types.CostChargeResponseSucceeded,
+	})
+	require.NoError(t, err)
+	newConfigJSON, err := common.Marshal(newConfig)
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	newRule := model.ChannelModelCostRule{
+		ChannelID: info.ChannelId, BillableUpstreamModel: info.BillableUpstreamModel, Version: 2,
+		Status: string(types.CostRuleDraft), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
+		ConfigJSON: string(newConfigJSON), Source: "manual", CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, model.DB.Create(&newRule).Error)
+	ruleQueries := switchActiveCostRuleBeforePrepare(t, oldRule, newRule, now)
+
+	_, err = wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{}`)))
+
+	assert.Equal(t, int32(2), ruleQueries.Load(), "PrepareCostAttempt must lock the rule switched after recheck")
+	require.Error(t, err)
+	require.ErrorIs(t, err, service.ErrProfitEligibility)
+	var coverageErr *service.CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, info.ChannelId, coverageErr.ChannelID)
+	assert.Nil(t, info.CostAttempt, "snapshot rejection must occur before authorization")
+	assert.False(t, fake.called, "snapshot rejection must not call upstream")
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("request_id = ?", info.RequestId).Count(&requestCount).Error)
+	assert.Zero(t, requestCount, "snapshot rejection must not create a cost request")
+	var attemptCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingAttempt{}).Where("cost_request_id IN (SELECT id FROM cost_accounting_requests WHERE request_id = ?)", info.RequestId).Count(&attemptCount).Error)
+	assert.Zero(t, attemptCount, "snapshot rejection must not create a cost attempt")
+}
+
 func TestPerRequestProtocolErrorDoesNotConfirmCost(t *testing.T) {
 	fake := &costTransportAdaptor{responseErr: types.NewError(errors.New("invalid upstream response"), types.ErrorCodeBadResponse)}
 	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-cost-protocol-error", fake)

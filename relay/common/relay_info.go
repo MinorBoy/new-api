@@ -167,8 +167,11 @@ type RelayInfo struct {
 
 	PredictedUpstreamModel string
 	BillableUpstreamModel  string
-	CostRequestID          int64
-	CostAttempt            *types.CostAttemptHandle
+	// CostProfitRecheckSnapshot is captured by the strict pre-dispatch margin
+	// gate and consumed by cost-attempt preparation before dispatch.
+	CostProfitRecheckSnapshot *types.CostProfitRecheckSnapshot
+	CostRequestID             int64
+	CostAttempt               *types.CostAttemptHandle
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.

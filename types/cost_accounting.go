@@ -102,6 +102,28 @@ type CostAttemptHandle struct {
 	ChargeEvent   CostChargeEvent
 }
 
+// CostProfitRecheckSnapshot records the state that passed the authoritative
+// pre-dispatch profit recheck. PrepareCostAttempt compares it with the locked
+// current state before creating a cost request or attempt.
+type CostProfitRecheckSnapshot struct {
+	ChannelID                      int
+	BillableUpstreamModel          string
+	RuleID                         int64
+	RuleVersion                    int
+	GlobalMinimumExpectedMarginBPS int
+	RouteTarget                    *CostRoutingTargetSnapshot
+}
+
+// CostRoutingTargetSnapshot holds the routing values that affect profit
+// eligibility for the selected target. A nil target means legacy routing.
+type CostRoutingTargetSnapshot struct {
+	ID                       int
+	PolicyID                 int
+	ChannelID                int
+	UpstreamModel            string
+	MinimumExpectedMarginBPS *int
+}
+
 type CostOutcome struct {
 	Status           CostAttemptStatus
 	UpstreamAccepted bool

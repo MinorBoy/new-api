@@ -463,10 +463,10 @@ func evaluateCandidateProfit(
 		exclusion.Reason = ProfitReasonMeterUnknown
 		return exclusion
 	}
-	// Token-priced candidates whose input duration is unknown (no reference videos, or
-	// the metadata service failed) cannot be priced safely — exclude rather than price
-	// at zero tokens.
-	if types.CostMode(rule.CostMode) == types.CostModePerToken && facts.InputDurationMS <= 0 {
+	// A metadata state means the request carries reference videos. Their unknown
+	// duration cannot safely be priced at zero tokens; no state means there is no input
+	// video, so zero input tokens and the estimated output tokens are valid.
+	if types.CostMode(rule.CostMode) == types.CostModePerToken && input.MetadataState != nil && facts.InputDurationMS <= 0 {
 		if metadataErr != nil {
 			exclusion.Reason = ProfitReasonMetadataUnavailable
 			return exclusion

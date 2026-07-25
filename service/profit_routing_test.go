@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
@@ -236,6 +237,33 @@ func TestBuildProfitCostMeterPerTokenSubModes(t *testing.T) {
 			assert.Equal(t, outputTokens, *meter.OutputTokens)
 		})
 	}
+}
+
+func TestFilterProfitEligibleChannelsAllowsTokenPricingWithoutReferenceVideo(t *testing.T) {
+	facts, err := EstimateProfitRoutingFacts("720p", 5, 0)
+	require.NoError(t, err)
+	require.Zero(t, facts.InputTokens)
+	require.Positive(t, facts.OutputTokens)
+
+	config, err := NormalizeCostRuleConfig(types.CostModePerToken, validTokenCostConfig(types.CostTokenModeInputOutput, types.CostMeterLocalUsage))
+	require.NoError(t, err)
+	configJSON, err := common.Marshal(config)
+	require.NoError(t, err)
+	candidate := ProfitRoutingCandidate{ChannelID: 7, PredictedUpstreamModel: "vendor-model"}
+	rules := map[CostRuleCandidate]*model.ChannelModelCostRule{
+		{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel}: {
+			ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel,
+			CostMode: string(types.CostModePerToken), SchemaVersion: 1, ConfigJSON: string(configJSON),
+		},
+	}
+
+	result := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		Facts: facts, RevenueNanoUSD: nano("10"), HasRevenue: true,
+		Candidates: []ProfitRoutingCandidate{candidate}, MetadataState: nil,
+	}, rules)
+
+	assert.Contains(t, result.AllowedChannelIDs, candidate.ChannelID)
+	assert.Empty(t, result.Exclusions)
 }
 
 func TestCalculateTaskTokenQuotaMatchesSettlementFormula(t *testing.T) {

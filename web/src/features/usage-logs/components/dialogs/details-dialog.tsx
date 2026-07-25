@@ -57,6 +57,7 @@ import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Label } from '@/components/ui/label'
+import { CostRequestDetail } from '@/features/cost-accounting/components/cost-request-detail'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
@@ -630,7 +631,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
       contentClassName={cn(
         'min-w-0 overflow-hidden',
         'max-sm:max-h-[calc(100dvh-1.5rem)] max-sm:w-[calc(100vw-1.5rem)] max-sm:max-w-[calc(100vw-1.5rem)] max-sm:p-4',
-        isTieredBilling ? 'sm:max-w-4xl lg:max-w-5xl' : 'sm:max-w-lg'
+        isTieredBilling ||
+          (props.isAdmin &&
+            other?.admin_info?.cost_accounting_request_id != null)
+          ? 'sm:max-w-4xl lg:max-w-5xl'
+          : 'sm:max-w-lg'
       )}
       headerClassName='max-sm:gap-1'
       titleClassName='flex items-center gap-2 text-base'
@@ -779,6 +784,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
             </div>
           </DetailSection>
         )}
+
+        {props.isAdmin && isDisplayableType(props.log.type) ? (
+          <CostRequestDetail
+            requestID={other?.admin_info?.cost_accounting_request_id}
+            isAdmin={props.isAdmin}
+            open={props.open}
+          />
+        ) : null}
 
         {/* Quota saturation marker (admin only) */}
         {props.isAdmin && other?.admin_info?.quota_saturation && (

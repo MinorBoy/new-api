@@ -114,6 +114,8 @@ export interface LogOtherData {
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
+    // Reference to the administrator-only supplier cost ledger.
+    cost_accounting_request_id?: number
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string

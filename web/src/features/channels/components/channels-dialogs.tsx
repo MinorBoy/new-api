@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { ChannelCostDrawer } from '@/features/cost-accounting/components/channel-cost-drawer'
+
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
@@ -38,6 +40,12 @@ export function ChannelsDialogs() {
         open={open === 'create-channel' || open === 'update-channel'}
         onOpenChange={(v) => !v && setOpen(null)}
         currentRow={open === 'update-channel' ? currentRow : null}
+      />
+
+      <ChannelCostDrawer
+        open={open === 'model-costs'}
+        channel={currentRow}
+        onOpenChange={(value) => !value && setOpen(null)}
       />
 
       {/* Test Channel Dialog */}

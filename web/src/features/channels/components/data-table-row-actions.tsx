@@ -101,6 +101,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
   )
+  const canReadCostAccounting = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.COST_ACCOUNTING,
+    ADMIN_PERMISSION_ACTIONS.READ
+  )
 
   const handleEdit = () => {
     setCurrentRow(channel)
@@ -127,6 +132,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleQueryBalance = () => {
     setCurrentRow(channel)
     setOpen('balance-query')
+  }
+
+  const handleModelCosts = () => {
+    setCurrentRow(channel)
+    setOpen('model-costs')
   }
 
   const handleFetchModels = () => {
@@ -291,6 +301,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           )}
 
           {/* Query Balance */}
+          {canReadCostAccounting && (
+            <DropdownMenuItem onClick={handleModelCosts}>
+              {t('Model costs')}
+              <DropdownMenuShortcut>
+                <DollarSign size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+
           <DropdownMenuItem onClick={handleQueryBalance}>
             {t('Query Balance')}
             <DropdownMenuShortcut>

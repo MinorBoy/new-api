@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -246,7 +247,7 @@ func TestCostAccountingStrictModeRejectsIncompleteCoverage(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/cost-accounting/settings", strings.NewReader(`{"mode":"strict"}`))
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/cost-accounting/settings", strings.NewReader(`{"mode":"strict","minimum_expected_margin_bps":0}`))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	UpdateCostAccountingSettings(ctx)
 
@@ -256,6 +257,99 @@ func TestCostAccountingStrictModeRejectsIncompleteCoverage(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "cost_coverage_incomplete", response.Code)
+}
+
+func TestCostAccountingSettingsUpdatePreservesExplicitZero(t *testing.T) {
+	prepareCostAccountingSettingsControllerTest(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/cost-accounting/settings", strings.NewReader(`{"mode":"strict","minimum_expected_margin_bps":0}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	UpdateCostAccountingSettings(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Data struct {
+			Mode                     types.CostAccountingMode `json:"mode"`
+			MinimumExpectedMarginBPS int                      `json:"minimum_expected_margin_bps"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, types.CostAccountingStrict, response.Data.Mode)
+	assert.Zero(t, response.Data.MinimumExpectedMarginBPS)
+	assert.Equal(t, response.Data.Mode, cost_setting.Runtime().Mode)
+	assert.Equal(t, response.Data.MinimumExpectedMarginBPS, cost_setting.Runtime().MinimumExpectedMarginBPS)
+}
+
+func TestCostAccountingSettingsInvalidMarginDoesNotUpdateEitherOption(t *testing.T) {
+	prepareCostAccountingSettingsControllerTest(t)
+	require.NoError(t, model.UpdateOptionsBulk(map[string]string{
+		cost_setting.ConfigName + "." + cost_setting.KeyMode:                     string(types.CostAccountingDisabled),
+		cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS: "375",
+	}))
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/cost-accounting/settings", strings.NewReader(`{"mode":"strict","minimum_expected_margin_bps":10001}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	UpdateCostAccountingSettings(ctx)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	var options []model.Option
+	require.NoError(t, model.DB.Where("key IN ?", []string{
+		cost_setting.ConfigName + "." + cost_setting.KeyMode,
+		cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS,
+	}).Find(&options).Error)
+	require.Len(t, options, 2)
+	values := make(map[string]string, len(options))
+	for _, option := range options {
+		values[option.Key] = option.Value
+	}
+	assert.Equal(t, string(types.CostAccountingDisabled), values[cost_setting.ConfigName+"."+cost_setting.KeyMode])
+	assert.Equal(t, "375", values[cost_setting.ConfigName+"."+cost_setting.KeyMinimumExpectedMarginBPS])
+}
+
+func prepareCostAccountingSettingsControllerTest(t *testing.T) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousRuntime := cost_setting.Runtime()
+	previousMainType := common.MainDatabaseType()
+	previousLogType := common.LogDatabaseType()
+	previousRedisEnabled := common.RedisEnabled
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	common.OptionMapRWMutex.Unlock()
+	model.DB = db
+	model.LOG_DB = db
+	common.RedisEnabled = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	require.NoError(t, db.AutoMigrate(
+		&model.Channel{}, &model.Ability{}, &model.Option{}, &model.ChannelModelCostRule{},
+		&model.User{}, &model.Log{},
+	))
+	t.Cleanup(func() {
+		require.NoError(t, model.UpdateOptionsBulk(map[string]string{
+			cost_setting.ConfigName + "." + cost_setting.KeyMode:                     string(previousRuntime.Mode),
+			cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS: strconv.Itoa(previousRuntime.MinimumExpectedMarginBPS),
+		}))
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		common.RedisEnabled = previousRedisEnabled
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptionMap
+		common.OptionMapRWMutex.Unlock()
+		service.InvalidateCostCoverage(0, "")
+		require.NoError(t, sqlDB.Close())
+	})
 }
 
 func costControllerStringPointer(value string) *string {

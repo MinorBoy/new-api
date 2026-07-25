@@ -18,20 +18,32 @@ import (
 )
 
 func GetCostAccountingSettings(c *gin.Context) {
-	common.ApiSuccess(c, gin.H{"mode": cost_setting.Runtime().Mode})
+	settings := cost_setting.Runtime()
+	common.ApiSuccess(c, gin.H{
+		"mode":                        settings.Mode,
+		"minimum_expected_margin_bps": settings.MinimumExpectedMarginBPS,
+	})
 }
 
 func UpdateCostAccountingSettings(c *gin.Context) {
-	var request dto.UpdateCostAccountingModeRequest
+	var request dto.UpdateCostAccountingSettingsRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		writeCostAccountingError(c, err)
 		return
 	}
-	if err := cost_setting.ValidateMode(request.Mode); err != nil {
+	if request.Mode == nil || request.MinimumExpectedMarginBPS == nil {
+		writeCostAccountingError(c, errors.New("mode and minimum expected margin are required"))
+		return
+	}
+	if err := cost_setting.ValidateMode(*request.Mode); err != nil {
 		writeCostAccountingError(c, err)
 		return
 	}
-	if request.Mode == types.CostAccountingStrict {
+	if err := cost_setting.ValidateMinimumExpectedMarginBPS(*request.MinimumExpectedMarginBPS); err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	if *request.Mode == types.CostAccountingStrict {
 		coverage, err := service.CheckAuthoritativeCostCoverage()
 		if err != nil {
 			writeCostAccountingError(c, err)
@@ -53,12 +65,22 @@ func UpdateCostAccountingSettings(c *gin.Context) {
 			return
 		}
 	}
-	if err := model.UpdateOption(cost_setting.ConfigName+"."+cost_setting.KeyMode, string(request.Mode)); err != nil {
+	if err := model.UpdateOptionsBulk(map[string]string{
+		cost_setting.ConfigName + "." + cost_setting.KeyMode:                     string(*request.Mode),
+		cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS: strconv.Itoa(*request.MinimumExpectedMarginBPS),
+	}); err != nil {
 		writeCostAccountingError(c, err)
 		return
 	}
-	recordManageAudit(c, "cost_accounting.mode_update", map[string]interface{}{"mode": request.Mode})
-	common.ApiSuccess(c, gin.H{"mode": cost_setting.Runtime().Mode})
+	recordManageAudit(c, "cost_accounting.mode_update", map[string]interface{}{
+		"mode":                        *request.Mode,
+		"minimum_expected_margin_bps": *request.MinimumExpectedMarginBPS,
+	})
+	settings := cost_setting.Runtime()
+	common.ApiSuccess(c, gin.H{
+		"mode":                        settings.Mode,
+		"minimum_expected_margin_bps": settings.MinimumExpectedMarginBPS,
+	})
 }
 
 func ListCostRules(c *gin.Context) {

@@ -5,8 +5,9 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
-type UpdateCostAccountingModeRequest struct {
-	Mode types.CostAccountingMode `json:"mode" binding:"required"`
+type UpdateCostAccountingSettingsRequest struct {
+	Mode                     *types.CostAccountingMode `json:"mode"`
+	MinimumExpectedMarginBPS *int                      `json:"minimum_expected_margin_bps"`
 }
 
 type CostRuleWriteRequest struct {

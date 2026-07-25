@@ -23,16 +23,17 @@ type RoutingPolicy struct {
 }
 
 type RouteTarget struct {
-	ID             int    `json:"id"`
-	PolicyID       int    `json:"policy_id" gorm:"not null;index"`
-	ChannelID      int    `json:"channel_id" gorm:"not null;index"`
-	Name           string `json:"name" gorm:"type:varchar(128);not null"`
-	UpstreamModel  string `json:"upstream_model" gorm:"type:varchar(255);not null"`
-	TargetPriority int    `json:"target_priority" gorm:"not null;index"`
-	Constraints    string `json:"constraints" gorm:"type:text;not null"`
-	Enabled        bool   `json:"enabled" gorm:"not null"`
-	CreatedAt      int64  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt      int64  `json:"updated_at" gorm:"autoUpdateTime"`
+	ID                       int    `json:"id"`
+	PolicyID                 int    `json:"policy_id" gorm:"not null;index"`
+	ChannelID                int    `json:"channel_id" gorm:"not null;index"`
+	Name                     string `json:"name" gorm:"type:varchar(128);not null"`
+	UpstreamModel            string `json:"upstream_model" gorm:"type:varchar(255);not null"`
+	TargetPriority           int    `json:"target_priority" gorm:"not null;index"`
+	MinimumExpectedMarginBPS *int   `json:"minimum_expected_margin_bps"`
+	Constraints              string `json:"constraints" gorm:"type:text;not null"`
+	Enabled                  bool   `json:"enabled" gorm:"not null"`
+	CreatedAt                int64  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt                int64  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 type RoutingCandidateChannel struct {
@@ -105,14 +106,15 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 			return nil, fmt.Errorf("decode route target %q constraints: %w", target.Name, err)
 		}
 		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], modelrouting.Target{
-			ID:            target.ID,
-			PolicyID:      id,
-			ChannelID:     target.ChannelID,
-			Name:          target.Name,
-			UpstreamModel: target.UpstreamModel,
-			Priority:      target.TargetPriority,
-			Enabled:       target.Enabled,
-			Constraints:   constraints,
+			ID:                       target.ID,
+			PolicyID:                 id,
+			ChannelID:                target.ChannelID,
+			Name:                     target.Name,
+			UpstreamModel:            target.UpstreamModel,
+			Priority:                 target.TargetPriority,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+			Enabled:                  target.Enabled,
+			Constraints:              constraints,
 		})
 	}
 	if err := modelrouting.ValidatePolicy(snapshot, relaycommon.MaxTaskDurationSeconds); err != nil {

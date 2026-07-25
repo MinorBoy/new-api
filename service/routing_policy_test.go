@@ -48,6 +48,41 @@ func TestSaveRoutingPolicyNormalizesAndPublishesCompleteReplacement(t *testing.T
 	assert.Equal(t, saved.Targets[0].UpstreamModel, snapshot.TargetsByChannel[11][0].UpstreamModel)
 }
 
+func TestSaveRoutingPolicyPreservesExplicitZeroMinimumExpectedMargin(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	request := validRoutingPolicyWriteRequest()
+	zero := 0
+	request.Targets[0].MinimumExpectedMarginBPS = &zero
+
+	saved, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	require.Len(t, saved.Targets, 1)
+	require.NotNil(t, saved.Targets[0].MinimumExpectedMarginBPS)
+	assert.Zero(t, *saved.Targets[0].MinimumExpectedMarginBPS)
+
+	request = routingPolicyWriteRequestForTest(saved)
+	updated, err := service.SaveRoutingPolicy(saved.ID, request)
+	require.NoError(t, err)
+	require.NotNil(t, updated.Targets[0].MinimumExpectedMarginBPS)
+	assert.Zero(t, *updated.Targets[0].MinimumExpectedMarginBPS)
+}
+
+func routingPolicyWriteRequestForTest(view *service.RoutingPolicyView) service.RoutingPolicyWriteRequest {
+	request := service.RoutingPolicyWriteRequest{
+		GroupName: view.GroupName, Model: view.Model, Enabled: view.Enabled, Defaults: view.Defaults,
+		Targets: make([]service.RouteTargetWriteRequest, 0, len(view.Targets)),
+	}
+	for _, target := range view.Targets {
+		request.Targets = append(request.Targets, service.RouteTargetWriteRequest{
+			ChannelID: target.ChannelID, Name: target.Name, UpstreamModel: target.UpstreamModel,
+			TargetPriority: target.TargetPriority, Enabled: target.Enabled, Constraints: target.Constraints,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+		})
+	}
+	return request
+}
+
 func TestRoutingConstraintsIgnoreLegacyUpscaleProperties(t *testing.T) {
 	legacy := `{
 		"output_resolutions":["1080p"],

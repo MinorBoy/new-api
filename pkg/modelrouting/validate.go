@@ -9,14 +9,15 @@ import (
 type ValidationCode string
 
 const (
-	ValidationInvalidModel            ValidationCode = "invalid_model"
-	ValidationInvalidGroup            ValidationCode = "invalid_group"
-	ValidationInvalidOutputResolution ValidationCode = "invalid_output_resolution"
-	ValidationInvalidDuration         ValidationCode = "invalid_duration"
-	ValidationInvalidAspectRatio      ValidationCode = "invalid_aspect_ratio"
-	ValidationInvalidReferenceLimit   ValidationCode = "invalid_reference_limit"
-	ValidationDefaultRouteUnavailable ValidationCode = "default_route_unavailable"
-	ValidationTargetOverlap           ValidationCode = "routing_target_overlap"
+	ValidationInvalidModel                 ValidationCode = "invalid_model"
+	ValidationInvalidGroup                 ValidationCode = "invalid_group"
+	ValidationInvalidOutputResolution      ValidationCode = "invalid_output_resolution"
+	ValidationInvalidDuration              ValidationCode = "invalid_duration"
+	ValidationInvalidAspectRatio           ValidationCode = "invalid_aspect_ratio"
+	ValidationInvalidReferenceLimit        ValidationCode = "invalid_reference_limit"
+	ValidationInvalidMinimumExpectedMargin ValidationCode = "invalid_minimum_expected_margin"
+	ValidationDefaultRouteUnavailable      ValidationCode = "default_route_unavailable"
+	ValidationTargetOverlap                ValidationCode = "routing_target_overlap"
 )
 
 type ValidationError struct {
@@ -53,6 +54,9 @@ func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 
 	for _, targets := range policy.TargetsByChannel {
 		for _, target := range targets {
+			if target.MinimumExpectedMarginBPS != nil && (*target.MinimumExpectedMarginBPS < 0 || *target.MinimumExpectedMarginBPS > 10_000) {
+				return newValidationError(ValidationInvalidMinimumExpectedMargin, "targets.minimum_expected_margin_bps", "minimum expected margin must be between 0 and 10000 basis points")
+			}
 			if err := validateConstraints(target.Constraints, maxDuration); err != nil {
 				return err
 			}

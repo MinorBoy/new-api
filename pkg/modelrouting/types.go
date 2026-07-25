@@ -56,14 +56,15 @@ type Constraints struct {
 }
 
 type Target struct {
-	ID            int         `json:"id"`
-	PolicyID      int         `json:"policy_id"`
-	ChannelID     int         `json:"channel_id"`
-	Name          string      `json:"name"`
-	UpstreamModel string      `json:"upstream_model"`
-	Priority      int         `json:"target_priority"`
-	Enabled       bool        `json:"enabled"`
-	Constraints   Constraints `json:"constraints"`
+	ID                       int         `json:"id"`
+	PolicyID                 int         `json:"policy_id"`
+	ChannelID                int         `json:"channel_id"`
+	Name                     string      `json:"name"`
+	UpstreamModel            string      `json:"upstream_model"`
+	Priority                 int         `json:"target_priority"`
+	MinimumExpectedMarginBPS *int        `json:"minimum_expected_margin_bps,omitempty"`
+	Enabled                  bool        `json:"enabled"`
+	Constraints              Constraints `json:"constraints"`
 }
 
 type PolicySnapshot struct {

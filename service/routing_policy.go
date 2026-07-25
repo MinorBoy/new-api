@@ -22,12 +22,13 @@ type RoutingPolicyWriteRequest struct {
 }
 
 type RouteTargetWriteRequest struct {
-	ChannelID      int                      `json:"channel_id"`
-	Name           string                   `json:"name"`
-	UpstreamModel  string                   `json:"upstream_model"`
-	TargetPriority int                      `json:"target_priority"`
-	Enabled        bool                     `json:"enabled"`
-	Constraints    modelrouting.Constraints `json:"constraints"`
+	ChannelID                int                      `json:"channel_id"`
+	Name                     string                   `json:"name"`
+	UpstreamModel            string                   `json:"upstream_model"`
+	TargetPriority           int                      `json:"target_priority"`
+	MinimumExpectedMarginBPS *int                     `json:"minimum_expected_margin_bps"`
+	Enabled                  bool                     `json:"enabled"`
+	Constraints              modelrouting.Constraints `json:"constraints"`
 }
 
 type RoutingPolicyServiceError struct {
@@ -60,14 +61,15 @@ type RoutingPolicyView struct {
 }
 
 type RouteTargetView struct {
-	ID             int                      `json:"id"`
-	ChannelID      int                      `json:"channel_id"`
-	ChannelName    string                   `json:"channel_name"`
-	Name           string                   `json:"name"`
-	UpstreamModel  string                   `json:"upstream_model"`
-	TargetPriority int                      `json:"target_priority"`
-	Enabled        bool                     `json:"enabled"`
-	Constraints    modelrouting.Constraints `json:"constraints"`
+	ID                       int                      `json:"id"`
+	ChannelID                int                      `json:"channel_id"`
+	ChannelName              string                   `json:"channel_name"`
+	Name                     string                   `json:"name"`
+	UpstreamModel            string                   `json:"upstream_model"`
+	TargetPriority           int                      `json:"target_priority"`
+	MinimumExpectedMarginBPS *int                     `json:"minimum_expected_margin_bps"`
+	Enabled                  bool                     `json:"enabled"`
+	Constraints              modelrouting.Constraints `json:"constraints"`
 }
 
 func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolicyView, error) {
@@ -123,28 +125,30 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 		}
 		targetID := -(index + 1)
 		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], modelrouting.Target{
-			ID:            targetID,
-			PolicyID:      id,
-			ChannelID:     target.ChannelID,
-			Name:          target.Name,
-			UpstreamModel: target.UpstreamModel,
-			Priority:      target.TargetPriority,
-			Enabled:       target.Enabled,
-			Constraints:   target.Constraints,
+			ID:                       targetID,
+			PolicyID:                 id,
+			ChannelID:                target.ChannelID,
+			Name:                     target.Name,
+			UpstreamModel:            target.UpstreamModel,
+			Priority:                 target.TargetPriority,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+			Enabled:                  target.Enabled,
+			Constraints:              target.Constraints,
 		})
 		encoded, err := common.Marshal(target.Constraints)
 		if err != nil {
 			return nil, newRoutingPolicyServiceError("routing_policy_error", fmt.Sprintf("targets.%d.constraints", index), err.Error())
 		}
 		rows = append(rows, model.RouteTarget{
-			ID:             targetID,
-			PolicyID:       id,
-			ChannelID:      target.ChannelID,
-			Name:           target.Name,
-			UpstreamModel:  target.UpstreamModel,
-			TargetPriority: target.TargetPriority,
-			Enabled:        target.Enabled,
-			Constraints:    string(encoded),
+			ID:                       targetID,
+			PolicyID:                 id,
+			ChannelID:                target.ChannelID,
+			Name:                     target.Name,
+			UpstreamModel:            target.UpstreamModel,
+			TargetPriority:           target.TargetPriority,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+			Enabled:                  target.Enabled,
+			Constraints:              string(encoded),
 		})
 	}
 
@@ -337,14 +341,15 @@ func routingPolicyViewFromRow(row *model.RoutingPolicy, channelNames map[int]str
 			return nil, newRoutingPolicyServiceError("routing_policy_error", "", err.Error())
 		}
 		view.Targets = append(view.Targets, RouteTargetView{
-			ID:             target.ID,
-			ChannelID:      target.ChannelID,
-			ChannelName:    channelNames[target.ChannelID],
-			Name:           target.Name,
-			UpstreamModel:  target.UpstreamModel,
-			TargetPriority: target.TargetPriority,
-			Enabled:        target.Enabled,
-			Constraints:    constraints,
+			ID:                       target.ID,
+			ChannelID:                target.ChannelID,
+			ChannelName:              channelNames[target.ChannelID],
+			Name:                     target.Name,
+			UpstreamModel:            target.UpstreamModel,
+			TargetPriority:           target.TargetPriority,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+			Enabled:                  target.Enabled,
+			Constraints:              constraints,
 		})
 	}
 	return view, nil
@@ -360,12 +365,13 @@ func routingPolicyWriteRequestFromView(view *RoutingPolicyView) RoutingPolicyWri
 	}
 	for _, target := range view.Targets {
 		request.Targets = append(request.Targets, RouteTargetWriteRequest{
-			ChannelID:      target.ChannelID,
-			Name:           target.Name,
-			UpstreamModel:  target.UpstreamModel,
-			TargetPriority: target.TargetPriority,
-			Enabled:        target.Enabled,
-			Constraints:    target.Constraints,
+			ChannelID:                target.ChannelID,
+			Name:                     target.Name,
+			UpstreamModel:            target.UpstreamModel,
+			TargetPriority:           target.TargetPriority,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+			Enabled:                  target.Enabled,
+			Constraints:              target.Constraints,
 		})
 	}
 	return request

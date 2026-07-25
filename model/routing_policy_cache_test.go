@@ -60,6 +60,30 @@ func TestRefreshRoutingPolicyCacheReplacesOnlyOneKey(t *testing.T) {
 	assert.Equal(t, beforeFast, afterFast)
 }
 
+func TestRoutingPolicyCachePreservesMinimumExpectedMarginNullAndZero(t *testing.T) {
+	db := openRoutingTestDB(t)
+	prepareRoutingCacheTest(t, db)
+	policy := createCachedPolicy(t, modelrouting.Seedance20, true, 11, "provider-standard", true)
+	zero := 0
+	require.NoError(t, db.Model(&model.RouteTarget{}).
+		Where("policy_id = ?", policy.ID).
+		Update("minimum_expected_margin_bps", &zero).Error)
+
+	require.NoError(t, model.InitRoutingPolicyCache())
+	snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
+	require.True(t, ok)
+	require.NotNil(t, snapshot.TargetsByChannel[11][0].MinimumExpectedMarginBPS)
+	assert.Zero(t, *snapshot.TargetsByChannel[11][0].MinimumExpectedMarginBPS)
+
+	require.NoError(t, db.Model(&model.RouteTarget{}).
+		Where("policy_id = ?", policy.ID).
+		Update("minimum_expected_margin_bps", nil).Error)
+	require.NoError(t, model.RefreshRoutingPolicyCache("分组A", modelrouting.Seedance20))
+	snapshot, ok = model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
+	require.True(t, ok)
+	assert.Nil(t, snapshot.TargetsByChannel[11][0].MinimumExpectedMarginBPS)
+}
+
 func TestRefreshRoutingPolicyCacheKeepsPreviousSnapshotOnDecodeFailure(t *testing.T) {
 	db := openRoutingTestDB(t)
 	prepareRoutingCacheTest(t, db)

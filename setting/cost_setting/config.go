@@ -10,16 +10,19 @@ import (
 )
 
 const (
-	ConfigName = "cost_setting"
-	KeyMode    = "mode"
+	ConfigName                  = "cost_setting"
+	KeyMode                     = "mode"
+	KeyMinimumExpectedMarginBPS = "minimum_expected_margin_bps"
 )
 
 type CostSetting struct {
-	Mode types.CostAccountingMode `json:"mode"`
+	Mode                     types.CostAccountingMode `json:"mode"`
+	MinimumExpectedMarginBPS int                      `json:"minimum_expected_margin_bps"`
 }
 
 type RuntimeSnapshot struct {
-	Mode types.CostAccountingMode
+	Mode                     types.CostAccountingMode
+	MinimumExpectedMarginBPS int
 }
 
 var costSetting = CostSetting{Mode: types.CostAccountingDisabled}
@@ -40,13 +43,20 @@ func ValidateMode(mode types.CostAccountingMode) error {
 	}
 }
 
+func ValidateMinimumExpectedMarginBPS(value int) error {
+	if value < 0 || value > 10_000 {
+		return fmt.Errorf("minimum expected margin must be between 0 and 10000 basis points")
+	}
+	return nil
+}
+
 func Runtime() RuntimeSnapshot {
 	if loaded := runtimeSnapshot.Load(); loaded != nil {
 		if snapshot, ok := loaded.(RuntimeSnapshot); ok {
 			return snapshot
 		}
 	}
-	return RuntimeSnapshot{Mode: types.CostAccountingDisabled}
+	return RuntimeSnapshot{Mode: types.CostAccountingDisabled, MinimumExpectedMarginBPS: 0}
 }
 
 func UpdateAndSync() {
@@ -55,5 +65,13 @@ func UpdateAndSync() {
 		common.SysError(err.Error() + "; using disabled mode")
 		mode = types.CostAccountingDisabled
 	}
-	runtimeSnapshot.Store(RuntimeSnapshot{Mode: mode})
+	minimumExpectedMarginBPS := costSetting.MinimumExpectedMarginBPS
+	if err := ValidateMinimumExpectedMarginBPS(minimumExpectedMarginBPS); err != nil {
+		common.SysError(err.Error() + "; using zero minimum expected margin")
+		minimumExpectedMarginBPS = 0
+	}
+	runtimeSnapshot.Store(RuntimeSnapshot{
+		Mode:                     mode,
+		MinimumExpectedMarginBPS: minimumExpectedMarginBPS,
+	})
 }

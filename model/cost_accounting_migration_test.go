@@ -90,6 +90,8 @@ func testCostAccountingMigrationContracts(t *testing.T, db *gorm.DB, dialect com
 
 	t.Cleanup(func() {
 		require.NoError(t, db.Migrator().DropTable(
+			&RouteTarget{},
+			&RoutingPolicy{},
 			&CostAccountingAudit{},
 			&CostAccountingAttempt{},
 			&CostAccountingRequest{},
@@ -97,11 +99,47 @@ func testCostAccountingMigrationContracts(t *testing.T, db *gorm.DB, dialect com
 		))
 	})
 	require.NoError(t, db.AutoMigrate(
+		&RoutingPolicy{},
+		&RouteTarget{},
 		&ChannelModelCostRule{},
 		&CostAccountingRequest{},
 		&CostAccountingAttempt{},
 		&CostAccountingAudit{},
 	))
+
+	columnTypes, err := db.Migrator().ColumnTypes(&RouteTarget{})
+	require.NoError(t, err)
+	var marginColumn gorm.ColumnType
+	for _, columnType := range columnTypes {
+		if columnType.Name() == "minimum_expected_margin_bps" {
+			marginColumn = columnType
+			break
+		}
+	}
+	require.NotNil(t, marginColumn)
+	nullable, ok := marginColumn.Nullable()
+	if dialect != common.DatabaseTypeSQLite {
+		require.True(t, ok)
+		assert.True(t, nullable)
+	}
+
+	zeroMargin := 0
+	nullMarginTarget := RouteTarget{
+		PolicyID: 1, ChannelID: 1, Name: "inherit", UpstreamModel: "provider-inherit",
+		Constraints: `{}`, Enabled: false,
+	}
+	zeroMarginTarget := RouteTarget{
+		PolicyID: 1, ChannelID: 2, Name: "zero", UpstreamModel: "provider-zero",
+		MinimumExpectedMarginBPS: &zeroMargin, Constraints: `{}`, Enabled: false,
+	}
+	require.NoError(t, db.Create(&nullMarginTarget).Error)
+	require.NoError(t, db.Create(&zeroMarginTarget).Error)
+	var loadedTargets []RouteTarget
+	require.NoError(t, db.Order("channel_id ASC").Find(&loadedTargets).Error)
+	require.Len(t, loadedTargets, 2)
+	assert.Nil(t, loadedTargets[0].MinimumExpectedMarginBPS)
+	require.NotNil(t, loadedTargets[1].MinimumExpectedMarginBPS)
+	assert.Zero(t, *loadedTargets[1].MinimumExpectedMarginBPS)
 
 	requests := []CostAccountingRequest{
 		{RequestID: "nullable-task-1"},
@@ -152,7 +190,7 @@ func testCostAccountingMigrationContracts(t *testing.T, db *gorm.DB, dialect com
 			_ = db.Callback().Update().Remove(callbackName)
 		}
 	})
-	_, err := ActivateChannelModelCostRule(draft.ID, 42, 200, nil)
+	_, err = ActivateChannelModelCostRule(draft.ID, 42, 200, nil)
 	require.ErrorIs(t, err, activationErr)
 	require.Equal(t, 2, activationUpdates)
 	require.NoError(t, db.Callback().Update().Remove(callbackName))

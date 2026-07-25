@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -295,6 +296,13 @@ func InitResources() error {
 
 	service.InitHttpClient()
 
+	// Wire the standalone video metadata client used by profit-aware routing. When
+	// the service URL or token is absent, an explicit unavailable client is installed
+	// so per-request/per-duration/free candidates keep working while only
+	// token-dependent video candidates are excluded. The startup warning carries no
+	// secrets: it only records that the service is not configured.
+	service.SetVideoMetadataClient(buildVideoMetadataClient())
+
 	service.InitTokenEncoders()
 
 	// Initialize SQL Database
@@ -364,4 +372,32 @@ func InitResources() error {
 	service.StartAuthArtifactCleanup()
 
 	return nil
+}
+
+// buildVideoMetadataClient assembles the standalone video metadata client from
+// environment configuration. A missing URL or token leaves routing with the
+// fail-safe unavailable client (per-request/per-duration/free candidates keep
+// working; only token-dependent video candidates are excluded). The startup log
+// records the absence without echoing the token.
+func buildVideoMetadataClient() service.VideoMetadataClient {
+	baseURL := strings.TrimSpace(os.Getenv("VIDEO_METADATA_SERVICE_URL"))
+	token := os.Getenv("VIDEO_METADATA_SERVICE_TOKEN")
+	if baseURL == "" || strings.TrimSpace(token) == "" {
+		common.SysLog("video metadata service is not configured; token-priced video routing will exclude token-dependent candidates")
+		return nil
+	}
+	timeoutSeconds := 30
+	if raw := strings.TrimSpace(os.Getenv("VIDEO_METADATA_TIMEOUT_SECONDS")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			timeoutSeconds = parsed
+		}
+	}
+	maxBytes := int64(videometa.MaxVideoBytes)
+	if raw := strings.TrimSpace(os.Getenv("VIDEO_METADATA_MAX_BYTES")); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 && parsed <= videometa.MaxVideoBytes {
+			maxBytes = parsed
+		}
+	}
+	httpClient := &http.Client{Timeout: time.Duration(timeoutSeconds) * time.Second}
+	return service.NewHTTPVideoMetadataClient(baseURL, token, httpClient, maxBytes)
 }

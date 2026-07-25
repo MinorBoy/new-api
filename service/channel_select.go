@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -24,6 +25,63 @@ type RetryParam struct {
 	ExcludedChannelIDs map[int]struct{}
 	costCoverageMisses map[int]PredictedCoverageInput
 	resetNextTry       bool
+	// profitRoutingState lazily resolves input reference video durations once per
+	// request via the standalone metadata service. It is nil for requests that carry
+	// no reference videos, so text/image/per-request/per-duration/free candidates
+	// never trigger a metadata lookup. The state, and the URLs it holds, stay in
+	// request memory: they are not copied onto Facts, Audit, diagnostics or logs.
+	profitRoutingState *ProfitRoutingRequestState
+}
+
+// ProfitRoutingState returns the request-level metadata state, building it lazily
+// from the routing input's reference video URLs. The state is shared across every
+// candidate evaluation and retry within the same request, so the metadata service
+// is called at most once per request. It returns nil when there are no reference
+// videos, letting callers short-circuit token-dependent predictions.
+func (p *RetryParam) ProfitRoutingState() *ProfitRoutingRequestState {
+	if p == nil {
+		return nil
+	}
+	if p.profitRoutingState != nil {
+		return p.profitRoutingState
+	}
+	if p.RoutingInput == nil || len(p.RoutingInput.ReferenceVideoURLs) == 0 {
+		return nil
+	}
+	p.profitRoutingState = NewProfitRoutingRequestState(currentVideoMetadataClient(), p.RoutingInput.ReferenceVideoURLs)
+	return p.profitRoutingState
+}
+
+// videoMetadataClientHolder keeps the process-wide metadata client behind a mutex
+// so main.go can swap it during startup without exposing a writable package global.
+var videoMetadataClientHolder = struct {
+	mu     sync.Mutex
+	client VideoMetadataClient
+}{
+	client: &unavailableVideoMetadataClient{},
+}
+
+// currentVideoMetadataClient returns the metadata client wired by main.go. Until
+// main.go runs it is the unavailable client, so deployments that never configure
+// the metadata service exclude only token-dependent candidates and never treat the
+// absence as free cost.
+func currentVideoMetadataClient() VideoMetadataClient {
+	videoMetadataClientHolder.mu.Lock()
+	defer videoMetadataClientHolder.mu.Unlock()
+	return videoMetadataClientHolder.client
+}
+
+// SetVideoMetadataClient installs the process-wide metadata client. It is meant to
+// be called once during startup from main.go; passing nil restores the unavailable
+// fail-safe client.
+func SetVideoMetadataClient(client VideoMetadataClient) {
+	videoMetadataClientHolder.mu.Lock()
+	defer videoMetadataClientHolder.mu.Unlock()
+	if client == nil {
+		videoMetadataClientHolder.client = &unavailableVideoMetadataClient{}
+		return
+	}
+	videoMetadataClientHolder.client = client
 }
 
 func (p *RetryParam) ExcludeChannel(channelID int) {

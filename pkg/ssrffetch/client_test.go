@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -203,4 +206,37 @@ func TestProtectedRoundTripperCachesOnlyByProxyAddress(t *testing.T) {
 	assert.Same(t, direct, directAgain)
 	assert.Same(t, proxied, proxiedAgain)
 	assert.NotSame(t, direct, proxied)
+}
+
+func TestClientRejectsRedirectBeforeDialingBlockedTarget(t *testing.T) {
+	var blockedHits atomic.Int32
+	blocked := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		blockedHits.Add(1)
+	}))
+	t.Cleanup(blocked.Close)
+	source := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Redirect(writer, &http.Request{}, blocked.URL+"/private.mp4", http.StatusFound)
+	}))
+	t.Cleanup(source.Close)
+
+	client, err := NewClient(Options{
+		GetProtection: func() (*common.SSRFProtection, bool, error) {
+			return nil, false, nil
+		},
+		ValidateURL: func(rawURL string) error {
+			if strings.HasPrefix(rawURL, blocked.URL) {
+				return errors.New("redirect target blocked")
+			}
+			return nil
+		},
+		Proxy: func(*http.Request) (*url.URL, error) { return nil, nil },
+	})
+	require.NoError(t, err)
+
+	response, err := client.Get(source.URL + "/source.mp4")
+
+	require.ErrorContains(t, err, "redirect target blocked")
+	require.NotNil(t, response)
+	assert.Equal(t, http.StatusFound, response.StatusCode)
+	assert.Zero(t, blockedHits.Load())
 }

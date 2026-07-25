@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -231,6 +234,54 @@ func TestServerLogsOnlyAllowlistedFields(t *testing.T) {
 	assert.NotContains(t, combined, "signature=private")
 	assert.NotContains(t, combined, "request-id-secret")
 	assert.NotContains(t, combined, "service-secret")
+}
+
+func TestMetadataServiceEndToEndCachesValidatedAsset(t *testing.T) {
+	payload, err := os.ReadFile("testdata/sample.mp4")
+	require.NoError(t, err)
+	var gets atomic.Int32
+	asset := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("ETag", `"sample-v1"`)
+		writer.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		if request.Method == http.MethodGet {
+			gets.Add(1)
+			_, _ = writer.Write(payload)
+		}
+	}))
+	t.Cleanup(asset.Close)
+	var cacheHits []bool
+	handler := NewServer(ServerOptions{
+		Token:          "service-secret",
+		MaxConcurrency: 2,
+		Metadata: NewFetcher(FetcherOptions{
+			Client: asset.Client(), Cache: NewCache(4), MaxBytes: MaxVideoBytes, TempDir: t.TempDir(),
+		}).Metadata,
+		Log: func(_ string, fields map[string]any) {
+			cacheHit, ok := fields["cache_hit"].(bool)
+			require.True(t, ok)
+			cacheHits = append(cacheHits, cacheHit)
+		},
+	})
+	body := fmt.Sprintf(`{"url":%q,"media_type":"video","max_bytes":134217728,"deadline_ms":30000}`, asset.URL+"/sample.mp4")
+
+	first := postMetadata(t, handler, body)
+	second := postMetadata(t, handler, body)
+
+	assert.Equal(t, http.StatusOK, first.Code)
+	assert.Equal(t, http.StatusOK, second.Code)
+	assert.Equal(t, int32(1), gets.Load())
+	assert.Equal(t, []bool{false, true}, cacheHits)
+	assert.NotContains(t, second.Body.String(), "cache_hit")
+}
+
+func postMetadata(t *testing.T, handler http.Handler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/v1/metadata/video", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer service-secret")
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
 
 func validMetadataRequest(t *testing.T) *http.Request {

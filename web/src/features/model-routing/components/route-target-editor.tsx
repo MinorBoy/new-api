@@ -41,6 +41,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  formatMarginBPSPercent,
+  marginPercentInputToBPS,
+} from '@/lib/margin-bps'
 import { cn } from '@/lib/utils'
 
 import {
@@ -284,6 +288,63 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
                   }
                 />
               </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={props.form.control}
+          name={`targets.${props.index}.minimum_expected_margin_bps`}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Minimum expected gross margin')}</FormLabel>
+              <FormControl>
+                <div className='flex items-center gap-1.5'>
+                  <Input
+                    key={field.value ?? 'inherit'}
+                    type='number'
+                    min={0}
+                    max={100}
+                    step={0.01}
+                    defaultValue={
+                      field.value === null
+                        ? ''
+                        : formatMarginBPSPercent(field.value)
+                    }
+                    placeholder={t('Leave empty to inherit the global setting')}
+                    onBlur={(event) => {
+                      if (event.target.value === '') {
+                        field.onChange(null)
+                        return
+                      }
+                      try {
+                        field.onChange(
+                          marginPercentInputToBPS(event.target.value)
+                        )
+                      } catch {
+                        event.target.value =
+                          field.value === null
+                            ? ''
+                            : formatMarginBPSPercent(field.value)
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.currentTarget.blur()
+                      }
+                    }}
+                  />
+                  <span className='text-muted-foreground text-sm'>%</span>
+                </div>
+              </FormControl>
+              <FormDescription className='text-xs'>
+                {field.value === null
+                  ? t('Leave empty to inherit the global setting')
+                  : t('Effective minimum margin: {{value}}%', {
+                      value: formatMarginBPSPercent(field.value),
+                    })}
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )}

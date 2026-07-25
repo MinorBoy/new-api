@@ -20,7 +20,6 @@ import { api } from '@/lib/api'
 
 import type {
   CostAccountingApiResponse,
-  CostAccountingMode,
   CostAccountingSettings,
   CostAnomalyPage,
   CostAnomalyParams,
@@ -39,6 +38,7 @@ import type {
   CostRuleWriteRequest,
   ReconcileCostAttemptRequest,
   ReconcileCostRevenueRequest,
+  UpdateCostAccountingSettingsRequest,
 } from './types'
 
 const COST_ACCOUNTING_PATH = '/api/cost-accounting'
@@ -76,11 +76,11 @@ export async function getCostAccountingSettings(): Promise<
 }
 
 export async function updateCostAccountingSettings(
-  mode: CostAccountingMode
+  request: UpdateCostAccountingSettingsRequest
 ): Promise<CostAccountingApiResponse<CostAccountingSettings>> {
   const response = await api.put<
     CostAccountingApiResponse<CostAccountingSettings>
-  >(`${COST_ACCOUNTING_PATH}/settings`, { mode })
+  >(`${COST_ACCOUNTING_PATH}/settings`, request)
   return response.data
 }
 

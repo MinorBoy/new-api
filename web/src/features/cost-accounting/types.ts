@@ -153,6 +153,12 @@ export type CostRuleFormValues =
 
 export interface CostAccountingSettings {
   mode: CostAccountingMode
+  minimum_expected_margin_bps: number
+}
+
+export interface UpdateCostAccountingSettingsRequest {
+  mode: CostAccountingMode
+  minimum_expected_margin_bps: number
 }
 
 export interface CostRule {

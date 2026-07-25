@@ -79,6 +79,8 @@ const referenceLimitsSchema = z.object({
   audios: z.number().int().min(0).max(3),
 })
 
+const marginBPSSchema = z.number().int().min(0).max(10_000)
+
 export const routeTargetFormSchema = z.object({
   id: z.number().int().positive().optional(),
   channel_id: z.number().int().positive('Channel is required'),
@@ -86,6 +88,7 @@ export const routeTargetFormSchema = z.object({
   name: z.string().trim().min(1, 'Target name is required'),
   upstream_model: z.string().trim().min(1, 'Upstream model is required'),
   target_priority: z.number().int(),
+  minimum_expected_margin_bps: marginBPSSchema.nullable(),
   enabled: z.boolean(),
   output_resolutions: z
     .array(resolutionSchema)
@@ -156,6 +159,7 @@ export const routeTargetSchema = z.object({
   name: z.string(),
   upstream_model: z.string(),
   target_priority: z.number().int(),
+  minimum_expected_margin_bps: marginBPSSchema.nullable(),
   enabled: z.boolean(),
   constraints: routeConstraintsApiSchema,
 })
@@ -361,6 +365,7 @@ export function createEmptyTarget(): RouteTargetFormValues {
     name: '',
     upstream_model: '',
     target_priority: 0,
+    minimum_expected_margin_bps: null,
     enabled: true,
     output_resolutions: ['720p'],
     durations: { mode: 'range', values: [], min: 4, max: 15 },
@@ -431,6 +436,7 @@ export function toWriteRequest(
       name: target.name,
       upstream_model: target.upstream_model,
       target_priority: target.target_priority,
+      minimum_expected_margin_bps: target.minimum_expected_margin_bps,
       enabled: target.enabled,
       constraints: {
         output_resolutions: target.output_resolutions,
@@ -485,6 +491,7 @@ export function fromPolicyResponse(
         name: target.name,
         upstream_model: target.upstream_model,
         target_priority: target.target_priority,
+        minimum_expected_margin_bps: target.minimum_expected_margin_bps,
         enabled: target.enabled,
         output_resolutions: target.constraints.output_resolutions,
         durations: durationForm,

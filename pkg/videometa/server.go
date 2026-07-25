@@ -76,6 +76,7 @@ func (s *metadataServer) ServeHTTP(writer http.ResponseWriter, request *http.Req
 	startedAt := time.Now()
 	resultCode := ErrorInternal
 	var responseBytes int64
+	var cacheHit bool
 	defer func() {
 		if s.log == nil {
 			return
@@ -85,7 +86,7 @@ func (s *metadataServer) ServeHTTP(writer http.ResponseWriter, request *http.Req
 			"result_code": resultCode,
 			"elapsed_ms":  time.Since(startedAt).Milliseconds(),
 			"bytes":       responseBytes,
-			"cache_hit":   false,
+			"cache_hit":   cacheHit,
 		})
 	}()
 
@@ -148,6 +149,7 @@ func (s *metadataServer) ServeHTTP(writer http.ResponseWriter, request *http.Req
 	}
 	resultCode = "success"
 	responseBytes = metadata.ContentLength
+	cacheHit = metadata.CacheHit
 	s.writeJSON(writer, http.StatusOK, metadata)
 }
 

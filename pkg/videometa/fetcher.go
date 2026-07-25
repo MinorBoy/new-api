@@ -84,6 +84,7 @@ func (f *Fetcher) Metadata(ctx context.Context, request Request) (Metadata, erro
 		if metadata, ok := f.cache.Get(CacheKey(CacheKeyInput{
 			URL: request.URL, ETag: headers.etag, LastModified: headers.lastModified, ContentLength: headers.contentLength,
 		})); ok {
+			metadata.CacheHit = true
 			return metadata, nil
 		}
 	}

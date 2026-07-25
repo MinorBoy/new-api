@@ -55,6 +55,7 @@ type Metadata struct {
 	ContentLength int64  `json:"content_length"`
 	ETag          string `json:"etag,omitempty"`
 	LastModified  string `json:"last_modified,omitempty"`
+	CacheHit      bool   `json:"-"`
 }
 
 func (m Metadata) Validate() error {

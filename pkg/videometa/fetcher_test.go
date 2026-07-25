@@ -52,7 +52,10 @@ func TestFetcherUsesHeadMetadataAndCachesParsedAsset(t *testing.T) {
 	second, err := fetcher.Metadata(context.Background(), request)
 	require.NoError(t, err)
 
-	assert.Equal(t, first, second)
+	assert.Equal(t, first.DurationMS, second.DurationMS)
+	assert.Equal(t, first.ContentLength, second.ContentLength)
+	assert.False(t, first.CacheHit)
+	assert.True(t, second.CacheHit)
 	assert.Equal(t, `"sample-v1"`, first.ETag)
 	assert.Equal(t, int32(2), heads.Load())
 	assert.Equal(t, int32(1), gets.Load())

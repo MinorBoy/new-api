@@ -153,25 +153,30 @@ func performProfitRoutingRequest(t *testing.T, engine http.Handler, authorizatio
 	return recorder.Code, recorder.Body.Bytes()
 }
 
-func seedProfitRoutingTokenRuleE2E(t *testing.T, channelID int, modelName, pricePerMillion string) {
+func seedProfitRoutingRuleE2E(t *testing.T, channelID int, modelName string, mode types.CostMode, config types.CostRuleConfigV1) {
 	t.Helper()
-	configValue, err := service.NormalizeCostRuleConfig(types.CostModePerToken, types.CostRuleConfigV1{
-		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
-		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
-		TotalPerMillion: &pricePerMillion, TokenMode: types.CostTokenModeTotal,
-		MeterSource: types.CostMeterLocalUsage, ChargeEvent: types.CostChargeSubmitAccepted,
-	})
+	configValue, err := service.NormalizeCostRuleConfig(mode, config)
 	require.NoError(t, err)
 	configJSON, err := common.Marshal(configValue)
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
 		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
-		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerToken), SchemaVersion: 1,
+		Status: string(types.CostRuleActive), CostMode: string(mode), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
 	service.InvalidateCostCoverage(channelID, modelName)
+}
+
+func seedProfitRoutingTokenRuleE2E(t *testing.T, channelID int, modelName, pricePerMillion string) {
+	t.Helper()
+	seedProfitRoutingRuleE2E(t, channelID, modelName, types.CostModePerToken, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		TotalPerMillion: &pricePerMillion, TokenMode: types.CostTokenModeTotal,
+		MeterSource: types.CostMeterUpstreamUsage, ChargeEvent: types.CostChargeResponseSucceeded,
+	})
 }
 
 func replaceProfitRoutingRequestPriceE2E(t *testing.T, channelID int, modelName, price string) {
@@ -188,6 +193,118 @@ func replaceProfitRoutingRequestPriceE2E(t *testing.T, channelID int, modelName,
 		Where("channel_id = ? AND billable_upstream_model = ?", channelID, modelName).
 		Update("config_json", string(configJSON)).Error)
 	service.InvalidateCostCoverage(channelID, modelName)
+}
+
+func TestProfitRoutingDispatchesFreeAndPerDurationRulesE2E(t *testing.T) {
+	tests := []struct {
+		name string
+		seed func(t *testing.T)
+	}{
+		{
+			name: "free",
+			seed: func(t *testing.T) {
+				seedProfitRoutingRuleE2E(t, capabilityChannelB, upstreamStandardMG, types.CostModeFree, types.CostRuleConfigV1{
+					ZeroCostReason: "supplier contract",
+				})
+			},
+		},
+		{
+			name: "per duration",
+			seed: func(t *testing.T) {
+				pricePerSecond := "0.1"
+				seedProfitRoutingRuleE2E(t, capabilityChannelB, upstreamStandardMG, types.CostModePerDuration, types.CostRuleConfigV1{
+					Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+					RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+					PricePerSecond: &pricePerSecond, MeterSource: types.CostMeterValidatedRequest,
+					ChargeEvent: types.CostChargeSubmitAccepted,
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupStrictProfitRoutingE2E(t, func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
+				return 2_000_000_000, "1000", nil
+			})
+			tt.seed(t)
+
+			body := capabilityRequestBody(t, modelrouting.Seedance20, "720p", 10, "16:9", modelrouting.ReferenceLimits{}, false)
+			status, response := performProfitRoutingRequest(t, env.engine, "Bearer e2e", "", body)
+
+			require.Equal(t, http.StatusOK, status, string(response))
+			assert.Empty(t, env.channelA.snapshot())
+			selected := env.channelB.snapshot()
+			require.Len(t, selected, 1)
+			assert.Equal(t, http.MethodPost, selected[0].Method)
+			assert.Equal(t, "/v1/video/generations", selected[0].Path)
+		})
+	}
+}
+
+func TestProfitRoutingMetadataUnavailableExcludesTokenAndDispatchesNonTokenE2E(t *testing.T) {
+	env := setupStrictProfitRoutingE2E(t, func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return 2_000_000_000, "1000", nil
+	})
+	seedProfitRoutingTokenRuleE2E(t, capabilityChannelA, upstreamStandard1080, "1")
+	seedCostAccountingRule(t, capabilityChannelB, upstreamUpscaled1080, types.CostChargeSubmitAccepted, "1")
+	metadataClient := &profitRoutingE2EMetadataClient{err: &service.VideoMetadataError{Kind: service.VideoMetadataUnavailable}}
+	service.SetVideoMetadataClient(metadataClient)
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+
+	body := capabilityRequestBody(t, modelrouting.Seedance20, "1080p", 15, "9:16", modelrouting.ReferenceLimits{Videos: 1}, false)
+	body = strings.Replace(body, "video-a.mp4", "video-a.mp4?signature=secret-token", 1)
+	status, response := performProfitRoutingRequest(t, env.engine, "Bearer e2e", "", body)
+
+	require.Equal(t, http.StatusOK, status, string(response))
+	assert.Empty(t, env.channelA.snapshot())
+	selected := env.channelB.snapshot()
+	require.Len(t, selected, 1)
+	assert.Equal(t, http.MethodPost, selected[0].Method)
+	assert.Equal(t, "/v1/video/generations", selected[0].Path)
+	metadataCalls := metadataClient.snapshot()
+	require.NotEmpty(t, metadataCalls)
+	for _, assetURL := range metadataCalls {
+		assert.Equal(t, "https://mock.example/video-a.mp4?signature=secret-token", assetURL)
+	}
+	assert.NotContains(t, string(response), "metadata_unavailable")
+	assert.NotContains(t, string(response), "routing_diagnostics")
+	assert.NotContains(t, string(response), "assets.example")
+	assert.NotContains(t, string(response), "secret-token")
+
+	adminLogs, _, err := model.GetAllLogs(model.LogTypeUnknown, 0, 0, modelrouting.Seedance20, "", "", 0, 20, 0, "", "", "")
+	require.NoError(t, err)
+	var diagnosticLog *model.Log
+	for _, log := range adminLogs {
+		if strings.Contains(log.Other, "routing_diagnostics") {
+			diagnosticLog = log
+			break
+		}
+	}
+	require.NotNil(t, diagnosticLog)
+	assert.NotContains(t, diagnosticLog.Other, "assets.example")
+	assert.NotContains(t, diagnosticLog.Other, "secret-token")
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(diagnosticLog.Other, &other))
+	adminInfo, ok := other["admin_info"].(map[string]any)
+	require.True(t, ok)
+	diagnostics, ok := adminInfo["routing_diagnostics"].([]any)
+	require.True(t, ok)
+	require.Len(t, diagnostics, 1)
+	diagnostic, ok := diagnostics[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(capabilityChannelA), diagnostic["channel_id"])
+	assert.Equal(t, string(service.ProfitReasonMetadataUnavailable), diagnostic["reason"])
+
+	userLogs, _, err := model.GetUserLogs(e2eUserID, model.LogTypeUnknown, 0, 0, "", "", 0, 20, "", "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, userLogs)
+	for _, log := range userLogs {
+		assert.NotContains(t, log.Other, "admin_info")
+		assert.NotContains(t, log.Other, "routing_diagnostics")
+		assert.NotContains(t, log.Other, "assets.example")
+		assert.NotContains(t, log.Other, "secret-token")
+	}
 }
 
 func TestProfitRoutingRejectsInvalidReferenceVideoBeforeUpstreamE2E(t *testing.T) {

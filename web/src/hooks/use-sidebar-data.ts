@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  ChartNoAxesCombined,
   CreditCard,
   FileText,
   FlaskConical,
@@ -36,7 +37,11 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+} from '@/lib/admin-permissions'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -123,6 +128,15 @@ export function useSidebarData(): SidebarData {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
+          },
+          {
+            title: t('Cost accounting'),
+            url: '/cost-accounting',
+            icon: ChartNoAxesCombined,
+            requiredPermission: {
+              resource: ADMIN_PERMISSION_RESOURCES.COST_ACCOUNTING,
+              action: ADMIN_PERMISSION_ACTIONS.READ,
+            },
           },
           {
             title: t('Models'),

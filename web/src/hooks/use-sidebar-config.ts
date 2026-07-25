@@ -63,6 +63,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    cost_accounting: true,
   },
 }
 
@@ -108,6 +109,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/wallet': { section: 'personal', module: 'topup' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
+  '/cost-accounting': { section: 'admin', module: 'cost_accounting' },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
   '/models/deployments': { section: 'admin', module: 'models' },
@@ -165,7 +167,7 @@ function parseUserSidebarConfig(
  * is a second narrower layer: it can only further hide what admin allowed.
  * A null user config means "do not narrow" (legacy/empty users).
  */
-function isModuleEnabled(
+export function isSidebarModuleEnabled(
   url: string,
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig
@@ -215,7 +217,7 @@ function isNavItemVisible(
   if ('url' in item && item.url) {
     const configUrls = item.configUrls ?? [item.url]
     return configUrls.some((url) =>
-      isModuleEnabled(url as string, adminConfig, userConfig)
+      isSidebarModuleEnabled(url as string, adminConfig, userConfig)
     )
   }
 
@@ -223,7 +225,7 @@ function isNavItemVisible(
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
     return item.items.some((subItem) =>
-      isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+      isSidebarModuleEnabled(subItem.url as string, adminConfig, userConfig)
     )
   }
 
@@ -243,7 +245,7 @@ function filterNavItems(
       // If collapsible item, also filter its sub-items
       if ('items' in item && item.items) {
         const filteredSubItems = item.items.filter((subItem) =>
-          isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+          isSidebarModuleEnabled(subItem.url as string, adminConfig, userConfig)
         )
 
         return {
@@ -327,5 +329,5 @@ export function useIsSidebarModuleVisible(url: string): boolean {
       ? null
       : parseUserSidebarConfig(auth?.user?.sidebar_modules)
 
-  return isModuleEnabled(url, adminConfig, userConfig)
+  return isSidebarModuleEnabled(url, adminConfig, userConfig)
 }

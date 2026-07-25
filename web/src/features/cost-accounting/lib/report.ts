@@ -1,0 +1,61 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import type { CostCoverageItem, CostReportParams } from '../types'
+
+export type CostAccountingSearch = {
+  tab?: 'profit' | 'anomalies'
+  timeBasis?: 'profit_recognized_at' | 'requested_at'
+  startTime?: number
+  endTime?: number
+  channelId?: number
+  billableModel?: string
+  originModel?: string
+  userGroup?: string
+  usingGroup?: string
+  billingSource?: string
+  status?: string
+}
+
+function optionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? ''
+  return trimmed || undefined
+}
+
+export function costReportParamsFromSearch(
+  search: CostAccountingSearch
+): CostReportParams {
+  return {
+    time_basis: search.timeBasis ?? 'profit_recognized_at',
+    start_time: search.startTime,
+    end_time: search.endTime,
+    channel_id: search.channelId,
+    billable_upstream_model: optionalText(search.billableModel),
+    origin_model: optionalText(search.originModel),
+    user_group: optionalText(search.userGroup),
+    using_group: optionalText(search.usingGroup),
+    billing_source: optionalText(search.billingSource),
+    status: optionalText(search.status),
+  }
+}
+
+export function canEnableStrictCostAccounting(
+  coverage: CostCoverageItem[]
+): boolean {
+  return coverage.every((item) => item.covered)
+}

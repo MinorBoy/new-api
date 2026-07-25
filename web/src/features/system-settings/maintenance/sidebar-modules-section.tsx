@@ -154,6 +154,12 @@ export function SidebarModulesSection({
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
       },
+      cost_accounting: {
+        title: t('Cost accounting'),
+        description: t(
+          'Review supplier costs, anomalies, and billed gross profit.'
+        ),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

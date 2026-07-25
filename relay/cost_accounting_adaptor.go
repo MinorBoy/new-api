@@ -48,6 +48,9 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 	if info == nil || strings.TrimSpace(info.BillableUpstreamModel) == "" {
 		return nil, ErrCostIdentityUnconfirmed
 	}
+	if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+	}
 
 	billingSource := strings.TrimSpace(info.BillingSource)
 	if billingSource == "" {

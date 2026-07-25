@@ -242,7 +242,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if errors.As(newAPIError, &coverageErr) {
 			retryParam.ExcludeChannel(coverageErr.ChannelID)
 			newAPIError = costCoverageUnavailableError()
-			if retryParam.GetRetry() < common.RetryTimes {
+			if retryParam.GetRetry() < common.RetryTimes && canRetryCostCoverageFailure(c, relayInfo) {
 				continue
 			}
 			break
@@ -737,10 +737,22 @@ func handleTaskCostCoverageFailure(retryParam *service.RetryParam, relayInfo *re
 		"get_channel_failed",
 		http.StatusServiceUnavailable,
 	)
-	if relayInfo != nil && relayInfo.TaskRelayInfo != nil && relayInfo.LockedChannel != nil {
+	if !canRetryCostCoverageFailure(retryParam.Ctx, relayInfo) {
 		return safeErr, false, true
 	}
 	return safeErr, retryParam.GetRetry() < common.RetryTimes, true
+}
+
+func canRetryCostCoverageFailure(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo != nil && relayInfo.TaskRelayInfo != nil && relayInfo.LockedChannel != nil {
+		return false
+	}
+	if c != nil {
+		if _, specificChannel := c.Get("specific_channel_id"); specificChannel {
+			return false
+		}
+	}
+	return true
 }
 
 func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) error {

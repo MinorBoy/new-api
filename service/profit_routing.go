@@ -10,8 +10,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
 
@@ -392,7 +396,7 @@ func FilterProfitEligibleChannels(input ProfitChannelFilterInput, rules map[Cost
 	needsMetadata := false
 	for _, candidate := range input.Candidates {
 		rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel}]
-		if rule != nil && types.CostMode(rule.CostMode) == types.CostModePerToken && input.Facts.InputDurationMS > 0 {
+		if rule != nil && types.CostMode(rule.CostMode) == types.CostModePerToken && input.Facts.InputDurationMS <= 0 && input.MetadataState != nil {
 			needsMetadata = true
 			break
 		}
@@ -445,6 +449,14 @@ func evaluateCandidateProfit(
 	facts := input.Facts
 	if metadataResolved {
 		facts.InputDurationMS = metadataDurationMS
+		inputTokens, outputTokens, totalTokens, err := EstimateSeedanceTokens(facts)
+		if err != nil {
+			exclusion.Reason = ProfitReasonMeterUnknown
+			return exclusion
+		}
+		facts.InputTokens = inputTokens
+		facts.OutputTokens = outputTokens
+		facts.TotalTokens = totalTokens
 	}
 	meter, err := BuildProfitCostMeter(types.CostMode(rule.CostMode), facts)
 	if err != nil {
@@ -493,21 +505,27 @@ func evaluateCandidateProfit(
 }
 
 // parseCostRuleConfigForProfit reuses validateCostRuleContract to parse and normalize
-// a stored rule's ConfigJSON. Capabilities default to "complete" since the profit
-// filter only needs the price fields; the authoritative contract check still happens
-// at coverage and dispatch time.
+// a stored rule's ConfigJSON. The profit gate only needs price fields; the selected
+// channel's actual capability contract is enforced by coverage and dispatch before
+// an upstream request can be sent.
 func parseCostRuleConfigForProfit(rule *model.ChannelModelCostRule) (types.CostRuleConfigV1, error) {
 	if rule == nil {
 		return types.CostRuleConfigV1{}, fmt.Errorf("cost rule is nil")
 	}
-	capabilities := CostCapabilityLookup
-	if capabilities == nil {
-		capabilities = func(int, string, constant.TaskPlatform) types.CostCapabilities {
-			return types.CostCapabilities{CanResolveBillableModel: true}
-		}
-	}
-	resolved := capabilities(0, "", constant.TaskPlatform(""))
-	return validateCostRuleContract(rule, resolved)
+	return validateCostRuleContract(rule, types.CostCapabilities{
+		CanResolveBillableModel: true,
+		ChargeEvents: []types.CostChargeEvent{
+			types.CostChargeResponseSucceeded,
+			types.CostChargeSubmitAccepted,
+			types.CostChargeTaskSucceeded,
+		},
+		MeterSources: []types.CostMeterSource{
+			types.CostMeterValidatedRequest,
+			types.CostMeterUpstreamActual,
+			types.CostMeterUpstreamUsage,
+			types.CostMeterLocalUsage,
+		},
+	})
 }
 
 // EstimateProfitRoutingFacts builds the ProfitRoutingFacts the filter consumes from the
@@ -535,4 +553,192 @@ func EstimateProfitRoutingFacts(resolution string, outputDurationSeconds int, in
 	facts.OutputTokens = outputTokens
 	facts.TotalTokens = totalTokens
 	return facts, nil
+}
+
+// ErrProfitEligibility is the sentinel a failed pre-dispatch recheck matches. The
+// matching error also unwraps to CostCoverageError, preserving the controller's
+// existing exclude-and-retry behavior without exposing diagnostics to callers.
+var ErrProfitEligibility = fmt.Errorf("profit eligibility recheck failed")
+
+// ProfitEligibilityError carries the channel that failed the authoritative pre-dispatch
+// recheck. Its public text is deliberately generic: amounts, thresholds and rule
+// identity remain request-level admin diagnostics, never API error data.
+type ProfitEligibilityError struct {
+	ChannelID int
+	Reason    ProfitExclusionReason
+}
+
+func (e *ProfitEligibilityError) Error() string {
+	if e == nil {
+		return "profit eligibility recheck failed"
+	}
+	return ErrProfitEligibility.Error()
+}
+
+func (e *ProfitEligibilityError) Is(target error) bool {
+	return target == ErrProfitEligibility
+}
+
+func (e *ProfitEligibilityError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return &CostCoverageError{ChannelID: e.ChannelID}
+}
+
+// RecheckSelectedChannelProfit is the authoritative pre-dispatch margin gate. It runs
+// in the task relay path immediately after ConfirmTaskCostIdentity sets the final
+// BillableUpstreamModel, and BEFORE PrepareCostAttempt/AuthorizeCostDispatch/DoRequest,
+// so a failed recheck creates no cost attempt and triggers no upstream side-effect.
+//
+// Unlike the candidate-stage filter (which prices the predicted model from the routing
+// target), the recheck prices the authoritative billable model the adapter will actually
+// send upstream. It re-reads the current active rule (authoritative=true, bypassing the
+// candidate cache) and the latest global threshold, so a rule activation/version change
+// or threshold bump between candidate selection and dispatch cannot bypass the gate.
+//
+// Returns nil when the channel passes; returns *ProfitEligibilityError (wrapping
+// *CostCoverageError{ChannelID}) when it fails. The caller maps the failure to a
+// retryable exclude-and-retry outcome, never to a silent switch.
+func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
+		return nil
+	}
+	if info == nil || info.ChannelMeta == nil {
+		return &ProfitEligibilityError{Reason: ProfitReasonCalculationError}
+	}
+	billableModel := strings.TrimSpace(info.BillableUpstreamModel)
+	channelID := info.ChannelId
+	if billableModel == "" || channelID <= 0 {
+		return &ProfitEligibilityError{
+			ChannelID: channelID,
+			Reason:    ProfitReasonMeterUnknown,
+		}
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+
+	candidate := ProfitRoutingCandidate{ChannelID: channelID, PredictedUpstreamModel: billableModel}
+	group := info.UsingGroup
+	if group == "" {
+		group = info.TokenGroup
+	}
+
+	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
+	rules, err := ActiveCostRules([]CostRuleCandidate{{ChannelID: channelID, BillableUpstreamModel: billableModel}}, true)
+	if err != nil {
+		common.SysError(fmt.Sprintf("profit recheck active rule lookup failed: %s", err.Error()))
+		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
+	}
+	threshold, err := currentRecheckMarginThreshold(info, cost_setting.Runtime().MinimumExpectedMarginBPS)
+	if err != nil {
+		common.SysError(fmt.Sprintf("profit recheck routing threshold lookup failed: %s", err.Error()))
+		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
+	}
+	// Resolve any input reference video metadata so per-token candidates price with the
+	// authoritative input duration. The URLs are read from the request context's
+	// FactsInput (set by the routing middleware); they stay in request memory only.
+	var metadataState *ProfitRoutingRequestState
+	if c != nil {
+		input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput)
+		if ok && len(input.ReferenceVideoURLs) > 0 {
+			metadataState = NewProfitRoutingRequestState(currentVideoMetadataClient(), input.ReferenceVideoURLs)
+		}
+	}
+
+	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		Ctx:             ctx,
+		Facts:           facts,
+		RevenueNanoUSD:  revenueNanoUSD,
+		HasRevenue:      hasRevenue,
+		GlobalMarginBPS: threshold,
+		Candidates:      []ProfitRoutingCandidate{candidate},
+		MetadataState:   metadataState,
+	}, rules)
+	if _, allowed := filterResult.AllowedChannelIDs[channelID]; allowed {
+		return nil
+	}
+	reason := ProfitReasonMarginBelowThreshold
+	if len(filterResult.Exclusions) > 0 {
+		reason = filterResult.Exclusions[0].Reason
+	}
+	return &ProfitEligibilityError{ChannelID: channelID, Reason: reason}
+}
+
+// currentRecheckMarginThreshold reads the selected target directly from storage rather
+// than reusing the candidate-stage policy snapshot. A deleted or disabled target is
+// not eligible to dispatch under strict accounting, so it fails closed.
+func currentRecheckMarginThreshold(info *relaycommon.RelayInfo, globalThreshold int) (int, error) {
+	if info == nil || info.Routing == nil {
+		return globalThreshold, nil
+	}
+	routing := info.Routing
+	if routing.PolicyID <= 0 || routing.TargetID <= 0 || info.ChannelId <= 0 {
+		return 0, fmt.Errorf("selected routing target is incomplete")
+	}
+	var target model.RouteTarget
+	err := model.DB.Where("id = ? AND policy_id = ? AND channel_id = ? AND enabled = ?", routing.TargetID, routing.PolicyID, info.ChannelId, true).
+		First(&target).Error
+	if err != nil {
+		return 0, err
+	}
+	if target.MinimumExpectedMarginBPS != nil {
+		return *target.MinimumExpectedMarginBPS, nil
+	}
+	return globalThreshold, nil
+}
+
+// recheckFacts resolves the ProfitRoutingFacts + revenue for the pre-dispatch recheck.
+// It prefers the capability-routing facts already on RelayInfo.Routing.Facts; otherwise
+// it falls back to the request body's resolution/duration. Revenue is computed once via
+// the injected callback, mirroring the candidate-stage path.
+func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayInfo, group string) (ProfitRoutingFacts, int64, bool) {
+	resolution := ""
+	duration := 0
+	if info.Routing != nil {
+		resolution = info.Routing.Facts.OutputResolution
+		duration = info.Routing.Facts.DurationSeconds
+	}
+	if c != nil {
+		if routingFacts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts); ok {
+			if resolution == "" {
+				resolution = routingFacts.OutputResolution
+			}
+			if duration <= 0 {
+				duration = routingFacts.DurationSeconds
+			}
+		}
+		if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok {
+			if resolution == "" && input.OutputResolution != nil {
+				resolution = *input.OutputResolution
+			}
+			if duration <= 0 && input.DurationSeconds != nil && *input.DurationSeconds > 0 {
+				duration = *input.DurationSeconds
+			}
+		}
+	}
+	if (resolution == "" || duration <= 0) && info.PriceData.RequestedDurationSeconds > 0 {
+		duration = info.PriceData.RequestedDurationSeconds
+	}
+	facts := ProfitRoutingFacts{OutputDurationSeconds: duration}
+	if resolution != "" && duration > 0 {
+		if estimated, err := EstimateProfitRoutingFacts(resolution, duration, 0); err == nil {
+			facts = estimated
+		}
+	}
+	durationSeconds := duration
+	revenueNanoUSD, err := PreviewRoutingRevenue(ctx, RoutingRevenuePreviewInput{
+		OriginModelName: info.OriginModelName,
+		Group:           group,
+		RequestPath:     info.RequestURLPath,
+		RelayMode:       info.RelayMode,
+		DurationSeconds: &durationSeconds,
+		UserId:          info.UserId,
+	})
+	if err != nil {
+		return facts, 0, false
+	}
+	return facts, revenueNanoUSD, true
 }

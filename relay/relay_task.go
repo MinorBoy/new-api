@@ -234,6 +234,18 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		info.PriceData.Quota = quota
 		noteTaskQuotaClamp(info, clamp)
 	}
+	// Strict cost rechecks price the same validated duration that PrepareCostAttempt
+	// will persist. Populate it before the final model identity is confirmed so the
+	// recheck has no zero-value duration fallback.
+	if cost_setting.Runtime().Mode == types.CostAccountingStrict && info.PriceData.RequestedDurationSeconds == 0 {
+		if estimator, ok := adaptor.(channel.TaskDurationEstimator); ok {
+			requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
+			if taskErr != nil {
+				return nil, taskErr
+			}
+			info.PriceData.RequestedDurationSeconds = requestedSeconds
+		}
+	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
@@ -258,6 +270,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			logger.LogWarn(c, fmt.Sprintf("task cost identity confirmation failed: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
 			coverageErr := &service.CostCoverageError{ChannelID: info.ChannelId}
 			return nil, service.TaskErrorWrapperLocal(coverageErr, "cost_coverage_unavailable", http.StatusServiceUnavailable)
+		}
+		if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "cost_coverage_unavailable", http.StatusServiceUnavailable)
 		}
 
 		billingSource := strings.TrimSpace(info.BillingSource)

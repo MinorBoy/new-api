@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -283,9 +284,16 @@ func withCostAccountingMode(t *testing.T, mode types.CostAccountingMode) {
 	require.NotNil(t, cfg)
 	require.NoError(t, config.UpdateConfigFromMap(cfg, map[string]string{cost_setting.KeyMode: string(mode)}))
 	cost_setting.UpdateAndSync()
+	previousRevenueHook := service.RevenuePreviewHookForTest()
+	if mode == types.CostAccountingStrict {
+		service.SetRoutingRevenuePreview(func(_ context.Context, _ service.RoutingRevenuePreviewInput) (int64, string, error) {
+			return 1_000_000, "500000", nil
+		})
+	}
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(cfg, map[string]string{cost_setting.KeyMode: string(types.CostAccountingDisabled)}))
 		cost_setting.UpdateAndSync()
+		service.SetRoutingRevenuePreview(previousRevenueHook)
 	})
 }
 

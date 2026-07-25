@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -486,14 +487,9 @@ func seedanceAcceptanceUnitPrice(t *testing.T, model, resolution string, hasVide
 	default:
 		require.FailNow(t, "unknown Seedance price resolution", "model=%s resolution=%s", model, resolution)
 	}
-	key := videoPriceKey{
-		is1080p:  strings.EqualFold(resolution, "1080p"),
-		is4k:     strings.EqualFold(resolution, "4k"),
-		hasVideo: hasVideo,
-	}
-	prices, ok := videoPriceTable[family]
-	require.True(t, ok, "missing Seedance price table for model=%s family=%s", model, family)
-	price, ok := prices[key]
+	// Delegate to the shared seedancepricing table so the acceptance oracle asserts
+	// the Doubao adapter and the profit predictor read the same official unit price.
+	price, ok := seedancepricing.OfficialUnitPrice(model, resolution, hasVideo)
 	require.True(t, ok, "missing Seedance price for model=%s resolution=%s has_video=%t", model, resolution, hasVideo)
 	return price
 }

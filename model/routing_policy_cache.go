@@ -171,14 +171,15 @@ func routingPolicySnapshotFromRows(policy RoutingPolicy, targets []RouteTarget) 
 			return modelrouting.PolicySnapshot{}, fmt.Errorf("decode route target %d constraints: %w", target.ID, err)
 		}
 		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], modelrouting.Target{
-			ID:            target.ID,
-			PolicyID:      target.PolicyID,
-			ChannelID:     target.ChannelID,
-			Name:          target.Name,
-			UpstreamModel: target.UpstreamModel,
-			Priority:      target.TargetPriority,
-			Enabled:       target.Enabled,
-			Constraints:   constraints,
+			ID:                       target.ID,
+			PolicyID:                 target.PolicyID,
+			ChannelID:                target.ChannelID,
+			Name:                     target.Name,
+			UpstreamModel:            target.UpstreamModel,
+			Priority:                 target.TargetPriority,
+			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
+			Enabled:                  target.Enabled,
+			Constraints:              constraints,
 		})
 	}
 	if err := modelrouting.ValidatePolicy(snapshot, relaycommon.MaxTaskDurationSeconds); err != nil {

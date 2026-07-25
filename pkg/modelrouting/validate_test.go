@@ -34,6 +34,37 @@ func TestValidatePolicyAcceptsDisjointSamePriorityTargets(t *testing.T) {
 	require.NoError(t, modelrouting.ValidatePolicy(policy, relaycommon.MaxTaskDurationSeconds))
 }
 
+func TestValidatePolicyMinimumExpectedMarginBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   *int
+		wantErr bool
+	}{
+		{name: "inherit", value: nil},
+		{name: "explicit zero", value: intPtr(0)},
+		{name: "maximum", value: intPtr(10_000)},
+		{name: "negative", value: intPtr(-1), wantErr: true},
+		{name: "over maximum", value: intPtr(10_001), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := validPolicySnapshot()
+			policy.TargetsByChannel[11][0].MinimumExpectedMarginBPS = tt.value
+
+			err := modelrouting.ValidatePolicy(policy, relaycommon.MaxTaskDurationSeconds)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				assert.Equal(t, tt.value, policy.TargetsByChannel[11][0].MinimumExpectedMarginBPS)
+				return
+			}
+			var validationErr *modelrouting.ValidationError
+			require.ErrorAs(t, err, &validationErr)
+			assert.Equal(t, modelrouting.ValidationInvalidMinimumExpectedMargin, validationErr.Code)
+		})
+	}
+}
+
 func TestValidatePolicyRejectsInvalidContracts(t *testing.T) {
 	tests := []struct {
 		name     string

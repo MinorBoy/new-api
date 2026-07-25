@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,11 +144,21 @@ func prepareCostRoutingControllerTest(t *testing.T, mode types.CostAccountingMod
 	require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{cost_setting.KeyMode: string(mode)}))
 	cost_setting.UpdateAndSync()
 
+	// Inject a revenue preview callback so strict-mode profit routing has a positive
+	// revenue to compare against the (typically free) cost rules these tests seed.
+	// Mirrors the production main.go wiring; the callback returns a fixed positive
+	// quota so free-cost candidates pass the margin gate.
+	previousRevenueHook := service.RevenuePreviewHookForTest()
+	service.SetRoutingRevenuePreview(func(_ context.Context, _ service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return 1_000_000, "500000", nil
+	})
+
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{cost_setting.KeyMode: string(previousMode)}))
 		cost_setting.UpdateAndSync()
 		service.InvalidateCostCoverage(0, "")
 		service.CostCapabilityLookup = previousLookup
+		service.SetRoutingRevenuePreview(previousRevenueHook)
 		common.MemoryCacheEnabled = previousMemoryCacheEnabled
 		model.DB = previousDB
 		require.NoError(t, sqlDB.Close())

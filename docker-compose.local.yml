@@ -25,10 +25,14 @@ services:
       BATCH_UPDATE_ENABLED: "true"
       NODE_NAME: new-api-local-node
       SESSION_SECRET: "${SESSION_SECRET:-}"
+      VIDEO_METADATA_SERVICE_URL: http://video-metadata:8090
+      VIDEO_METADATA_SERVICE_TOKEN: "${VIDEO_METADATA_SERVICE_TOKEN:-local-video-metadata-secret}"
     depends_on:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      video-metadata:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/status | grep -Eq '\"success\"[[:space:]]*:[[:space:]]*true'"]
@@ -36,6 +40,24 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+
+  video-metadata:
+    build:
+      context: .
+      dockerfile: Dockerfile.video-metadata
+    image: new-api-video-metadata:local
+    restart: unless-stopped
+    environment:
+      VIDEO_METADATA_SERVICE_TOKEN: "${VIDEO_METADATA_SERVICE_TOKEN:-local-video-metadata-secret}"
+      TZ: Asia/Shanghai
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
 
   mysql:
     image: mysql:8.2

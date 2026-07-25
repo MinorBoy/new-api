@@ -37,6 +37,30 @@ func TestReplaceRoutingPolicyPersistsTypedConstraints(t *testing.T) {
 	assert.JSONEq(t, targets[0].Constraints, loaded.Targets[0].Constraints)
 }
 
+func TestReplaceRoutingPolicyPreservesMinimumExpectedMarginNullAndZero(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RoutingPolicy{}, &model.RouteTarget{}))
+	zero := 0
+	targets := []model.RouteTarget{
+		{
+			ChannelID: 11, Name: "inherit", UpstreamModel: "provider-inherit", TargetPriority: 100,
+			Enabled: true, Constraints: validConstraintsJSON(t, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+		{
+			ChannelID: 12, Name: "zero", UpstreamModel: "provider-zero", TargetPriority: 100,
+			Enabled: true, MinimumExpectedMarginBPS: &zero,
+			Constraints: validConstraintsJSON(t, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+	}
+
+	created, err := model.ReplaceRoutingPolicy(0, validRoutingPolicyRow(), targets)
+	require.NoError(t, err)
+	require.Len(t, created.Targets, 2)
+	assert.Nil(t, created.Targets[0].MinimumExpectedMarginBPS)
+	require.NotNil(t, created.Targets[1].MinimumExpectedMarginBPS)
+	assert.Zero(t, *created.Targets[1].MinimumExpectedMarginBPS)
+}
+
 func TestRoutingPolicyUniqueGroupAndModel(t *testing.T) {
 	db := openRoutingTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.RoutingPolicy{}, &model.RouteTarget{}))

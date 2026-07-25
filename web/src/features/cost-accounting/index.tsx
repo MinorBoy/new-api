@@ -25,6 +25,8 @@ import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
+import { Field, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
@@ -32,6 +34,10 @@ import {
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
+import {
+  formatMarginBPSPercent,
+  marginPercentInputToBPS,
+} from '@/lib/margin-bps'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -91,6 +97,8 @@ export function CostAccounting() {
   const uncovered = coverage.filter((item) => !item.covered).length
   const covered = coverage.length - uncovered
   const mode = settingsQuery.data?.data.mode ?? 'disabled'
+  const minimumExpectedMarginBPS =
+    settingsQuery.data?.data.minimum_expected_margin_bps ?? 0
   const canWrite = hasPermission(
     currentUser,
     ADMIN_PERMISSION_RESOURCES.COST_ACCOUNTING,
@@ -103,12 +111,17 @@ export function CostAccounting() {
   const modeMutation = useMutation({
     mutationFn: updateCostAccountingSettings,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: costAccountingQueryKeys.settings(),
-      })
-      toast.success(t('Cost accounting mode updated'))
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: costAccountingQueryKeys.settings(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: costAccountingQueryKeys.coverages(),
+        }),
+      ])
+      toast.success(t('Settings updated successfully'))
     },
-    onError: () => toast.error(t('Failed to update cost accounting mode')),
+    onError: () => toast.error(t('Failed to update settings')),
   })
 
   return (
@@ -137,28 +150,84 @@ export function CostAccounting() {
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
         {canWrite ? (
-          <ToggleGroup
-            value={[mode]}
-            onValueChange={(selection) => {
-              const value = selection[0]
-              if (value === 'strict' && !canEnableStrict) {
-                toast.error(
-                  t('Resolve uncovered models before enabling strict mode')
-                )
-                return
-              }
-              if (value === 'disabled' || value === 'strict') {
-                modeMutation.mutate(value)
-              }
-            }}
-            disabled={modeMutation.isPending || settingsQuery.isLoading}
-            aria-label={t('Cost accounting mode')}
-          >
-            <ToggleGroupItem value='disabled'>{t('Disabled')}</ToggleGroupItem>
-            <ToggleGroupItem value='strict' disabled={!canEnableStrict}>
-              {t('Strict')}
-            </ToggleGroupItem>
-          </ToggleGroup>
+          <div className='flex flex-wrap items-center justify-end gap-3'>
+            <Field className='w-52 gap-1'>
+              <FieldLabel htmlFor='cost-minimum-margin' className='text-xs'>
+                {t('Minimum expected gross margin')}
+              </FieldLabel>
+              <div className='flex items-center gap-1.5'>
+                <Input
+                  key={minimumExpectedMarginBPS}
+                  id='cost-minimum-margin'
+                  type='number'
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  defaultValue={formatMarginBPSPercent(
+                    minimumExpectedMarginBPS
+                  )}
+                  disabled={modeMutation.isPending || settingsQuery.isLoading}
+                  aria-label={t('Minimum expected gross margin')}
+                  onBlur={(event) => {
+                    let nextMargin: number
+                    try {
+                      nextMargin = marginPercentInputToBPS(event.target.value)
+                    } catch {
+                      toast.error(
+                        t(
+                          'Enter a percentage from 0 to 100 with at most two decimals'
+                        )
+                      )
+                      event.target.value = formatMarginBPSPercent(
+                        minimumExpectedMarginBPS
+                      )
+                      return
+                    }
+                    if (nextMargin === minimumExpectedMarginBPS) {
+                      return
+                    }
+                    modeMutation.mutate({
+                      mode,
+                      minimum_expected_margin_bps: nextMargin,
+                    })
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+                <span className='text-muted-foreground text-sm'>%</span>
+              </div>
+            </Field>
+            <ToggleGroup
+              value={[mode]}
+              onValueChange={(selection) => {
+                const value = selection[0]
+                if (value === 'strict' && !canEnableStrict) {
+                  toast.error(
+                    t('Resolve uncovered models before enabling strict mode')
+                  )
+                  return
+                }
+                if (value === 'disabled' || value === 'strict') {
+                  modeMutation.mutate({
+                    mode: value,
+                    minimum_expected_margin_bps: minimumExpectedMarginBPS,
+                  })
+                }
+              }}
+              disabled={modeMutation.isPending || settingsQuery.isLoading}
+              aria-label={t('Cost accounting mode')}
+            >
+              <ToggleGroupItem value='disabled'>
+                {t('Disabled')}
+              </ToggleGroupItem>
+              <ToggleGroupItem value='strict' disabled={!canEnableStrict}>
+                {t('Strict')}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
         ) : null}
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>

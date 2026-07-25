@@ -236,6 +236,123 @@ func ActiveCostRule(channelID int, billableModel string, authoritative bool) (*m
 	return &rule, nil
 }
 
+// CostRuleCandidate identifies one (channel, billable upstream model) pair the routing
+// layer wants to price. It is the batch counterpart of ActiveCostRule's two scalar
+// arguments, and serves as the map key returned by ActiveCostRules.
+type CostRuleCandidate struct {
+	ChannelID             int
+	BillableUpstreamModel string
+}
+
+// ActiveCostRules resolves the active cost rule for every candidate in a single
+// database query, avoiding the N+1 pattern the per-candidate ActiveCostRule would
+// produce during channel selection.
+//
+// The non-authoritative path reuses the same activeCostRuleCache as ActiveCostRule,
+// priming it from the batch result so subsequent single-candidate lookups (including
+// the authoritative pre-dispatch recheck in Task 7) hit the cache. Missing candidates
+// (draft/retired/no-rule) are simply absent from the returned map; the caller treats
+// absence as "no active rule" exactly as a gorm.ErrRecordNotFound from ActiveCostRule.
+// An active-rule conflict (two active versions for one key) surfaces as
+// model.ErrCostActiveRuleConflict and drops both entries, matching single-key semantics.
+//
+// The query uses only GORM methods with a status equality filter — no dialect SQL —
+// so it is valid across SQLite, MySQL and PostgreSQL.
+func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[CostRuleCandidate]*model.ChannelModelCostRule, error) {
+	if len(candidates) == 0 {
+		return map[CostRuleCandidate]*model.ChannelModelCostRule{}, nil
+	}
+
+	// De-duplicate by the normalized key so repeated candidates do not inflate the
+	// result or trigger spurious conflict detection.
+	normalized := make(map[costCoverageKey]CostRuleCandidate, len(candidates))
+	cacheHits := make(map[costCoverageKey]*model.ChannelModelCostRule)
+	pending := make([]costCoverageKey, 0, len(candidates))
+	for _, candidate := range candidates {
+		modelName := strings.TrimSpace(candidate.BillableUpstreamModel)
+		if candidate.ChannelID == 0 || modelName == "" {
+			continue
+		}
+		key := costCoverageKey{channelID: candidate.ChannelID, model: modelName}
+		if _, exists := normalized[key]; exists {
+			continue
+		}
+		normalized[key] = CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: modelName}
+		if !authoritative {
+			if cached, ok := activeCostRuleCache.Load(key); ok {
+				rule := cached.(model.ChannelModelCostRule)
+				cacheHits[key] = &rule
+				continue
+			}
+		}
+		pending = append(pending, key)
+	}
+
+	results := make(map[CostRuleCandidate]*model.ChannelModelCostRule, len(candidates))
+	for key, rule := range cacheHits {
+		results[normalized[key]] = rule
+	}
+	if len(pending) == 0 {
+		return results, nil
+	}
+
+	// Build a single WHERE clause matching any pending (channel_id, model) pair. We
+	// avoid a cross-database tuple-IN by OR-ing channel-scoped clauses, and repeat the
+	// active-status predicate in each branch so the OR cannot pull in draft/retired
+	// rows. This keeps the query portable across SQLite/MySQL/PostgreSQL without
+	// dialect branches.
+	channelModels := make(map[int][]string)
+	for _, key := range pending {
+		channelModels[key.channelID] = append(channelModels[key.channelID], key.model)
+	}
+	query := model.DB.Model(&model.ChannelModelCostRule{})
+	first := true
+	for channelID, models := range channelModels {
+		clause := "channel_id = ? AND billable_upstream_model IN ? AND status = ?"
+		args := []any{channelID, models, types.CostRuleActive}
+		if first {
+			query = query.Where(clause, args...)
+			first = false
+			continue
+		}
+		query = query.Or(clause, args...)
+	}
+	var rows []model.ChannelModelCostRule
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	byKey := make(map[costCoverageKey][]model.ChannelModelCostRule)
+	for index := range rows {
+		row := rows[index]
+		key := costCoverageKey{channelID: row.ChannelID, model: row.BillableUpstreamModel}
+		byKey[key] = append(byKey[key], row)
+	}
+	for _, key := range pending {
+		matches := byKey[key]
+		if len(matches) == 0 {
+			activeCostRuleCache.Delete(key)
+			continue
+		}
+		// Mirror ActiveCostRule: keep only the highest version; more than one active
+		// version is an unrecoverable conflict.
+		latest := matches[0]
+		for _, row := range matches[1:] {
+			if row.Version > latest.Version {
+				latest = row
+			}
+		}
+		if len(matches) > 1 {
+			activeCostRuleCache.Delete(key)
+			return nil, fmt.Errorf("%w: channel=%d model=%s", model.ErrCostActiveRuleConflict, key.channelID, key.model)
+		}
+		activeCostRuleCache.Store(key, latest)
+		latestCopy := latest
+		results[normalized[key]] = &latestCopy
+	}
+	return results, nil
+}
+
 func CheckPredictedCostCoverage(input PredictedCoverageInput) (bool, error) {
 	channel, err := model.GetChannelById(input.ChannelID, false)
 	if err != nil {

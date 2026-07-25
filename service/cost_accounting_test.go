@@ -2,16 +2,22 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestAuthorizeDispatchBeforeTransport(t *testing.T) {
@@ -51,6 +57,98 @@ func TestPrepareCostAttemptRejectsMissingCoverage(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).
 		Where("request_id = ?", preparedAttemptInput().RequestID).Count(&requestCount).Error)
 	assert.Zero(t, requestCount)
+}
+
+func TestPrepareCostAttemptRejectsChangedProfitRecheckTarget(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+	seedActiveAttemptRule(t, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})
+	configureProfitRecheckSettings(t, 0)
+
+	threshold := 100
+	target := model.RouteTarget{
+		ID: 41, PolicyID: 42, ChannelID: 7, Name: "supplier", UpstreamModel: "vendor-model",
+		TargetPriority: 100, MinimumExpectedMarginBPS: &threshold, Constraints: `{}`, Enabled: true,
+	}
+	require.NoError(t, model.DB.Create(&target).Error)
+	info := profitRecheckRelayInfo(target.ID, target.PolicyID)
+	setProfitRecheckRevenue(t)
+	require.NoError(t, RecheckSelectedChannelProfit(nil, info))
+	require.NotNil(t, info.CostProfitRecheckSnapshot)
+
+	changedThreshold := 200
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).Where("id = ?", target.ID).
+		Update("minimum_expected_margin_bps", &changedThreshold).Error)
+	input := preparedAttemptInput()
+	input.CostProfitRecheckSnapshot = info.CostProfitRecheckSnapshot
+
+	_, err := PrepareCostAttempt(context.Background(), input)
+
+	require.ErrorIs(t, err, ErrProfitEligibility)
+	var coverageErr *CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, input.ChannelID, coverageErr.ChannelID)
+	assertNoPreparedCostRequest(t, input.RequestID)
+}
+
+func TestPrepareCostAttemptRejectsChangedProfitRecheckGlobalThreshold(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	seedActiveAttemptRule(t, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})
+	configureProfitRecheckSettings(t, 0)
+
+	info := profitRecheckRelayInfo(0, 0)
+	setProfitRecheckRevenue(t)
+	require.NoError(t, RecheckSelectedChannelProfit(nil, info))
+	require.NotNil(t, info.CostProfitRecheckSnapshot)
+
+	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
+	require.NotNil(t, costConfig)
+	require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
+		cost_setting.KeyMode:                     string(types.CostAccountingStrict),
+		cost_setting.KeyMinimumExpectedMarginBPS: "200",
+	}))
+	cost_setting.UpdateAndSync()
+	input := preparedAttemptInput()
+	input.CostProfitRecheckSnapshot = info.CostProfitRecheckSnapshot
+
+	_, err := PrepareCostAttempt(context.Background(), input)
+
+	require.ErrorIs(t, err, ErrProfitEligibility)
+	var coverageErr *CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, input.ChannelID, coverageErr.ChannelID)
+	assertNoPreparedCostRequest(t, input.RequestID)
+}
+
+func TestPrepareCostAttemptMapsSnapshotLockConflictToProfitEligibility(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	seedActiveAttemptRule(t, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})
+	configureProfitRecheckSettings(t, 0)
+
+	info := profitRecheckRelayInfo(0, 0)
+	setProfitRecheckRevenue(t)
+	require.NoError(t, RecheckSelectedChannelProfit(nil, info))
+	require.NotNil(t, info.CostProfitRecheckSnapshot)
+	callbackName := "profit_recheck_snapshot_sqlite_locked"
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "channel_model_cost_rules" {
+			tx.AddError(errors.New("database is locked"))
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	})
+	input := preparedAttemptInput()
+	input.CostProfitRecheckSnapshot = info.CostProfitRecheckSnapshot
+
+	_, err := PrepareCostAttempt(context.Background(), input)
+
+	require.ErrorIs(t, err, ErrProfitEligibility)
+	var coverageErr *CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, input.ChannelID, coverageErr.ChannelID)
+	assertNoPreparedCostRequest(t, input.RequestID)
 }
 
 func TestPrepareCostAttemptIgnoresValidatedDurationCandidateForUpstreamActualRule(t *testing.T) {
@@ -241,6 +339,60 @@ func normalizedCostAttemptConfig(t *testing.T, mode types.CostMode, config types
 	normalized, err := NormalizeCostRuleConfig(mode, config)
 	require.NoError(t, err)
 	return normalized
+}
+
+func configureProfitRecheckSettings(t *testing.T, minimumExpectedMarginBPS int) {
+	t.Helper()
+	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
+	require.NotNil(t, costConfig)
+	previous := cost_setting.Runtime()
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
+			cost_setting.KeyMode:                     string(previous.Mode),
+			cost_setting.KeyMinimumExpectedMarginBPS: strconv.Itoa(previous.MinimumExpectedMarginBPS),
+		}))
+		cost_setting.UpdateAndSync()
+	})
+	require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
+		cost_setting.KeyMode:                     string(types.CostAccountingStrict),
+		cost_setting.KeyMinimumExpectedMarginBPS: strconv.Itoa(minimumExpectedMarginBPS),
+	}))
+	cost_setting.UpdateAndSync()
+}
+
+func profitRecheckRelayInfo(targetID, policyID int) *relaycommon.RelayInfo {
+	info := &relaycommon.RelayInfo{
+		OriginModelName:        "client-model",
+		RequestURLPath:         "/v1/chat/completions",
+		BillableUpstreamModel:  "vendor-model",
+		PredictedUpstreamModel: "vendor-model",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 7, ChannelType: constant.ChannelTypeOpenAI,
+		},
+	}
+	if targetID > 0 {
+		info.Routing = &modelrouting.Audit{PolicyID: policyID, TargetID: targetID}
+	}
+	return info
+}
+
+func setProfitRecheckRevenue(t *testing.T) {
+	t.Helper()
+	previous := RevenuePreviewHookForTest()
+	SetRoutingRevenuePreview(func(context.Context, RoutingRevenuePreviewInput) (int64, string, error) {
+		return 1_000_000, "500000", nil
+	})
+	t.Cleanup(func() { SetRoutingRevenuePreview(previous) })
+}
+
+func assertNoPreparedCostRequest(t *testing.T, requestID string) {
+	t.Helper()
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("request_id = ?", requestID).Count(&requestCount).Error)
+	assert.Zero(t, requestCount)
+	var attemptCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingAttempt{}).Where("cost_request_id IN (SELECT id FROM cost_accounting_requests WHERE request_id = ?)", requestID).Count(&attemptCount).Error)
+	assert.Zero(t, attemptCount)
 }
 
 func preparedAttemptInput() PrepareCostAttemptInput {

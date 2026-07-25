@@ -167,8 +167,11 @@ type RelayInfo struct {
 
 	PredictedUpstreamModel string
 	BillableUpstreamModel  string
-	CostRequestID          int64
-	CostAttempt            *types.CostAttemptHandle
+	// CostProfitRecheckSnapshot is captured by the strict pre-dispatch margin
+	// gate and consumed by cost-attempt preparation before dispatch.
+	CostProfitRecheckSnapshot *types.CostProfitRecheckSnapshot
+	CostRequestID             int64
+	CostAttempt               *types.CostAttemptHandle
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.
@@ -286,7 +289,7 @@ func (info *RelayInfo) ToString() string {
 	fmt.Fprintf(b, "RelayMode: %d, ", info.RelayMode)
 	fmt.Fprintf(b, "IsStream: %t, ", info.IsStream)
 	fmt.Fprintf(b, "IsPlayground: %t, ", info.IsPlayground)
-	fmt.Fprintf(b, "RequestURLPath: %q, ", info.RequestURLPath)
+	fmt.Fprintf(b, "RequestURLPath: %q, ", SafeRequestPath(info.RequestURLPath))
 	fmt.Fprintf(b, "OriginModelName: %q, ", info.OriginModelName)
 	fmt.Fprintf(b, "EstimatePromptTokens: %d, ", info.estimatePromptTokens)
 	fmt.Fprintf(b, "ShouldIncludeUsage: %t, ", info.ShouldIncludeUsage)
@@ -545,6 +548,13 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	}
 
 	return info
+}
+
+// SafeRequestPath removes a request target's query string before it is used in
+// logs, diagnostics, billing, or routing decisions.
+func SafeRequestPath(requestURLPath string) string {
+	path, _, _ := strings.Cut(requestURLPath, "?")
+	return path
 }
 
 func cloneRequestHeaders(c *gin.Context) map[string]string {

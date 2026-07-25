@@ -150,6 +150,85 @@ func TestExtractSeedanceRoutingInputSkipsLegacyRequests(t *testing.T) {
 	}
 }
 
+func TestExtractSeedanceRoutingInputCollectsReferenceVideoURLs(t *testing.T) {
+	body := `{
+		"model":"doubao-seedance-2-0-260128",
+		"content":[
+			{"type":"text","text":"make a video"},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://assets.example/a.mp4?sig=secret"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://assets.example/b.mp4?token=bearer"}}
+		]
+	}`
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", body, true)
+
+	input, routeErr := extractSeedanceRoutingInput(c, modelrouting.Seedance20)
+	require.Nil(t, routeErr)
+	require.NotNil(t, input)
+	assert.Equal(t, 2, input.ReferenceVideos)
+	require.Len(t, input.ReferenceVideoURLs, 2)
+	assert.Equal(t, "https://assets.example/a.mp4?sig=secret", input.ReferenceVideoURLs[0])
+	assert.Equal(t, "https://assets.example/b.mp4?token=bearer", input.ReferenceVideoURLs[1])
+
+	serialized, err := common.Marshal(input)
+	require.NoError(t, err)
+	assert.NotContains(t, string(serialized), "assets.example")
+	assert.NotContains(t, string(serialized), "sig=secret")
+	assert.NotContains(t, string(serialized), "token=bearer")
+	assert.NotContains(t, string(serialized), "ReferenceVideoURLs")
+}
+
+func TestExtractSeedanceRoutingInputRejectsInvalidReferenceVideoURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"empty url", ""},
+		{"non http scheme", "ftp://example.com/a.mp4"},
+		{"missing host", "https:///a.mp4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"video"},{"type":"video_url","role":"reference_video","video_url":{"url":"` + escapeJSON(tt.url) + `"}}]}`
+			c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", body, true)
+			input, routeErr := extractSeedanceRoutingInput(c, modelrouting.Seedance20)
+			assert.Nil(t, input)
+			require.NotNil(t, routeErr)
+			// Error messages must never echo the raw URL or its host, so signed query
+			// parameters and internal host names stay out of client-facing responses.
+			assert.NotContains(t, routeErr.Message, "example.com")
+			if tt.url != "" {
+				assert.NotContains(t, routeErr.Message, tt.url)
+			}
+		})
+	}
+}
+
+func TestExtractSeedanceRoutingInputRejectsTooManyReferenceVideos(t *testing.T) {
+	videos := make([]string, 4)
+	for index := range videos {
+		videos[index] = `{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/` + string(rune('a'+index)) + `.mp4"}}`
+	}
+	body := routingContentBody(append([]string{`{"type":"text","text":"video"}`}, videos...))
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", body, true)
+	input, routeErr := extractSeedanceRoutingInput(c, modelrouting.Seedance20)
+	assert.Nil(t, input)
+	require.NotNil(t, routeErr)
+}
+
+func escapeJSON(value string) string {
+	var buf strings.Builder
+	for _, r := range value {
+		switch r {
+		case '"', '\\':
+			buf.WriteByte('\\')
+			buf.WriteRune(r)
+		default:
+			buf.WriteRune(r)
+		}
+	}
+	return buf.String()
+}
+
 func seedanceRoutingContext(t *testing.T, method, path, body string, official bool) *gin.Context {
 	t.Helper()
 	recorder := httptest.NewRecorder()

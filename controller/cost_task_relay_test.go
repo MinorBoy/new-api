@@ -158,6 +158,58 @@ func TestHandleTaskCostCoverageFailureDoesNotBreakChannelAffinity(t *testing.T) 
 	assert.False(t, retry)
 }
 
+func TestHandleTaskProfitEligibilityFailureDoesNotRetrySpecificChannel(t *testing.T) {
+	previousRetryTimes := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("specific_channel_id", "73")
+	retryParam := &service.RetryParam{Ctx: c, Retry: common.GetPointer(0)}
+	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	taskErr := service.TaskErrorWrapperLocal(
+		&service.ProfitEligibilityError{ChannelID: 73, Reason: service.ProfitReasonMarginBelowThreshold},
+		"cost_coverage_unavailable",
+		http.StatusServiceUnavailable,
+	)
+
+	safeErr, retry, handled := handleTaskCostCoverageFailure(retryParam, info, taskErr)
+
+	assert.True(t, handled)
+	assert.False(t, retry)
+	require.NotNil(t, safeErr)
+	assert.Equal(t, http.StatusServiceUnavailable, safeErr.StatusCode)
+	assert.Equal(t, "available channel is unavailable", safeErr.Message)
+	_, excluded := retryParam.ExcludedChannelIDs[73]
+	assert.True(t, excluded)
+}
+
+func TestCostCoverageRetryIsBlockedForPinnedChannels(t *testing.T) {
+	specific, _ := gin.CreateTestContext(httptest.NewRecorder())
+	specific.Set("specific_channel_id", "73")
+
+	assert.False(t, canRetryCostCoverageFailure(specific, &relaycommon.RelayInfo{}))
+	assert.False(t, canRetryCostCoverageFailure(nil, &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{LockedChannel: &model.Channel{Id: 73}},
+	}))
+	assert.True(t, canRetryCostCoverageFailure(nil, &relaycommon.RelayInfo{}))
+}
+
+func TestCostCoverageUnavailableErrorUsesServiceUnavailable(t *testing.T) {
+	err := costCoverageUnavailableError()
+
+	require.NotNil(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	assert.Equal(t, "available channel is unavailable", err.Error())
+}
+
+func TestCostCoverageRetryDoesNotBypassChannelAffinity(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("channel_affinity_skip_retry_on_failure", true)
+
+	assert.False(t, canRetryCostCoverageFailure(c, &relaycommon.RelayInfo{}))
+}
+
 func setupControllerTaskCostDB(t *testing.T) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

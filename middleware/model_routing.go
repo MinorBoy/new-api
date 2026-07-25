@@ -114,6 +114,11 @@ func parseSeedanceRoutingFields(body []byte, canonicalModel string) (modelroutin
 	input.ReferenceImages = contentFacts.images
 	input.ReferenceVideos = contentFacts.videos
 	input.ReferenceAudios = contentFacts.audios
+	// Reference video URLs stay in request memory only: they carry signed query
+	// parameters and are never copied onto Facts/Audit/diagnostics/logs. The slice is
+	// nil when there are no reference videos so downstream profit routing can skip the
+	// metadata service entirely for text/image-only requests.
+	input.ReferenceVideoURLs = contentFacts.videoURLs
 	return input, nil
 }
 
@@ -127,6 +132,7 @@ type seedanceRoutingContentFacts struct {
 	referenceImages int
 	firstIndex      int
 	lastIndex       int
+	videoURLs       []string
 }
 
 func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFacts, *routingInputError) {
@@ -156,7 +162,7 @@ func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFac
 			}
 			facts.texts++
 		case "image_url":
-			if err := validateRoutingMedia(item["image_url"]); err != nil {
+			if _, err := validateRoutingMedia(item["image_url"]); err != nil {
 				return facts, err
 			}
 			role, err := optionalRoutingRole(item["role"])
@@ -179,7 +185,8 @@ func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFac
 				return facts, newRoutingInputError("InvalidParameter.content", "unsupported image role")
 			}
 		case "video_url":
-			if err := validateRoutingMedia(item["video_url"]); err != nil {
+			normalized, err := validateRoutingMedia(item["video_url"])
+			if err != nil {
 				return facts, err
 			}
 			role, err := optionalRoutingRole(item["role"])
@@ -187,8 +194,9 @@ func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFac
 				return facts, newRoutingInputError("InvalidParameter.content", "video role must be reference_video")
 			}
 			facts.videos++
+			facts.videoURLs = append(facts.videoURLs, normalized)
 		case "audio_url":
-			if err := validateRoutingMedia(item["audio_url"]); err != nil {
+			if _, err := validateRoutingMedia(item["audio_url"]); err != nil {
 				return facts, err
 			}
 			role, err := optionalRoutingRole(item["role"])
@@ -247,27 +255,37 @@ func optionalRoutingRole(raw json.RawMessage) (string, *routingInputError) {
 	return strings.TrimSpace(role), nil
 }
 
-func validateRoutingMedia(raw json.RawMessage) *routingInputError {
+// validateRoutingMedia parses a media URL object, rejecting empty, non-string,
+// non-HTTP(S) and host-less URLs. It returns the normalized URL so callers handling
+// reference videos can collect it for downstream profit routing. The URL — including
+// any signed query parameters — is only ever stored on FactsInput.ReferenceVideoURLs
+// (which is `json:"-"`); it must never be copied onto Facts, Audit, error messages,
+// diagnostics or logs.
+func validateRoutingMedia(raw json.RawMessage) (string, *routingInputError) {
 	if common.GetJsonType(raw) != "object" {
-		return newRoutingInputError("InvalidParameter.content", "media URL must be an object")
+		return "", newRoutingInputError("InvalidParameter.content", "media URL must be an object")
 	}
 	var media map[string]json.RawMessage
 	if err := common.Unmarshal(raw, &media); err != nil {
-		return newRoutingInputError("InvalidParameter.content", "media URL is invalid")
+		return "", newRoutingInputError("InvalidParameter.content", "media URL is invalid")
 	}
 	urlRaw, ok := media["url"]
 	if !ok || common.GetJsonType(urlRaw) != "string" {
-		return newRoutingInputError("InvalidParameter.content", "media URL is required")
+		return "", newRoutingInputError("InvalidParameter.content", "media URL is required")
 	}
 	var value string
 	if common.Unmarshal(urlRaw, &value) != nil {
-		return newRoutingInputError("InvalidParameter.content", "media URL is invalid")
+		return "", newRoutingInputError("InvalidParameter.content", "media URL is invalid")
 	}
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", newRoutingInputError("InvalidParameter.content", "media URL is required")
+	}
+	parsed, err := url.ParseRequestURI(value)
 	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return newRoutingInputError("InvalidParameter.content", "media URL is invalid")
+		return "", newRoutingInputError("InvalidParameter.content", "media URL is invalid")
 	}
-	return nil
+	return value, nil
 }
 
 func containsRoutingString(values []string, expected string) bool {

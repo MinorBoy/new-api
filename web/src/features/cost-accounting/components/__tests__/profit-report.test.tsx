@@ -30,6 +30,10 @@ import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
 } from '@/lib/admin-permissions'
+import {
+  formatMarginBPSPercent,
+  marginPercentInputToBPS,
+} from '@/lib/margin-bps'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -246,6 +250,18 @@ test('allows strict mode only when authoritative coverage is complete', () => {
     ]),
     true
   )
+})
+
+test('converts minimum expected margin percentage input to basis points', () => {
+  assert.equal(marginPercentInputToBPS('10.25'), 1025)
+  assert.equal(marginPercentInputToBPS('0'), 0)
+  assert.equal(marginPercentInputToBPS('100'), 10000)
+  assert.equal(formatMarginBPSPercent(1025), '10.25')
+  assert.equal(formatMarginBPSPercent(0), '0')
+  assert.equal(formatMarginBPSPercent(10000), '100')
+  assert.throws(() => marginPercentInputToBPS('-0.01'))
+  assert.throws(() => marginPercentInputToBPS('100.01'))
+  assert.throws(() => marginPercentInputToBPS('1.234'))
 })
 
 test('filters sidebar items by cost-accounting permission', () => {

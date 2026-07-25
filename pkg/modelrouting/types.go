@@ -23,6 +23,12 @@ type FactsInput struct {
 	ReferenceVideos   int
 	ReferenceAudios   int
 	RequireRealPerson bool
+	// ReferenceVideoURLs holds the normalized HTTP(S) URLs of every reference_video
+	// input, captured so downstream profit routing can resolve their durations via the
+	// standalone metadata service. The URLs carry signed query parameters and other
+	// sensitive material, so this slice is never serialized: it stays in request memory
+	// and is excluded from Facts, Audit, diagnostics and logs.
+	ReferenceVideoURLs []string `json:"-"`
 }
 
 type Facts struct {
@@ -56,14 +62,15 @@ type Constraints struct {
 }
 
 type Target struct {
-	ID            int         `json:"id"`
-	PolicyID      int         `json:"policy_id"`
-	ChannelID     int         `json:"channel_id"`
-	Name          string      `json:"name"`
-	UpstreamModel string      `json:"upstream_model"`
-	Priority      int         `json:"target_priority"`
-	Enabled       bool        `json:"enabled"`
-	Constraints   Constraints `json:"constraints"`
+	ID                       int         `json:"id"`
+	PolicyID                 int         `json:"policy_id"`
+	ChannelID                int         `json:"channel_id"`
+	Name                     string      `json:"name"`
+	UpstreamModel            string      `json:"upstream_model"`
+	Priority                 int         `json:"target_priority"`
+	MinimumExpectedMarginBPS *int        `json:"minimum_expected_margin_bps,omitempty"`
+	Enabled                  bool        `json:"enabled"`
+	Constraints              Constraints `json:"constraints"`
 }
 
 type PolicySnapshot struct {

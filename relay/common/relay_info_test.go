@@ -1,9 +1,11 @@
 package common
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,4 +39,16 @@ func TestRelayInfoGetFinalRequestRelayFormatFallsBackToRelayFormat(t *testing.T)
 func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
+}
+
+func TestGenRelayInfoPreservesQueryButSanitizesString(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/video/generations?signature=secret&asset=https%3A%2F%2Fassets.example%2Finput.mp4", nil)
+
+	info, err := GenRelayInfo(c, types.RelayFormatTask, nil, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, "/v1/video/generations?signature=secret&asset=https%3A%2F%2Fassets.example%2Finput.mp4", info.RequestURLPath)
+	require.NotContains(t, info.ToString(), "assets.example")
+	require.NotContains(t, info.ToString(), "secret")
 }

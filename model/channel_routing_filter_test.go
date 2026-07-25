@@ -112,3 +112,40 @@ func routingFilterChannel(id int, channelType int, modelName string, priority in
 		Priority: &priority,
 	}
 }
+
+// TestGroupModelChannelIDsReturnsPreSelectionCandidates asserts the pre-selection
+// candidate lister honors the ChannelSelectFilter (exclusions and allow-list) and
+// returns a deterministic set the profit filter can intersect with its survivors. It
+// must never perform the weighted random pick — that stays in GetRandomSatisfiedChannel.
+func TestGroupModelChannelIDsReturnsPreSelectionCandidates(t *testing.T) {
+	for _, memoryCacheEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory_cache_%t", memoryCacheEnabled), func(t *testing.T) {
+			prepareChannelRoutingFilterTest(t, memoryCacheEnabled)
+
+			all := GroupModelChannelIDs("分组A", modelrouting.Seedance20, "/v1/video/generations", ChannelSelectFilter{})
+			require.NotEmpty(t, all)
+			// The base candidate set must contain channel 11 (highest priority) and not
+			// contain channels 14/15 (different model/path).
+			assert.Contains(t, all, 11)
+			assert.NotContains(t, all, 14)
+			assert.NotContains(t, all, 15)
+
+			excluded := GroupModelChannelIDs("分组A", modelrouting.Seedance20, "/v1/video/generations", ChannelSelectFilter{
+				ExcludedChannelIDs: map[int]struct{}{11: {}},
+			})
+			assert.NotContains(t, excluded, 11)
+			// Excluding 11 must not drop the other candidates.
+			assert.NotEqual(t, len(all)-1 == 0 && len(excluded) == 0, true)
+
+			allowlisted := GroupModelChannelIDs("分组A", modelrouting.Seedance20, "/v1/video/generations", ChannelSelectFilter{
+				AllowedChannelIDs: map[int]struct{}{11: {}},
+			})
+			assert.ElementsMatch(t, []int{11}, allowlisted)
+
+			tombstone := GroupModelChannelIDs("分组A", modelrouting.Seedance20, "/v1/video/generations", ChannelSelectFilter{
+				AllowedChannelIDs: map[int]struct{}{0: {}},
+			})
+			assert.Empty(t, tombstone, "tombstone allow-list must yield no candidates")
+		})
+	}
+}

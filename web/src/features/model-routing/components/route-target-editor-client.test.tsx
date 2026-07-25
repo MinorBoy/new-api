@@ -29,6 +29,8 @@ import { I18nextProvider } from 'react-i18next'
 import {
   createEmptyPolicyForm,
   createEmptyTarget,
+  routeTargetFormSchema,
+  toWriteRequest,
   type RouteTargetFormValues,
   type RoutingPolicyFormValues,
 } from '../types'
@@ -204,4 +206,57 @@ test('does not replace a non-empty name when editing or copying a target', async
   } finally {
     await unmountTargetEditor(mounted.root, mounted.container)
   }
+})
+
+test('routing target margin keeps null inheritance and explicit zero', () => {
+  const inherited = createEmptyTarget()
+  assert.equal(inherited.minimum_expected_margin_bps, null)
+
+  const policy = createEmptyPolicyForm()
+  const request = toWriteRequest({
+    ...policy,
+    group_name: 'default',
+    enabled: true,
+    targets: [
+      {
+        ...inherited,
+        channel_id: 1,
+        name: 'target',
+        upstream_model: 'vendor-model',
+        minimum_expected_margin_bps: 0,
+      },
+    ],
+  })
+
+  assert.equal(request.targets[0]?.minimum_expected_margin_bps, 0)
+  assert.equal(
+    routeTargetFormSchema.safeParse({
+      ...inherited,
+      channel_id: 1,
+      name: 'target',
+      upstream_model: 'vendor-model',
+      minimum_expected_margin_bps: null,
+    }).success,
+    true
+  )
+  assert.equal(
+    routeTargetFormSchema.safeParse({
+      ...inherited,
+      channel_id: 1,
+      name: 'target',
+      upstream_model: 'vendor-model',
+      minimum_expected_margin_bps: -1,
+    }).success,
+    false
+  )
+  assert.equal(
+    routeTargetFormSchema.safeParse({
+      ...inherited,
+      channel_id: 1,
+      name: 'target',
+      upstream_model: 'vendor-model',
+      minimum_expected_margin_bps: 10001,
+    }).success,
+    false
+  )
 })

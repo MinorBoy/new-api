@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	ErrCostStateConflict  = errors.New("cost accounting state conflict")
-	ErrCostAmountOverflow = errors.New("cost accounting amount overflow")
+	ErrCostStateConflict        = errors.New("cost accounting state conflict")
+	ErrCostAmountOverflow       = errors.New("cost accounting amount overflow")
+	ErrCostRuleSnapshotConflict = errors.New("cost rule snapshot conflict")
 )
 
 const (
@@ -27,6 +28,31 @@ const (
 )
 
 var costAttemptAllocationLocks [256]sync.Mutex
+
+func IsCostSnapshotTransactionConflict(err error) bool {
+	for err != nil {
+		message := strings.ToLower(err.Error())
+		for _, marker := range []string{
+			"database is locked",
+			"database table is locked",
+			"database is busy",
+			"sqlite_busy",
+			"sqlite_locked",
+			"serialization failure",
+			"could not serialize",
+			"deadlock detected",
+			"deadlock found",
+			"lock wait timeout",
+			"try restarting transaction",
+		} {
+			if strings.Contains(message, marker) {
+				return true
+			}
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
 
 type CostAccountingRequest struct {
 	ID                             int64   `json:"id" gorm:"primaryKey"`
@@ -162,13 +188,14 @@ type ReconcileCostRevenueInput struct {
 }
 
 func PrepareCostAttempt(request *CostAccountingRequest, attempt *CostAccountingAttempt) error {
-	return prepareCostAttempt(DB, request, attempt, nil)
+	return prepareCostAttempt(DB, request, attempt, nil, nil)
 }
 
 func PrepareCostAttemptWithRuleValidation(
 	ctx context.Context,
 	request *CostAccountingRequest,
 	attempt *CostAccountingAttempt,
+	profitSnapshot *types.CostProfitRecheckSnapshot,
 	validateRule func(*ChannelModelCostRule) error,
 ) error {
 	if ctx == nil {
@@ -177,13 +204,14 @@ func PrepareCostAttemptWithRuleValidation(
 	if validateRule == nil {
 		return errors.New("cost rule validation is required")
 	}
-	return prepareCostAttempt(DB.WithContext(ctx), request, attempt, validateRule)
+	return prepareCostAttempt(DB.WithContext(ctx), request, attempt, profitSnapshot, validateRule)
 }
 
 func prepareCostAttempt(
 	db *gorm.DB,
 	request *CostAccountingRequest,
 	attempt *CostAccountingAttempt,
+	profitSnapshot *types.CostProfitRecheckSnapshot,
 	validateRule func(*ChannelModelCostRule) error,
 ) error {
 	if request == nil || attempt == nil || strings.TrimSpace(request.RequestID) == "" {
@@ -205,6 +233,51 @@ func prepareCostAttempt(
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		now := common.GetTimestamp()
+		if validateRule != nil {
+			if profitSnapshot != nil &&
+				(profitSnapshot.ChannelID != attempt.ChannelID || profitSnapshot.BillableUpstreamModel != attempt.BillableUpstreamModel) {
+				return ErrCostRuleSnapshotConflict
+			}
+			var activeRules []ChannelModelCostRule
+			if err := lockForUpdate(tx).Where(
+				"channel_id = ? AND billable_upstream_model = ? AND status = ?",
+				attempt.ChannelID, attempt.BillableUpstreamModel, types.CostRuleActive,
+			).Order("version DESC").Limit(2).Find(&activeRules).Error; err != nil {
+				return err
+			}
+			if len(activeRules) == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			if len(activeRules) > 1 {
+				return ErrCostActiveRuleConflict
+			}
+			if profitSnapshot != nil {
+				if activeRules[0].ID != profitSnapshot.RuleID || activeRules[0].Version != profitSnapshot.RuleVersion {
+					return ErrCostRuleSnapshotConflict
+				}
+				if profitSnapshot.RouteTarget != nil {
+					var target RouteTarget
+					err := lockForUpdate(tx).Where("id = ?", profitSnapshot.RouteTarget.ID).First(&target).Error
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return ErrCostRuleSnapshotConflict
+					}
+					if err != nil {
+						return err
+					}
+					if target.PolicyID != profitSnapshot.RouteTarget.PolicyID ||
+						target.ChannelID != profitSnapshot.RouteTarget.ChannelID ||
+						!target.Enabled ||
+						target.UpstreamModel != profitSnapshot.RouteTarget.UpstreamModel ||
+						!sameCostProfitMarginThreshold(target.MinimumExpectedMarginBPS, profitSnapshot.RouteTarget.MinimumExpectedMarginBPS) {
+						return ErrCostRuleSnapshotConflict
+					}
+				}
+			}
+			if err := validateRule(&activeRules[0]); err != nil {
+				return err
+			}
+		}
+
 		var persisted CostAccountingRequest
 		err := lockForUpdate(tx).Where("request_id = ?", request.RequestID).First(&persisted).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -241,24 +314,6 @@ func prepareCostAttempt(
 			return errors.New("cost request task ID does not match persisted request")
 		}
 		*request = persisted
-		if validateRule != nil {
-			var activeRules []ChannelModelCostRule
-			if err := lockForUpdate(tx).Where(
-				"channel_id = ? AND billable_upstream_model = ? AND status = ?",
-				attempt.ChannelID, attempt.BillableUpstreamModel, types.CostRuleActive,
-			).Order("version DESC").Limit(2).Find(&activeRules).Error; err != nil {
-				return err
-			}
-			if len(activeRules) == 0 {
-				return gorm.ErrRecordNotFound
-			}
-			if len(activeRules) > 1 {
-				return ErrCostActiveRuleConflict
-			}
-			if err := validateRule(&activeRules[0]); err != nil {
-				return err
-			}
-		}
 
 		if attempt.CostRequestID != 0 && attempt.CostRequestID != persisted.ID {
 			return errors.New("attempt belongs to another cost request")
@@ -291,6 +346,13 @@ func prepareCostAttempt(
 		}
 		return recomputeCostAccountingRequest(tx, persisted.ID, now)
 	})
+}
+
+func sameCostProfitMarginThreshold(left, right *int) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func TransitionCostAttempt(id int64, from, to types.CostAttemptStatus, updates map[string]any) error {

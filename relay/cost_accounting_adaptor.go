@@ -48,6 +48,9 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 	if info == nil || strings.TrimSpace(info.BillableUpstreamModel) == "" {
 		return nil, ErrCostIdentityUnconfirmed
 	}
+	if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+	}
 
 	billingSource := strings.TrimSpace(info.BillingSource)
 	if billingSource == "" {
@@ -62,22 +65,23 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		channelName = c.GetString(string(constant.ContextKeyChannelName))
 	}
 	handle, err := service.PrepareCostAttempt(requestCtx, service.PrepareCostAttemptInput{
-		RequestID:              info.RequestId,
-		UserID:                 info.UserId,
-		TokenID:                info.TokenId,
-		UserGroup:              info.UserGroup,
-		UsingGroup:             info.UsingGroup,
-		OriginModelName:        info.OriginModelName,
-		BillingSource:          billingSource,
-		SubscriptionID:         info.SubscriptionId,
-		SubscriptionPlanID:     info.SubscriptionPlanId,
-		QuotaPerUnitSnapshot:   strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
-		ChannelID:              info.ChannelId,
-		ChannelName:            channelName,
-		ChannelType:            info.ChannelType,
-		PredictedUpstreamModel: info.PredictedUpstreamModel,
-		BillableUpstreamModel:  info.BillableUpstreamModel,
-		RequestPath:            info.RequestURLPath,
+		RequestID:                 info.RequestId,
+		UserID:                    info.UserId,
+		TokenID:                   info.TokenId,
+		UserGroup:                 info.UserGroup,
+		UsingGroup:                info.UsingGroup,
+		OriginModelName:           info.OriginModelName,
+		BillingSource:             billingSource,
+		SubscriptionID:            info.SubscriptionId,
+		SubscriptionPlanID:        info.SubscriptionPlanId,
+		QuotaPerUnitSnapshot:      strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
+		ChannelID:                 info.ChannelId,
+		ChannelName:               channelName,
+		ChannelType:               info.ChannelType,
+		PredictedUpstreamModel:    info.PredictedUpstreamModel,
+		BillableUpstreamModel:     info.BillableUpstreamModel,
+		RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
+		CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
 	})
 	if err != nil {
 		var coverageErr *service.CostCoverageError
@@ -367,7 +371,7 @@ func ConfirmCostIdentity(adaptor channel.Adaptor, info *relaycommon.RelayInfo, f
 }
 
 func CostCapabilitiesForRoute(channelType int, requestPath string, taskPlatform constant.TaskPlatform) types.CostCapabilities {
-	requestPath = strings.ToLower(strings.TrimSpace(requestPath))
+	requestPath = strings.ToLower(strings.TrimSpace(relaycommon.SafeRequestPath(requestPath)))
 	if strings.Contains(requestPath, "/realtime") || strings.Contains(requestPath, "/mj") {
 		return types.CostCapabilities{}
 	}

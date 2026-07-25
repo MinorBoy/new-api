@@ -2,6 +2,8 @@ package model
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -15,6 +17,33 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestIsCostSnapshotTransactionConflict(t *testing.T) {
+	for _, err := range []error{
+		errors.New("database is locked"),
+		errors.New("database table is locked: channel_model_cost_rules"),
+		errors.New("SQLITE_BUSY: database is busy"),
+		errors.New("SQLITE_LOCKED"),
+		errors.New("could not serialize access due to concurrent update"),
+		errors.New("serialization failure"),
+		errors.New("deadlock detected"),
+		errors.New("deadlock found when trying to get lock"),
+		errors.New("lock wait timeout exceeded"),
+		errors.New("try restarting transaction"),
+		fmt.Errorf("prepare cost attempt: %w", errors.New("database is locked")),
+	} {
+		assert.True(t, IsCostSnapshotTransactionConflict(err), err.Error())
+	}
+
+	for _, err := range []error{
+		nil,
+		ErrCostRuleSnapshotConflict,
+		gorm.ErrRecordNotFound,
+		errors.New("cost rule configuration is invalid"),
+	} {
+		assert.False(t, IsCostSnapshotTransactionConflict(err))
+	}
+}
 
 func prepareCostAccountingDB(t *testing.T) {
 	t.Helper()

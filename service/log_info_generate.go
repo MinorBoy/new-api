@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -82,6 +81,19 @@ func routingAuditFromContext(c *gin.Context) *modelrouting.Audit {
 
 func AppendRoutingAdminInfoFromContext(c *gin.Context, other map[string]interface{}) {
 	appendRoutingAdminInfo(other, routingAuditFromContext(c))
+	if c == nil || other == nil {
+		return
+	}
+	diagnostics, ok := common.GetContextKeyType[[]ProfitRoutingDiagnostic](c, constant.ContextKeyRoutingDiagnostics)
+	if !ok || len(diagnostics) == 0 {
+		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["routing_diagnostics"] = diagnostics
 }
 
 // attachQuotaSaturation records the request's quota clamp (if any) onto the
@@ -111,11 +123,7 @@ func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other
 		}
 	}
 	if relayInfo != nil && relayInfo.RequestURLPath != "" {
-		path := relayInfo.RequestURLPath
-		if idx := strings.Index(path, "?"); idx != -1 {
-			path = path[:idx]
-		}
-		other["request_path"] = path
+		other["request_path"] = relaycommon.SafeRequestPath(relayInfo.RequestURLPath)
 	}
 }
 

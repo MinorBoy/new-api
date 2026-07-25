@@ -80,6 +80,7 @@ const (
 	ContextKeyRoutingUpstreamModel  ContextKey = "routing_upstream_model"
 	ContextKeyRoutingFacts          ContextKey = "routing_facts"
 	ContextKeyRoutingMismatchCounts ContextKey = "routing_mismatch_counts"
+	ContextKeyRoutingDiagnostics    ContextKey = "routing_diagnostics"
 
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit

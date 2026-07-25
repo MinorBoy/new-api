@@ -266,7 +266,7 @@ func emptyAllowedFilter(filter model.ChannelSelectFilter) model.ChannelSelectFil
 }
 
 func recordProfitExclusions(param *RetryParam, result groupRoutingResult, filterResult ProfitChannelFilterResult) {
-	if len(filterResult.Exclusions) == 0 {
+	if param == nil || len(filterResult.Exclusions) == 0 {
 		return
 	}
 	if param.profitExclusions == nil {
@@ -274,6 +274,28 @@ func recordProfitExclusions(param *RetryParam, result groupRoutingResult, filter
 	}
 	for _, exclusion := range filterResult.Exclusions {
 		param.profitExclusions[exclusion.ChannelID] = exclusion.Reason
+		if param.profitDiagnostics == nil {
+			param.profitDiagnostics = make(map[int]ProfitRoutingDiagnostic, len(filterResult.Exclusions))
+		}
+		param.profitDiagnostics[exclusion.ChannelID] = ProfitRoutingDiagnostic{
+			ChannelID:                exclusion.ChannelID,
+			BillableUpstreamModel:    exclusion.UpstreamModel,
+			EstimatedRevenueNanoUSD:  exclusion.EstimatedRevenueNanoUSD,
+			EstimatedCostNanoUSD:     exclusion.EstimatedCostNanoUSD,
+			EstimatedProfitNanoUSD:   exclusion.EstimatedProfitNanoUSD,
+			GrossMarginPPM:           exclusion.GrossMarginPPM,
+			MinimumExpectedMarginBPS: exclusion.MinimumExpectedMarginBPS,
+			RuleID:                   exclusion.RuleID,
+			RuleVersion:              exclusion.RuleVersion,
+			Reason:                   exclusion.Reason,
+		}
+	}
+	if param.Ctx != nil {
+		diagnostics := make([]ProfitRoutingDiagnostic, 0, len(param.profitDiagnostics))
+		for _, diagnostic := range param.profitDiagnostics {
+			diagnostics = append(diagnostics, diagnostic)
+		}
+		common.SetContextKey(param.Ctx, constant.ContextKeyRoutingDiagnostics, diagnostics)
 	}
 	_ = result
 }
@@ -562,10 +584,13 @@ func RecordRoutingSelectionFailure(c *gin.Context, canonicalModel string, select
 		"error_type":  string(types.ErrorTypeNewAPIError),
 		"error_code":  selectionErr.Code,
 		"status_code": selectionErr.StatusCode,
-		"admin_info": map[string]interface{}{
-			"routing_diagnostics": selectionErr.Diagnostics,
-		},
 	}
+	if len(selectionErr.Diagnostics) > 0 {
+		other["admin_info"] = map[string]interface{}{
+			"routing_selection": selectionErr.Diagnostics,
+		}
+	}
+	AppendRoutingAdminInfoFromContext(c, other)
 	if c.Request != nil && c.Request.URL != nil {
 		other["request_path"] = c.Request.URL.Path
 	}

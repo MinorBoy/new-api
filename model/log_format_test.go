@@ -68,3 +68,32 @@ func TestFormatUserLogsStripsCostAccountingAdminInfo(t *testing.T) {
 	require.NotContains(t, logs[0].Other, "cost_accounting_request_id")
 	require.Contains(t, parsed, "billing_source")
 }
+
+func TestFormatUserLogsStripsProfitRoutingDiagnostics(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"request_path": "/v1/video/generations",
+		"admin_info": map[string]interface{}{
+			"routing_diagnostics": []map[string]interface{}{
+				{
+					"channel_id":                  17,
+					"billable_upstream_model":     "vendor-video-model",
+					"estimated_revenue_nano_usd":  int64(10_000_000_000),
+					"minimum_expected_margin_bps": 1000,
+					"rule_version":                3,
+					"reason":                      "margin_below_threshold",
+				},
+			},
+		},
+	})
+	logs := []*Log{{Other: other}}
+
+	formatUserLogs(logs, 0)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, parsed, "admin_info")
+	require.Contains(t, parsed, "request_path")
+	require.NotContains(t, logs[0].Other, "vendor-video-model")
+	require.NotContains(t, logs[0].Other, "10_000_000_000")
+	require.NotContains(t, logs[0].Other, "margin_below_threshold")
+}

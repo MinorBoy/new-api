@@ -516,7 +516,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
-		RequestURLPath:  c.Request.URL.String(),
+		RequestURLPath:  c.Request.URL.Path,
 		RequestHeaders:  cloneRequestHeaders(c),
 		IsStream:        isStream,
 

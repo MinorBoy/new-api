@@ -75,6 +75,23 @@ type ProfitEligibilityResult struct {
 	RuleVersion    int
 }
 
+// ProfitRoutingDiagnostic is the admin-only explanation for one candidate that the
+// margin gate excluded. It deliberately contains only pricing and rule identity data;
+// request URLs, tokens, query parameters, and media contents never leave request
+// memory through this structure.
+type ProfitRoutingDiagnostic struct {
+	ChannelID                int                   `json:"channel_id"`
+	BillableUpstreamModel    string                `json:"billable_upstream_model"`
+	EstimatedRevenueNanoUSD  int64                 `json:"estimated_revenue_nano_usd"`
+	EstimatedCostNanoUSD     *int64                `json:"estimated_cost_nano_usd,omitempty"`
+	EstimatedProfitNanoUSD   *int64                `json:"estimated_profit_nano_usd,omitempty"`
+	GrossMarginPPM           *int64                `json:"gross_margin_ppm,omitempty"`
+	MinimumExpectedMarginBPS int                   `json:"minimum_expected_margin_bps"`
+	RuleID                   int64                 `json:"rule_id"`
+	RuleVersion              int                   `json:"rule_version"`
+	Reason                   ProfitExclusionReason `json:"reason"`
+}
+
 // tokenEstimateScale encodes the Seedance token formula:
 //
 //	tokens = duration_ms * width * height * frame_rate / 1024 / 1000
@@ -360,9 +377,16 @@ type ProfitChannelFilterResult struct {
 }
 
 type ProfitChannelExclusion struct {
-	ChannelID     int
-	UpstreamModel string
-	Reason        ProfitExclusionReason
+	ChannelID                int
+	UpstreamModel            string
+	EstimatedRevenueNanoUSD  int64
+	EstimatedCostNanoUSD     *int64
+	EstimatedProfitNanoUSD   *int64
+	GrossMarginPPM           *int64
+	MinimumExpectedMarginBPS int
+	RuleID                   int64
+	RuleVersion              int
+	Reason                   ProfitExclusionReason
 }
 
 // FilterProfitEligibleChannels evaluates each candidate's predicted margin and returns
@@ -430,7 +454,16 @@ func evaluateCandidateProfit(
 	metadataResolved bool,
 	metadataErr error,
 ) ProfitChannelExclusion {
-	exclusion := ProfitChannelExclusion{ChannelID: candidate.ChannelID, UpstreamModel: candidate.PredictedUpstreamModel}
+	threshold := input.GlobalMarginBPS
+	if candidate.TargetThresholdBPS != nil {
+		threshold = *candidate.TargetThresholdBPS
+	}
+	exclusion := ProfitChannelExclusion{
+		ChannelID:                candidate.ChannelID,
+		UpstreamModel:            candidate.PredictedUpstreamModel,
+		EstimatedRevenueNanoUSD:  input.RevenueNanoUSD,
+		MinimumExpectedMarginBPS: threshold,
+	}
 	if !input.HasRevenue || input.RevenueNanoUSD <= 0 {
 		exclusion.Reason = ProfitReasonRevenueUnknown
 		return exclusion
@@ -445,6 +478,8 @@ func evaluateCandidateProfit(
 		exclusion.Reason = ProfitReasonCostRuleMissing
 		return exclusion
 	}
+	exclusion.RuleID = rule.ID
+	exclusion.RuleVersion = rule.Version
 
 	facts := input.Facts
 	if metadataResolved {
@@ -485,11 +520,8 @@ func evaluateCandidateProfit(
 		exclusion.Reason = ProfitReasonCalculationError
 		return exclusion
 	}
+	exclusion.EstimatedCostNanoUSD = &costNanoUSD
 
-	threshold := input.GlobalMarginBPS
-	if candidate.TargetThresholdBPS != nil {
-		threshold = *candidate.TargetThresholdBPS
-	}
 	eligibility := EvaluateProfitEligibility(ProfitRoutingInput{
 		RevenueNanoUSD: input.RevenueNanoUSD,
 		CostNanoUSD:    costNanoUSD,
@@ -497,6 +529,11 @@ func evaluateCandidateProfit(
 		RuleID:         rule.ID,
 		RuleVersion:    rule.Version,
 	})
+	if eligibility.Reason != ProfitReasonCalculationError {
+		profitNanoUSD := eligibility.ProfitNanoUSD
+		exclusion.EstimatedProfitNanoUSD = &profitNanoUSD
+		exclusion.GrossMarginPPM = eligibility.MarginPPM
+	}
 	if !eligibility.Eligible {
 		exclusion.Reason = eligibility.Reason
 		return exclusion

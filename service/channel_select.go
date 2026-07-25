@@ -35,6 +35,10 @@ type RetryParam struct {
 	// profit filter dropped, so the controller/diagnostics layer can surface a stable
 	// reason without leaking amounts, thresholds or rule versions to ordinary users.
 	profitExclusions map[int]ProfitExclusionReason
+	// profitDiagnostics keeps the complete admin-only pricing diagnostic for each
+	// excluded channel. It is copied to the request context for error and consume logs;
+	// the type cannot hold request URLs, tokens, query parameters, or media content.
+	profitDiagnostics map[int]ProfitRoutingDiagnostic
 }
 
 // ProfitRoutingState returns the request-level metadata state, building it lazily

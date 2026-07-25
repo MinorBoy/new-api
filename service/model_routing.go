@@ -82,17 +82,17 @@ func evaluateGroupRouting(group, modelName string, input *modelrouting.FactsInpu
 // meter, metadata-service failure and calculation overflow all exclude the candidate
 // (fail-closed). costCoverageMisses diagnostics are kept separate from profit
 // exclusions — unknown cost is never treated as coverage success.
-func applyProfitFilter(param *RetryParam, group string, result groupRoutingResult, filter model.ChannelSelectFilter) model.ChannelSelectFilter {
+func applyProfitFilter(param *RetryParam, group string, result groupRoutingResult, filter model.ChannelSelectFilter) (model.ChannelSelectFilter, error) {
 	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
-		return filter
+		return filter, nil
 	}
 	if param == nil || param.Ctx == nil {
-		return filter
+		return filter, nil
 	}
 
 	candidates := profitCandidates(param, group, result, filter)
 	if len(candidates) == 0 {
-		return filter
+		return filter, nil
 	}
 
 	facts, revenueNanoUSD, hasRevenue, _ := profitFilterFacts(param, group)
@@ -101,7 +101,7 @@ func applyProfitFilter(param *RetryParam, group string, result groupRoutingResul
 		common.SysError(fmt.Sprintf("profit routing active rule batch failed: %s", err.Error()))
 		// Fail-closed: drop every candidate so the caller returns 503 instead of
 		// admitting an unpriced channel.
-		return emptyAllowedFilter(filter)
+		return emptyAllowedFilter(filter), nil
 	}
 
 	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
@@ -114,14 +114,21 @@ func applyProfitFilter(param *RetryParam, group string, result groupRoutingResul
 		MetadataState:   param.ProfitRoutingState(),
 	}, rules)
 
+	if filterResult.InvalidMedia {
+		return filter, &ChannelSelectionError{
+			Code:       types.ErrorCodeInvalidRequest,
+			StatusCode: http.StatusBadRequest,
+			Err:        errors.New("input video is not supported"),
+		}
+	}
 	recordProfitExclusions(param, result, filterResult)
 	if len(filterResult.AllowedChannelIDs) == 0 {
-		return emptyAllowedFilter(filter)
+		return emptyAllowedFilter(filter), nil
 	}
 	return model.ChannelSelectFilter{
 		AllowedChannelIDs:  filterResult.AllowedChannelIDs,
 		ExcludedChannelIDs: filter.ExcludedChannelIDs,
-	}
+	}, nil
 }
 
 // profitCandidates builds the (channelID, predicted model, threshold) list the filter
@@ -304,12 +311,12 @@ func recordProfitExclusions(param *RetryParam, result groupRoutingResult, filter
 // for a single caller-pinned channel. It returns false (excluding the channel) when
 // strict mode is off OR the channel passes; under strict mode a failing pinned channel
 // returns false so the controller surfaces a generic 503 instead of silently switching.
-func knownChannelPassesProfitFilter(param *RetryParam, group string, result groupRoutingResult, channelID int) bool {
+func knownChannelPassesProfitFilter(param *RetryParam, group string, result groupRoutingResult, channelID int) (bool, error) {
 	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
-		return true
+		return true, nil
 	}
 	if param == nil || param.Ctx == nil {
-		return true
+		return true, nil
 	}
 	predictedModel := ""
 	threshold := (*int)(nil)
@@ -327,7 +334,7 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 	rules, err := ActiveCostRules(profitCandidateKeys([]ProfitRoutingCandidate{candidate}), false)
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit routing known-channel active rule failed: %s", err.Error()))
-		return false
+		return false, nil
 	}
 	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
 		Ctx:             param.Ctx,
@@ -338,9 +345,16 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 		Candidates:      []ProfitRoutingCandidate{candidate},
 		MetadataState:   param.ProfitRoutingState(),
 	}, rules)
+	if filterResult.InvalidMedia {
+		return false, &ChannelSelectionError{
+			Code:       types.ErrorCodeInvalidRequest,
+			StatusCode: http.StatusBadRequest,
+			Err:        errors.New("input video is not supported"),
+		}
+	}
 	recordProfitExclusions(param, result, filterResult)
 	_, allowed := filterResult.AllowedChannelIDs[channelID]
-	return allowed
+	return allowed, nil
 }
 
 func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (*model.Channel, groupRoutingResult, error) {
@@ -360,7 +374,10 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 	// candidate set to channels whose predicted margin meets the minimum threshold.
 	// The filter only intersects the set; it never reorders or changes priority/weight,
 	// so GetRandomSatisfiedChannel below still applies the original selection semantics.
-	filter = applyProfitFilter(param, group, result, filter)
+	filter, err = applyProfitFilter(param, group, result, filter)
+	if err != nil {
+		return nil, result, err
+	}
 	channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, priorityRetry, param.RequestPath, filter)
 	if err != nil {
 		return nil, result, &ChannelSelectionError{
@@ -441,7 +458,11 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	// that fails the margin threshold must NOT silently switch to another channel: it is
 	// excluded here and the controller returns a generic 503, matching the cost-coverage
 	// path below. The same applyProfitFilter primitive as the random path is reused.
-	if !knownChannelPassesProfitFilter(param, group, result, channelID) {
+	profitEligible, profitErr := knownChannelPassesProfitFilter(param, group, result, channelID)
+	if profitErr != nil {
+		return false, profitErr
+	}
+	if !profitEligible {
 		param.ExcludeChannel(channelID)
 		selectionErr := &ChannelSelectionError{
 			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,

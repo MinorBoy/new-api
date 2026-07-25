@@ -206,6 +206,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				if !errors.As(err, &selectionErr) || selectionErr.Code == types.ErrorCodeRoutingPolicyError {
 					return nil, autoGroup, err
 				}
+				if selectionErr.Code == types.ErrorCodeInvalidRequest {
+					return nil, autoGroup, err
+				}
 				for _, diagnostic := range selectionErr.Diagnostics {
 					diagnostics = append(diagnostics, diagnostic)
 				}

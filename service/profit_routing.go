@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -374,6 +375,7 @@ type ProfitChannelFilterInput struct {
 type ProfitChannelFilterResult struct {
 	AllowedChannelIDs map[int]struct{}
 	Exclusions        []ProfitChannelExclusion
+	InvalidMedia      bool
 }
 
 type ProfitChannelExclusion struct {
@@ -428,6 +430,11 @@ func FilterProfitEligibleChannels(input ProfitChannelFilterInput, rules map[Cost
 	if needsMetadata && input.MetadataState != nil {
 		metadata, err := input.MetadataState.Metadata(input.Ctx)
 		if err != nil {
+			var metadataError *VideoMetadataError
+			if errors.As(err, &metadataError) && metadataError.Kind == VideoMetadataInvalidMedia {
+				result.InvalidMedia = true
+				return result
+			}
 			metadataErr = err
 		} else {
 			metadataDurationMS = metadata.TotalDurationMS

@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -191,6 +192,113 @@ func TestProfitRoutingExcludesBelowMarginCapabilityCandidate(t *testing.T) {
 	}
 }
 
+func TestProfitRoutingRejectsInvalidInputVideo(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "token-priced", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "token-model", "1080p"))
+	require.NoError(t, err)
+	seedTokenCostRuleForRouting(t, 11, "token-model")
+
+	service.SetVideoMetadataClient(invalidVideoMetadataClient{})
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	input.ReferenceVideoURLs = []string{"https://assets.example/invalid.mp4?signature=secret"}
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	assert.Nil(t, channel)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, types.ErrorCodeInvalidRequest, selectionErr.Code)
+	assert.Equal(t, http.StatusBadRequest, selectionErr.StatusCode)
+	assert.Equal(t, "input video is not supported", selectionErr.Err.Error())
+	assert.NotContains(t, selectionErr.Err.Error(), "assets.example")
+	assert.NotContains(t, selectionErr.Err.Error(), "secret")
+}
+
+func TestProfitRoutingReturns503WhenEveryCandidateIsBelowMargin(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "expensive", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "expensive-model", "1080p"))
+	require.NoError(t, err)
+	seedPerRequestCostRuleForRouting(t, 11, "expensive-model", "100")
+
+	c := capabilitySelectionContext()
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	assert.Nil(t, channel)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, http.StatusServiceUnavailable, selectionErr.StatusCode)
+	assert.Equal(t, "compatible channels are unavailable", selectionErr.Err.Error())
+	assert.NotContains(t, selectionErr.Err.Error(), "100")
+
+	diagnostics, ok := common.GetContextKeyType[[]service.ProfitRoutingDiagnostic](c, constant.ContextKeyRoutingDiagnostics)
+	require.True(t, ok)
+	require.Len(t, diagnostics, 1)
+	assert.Equal(t, service.ProfitReasonMarginBelowThreshold, diagnostics[0].Reason)
+}
+
+func TestProfitRoutingAutoGroupSkipsBelowMarginCandidates(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	prepareAutoGroupSelectionTest(t)
+	seedRoutingCandidate(t, 11, "expensive", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "free", "分组B", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "expensive-model", "1080p"))
+	require.NoError(t, err)
+	_, err = service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组B", modelrouting.Seedance20, 12, "free-model", "1080p"))
+	require.NoError(t, err)
+	seedPerRequestCostRuleForRouting(t, 11, "expensive-model", "100")
+	seedActiveFreeCostRuleForRouting(t, 12, "free-model")
+
+	c := capabilitySelectionContext()
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "分组A")
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	channel, group, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "auto", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+	assert.Equal(t, "分组B", group)
+}
+
+func TestProfitRoutingKnownChannelRejectsBelowMarginForSpecificAndAffinitySelection(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "expensive", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "expensive-model", "1080p"))
+	require.NoError(t, err)
+	seedPerRequestCostRuleForRouting(t, 11, "expensive-model", "100")
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	compatible, err := service.ValidateKnownChannelForRouting(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}, "分组A", 11)
+
+	assert.False(t, compatible)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, http.StatusServiceUnavailable, selectionErr.StatusCode)
+}
+
+type invalidVideoMetadataClient struct{}
+
+func (invalidVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataInvalidMedia}
+}
+
 // TestProfitRoutingNoOpOutsideStrictMode asserts the filter is inert when cost
 // accounting is disabled: both channels remain selectable even though one carries a
 // cost that would fail the margin gate under strict mode.
@@ -284,6 +392,34 @@ func seedPerRequestCostRuleForRouting(t *testing.T, channelID int, modelName, un
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
 		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
+		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error)
+}
+
+func seedTokenCostRuleForRouting(t *testing.T, channelID int, modelName string) {
+	t.Helper()
+	price := "1"
+	config := types.CostRuleConfigV1{
+		Currency:              "USD",
+		BillingMultiplier:     "1",
+		PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1",
+		FeeRate:               "0",
+		CurrencyToUSDRate:     "1",
+		TotalPerMillion:       &price,
+		TokenMode:             types.CostTokenModeTotal,
+		MeterSource:           types.CostMeterLocalUsage,
+		ChargeEvent:           types.CostChargeResponseSucceeded,
+	}
+	normalized, err := service.NormalizeCostRuleConfig(types.CostModePerToken, config)
+	require.NoError(t, err)
+	configJSON, err := common.Marshal(normalized)
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerToken), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)

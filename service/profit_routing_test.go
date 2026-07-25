@@ -266,6 +266,62 @@ func TestFilterProfitEligibleChannelsAllowsTokenPricingWithoutReferenceVideo(t *
 	assert.Empty(t, result.Exclusions)
 }
 
+func TestFilterProfitEligibleChannelsMetadataUnavailableExcludesOnlyTokenCandidates(t *testing.T) {
+	facts, err := EstimateProfitRoutingFacts("720p", 5, 0)
+	require.NoError(t, err)
+	tokenConfig, err := NormalizeCostRuleConfig(types.CostModePerToken, validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterLocalUsage))
+	require.NoError(t, err)
+	tokenConfigJSON, err := common.Marshal(tokenConfig)
+	require.NoError(t, err)
+	unitPrice := "1"
+	requestConfig, err := NormalizeCostRuleConfig(types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency:              "USD",
+		BillingMultiplier:     "1",
+		PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1",
+		FeeRate:               "0",
+		CurrencyToUSDRate:     "1",
+		UnitPrice:             &unitPrice,
+		ChargeEvent:           types.CostChargeResponseSucceeded,
+	})
+	require.NoError(t, err)
+	requestConfigJSON, err := common.Marshal(requestConfig)
+	require.NoError(t, err)
+
+	tokenCandidate := ProfitRoutingCandidate{ChannelID: 7, PredictedUpstreamModel: "token-model"}
+	requestCandidate := ProfitRoutingCandidate{ChannelID: 8, PredictedUpstreamModel: "request-model"}
+	state := NewProfitRoutingRequestState(&fakeMetadataClient{
+		errs: map[string]error{"https://assets.example/input.mp4?signature=secret": &VideoMetadataError{Kind: VideoMetadataUnavailable}},
+	}, []string{"https://assets.example/input.mp4?signature=secret"})
+	result := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		Ctx:            context.Background(),
+		Facts:          facts,
+		RevenueNanoUSD: nano("10"),
+		HasRevenue:     true,
+		Candidates:     []ProfitRoutingCandidate{tokenCandidate, requestCandidate},
+		MetadataState:  state,
+	}, map[CostRuleCandidate]*model.ChannelModelCostRule{
+		{ChannelID: tokenCandidate.ChannelID, BillableUpstreamModel: tokenCandidate.PredictedUpstreamModel}: {
+			ID: 70, ChannelID: tokenCandidate.ChannelID, BillableUpstreamModel: tokenCandidate.PredictedUpstreamModel,
+			Version: 1, CostMode: string(types.CostModePerToken), SchemaVersion: 1, ConfigJSON: string(tokenConfigJSON),
+		},
+		{ChannelID: requestCandidate.ChannelID, BillableUpstreamModel: requestCandidate.PredictedUpstreamModel}: {
+			ID: 80, ChannelID: requestCandidate.ChannelID, BillableUpstreamModel: requestCandidate.PredictedUpstreamModel,
+			Version: 1, CostMode: string(types.CostModePerRequest), SchemaVersion: 1, ConfigJSON: string(requestConfigJSON),
+		},
+	})
+
+	assert.Contains(t, result.AllowedChannelIDs, requestCandidate.ChannelID)
+	assert.NotContains(t, result.AllowedChannelIDs, tokenCandidate.ChannelID)
+	require.Len(t, result.Exclusions, 1)
+	assert.Equal(t, tokenCandidate.ChannelID, result.Exclusions[0].ChannelID)
+	assert.Equal(t, ProfitReasonMetadataUnavailable, result.Exclusions[0].Reason)
+	body, err := common.Marshal(result.Exclusions)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "assets.example")
+	assert.NotContains(t, string(body), "secret")
+}
+
 func TestCalculateTaskTokenQuotaMatchesSettlementFormula(t *testing.T) {
 	// totalTokens * modelRatio * groupRatio * otherMultiplier, saturated via the shared
 	// helper. The same function must drive both the asynchronous actual settlement and

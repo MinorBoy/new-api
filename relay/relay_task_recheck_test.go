@@ -10,6 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -167,4 +169,65 @@ func TestProfitEligibilityErrorSupportsCoverageRetryAndSentinelMatching(t *testi
 	require.ErrorAs(t, err, &coverageErr)
 	assert.Equal(t, 710003, coverageErr.ChannelID)
 	assert.Equal(t, "profit eligibility recheck failed", err.Error())
+}
+
+func TestProfitRecheckFailsClosedWhenCurrentTargetModelChanges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withCostAccountingMode(t, types.CostAccountingStrict)
+	setupTaskCostSubmitDB(t)
+
+	const (
+		channelID  = 710004
+		policyID   = 91
+		targetID   = 92
+		finalModel = "final-provider-model"
+	)
+	seedTaskCostSubmitRule(t, channelID, finalModel, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})
+	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))
+	require.NoError(t, model.DB.Create(&model.RouteTarget{
+		ID: targetID, PolicyID: policyID, ChannelID: channelID, Name: "old target", UpstreamModel: "old-provider-model",
+		TargetPriority: 100, Constraints: `{}`, Enabled: true,
+	}).Error)
+
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, "https://provider.example")
+	info.ChannelMeta = &relaycommon.ChannelMeta{
+		ChannelId: channelID,
+		Routing: &modelrouting.Audit{
+			PolicyID: policyID,
+			TargetID: targetID,
+			Facts:    modelrouting.Facts{OutputResolution: "720p", DurationSeconds: 5},
+		},
+	}
+	info.BillableUpstreamModel = finalModel
+
+	err := service.RecheckSelectedChannelProfit(c, info)
+
+	require.ErrorIs(t, err, service.ErrProfitEligibility)
+	var coverageErr *service.CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, channelID, coverageErr.ChannelID)
+}
+
+func TestProfitRecheckFailsClosedWhenOutputFactsAreMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withCostAccountingMode(t, types.CostAccountingStrict)
+	setupTaskCostSubmitDB(t)
+
+	const (
+		channelID = 710005
+		modelName = "provider-model"
+	)
+	seedTaskCostSubmitRule(t, channelID, modelName, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text"}`, "https://provider.example")
+	common.SetContextKey(c, constant.ContextKeyRoutingFacts, modelrouting.Facts{})
+	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: channelID}
+	info.BillableUpstreamModel = modelName
+	info.RequestURLPath = "/v1/video/generations"
+
+	err := service.RecheckSelectedChannelProfit(c, info)
+
+	require.ErrorIs(t, err, service.ErrProfitEligibility)
+	var coverageErr *service.CostCoverageError
+	require.ErrorAs(t, err, &coverageErr)
+	assert.Equal(t, channelID, coverageErr.ChannelID)
 }

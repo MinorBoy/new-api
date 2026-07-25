@@ -807,6 +807,10 @@ func newNewAPIVideoRelayContext(body, upstreamURL string) (*gin.Context, *relayc
 	c.Set(string(constant.ContextKeyChannelBaseUrl), upstreamURL)
 	c.Set(string(constant.ContextKeyChannelKey), "mock-newapi-video-key")
 	c.Set("model_mapping", `{"client-video":"seedance-720p-token"}`)
+	common.SetContextKey(c, constant.ContextKeyRoutingFacts, modelrouting.Facts{
+		OutputResolution: "720p",
+		DurationSeconds:  5,
+	})
 	return c, &relaycommon.RelayInfo{
 		OriginModelName: "client-video",
 		UserGroup:       "default",

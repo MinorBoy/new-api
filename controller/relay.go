@@ -383,7 +383,12 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func costCoverageUnavailableError() *types.NewAPIError {
-	return types.NewError(errors.New("available channel is unavailable"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	return types.NewErrorWithStatusCode(
+		errors.New("available channel is unavailable"),
+		types.ErrorCodeGetChannelFailed,
+		http.StatusServiceUnavailable,
+		types.ErrOptionWithSkipRetry(),
+	)
 }
 
 func routingSelectionErrorToAPI(err error) *types.NewAPIError {
@@ -745,6 +750,9 @@ func handleTaskCostCoverageFailure(retryParam *service.RetryParam, relayInfo *re
 
 func canRetryCostCoverageFailure(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
 	if relayInfo != nil && relayInfo.TaskRelayInfo != nil && relayInfo.LockedChannel != nil {
+		return false
+	}
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
 	if c != nil {

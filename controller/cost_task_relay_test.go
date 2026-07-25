@@ -195,6 +195,21 @@ func TestCostCoverageRetryIsBlockedForPinnedChannels(t *testing.T) {
 	assert.True(t, canRetryCostCoverageFailure(nil, &relaycommon.RelayInfo{}))
 }
 
+func TestCostCoverageUnavailableErrorUsesServiceUnavailable(t *testing.T) {
+	err := costCoverageUnavailableError()
+
+	require.NotNil(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	assert.Equal(t, "available channel is unavailable", err.Error())
+}
+
+func TestCostCoverageRetryDoesNotBypassChannelAffinity(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("channel_affinity_skip_retry_on_failure", true)
+
+	assert.False(t, canRetryCostCoverageFailure(c, &relaycommon.RelayInfo{}))
+}
+
 func setupControllerTaskCostDB(t *testing.T) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

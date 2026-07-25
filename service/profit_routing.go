@@ -627,6 +627,10 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	}
 
 	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
+	if strings.Contains(strings.ToLower(info.RequestURLPath), "/video") &&
+		(facts.OutputDurationSeconds <= 0 || facts.Width <= 0 || facts.Height <= 0 || facts.FrameRateNum <= 0 || facts.FrameRateDen <= 0) {
+		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonMeterUnknown}
+	}
 	rules, err := ActiveCostRules([]CostRuleCandidate{{ChannelID: channelID, BillableUpstreamModel: billableModel}}, true)
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit recheck active rule lookup failed: %s", err.Error()))
@@ -683,6 +687,9 @@ func currentRecheckMarginThreshold(info *relaycommon.RelayInfo, globalThreshold 
 		First(&target).Error
 	if err != nil {
 		return 0, err
+	}
+	if strings.TrimSpace(target.UpstreamModel) != strings.TrimSpace(info.BillableUpstreamModel) {
+		return 0, fmt.Errorf("selected routing target model changed")
 	}
 	if target.MinimumExpectedMarginBPS != nil {
 		return *target.MinimumExpectedMarginBPS, nil

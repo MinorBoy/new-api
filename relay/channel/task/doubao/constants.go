@@ -1,12 +1,19 @@
 package doubao
 
-import "strings"
+import (
+	"strings"
 
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
+)
+
+// Doubao family identifiers are retained as aliases over the shared seedancepricing
+// package so the billing adapter and its tests keep their existing branch logic and
+// names without duplicating the official price table.
 const (
-	seedance20Family     = "seedance-2.0"
-	seedance20FastFamily = "seedance-2.0-fast"
-	seedance20MiniFamily = "seedance-2.0-mini"
-	seedance15ProFamily  = "seedance-1.5-pro"
+	seedance20Family     = seedancepricing.Family20
+	seedance20FastFamily = seedancepricing.Family20Fast
+	seedance20MiniFamily = seedancepricing.Family20Mini
+	seedance15ProFamily  = seedancepricing.Family15Pro
 )
 
 var ModelList = []string{
@@ -21,78 +28,20 @@ var ModelList = []string{
 
 var ChannelName = "doubao-video"
 
-// videoPriceKey 价格表的键：输出分辨率档（is1080p/is4k 均为 false 即 480p/720p 基准档）、输入是否含视频。
-type videoPriceKey struct {
-	is1080p  bool
-	is4k     bool
-	hasVideo bool
-}
-
-// videoPriceTable 各模型在不同 (输出分辨率档, 是否含视频输入) 下的单价（元/百万 token）。
-// 其中零值键 {480p/720p, 不含视频} 为基准价，等于管理员应配置的 ModelRatio；
-// 计费时取 实际单价/基准价 作为 OtherRatio。
-var videoPriceTable = map[string]map[videoPriceKey]float64{
-	seedance20Family: {
-		{hasVideo: false}:                46.0,
-		{hasVideo: true}:                 28.0,
-		{is1080p: true, hasVideo: false}: 51.0,
-		{is1080p: true, hasVideo: true}:  31.0,
-		{is4k: true, hasVideo: false}:    26.0,
-		{is4k: true, hasVideo: true}:     16.0,
-	},
-	seedance20FastFamily: {
-		{hasVideo: false}: 37.0,
-		{hasVideo: true}:  22.0,
-	},
-	seedance20MiniFamily: {
-		{hasVideo: false}: 23.0,
-		{hasVideo: true}:  14.0,
-	},
-}
-
-var videoBasePrices = map[string]float64{
-	seedance20Family:     46,
-	seedance20FastFamily: 37,
-	seedance20MiniFamily: 23,
-}
-
+// seedancePricingFamily is the compatibility alias for seedancepricing.Family,
+// retained so existing billing-adapter call sites keep their names while delegating
+// to the single shared table.
 func seedancePricingFamily(modelName string) string {
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	switch {
-	case strings.HasPrefix(modelName, "doubao-seedance-2-0-fast"):
-		return seedance20FastFamily
-	case strings.HasPrefix(modelName, "doubao-seedance-2-0-mini"):
-		return seedance20MiniFamily
-	case strings.HasPrefix(modelName, "doubao-seedance-2-0"):
-		return seedance20Family
-	case strings.HasPrefix(modelName, "doubao-seedance-1-5-pro"):
-		return seedance15ProFamily
-	default:
-		return ""
-	}
+	return seedancepricing.Family(modelName)
 }
 
-// GetVideoInputRatio 返回指定模型在给定输出分辨率/是否含视频输入下，相对基准价的计费倍率。
-// 第二个返回值表示该模型是否配置了价格表；倍率为 1.0 时调用方可忽略该 OtherRatio。
+// GetVideoInputRatio returns the billing multiplier (actual unit price / family base
+// price) for the given model at the given output resolution, depending on whether
+// the request includes reference video input. It delegates to seedancepricing so the
+// Doubao adapter and the profit predictor share one source of truth. A multiplier of
+// 1.0 means the caller may omit the OtherRatio.
 func GetVideoInputRatio(modelName, resolution string, hasVideo bool) (float64, bool) {
-	family := seedancePricingFamily(modelName)
-	prices, ok := videoPriceTable[family]
-	base := videoBasePrices[family]
-	if !ok || base <= 0 {
-		return 0, false
-	}
-	res := strings.ToLower(strings.TrimSpace(resolution))
-	if res == "" {
-		res = "720p"
-	}
-	if res != "480p" && res != "720p" && res != "1080p" && res != "4k" {
-		return 0, false
-	}
-	price, ok := prices[videoPriceKey{is1080p: res == "1080p", is4k: res == "4k", hasVideo: hasVideo}]
-	if !ok {
-		return 0, false
-	}
-	return price / base, true
+	return seedancepricing.VideoInputRatio(modelName, resolution, hasVideo)
 }
 
 // GetVideoBillingRatio is the descriptive alias used by billing callers.

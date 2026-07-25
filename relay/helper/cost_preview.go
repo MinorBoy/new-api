@@ -17,6 +17,13 @@ import (
 )
 
 func PreviewUserBillingQuota(c *gin.Context, input dto.CostPreviewRequest) (finalQuota int64, quotaPerUnitSnapshot string, err error) {
+	return previewUserBillingQuotaForUser(c.GetInt("id"), input)
+}
+
+// previewUserBillingQuotaForUser is the userId-parameterized core of
+// PreviewUserBillingQuota. Extracting it lets the routing revenue preview reuse the
+// exact same pricing chain without fabricating a gin.Context just to carry a user id.
+func previewUserBillingQuotaForUser(userId int, input dto.CostPreviewRequest) (finalQuota int64, quotaPerUnitSnapshot string, err error) {
 	previewContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	requestPath := strings.TrimSpace(input.RequestPath)
 	if requestPath == "" {
@@ -26,7 +33,7 @@ func PreviewUserBillingQuota(c *gin.Context, input dto.CostPreviewRequest) (fina
 	previewContext.Set("group", input.UserGroup)
 
 	info := &relaycommon.RelayInfo{
-		UserId:          c.GetInt("id"),
+		UserId:          userId,
 		UserGroup:       input.UserGroup,
 		UsingGroup:      input.UserGroup,
 		StartTime:       time.Now(),

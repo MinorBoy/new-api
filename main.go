@@ -26,6 +26,7 @@ import (
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -302,6 +303,14 @@ func InitResources() error {
 	// token-dependent video candidates are excluded. The startup warning carries no
 	// secrets: it only records that the service is not configured.
 	service.SetVideoMetadataClient(buildVideoMetadataClient())
+
+	// Install the routing revenue preview callback. It bridges the service-layer
+	// profit predictor to the relay/helper pricing chain without creating a
+	// service → relay/helper import cycle. Until installed, profit routing treats
+	// revenue as unknown and excludes every candidate (fail-closed).
+	service.SetRoutingRevenuePreview(func(_ context.Context, input service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return relayhelper.PreviewRoutingRevenue(input.OriginModelName, input.Group, input.RequestPath, input.RelayMode, input.DurationSeconds, input.UserId)
+	})
 
 	service.InitTokenEncoders()
 

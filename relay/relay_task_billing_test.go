@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -351,11 +352,16 @@ func TestCostTaskSubmitPersistsDispatchAuthorizationBeforeTransport(t *testing.T
 
 func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testing.T) {
 	tests := []struct {
-		name        string
-		channelType int
+		name             string
+		channelType      int
+		body             string
+		upstreamModel    string
+		durationSeconds  int
+		arkOfficialRoute bool
 	}{
-		{name: "NewAPIVideo", channelType: constant.ChannelTypeNewAPIVideo},
-		{name: "Lucen", channelType: constant.ChannelTypeLucen},
+		{name: "NewAPIVideo", channelType: constant.ChannelTypeNewAPIVideo, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
+		{name: "Lucen", channelType: constant.ChannelTypeLucen, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
+		{name: "MegaByAI", channelType: constant.ChannelTypeMegaByAI, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "videos-mini", durationSeconds: 8, arkOfficialRoute: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -365,12 +371,9 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 			configureNewAPIVideoFixedPricing(t, "client-video")
 			setupTaskCostSubmitDB(t)
 
-			const (
-				channelID = 700010
-				modelName = "seedance-720p-token"
-			)
+			const channelID = 700010
 			pricePerSecond := "0.1"
-			seedTaskCostSubmitRuleForChannel(t, channelID, tt.channelType, modelName, types.CostModePerDuration, types.CostRuleConfigV1{
+			seedTaskCostSubmitRuleForChannel(t, channelID, tt.channelType, tt.upstreamModel, types.CostModePerDuration, types.CostRuleConfigV1{
 				Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
 				RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
 				PricePerSecond: &pricePerSecond, ChargeEvent: types.CostChargeSubmitAccepted,
@@ -384,10 +387,14 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 				_, _ = w.Write([]byte(`{"id":"upstream-duration-task","status":"queued"}`))
 			}))
 			t.Cleanup(server.Close)
-			c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
+			c, info := newNewAPIVideoRelayContext(tt.body, server.URL)
 			c.Set(string(constant.ContextKeyChannelType), tt.channelType)
 			c.Set(string(constant.ContextKeyChannelId), channelID)
 			c.Set(string(constant.ContextKeyChannelName), "task supplier")
+			if tt.arkOfficialRoute {
+				c.Set(common.KeySeedanceOfficialAPI, true)
+				c.Set("model_mapping", `{"client-video":"`+tt.upstreamModel+`"}`)
+			}
 			info.RequestId = "task-cost-validated-duration"
 			info.RequestURLPath = "/v1/video/generations"
 
@@ -395,6 +402,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 
 			require.Nil(t, taskErr)
 			require.NotNil(t, result)
+			assert.NotContains(t, info.PriceData.OtherRatios(), "seconds")
 			select {
 			case <-upstreamCalled:
 			default:
@@ -404,9 +412,9 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 			var attempt model.CostAccountingAttempt
 			require.NoError(t, model.DB.First(&attempt, info.CostAttempt.AttemptID).Error)
 			assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
-			assert.JSONEq(t, `{"source":"validated_request","duration_seconds":"5"}`, attempt.RequestMeterJSON)
+			assert.JSONEq(t, fmt.Sprintf(`{"source":"validated_request","duration_seconds":"%d"}`, tt.durationSeconds), attempt.RequestMeterJSON)
 			require.NotNil(t, attempt.CostNanoUSD)
-			assert.Equal(t, int64(500_000_000), *attempt.CostNanoUSD)
+			assert.Equal(t, int64(tt.durationSeconds)*100_000_000, *attempt.CostNanoUSD)
 		})
 	}
 }

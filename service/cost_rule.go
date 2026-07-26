@@ -21,6 +21,7 @@ var CostCapabilityLookup func(channelType int, requestPath string, taskPlatform 
 type CreateCostRuleInput struct {
 	ChannelID             int
 	BillableUpstreamModel string
+	CostVariantKey        string
 	CostMode              types.CostMode
 	Config                types.CostRuleConfigV1
 	Note                  string
@@ -40,6 +41,7 @@ type UpdateCostRuleInput struct {
 type PredictedCoverageInput struct {
 	ChannelID              int
 	PredictedUpstreamModel string
+	CostVariantKey         string
 	RequestPath            string
 	TaskPlatform           constant.TaskPlatform
 	ContractTargets        []CostContractTarget
@@ -62,6 +64,7 @@ type CostCoverageResult struct {
 type costCoverageKey struct {
 	channelID int
 	model     string
+	variant   string
 }
 
 var activeCostRuleCache sync.Map
@@ -99,7 +102,8 @@ func CreateCostRuleDraft(input CreateCostRuleInput) (*model.ChannelModelCostRule
 		createErr = model.DB.Transaction(func(tx *gorm.DB) error {
 			var latestVersion int
 			if err := tx.Model(&model.ChannelModelCostRule{}).
-				Where("channel_id = ? AND billable_upstream_model = ?", candidate.ChannelID, candidate.BillableUpstreamModel).
+				Where("channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ?",
+					candidate.ChannelID, candidate.BillableUpstreamModel, candidate.CostVariantKey).
 				Select("COALESCE(MAX(version), 0)").
 				Scan(&latestVersion).Error; err != nil {
 				return err
@@ -189,24 +193,28 @@ func ActivateCostRule(id int64, adminID int) (*model.ChannelModelCostRule, error
 	if err != nil {
 		return nil, err
 	}
-	InvalidateCostCoverage(activated.ChannelID, activated.BillableUpstreamModel)
+	InvalidateCostCoverage(activated.ChannelID, activated.BillableUpstreamModel, activated.CostVariantKey)
 	return activated, nil
 }
 
 func RetireCostRule(id int64, adminID int) error {
 	var rule model.ChannelModelCostRule
-	if err := model.DB.Select("id", "channel_id", "billable_upstream_model").Where("id = ?", id).First(&rule).Error; err != nil {
+	if err := model.DB.Select("id", "channel_id", "billable_upstream_model", "cost_variant_key").Where("id = ?", id).First(&rule).Error; err != nil {
 		return err
 	}
 	if err := model.RetireChannelModelCostRule(id, adminID, common.GetTimestamp()); err != nil {
 		return err
 	}
-	InvalidateCostCoverage(rule.ChannelID, rule.BillableUpstreamModel)
+	InvalidateCostCoverage(rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey)
 	return nil
 }
 
-func ActiveCostRule(channelID int, billableModel string, authoritative bool) (*model.ChannelModelCostRule, error) {
-	key := costCoverageKey{channelID: channelID, model: strings.TrimSpace(billableModel)}
+func ActiveCostRule(channelID int, billableModel, costVariantKey string, authoritative bool) (*model.ChannelModelCostRule, error) {
+	variant, err := types.NormalizeCostVariantKey(costVariantKey)
+	if err != nil {
+		return nil, err
+	}
+	key := costCoverageKey{channelID: channelID, model: strings.TrimSpace(billableModel), variant: variant}
 	if !authoritative {
 		if cached, ok := activeCostRuleCache.Load(key); ok {
 			rule := cached.(model.ChannelModelCostRule)
@@ -215,9 +223,9 @@ func ActiveCostRule(channelID int, billableModel string, authoritative bool) (*m
 	}
 
 	var rules []model.ChannelModelCostRule
-	err := model.DB.Where(
-		"channel_id = ? AND billable_upstream_model = ? AND status = ?",
-		key.channelID, key.model, types.CostRuleActive,
+	err = model.DB.Where(
+		"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
+		key.channelID, key.model, key.variant, types.CostRuleActive,
 	).Order("version DESC").Limit(2).Find(&rules).Error
 	if err != nil {
 		activeCostRuleCache.Delete(key)
@@ -236,12 +244,14 @@ func ActiveCostRule(channelID int, billableModel string, authoritative bool) (*m
 	return &rule, nil
 }
 
-// CostRuleCandidate identifies one (channel, billable upstream model) pair the routing
-// layer wants to price. It is the batch counterpart of ActiveCostRule's two scalar
-// arguments, and serves as the map key returned by ActiveCostRules.
+// CostRuleCandidate identifies one (channel, billable upstream model, cost variant)
+// triple the routing layer wants to price. It is the batch counterpart of
+// ActiveCostRule's scalar arguments, and serves as the map key returned by
+// ActiveCostRules.
 type CostRuleCandidate struct {
 	ChannelID             int
 	BillableUpstreamModel string
+	CostVariantKey        string
 }
 
 // ActiveCostRules resolves the active cost rule for every candidate in a single
@@ -273,11 +283,15 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 		if candidate.ChannelID == 0 || modelName == "" {
 			continue
 		}
-		key := costCoverageKey{channelID: candidate.ChannelID, model: modelName}
+		variant, err := types.NormalizeCostVariantKey(candidate.CostVariantKey)
+		if err != nil {
+			return nil, err
+		}
+		key := costCoverageKey{channelID: candidate.ChannelID, model: modelName, variant: variant}
 		if _, exists := normalized[key]; exists {
 			continue
 		}
-		normalized[key] = CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: modelName}
+		normalized[key] = CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: modelName, CostVariantKey: variant}
 		if !authoritative {
 			if cached, ok := activeCostRuleCache.Load(key); ok {
 				rule := cached.(model.ChannelModelCostRule)
@@ -296,26 +310,33 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 		return results, nil
 	}
 
-	// Build a single WHERE clause matching any pending (channel_id, model) pair. We
-	// avoid a cross-database tuple-IN by OR-ing channel-scoped clauses, and repeat the
-	// active-status predicate in each branch so the OR cannot pull in draft/retired
-	// rows. This keeps the query portable across SQLite/MySQL/PostgreSQL without
-	// dialect branches.
-	channelModels := make(map[int][]string)
+	// Build a single WHERE clause matching any pending (channel_id, model, variant)
+	// triple. We avoid a cross-database tuple-IN by OR-ing channel-scoped clauses,
+	// and repeat the active-status predicate in each branch so the OR cannot pull in
+	// draft/retired rows. This keeps the query portable across SQLite/MySQL/PostgreSQL
+	// without dialect branches.
+	channelModels := make(map[int]map[string][]string)
 	for _, key := range pending {
-		channelModels[key.channelID] = append(channelModels[key.channelID], key.model)
+		variants, ok := channelModels[key.channelID]
+		if !ok {
+			variants = make(map[string][]string)
+			channelModels[key.channelID] = variants
+		}
+		variants[key.variant] = append(variants[key.variant], key.model)
 	}
 	query := model.DB.Model(&model.ChannelModelCostRule{})
 	first := true
-	for channelID, models := range channelModels {
-		clause := "channel_id = ? AND billable_upstream_model IN ? AND status = ?"
-		args := []any{channelID, models, types.CostRuleActive}
-		if first {
-			query = query.Where(clause, args...)
-			first = false
-			continue
+	for channelID, variantModels := range channelModels {
+		for variant, models := range variantModels {
+			clause := "channel_id = ? AND cost_variant_key = ? AND billable_upstream_model IN ? AND status = ?"
+			args := []any{channelID, variant, models, types.CostRuleActive}
+			if first {
+				query = query.Where(clause, args...)
+				first = false
+				continue
+			}
+			query = query.Or(clause, args...)
 		}
-		query = query.Or(clause, args...)
 	}
 	var rows []model.ChannelModelCostRule
 	if err := query.Find(&rows).Error; err != nil {
@@ -325,7 +346,7 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 	byKey := make(map[costCoverageKey][]model.ChannelModelCostRule)
 	for index := range rows {
 		row := rows[index]
-		key := costCoverageKey{channelID: row.ChannelID, model: row.BillableUpstreamModel}
+		key := costCoverageKey{channelID: row.ChannelID, model: row.BillableUpstreamModel, variant: row.CostVariantKey}
 		byKey[key] = append(byKey[key], row)
 	}
 	for _, key := range pending {
@@ -361,7 +382,7 @@ func CheckPredictedCostCoverage(input PredictedCoverageInput) (bool, error) {
 		}
 		return false, err
 	}
-	rule, err := ActiveCostRule(input.ChannelID, input.PredictedUpstreamModel, input.Authoritative)
+	rule, err := ActiveCostRule(input.ChannelID, input.PredictedUpstreamModel, input.CostVariantKey, input.Authoritative)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, nil
@@ -384,7 +405,21 @@ func CheckPredictedCostCoverage(input PredictedCoverageInput) (bool, error) {
 	return true, nil
 }
 
-func InvalidateCostCoverage(channelID int, billableModel string) {
+// InvalidateCostCoverage drops cached active cost rules. Each selector argument
+// is optional: a zero channelID, empty billableModel, or empty costVariantKey
+// matches every value for that dimension (so InvalidateCostCoverage(0, "", "")
+// clears the whole cache, matching the legacy bulk-reset behavior). A non-empty
+// variant narrows the eviction to that single variant only.
+func InvalidateCostCoverage(channelID int, billableModel, costVariantKey string) {
+	variant := strings.TrimSpace(costVariantKey)
+	if variant != "" {
+		normalized, err := types.NormalizeCostVariantKey(variant)
+		if err != nil {
+			// An invalid variant cannot match any cached key; nothing to evict.
+			return
+		}
+		variant = normalized
+	}
 	activeCostRuleCache.Range(func(key, _ any) bool {
 		coverageKey, ok := key.(costCoverageKey)
 		if !ok {
@@ -393,7 +428,8 @@ func InvalidateCostCoverage(channelID int, billableModel string) {
 		}
 		channelMatches := channelID == 0 || coverageKey.channelID == channelID
 		modelMatches := billableModel == "" || coverageKey.model == billableModel
-		if channelMatches && modelMatches {
+		variantMatches := variant == "" || coverageKey.variant == variant
+		if channelMatches && modelMatches && variantMatches {
 			activeCostRuleCache.Delete(key)
 		}
 		return true
@@ -408,7 +444,7 @@ func GetCostRule(id int64) (*model.ChannelModelCostRule, error) {
 	return &rule, nil
 }
 
-func ListCostRules(channelID int, billableModel string) ([]model.ChannelModelCostRule, error) {
+func ListCostRules(channelID int, billableModel, costVariantKey string) ([]model.ChannelModelCostRule, error) {
 	query := model.DB.Model(&model.ChannelModelCostRule{})
 	if channelID > 0 {
 		query = query.Where("channel_id = ?", channelID)
@@ -416,8 +452,15 @@ func ListCostRules(channelID int, billableModel string) ([]model.ChannelModelCos
 	if strings.TrimSpace(billableModel) != "" {
 		query = query.Where("billable_upstream_model = ?", strings.TrimSpace(billableModel))
 	}
+	if strings.TrimSpace(costVariantKey) != "" {
+		variant, err := types.NormalizeCostVariantKey(costVariantKey)
+		if err != nil {
+			return nil, err
+		}
+		query = query.Where("cost_variant_key = ?", variant)
+	}
 	var rules []model.ChannelModelCostRule
-	err := query.Order("channel_id ASC, billable_upstream_model ASC, version DESC").Find(&rules).Error
+	err := query.Order("channel_id ASC, billable_upstream_model ASC, cost_variant_key ASC, version DESC").Find(&rules).Error
 	return rules, err
 }
 
@@ -426,7 +469,7 @@ func CostRuleHistory(id int64) ([]model.ChannelModelCostRule, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ListCostRules(rule.ChannelID, rule.BillableUpstreamModel)
+	return ListCostRules(rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey)
 }
 
 func ValidateCostRuleByID(id int64) (types.CostRuleConfigV1, error) {
@@ -468,7 +511,7 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 			results = append(results, result)
 			continue
 		}
-		key := costCoverageKey{channelID: ability.ChannelId, model: predictedModel}
+		key := costCoverageKey{channelID: ability.ChannelId, model: predictedModel, variant: string(types.DefaultCostVariantKey)}
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -476,6 +519,7 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 		result.Covered, err = CheckPredictedCostCoverage(PredictedCoverageInput{
 			ChannelID:              ability.ChannelId,
 			PredictedUpstreamModel: predictedModel,
+			CostVariantKey:         string(types.DefaultCostVariantKey),
 			Authoritative:          true,
 		})
 		if err != nil {
@@ -498,10 +542,15 @@ func buildCostRuleDraft(input CreateCostRuleInput, capabilities types.CostCapabi
 	if err != nil {
 		return nil, err
 	}
+	variant, err := types.NormalizeCostVariantKey(input.CostVariantKey)
+	if err != nil {
+		return nil, err
+	}
 	now := common.GetTimestamp()
 	rule := &model.ChannelModelCostRule{
 		ChannelID:             input.ChannelID,
 		BillableUpstreamModel: strings.TrimSpace(input.BillableUpstreamModel),
+		CostVariantKey:        variant,
 		Status:                string(types.CostRuleDraft),
 		CostMode:              string(input.CostMode),
 		SchemaVersion:         1,

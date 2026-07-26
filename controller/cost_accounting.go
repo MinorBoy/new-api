@@ -85,7 +85,7 @@ func UpdateCostAccountingSettings(c *gin.Context) {
 
 func ListCostRules(c *gin.Context) {
 	channelID, _ := strconv.Atoi(c.Query("channel_id"))
-	rules, err := service.ListCostRules(channelID, c.Query("billable_upstream_model"))
+	rules, err := service.ListCostRules(channelID, c.Query("billable_upstream_model"), c.Query("cost_variant_key"))
 	if err != nil {
 		writeCostAccountingError(c, err)
 		return
@@ -107,6 +107,7 @@ func CreateCostRule(c *gin.Context) {
 	rule, err := service.CreateCostRuleDraft(service.CreateCostRuleInput{
 		ChannelID:             request.ChannelID,
 		BillableUpstreamModel: request.BillableUpstreamModel,
+		CostVariantKey:        request.CostVariantKey,
 		CostMode:              request.CostMode,
 		Config:                request.Config,
 		Note:                  request.Note,
@@ -682,7 +683,8 @@ func costRuleResponse(rule model.ChannelModelCostRule) (dto.CostRuleResponse, er
 	}
 	return dto.CostRuleResponse{
 		ID: rule.ID, ChannelID: rule.ChannelID, BillableUpstreamModel: rule.BillableUpstreamModel,
-		Version: rule.Version, Status: rule.Status, CostMode: types.CostMode(rule.CostMode),
+		CostVariantKey: rule.CostVariantKey,
+		Version:        rule.Version, Status: rule.Status, CostMode: types.CostMode(rule.CostMode),
 		SchemaVersion: rule.SchemaVersion, Config: config, Source: rule.Source, Note: rule.Note,
 		CreatedBy: rule.CreatedBy, ActivatedBy: rule.ActivatedBy,
 		EffectiveFrom: rule.EffectiveFrom, EffectiveTo: rule.EffectiveTo,

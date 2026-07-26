@@ -13,6 +13,7 @@ type UpdateCostAccountingSettingsRequest struct {
 type CostRuleWriteRequest struct {
 	ChannelID             int                    `json:"channel_id" binding:"required"`
 	BillableUpstreamModel string                 `json:"billable_upstream_model" binding:"required"`
+	CostVariantKey        string                 `json:"cost_variant_key,omitempty"`
 	CostMode              types.CostMode         `json:"cost_mode" binding:"required"`
 	Config                types.CostRuleConfigV1 `json:"config" binding:"required"`
 	Note                  string                 `json:"note,omitempty"`
@@ -32,6 +33,7 @@ type CostRuleResponse struct {
 	ID                    int64                  `json:"id"`
 	ChannelID             int                    `json:"channel_id"`
 	BillableUpstreamModel string                 `json:"billable_upstream_model"`
+	CostVariantKey        string                 `json:"cost_variant_key"`
 	Version               int                    `json:"version"`
 	Status                string                 `json:"status"`
 	CostMode              types.CostMode         `json:"cost_mode"`

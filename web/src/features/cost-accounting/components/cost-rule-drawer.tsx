@@ -83,17 +83,19 @@ import {
   formatNanoUSD,
   parseCostRuleForm,
 } from '../lib/cost-rule'
-import type {
-  CostMode,
-  CostPreviewRequest,
-  CostRule,
-  CostRuleFormValues,
+import {
+  costVariantKeySchema,
+  type CostMode,
+  type CostPreviewRequest,
+  type CostRule,
+  type CostRuleFormValues,
 } from '../types'
 
 type CostRuleDrawerProps = {
   open: boolean
   channel: Channel
   billableModel: string
+  costVariantKey?: string
   originModel: string
   rule: CostRule | null
   canWrite: boolean
@@ -124,6 +126,11 @@ type CostRuleFormSeed = Partial<{
 }>
 
 type SelectOption = { value: string; label: string }
+
+type CostRuleSaveInput = {
+  values: CostRuleFormValues
+  costVariantKey: string
+}
 
 const paidDefaults = {
   currency: 'USD',
@@ -382,6 +389,10 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
   const costMode = useWatch({ control: form.control, name: 'cost_mode' })
   const tokenMode = useWatch({ control: form.control, name: 'token_mode' })
   const [note, setNote] = useState(props.rule?.note ?? '')
+  const [costVariantKey, setCostVariantKey] = useState(
+    props.rule?.cost_variant_key ?? props.costVariantKey ?? 'default'
+  )
+  const [costVariantKeyInvalid, setCostVariantKeyInvalid] = useState(false)
   const [userGroup, setUserGroup] = useState(
     props.channel.group.split(',')[0] || 'default'
   )
@@ -393,7 +404,11 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
     if (!props.open) return
     form.reset(costRuleFormValues(props.rule, taskOnly))
     setNote(props.rule?.note ?? '')
-  }, [form, props.open, props.rule, taskOnly])
+    setCostVariantKey(
+      props.rule?.cost_variant_key ?? props.costVariantKey ?? 'default'
+    )
+    setCostVariantKeyInvalid(false)
+  }, [form, props.costVariantKey, props.open, props.rule, taskOnly])
 
   const invalidateCostQueries = async () => {
     await Promise.all([
@@ -407,7 +422,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
   }
 
   const saveMutation = useMutation({
-    mutationFn: async (values: CostRuleFormValues) => {
+    mutationFn: async ({ values, costVariantKey }: CostRuleSaveInput) => {
       const config = parseCostRuleForm(values)
       if (isEditingDraft && props.rule) {
         return updateCostRule(props.rule.id, {
@@ -419,6 +434,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
       return createCostRule({
         channel_id: props.channel.id,
         billable_upstream_model: props.billableModel,
+        cost_variant_key: costVariantKey,
         cost_mode: values.cost_mode,
         config,
         note,
@@ -462,6 +478,16 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
     )
   }
 
+  const saveCostRule = (values: CostRuleFormValues) => {
+    const result = costVariantKeySchema.safeParse(costVariantKey)
+    if (!result.success) {
+      setCostVariantKeyInvalid(true)
+      return
+    }
+    setCostVariantKeyInvalid(false)
+    saveMutation.mutate({ values, costVariantKey: result.data })
+  }
+
   const chargeEventOptions: SelectOption[] = [
     { value: 'response_succeeded', label: t('Response succeeded') },
     { value: 'submit_accepted', label: t('Submit accepted') },
@@ -492,7 +518,8 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>{t(drawerTitle)}</SheetTitle>
           <SheetDescription>
-            {props.channel.name} · {props.billableModel}
+            {props.channel.name} · {props.billableModel} ·{' '}
+            {props.rule?.cost_variant_key ?? costVariantKey}
           </SheetDescription>
         </SheetHeader>
 
@@ -500,9 +527,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
           <form
             id='cost-rule-form'
             className={sideDrawerFormClassName()}
-            onSubmit={form.handleSubmit((values) =>
-              saveMutation.mutate(values)
-            )}
+            onSubmit={form.handleSubmit(saveCostRule)}
           >
             <SideDrawerSection>
               <SideDrawerSectionHeader
@@ -511,6 +536,27 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
                   'Configure the supplier charge event and exact source price.'
                 )}
               />
+
+              <Field data-invalid={costVariantKeyInvalid || undefined}>
+                <FieldLabel htmlFor='cost-rule-cost-variant-key'>
+                  cost_variant_key
+                </FieldLabel>
+                <Input
+                  id='cost-rule-cost-variant-key'
+                  value={costVariantKey}
+                  pattern='[a-z0-9][a-z0-9._-]{0,63}'
+                  aria-invalid={costVariantKeyInvalid}
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    setCostVariantKey(nextValue)
+                    setCostVariantKeyInvalid(
+                      !costVariantKeySchema.safeParse(nextValue).success
+                    )
+                  }}
+                  disabled={disabled || props.rule !== null}
+                  autoComplete='off'
+                />
+              </Field>
 
               <FormItem>
                 <FormLabel>{t('Cost mode')}</FormLabel>

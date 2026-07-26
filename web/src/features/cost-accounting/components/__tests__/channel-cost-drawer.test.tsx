@@ -125,6 +125,7 @@ const activeRule: CostRule = {
   id: 11,
   channel_id: 7,
   billable_upstream_model: 'vendor-model',
+  cost_variant_key: 'default',
   version: 1,
   status: 'active',
   cost_mode: 'per_request',
@@ -282,6 +283,36 @@ test('shows mapped models, official price, active rule, normalized price, and co
   }
 })
 
+test('shows each cost variant as a distinct rule row', async () => {
+  const queryClient = createQueryClient()
+  const rule480 = {
+    ...activeRule,
+    id: 21,
+    cost_variant_key: '480p',
+  } as CostRule
+  const rule720 = {
+    ...activeRule,
+    id: 22,
+    cost_variant_key: '720p',
+  } as CostRule
+  queryClient.setQueryData(
+    costAccountingQueryKeys.ruleList({ channel_id: channel.id }),
+    { success: true, message: '', data: [rule480, rule720] }
+  )
+
+  const mounted = await mount(
+    <ChannelCostDrawer open channel={channel} onOpenChange={() => {}} />,
+    queryClient
+  )
+  try {
+    const text = browserWindow.document.body.textContent ?? ''
+    assert.match(text, /480p/)
+    assert.match(text, /720p/)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
 test('switching cost mode replaces conditional price and meter fields', async () => {
   const mounted = await mount(
     <CostRuleDrawer
@@ -320,6 +351,29 @@ test('task-only channels default new rules to task completion', async () => {
   )
   try {
     assert.match(browserWindow.document.body.textContent ?? '', /Task succeeded/)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
+test('new cost rules default their cost variant key', async () => {
+  const mounted = await mount(
+    <CostRuleDrawer
+      open
+      channel={channel}
+      billableModel='vendor-model'
+      originModel='client-model'
+      rule={null}
+      canWrite
+      onOpenChange={() => {}}
+    />
+  )
+  try {
+    const input = browserWindow.document.querySelector(
+      '#cost-rule-cost-variant-key'
+    ) as HTMLInputElement | null
+    assert.ok(input)
+    assert.equal(input.value, 'default')
   } finally {
     await unmount(mounted)
   }

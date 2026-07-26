@@ -110,6 +110,7 @@ type ChannelCostDrawerProps = {
 
 type ChannelCostRow = {
   billableModel: string
+  costVariantKey: string
   originModels: string[]
   coverage: CostCoverageItem[]
   versions: CostRule[]
@@ -119,8 +120,14 @@ type ChannelCostRow = {
 
 type EditorState = {
   billableModel: string
+  costVariantKey: string
   originModel: string
   rule: CostRule | null
+}
+
+type HistoryState = {
+  billableModel: string
+  costVariantKey: string
 }
 
 type LifecycleConfirmation = {
@@ -133,18 +140,20 @@ function buildChannelCostRows(
   coverage: CostCoverageItem[]
 ): ChannelCostRow[] {
   const rows = new Map<string, ChannelCostRow>()
-  const rowFor = (billableModel: string) => {
-    const existing = rows.get(billableModel)
+  const rowFor = (billableModel: string, costVariantKey = 'default') => {
+    const key = `${billableModel}\u0000${costVariantKey}`
+    const existing = rows.get(key)
     if (existing) return existing
     const row: ChannelCostRow = {
       billableModel,
+      costVariantKey,
       originModels: [],
       coverage: [],
       versions: [],
       activeRule: null,
       draftRule: null,
     }
-    rows.set(billableModel, row)
+    rows.set(key, row)
     return row
   }
 
@@ -156,7 +165,10 @@ function buildChannelCostRows(
     row.coverage.push(item)
   }
   for (const rule of rules) {
-    const row = rowFor(rule.billable_upstream_model)
+    const row = rowFor(
+      rule.billable_upstream_model,
+      rule.cost_variant_key || 'default'
+    )
     row.versions.push(rule)
     if (rule.status === 'active') row.activeRule = rule
     if (
@@ -171,8 +183,10 @@ function buildChannelCostRows(
     row.originModels.sort((left, right) => left.localeCompare(right))
     row.versions.sort((left, right) => right.version - left.version)
   }
-  return [...rows.values()].sort((left, right) =>
-    left.billableModel.localeCompare(right.billableModel)
+  return [...rows.values()].sort(
+    (left, right) =>
+      left.billableModel.localeCompare(right.billableModel) ||
+      left.costVariantKey.localeCompare(right.costVariantKey)
   )
 }
 
@@ -263,7 +277,9 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
     ADMIN_PERMISSION_ACTIONS.WRITE
   )
   const [editor, setEditor] = useState<EditorState | null>(null)
-  const [historyModel, setHistoryModel] = useState<string | null>(null)
+  const [historyTarget, setHistoryTarget] = useState<HistoryState | null>(
+    null
+  )
   const [confirmation, setConfirmation] =
     useState<LifecycleConfirmation | null>(null)
 
@@ -325,7 +341,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       setEditor(null)
-      setHistoryModel(null)
+      setHistoryTarget(null)
       setConfirmation(null)
     }
     props.onOpenChange(open)
@@ -334,7 +350,11 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   const rules = rulesQuery.data?.data ?? []
   const coverage = coverageQuery.data?.data ?? []
   const rows = buildChannelCostRows(rules, coverage)
-  const history = rows.find((row) => row.billableModel === historyModel)
+  const history = rows.find(
+    (row) =>
+      row.billableModel === historyTarget?.billableModel &&
+      row.costVariantKey === historyTarget?.costVariantKey
+  )
   const isLoading =
     rulesQuery.isLoading || coverageQuery.isLoading || pricingQuery.isLoading
   const error = rulesQuery.error ?? coverageQuery.error ?? pricingQuery.error
@@ -428,10 +448,11 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                   </Empty>
                 ) : (
                   <div className='max-h-[48vh] overflow-auto rounded-md border'>
-                    <Table className='min-w-[1040px]'>
+                    <Table className='min-w-[1160px]'>
                       <TableHeader className='bg-background sticky top-0'>
                         <TableRow>
                           <TableHead>{t('Billable upstream model')}</TableHead>
+                          <TableHead>cost_variant_key</TableHead>
                           <TableHead>{t('Client models')}</TableHead>
                           <TableHead>{t('Official price')}</TableHead>
                           <TableHead>{t('Rule')}</TableHead>
@@ -453,9 +474,14 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                             row.originModels[0] ?? row.billableModel
                           const previewRule = displayedRule
                           return (
-                            <TableRow key={row.billableModel}>
+                            <TableRow
+                              key={`${row.billableModel}\u0000${row.costVariantKey}`}
+                            >
                               <TableCell className='max-w-52 font-mono text-xs break-all whitespace-normal'>
                                 {row.billableModel}
+                              </TableCell>
+                              <TableCell className='font-mono text-xs'>
+                                {row.costVariantKey}
                               </TableCell>
                               <TableCell className='max-w-52 whitespace-normal'>
                                 {row.originModels.length > 0
@@ -517,6 +543,8 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                                               setEditor({
                                                 billableModel:
                                                   row.billableModel,
+                                                costVariantKey:
+                                                  row.costVariantKey,
                                                 originModel,
                                                 rule: previewRule,
                                               })
@@ -549,6 +577,8 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                                               setEditor({
                                                 billableModel:
                                                   row.billableModel,
+                                                costVariantKey:
+                                                  row.costVariantKey,
                                                 originModel,
                                                 rule:
                                                   row.draftRule ??
@@ -664,10 +694,18 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                                           size='icon-sm'
                                           aria-label={t('Show version history')}
                                           onClick={() =>
-                                            setHistoryModel((current) =>
-                                              current === row.billableModel
+                                            setHistoryTarget((current) =>
+                                              current?.billableModel ===
+                                                row.billableModel &&
+                                              current.costVariantKey ===
+                                                row.costVariantKey
                                                 ? null
-                                                : row.billableModel
+                                                : {
+                                                    billableModel:
+                                                      row.billableModel,
+                                                    costVariantKey:
+                                                      row.costVariantKey,
+                                                  }
                                             )
                                           }
                                         />
@@ -697,6 +735,8 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                       </h3>
                       <p className='text-muted-foreground font-mono text-xs'>
                         {history.billableModel}
+                        {' · '}
+                        {history.costVariantKey}
                       </p>
                     </div>
                     <div className='max-h-48 overflow-y-auto rounded-md border'>
@@ -752,6 +792,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
           open
           channel={props.channel}
           billableModel={editor.billableModel}
+          costVariantKey={editor.costVariantKey}
           originModel={editor.originModel}
           rule={editor.rule}
           canWrite={canWrite}

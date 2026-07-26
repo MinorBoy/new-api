@@ -27,8 +27,8 @@ func TestActiveCostRulesBatchDoesNotQueryPerCandidate(t *testing.T) {
 	rules, err := ActiveCostRules(candidates, true)
 	require.NoError(t, err)
 	assert.Len(t, rules, 2)
-	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "model-a"})
-	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "model-b"})
+	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "model-a", CostVariantKey: string(types.DefaultCostVariantKey)})
+	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "model-b", CostVariantKey: string(types.DefaultCostVariantKey)})
 }
 
 func TestActiveCostRulesBatchSkipsDraftAndRetired(t *testing.T) {
@@ -46,7 +46,7 @@ func TestActiveCostRulesBatchSkipsDraftAndRetired(t *testing.T) {
 	rules, err := ActiveCostRules(candidates, true)
 	require.NoError(t, err)
 	assert.Len(t, rules, 1)
-	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "active-model"})
+	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "active-model", CostVariantKey: string(types.DefaultCostVariantKey)})
 }
 
 func TestActiveCostRulesBatchDetectsActiveConflict(t *testing.T) {
@@ -71,7 +71,7 @@ func TestActiveCostRulesBatchUsesCacheForNonAuthoritative(t *testing.T) {
 
 	// Prime the cache via the single-key path so the batch path can reuse it without
 	// re-querying the database.
-	_, err := ActiveCostRule(7, "cached-model", true)
+	_, err := ActiveCostRule(7, "cached-model", string(types.DefaultCostVariantKey), true)
 	require.NoError(t, err)
 
 	// Replace the on-disk row so a fresh query would return nothing; the non-
@@ -79,7 +79,7 @@ func TestActiveCostRulesBatchUsesCacheForNonAuthoritative(t *testing.T) {
 	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
 	rules, err := ActiveCostRules(candidates, false)
 	require.NoError(t, err)
-	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "cached-model"})
+	assert.Contains(t, rules, CostRuleCandidate{ChannelID: 7, BillableUpstreamModel: "cached-model", CostVariantKey: string(types.DefaultCostVariantKey)})
 }
 
 func TestActiveCostRulesBatchEmptyCandidatesReturnsEmpty(t *testing.T) {
@@ -99,7 +99,7 @@ func seedCostRuleRowWithStatus(t *testing.T, channelID int, billableModel string
 	configJSON, err := common.Marshal(types.CostRuleConfigV1{ZeroCostReason: "fixture"})
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: billableModel, Version: version,
+		ChannelID: channelID, BillableUpstreamModel: billableModel, CostVariantKey: string(types.DefaultCostVariantKey), Version: version,
 		Status: status, CostMode: string(mode), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: now,
 		CreatedAt: *now, UpdatedAt: *now,

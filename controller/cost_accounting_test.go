@@ -222,6 +222,84 @@ func TestCostCoverageResponseKeepsPredictedUpstreamModelContract(t *testing.T) {
 	assert.True(t, response.Covered)
 }
 
+func TestCostRuleEndpointsIncludeCostVariantKey(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousLookup := service.CostCapabilityLookup
+	previousRedisEnabled := common.RedisEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.RedisEnabled = false
+	service.CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
+		return types.CostCapabilities{
+			CanResolveBillableModel: true,
+			ChargeEvents:            []types.CostChargeEvent{types.CostChargeResponseSucceeded},
+		}
+	}
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		service.CostCapabilityLookup = previousLookup
+		common.RedisEnabled = previousRedisEnabled
+		service.InvalidateCostCoverage(0, "", "")
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Log{}, &model.User{}))
+	require.NoError(t, db.Create(&model.Channel{Id: 7, Type: 1, Name: "supplier", Key: "secret", Status: common.ChannelStatusEnabled}).Error)
+
+	createRecorder := httptest.NewRecorder()
+	createCtx, _ := gin.CreateTestContext(createRecorder)
+	createCtx.Set("id", 1)
+	createCtx.Request = httptest.NewRequest(http.MethodPost, "/api/cost-accounting/rules", strings.NewReader(`{
+		"channel_id":7,
+		"billable_upstream_model":"vendor-model",
+		"cost_variant_key":" 480P ",
+		"cost_mode":"per_request",
+		"config":{
+			"currency":"USD",
+			"billing_multiplier":"1",
+			"purchase_discount_ratio":"1",
+			"recharge_exchange_ratio":"1",
+			"fee_rate":"0",
+			"currency_to_usd_rate":"1",
+			"unit_price":"1",
+			"charge_event":"response_succeeded",
+			"normalized_usd_prices":{}
+		}
+	}`))
+	createCtx.Request.Header.Set("Content-Type", "application/json")
+	CreateCostRule(createCtx)
+
+	assert.Equal(t, http.StatusCreated, createRecorder.Code)
+	var created struct {
+		Data struct {
+			CostVariantKey string `json:"cost_variant_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(createRecorder.Body.Bytes(), &created))
+	assert.Equal(t, "480p", created.Data.CostVariantKey)
+
+	listRecorder := httptest.NewRecorder()
+	listCtx, _ := gin.CreateTestContext(listRecorder)
+	listCtx.Request = httptest.NewRequest(http.MethodGet, "/api/cost-accounting/rules?channel_id=7&cost_variant_key=480p", nil)
+	ListCostRules(listCtx)
+
+	assert.Equal(t, http.StatusOK, listRecorder.Code)
+	var listed struct {
+		Data []struct {
+			CostVariantKey string `json:"cost_variant_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(listRecorder.Body.Bytes(), &listed))
+	require.Len(t, listed.Data, 1)
+	assert.Equal(t, "480p", listed.Data[0].CostVariantKey)
+}
+
 func TestCostAccountingStrictModeRejectsIncompleteCoverage(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -238,7 +316,7 @@ func TestCostAccountingStrictModeRejectsIncompleteCoverage(t *testing.T) {
 	t.Cleanup(func() {
 		model.DB = previousDB
 		service.CostCapabilityLookup = previousLookup
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 		require.NoError(t, sqlDB.Close())
 	})
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Option{}, &model.ChannelModelCostRule{}))
@@ -347,7 +425,7 @@ func prepareCostAccountingSettingsControllerTest(t *testing.T) {
 		common.OptionMapRWMutex.Lock()
 		common.OptionMap = previousOptionMap
 		common.OptionMapRWMutex.Unlock()
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 		require.NoError(t, sqlDB.Close())
 	})
 }

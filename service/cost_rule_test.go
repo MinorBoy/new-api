@@ -23,10 +23,10 @@ func prepareCostRuleServiceDB(t *testing.T) {
 	CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
 		return completeCostCapabilities()
 	}
-	InvalidateCostCoverage(0, "")
+	InvalidateCostCoverage(0, "", "")
 	t.Cleanup(func() {
 		CostCapabilityLookup = previousLookup
-		InvalidateCostCoverage(0, "")
+		InvalidateCostCoverage(0, "", "")
 		model.DB.Exec("DELETE FROM channel_model_cost_rules")
 		model.DB.Exec("DELETE FROM channels")
 	})
@@ -216,7 +216,7 @@ func TestCostRuleLifecycleVersionsAndPreservesHistory(t *testing.T) {
 	firstConfig := first.ConfigJSON
 	first, err = ActivateCostRule(first.ID, 41)
 	require.NoError(t, err)
-	cachedFirst, err := ActiveCostRule(7, "vendor-model", false)
+	cachedFirst, err := ActiveCostRule(7, "vendor-model", "default", false)
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, cachedFirst.ID)
 
@@ -234,7 +234,7 @@ func TestCostRuleLifecycleVersionsAndPreservesHistory(t *testing.T) {
 	require.NotNil(t, second.EffectiveFrom)
 	assert.Equal(t, *second.EffectiveFrom, *first.EffectiveTo)
 	assert.Equal(t, firstConfig, first.ConfigJSON)
-	activeSecond, err := ActiveCostRule(7, "vendor-model", false)
+	activeSecond, err := ActiveCostRule(7, "vendor-model", "default", false)
 	require.NoError(t, err)
 	assert.Equal(t, second.ID, activeSecond.ID)
 
@@ -245,7 +245,7 @@ func TestCostRuleLifecycleVersionsAndPreservesHistory(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrCostRuleStateConflict)
 
 	require.NoError(t, RetireCostRule(second.ID, 43))
-	_, err = ActiveCostRule(7, "vendor-model", false)
+	_, err = ActiveCostRule(7, "vendor-model", "default", false)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }
 
@@ -270,7 +270,7 @@ func TestActivateCostRuleRejectsDuplicateActiveRows(t *testing.T) {
 func TestActiveCostRuleCacheInvalidationAndAuthoritativeFallback(t *testing.T) {
 	prepareCostRuleServiceDB(t)
 
-	_, err := ActiveCostRule(7, "vendor-model", false)
+	_, err := ActiveCostRule(7, "vendor-model", "default", false)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	rule := costRuleWithConfig(t, types.CostModePerRequest, normalizedPerRequestConfig(t, "0.2"))
@@ -278,17 +278,17 @@ func TestActiveCostRuleCacheInvalidationAndAuthoritativeFallback(t *testing.T) {
 	rule.Status = string(types.CostRuleActive)
 	require.NoError(t, model.DB.Create(&rule).Error)
 
-	cached, err := ActiveCostRule(7, "vendor-model", false)
+	cached, err := ActiveCostRule(7, "vendor-model", "default", false)
 	require.NoError(t, err)
 	assert.Equal(t, rule.ID, cached.ID)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("id = ?", rule.ID).Update("status", types.CostRuleRetired).Error)
 
-	cached, err = ActiveCostRule(7, "vendor-model", false)
+	cached, err = ActiveCostRule(7, "vendor-model", "default", false)
 	require.NoError(t, err)
 	assert.Equal(t, rule.ID, cached.ID)
 
-	InvalidateCostCoverage(7, "vendor-model")
-	_, err = ActiveCostRule(7, "vendor-model", false)
+	InvalidateCostCoverage(7, "vendor-model", "default")
+	_, err = ActiveCostRule(7, "vendor-model", "default", false)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }
 
@@ -454,6 +454,7 @@ func costRuleWithConfig(t *testing.T, mode types.CostMode, config types.CostRule
 	return model.ChannelModelCostRule{
 		ChannelID:             7,
 		BillableUpstreamModel: "vendor-model",
+		CostVariantKey:        string(types.DefaultCostVariantKey),
 		Status:                string(types.CostRuleDraft),
 		CostMode:              string(mode),
 		SchemaVersion:         1,

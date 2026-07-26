@@ -16,7 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { z } from 'zod'
+
 export type NanoUSD = string
+
+export const costVariantKeySchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/)
 
 export interface CostAccountingApiResponse<T> {
   success: boolean
@@ -165,6 +173,7 @@ export interface CostRule {
   id: number
   channel_id: number
   billable_upstream_model: string
+  cost_variant_key: string
   version: number
   status: CostRuleStatus
   cost_mode: CostMode
@@ -183,6 +192,7 @@ export interface CostRule {
 export interface CostRuleWriteRequest {
   channel_id: number
   billable_upstream_model: string
+  cost_variant_key: string
   cost_mode: CostMode
   config: CostRuleConfigV1
   note?: string
@@ -192,12 +202,13 @@ export interface CostRuleWriteRequest {
 
 export type CostRuleUpdateRequest = Omit<
   CostRuleWriteRequest,
-  'channel_id' | 'billable_upstream_model'
+  'channel_id' | 'billable_upstream_model' | 'cost_variant_key'
 >
 
 export interface CostRuleListParams {
   channel_id?: number
   billable_upstream_model?: string
+  cost_variant_key?: string
 }
 
 export interface CostRuleValidationResult {

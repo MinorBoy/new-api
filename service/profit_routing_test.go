@@ -292,7 +292,7 @@ func TestFilterProfitEligibleChannelsMetadataUnavailableExcludesOnlyTokenCandida
 	requestCandidate := ProfitRoutingCandidate{ChannelID: 8, PredictedUpstreamModel: "request-model"}
 	state := NewProfitRoutingRequestState(&fakeMetadataClient{
 		errs: map[string]error{"https://assets.example/input.mp4?signature=secret": &VideoMetadataError{Kind: VideoMetadataUnavailable}},
-	}, []string{"https://assets.example/input.mp4?signature=secret"})
+	}, []string{"https://assets.example/input.mp4?signature=secret"}, 1)
 	result := FilterProfitEligibleChannels(ProfitChannelFilterInput{
 		Ctx:            context.Background(),
 		Facts:          facts,

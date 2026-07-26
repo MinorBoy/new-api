@@ -53,10 +53,14 @@ func (p *RetryParam) ProfitRoutingState() *ProfitRoutingRequestState {
 	if p.profitRoutingState != nil {
 		return p.profitRoutingState
 	}
-	if p.RoutingInput == nil || len(p.RoutingInput.ReferenceVideoURLs) == 0 {
+	if p.RoutingInput == nil || p.RoutingInput.ReferenceVideos <= 0 && len(p.RoutingInput.ReferenceVideoURLs) == 0 {
 		return nil
 	}
-	p.profitRoutingState = NewProfitRoutingRequestState(currentVideoMetadataClient(), p.RoutingInput.ReferenceVideoURLs)
+	referenceVideoCount := p.RoutingInput.ReferenceVideos
+	if referenceVideoCount <= 0 {
+		referenceVideoCount = len(p.RoutingInput.ReferenceVideoURLs)
+	}
+	p.profitRoutingState = NewProfitRoutingRequestState(currentVideoMetadataClient(), p.RoutingInput.ReferenceVideoURLs, referenceVideoCount)
 	return p.profitRoutingState
 }
 

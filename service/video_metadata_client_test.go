@@ -277,7 +277,7 @@ func (f *fakeMetadataClient) Metadata(ctx context.Context, url string) (videomet
 func TestVideoMetadataLoaderUsesSyncOnce(t *testing.T) {
 	calls := atomic.Int32{}
 	client := &fakeMetadataClient{Calls: &calls}
-	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"})
+	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"}, 1)
 	first, firstErr := state.Metadata(context.Background())
 	second, secondErr := state.Metadata(context.Background())
 	require.NoError(t, firstErr)
@@ -289,12 +289,27 @@ func TestVideoMetadataLoaderUsesSyncOnce(t *testing.T) {
 func TestProfitRoutingRequestStateNoURLsReturnsZeroWithoutCalling(t *testing.T) {
 	calls := atomic.Int32{}
 	client := &fakeMetadataClient{Calls: &calls}
-	state := NewProfitRoutingRequestState(client, nil)
+	state := NewProfitRoutingRequestState(client, nil, 0)
 	result, err := state.Metadata(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), result.TotalDurationMS)
 	assert.Equal(t, int32(0), calls.Load())
 	assert.False(t, result.HasReferenceVideos)
+}
+
+func TestProfitRoutingRequestStateRejectsUnfetchableReferenceVideo(t *testing.T) {
+	calls := atomic.Int32{}
+	state := NewProfitRoutingRequestState(&fakeMetadataClient{Calls: &calls}, nil, 1)
+
+	assert.True(t, state.HasReferenceVideos())
+	result, err := state.Metadata(context.Background())
+	require.Error(t, err)
+	assert.True(t, result.HasReferenceVideos)
+	assert.Zero(t, result.TotalDurationMS)
+	assert.Zero(t, calls.Load())
+	var metadataErr *VideoMetadataError
+	require.ErrorAs(t, err, &metadataErr)
+	assert.Equal(t, VideoMetadataUnavailable, metadataErr.Kind)
 }
 
 func TestProfitRoutingRequestStateSumsMultipleDurations(t *testing.T) {
@@ -311,7 +326,7 @@ func TestProfitRoutingRequestStateSumsMultipleDurations(t *testing.T) {
 		"https://assets.example/a.mp4",
 		"https://assets.example/b.mp4",
 		"https://assets.example/c.mp4",
-	})
+	}, 3)
 	result, err := state.Metadata(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(11000), result.TotalDurationMS)
@@ -346,7 +361,7 @@ func TestProfitRoutingRequestStateConcurrencyCappedAtThree(t *testing.T) {
 		server.URL + "/d.mp4",
 		server.URL + "/e.mp4",
 	}
-	state := NewProfitRoutingRequestState(client, urls)
+	state := NewProfitRoutingRequestState(client, urls, len(urls))
 	_, err := state.Metadata(context.Background())
 	require.NoError(t, err)
 	assert.LessOrEqual(t, maxInFlight.Load(), int32(3), "concurrent metadata fetches must not exceed 3")
@@ -356,7 +371,7 @@ func TestProfitRoutingRequestStateUnavailableExcludesTokenDependentCandidates(t 
 	client := &fakeMetadataClient{
 		errs: map[string]error{"https://assets.example/a.mp4": &VideoMetadataError{Kind: VideoMetadataUnavailable}},
 	}
-	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"})
+	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"}, 1)
 	_, err := state.Metadata(context.Background())
 	require.Error(t, err)
 	var metadataErr *VideoMetadataError
@@ -368,7 +383,7 @@ func TestProfitRoutingRequestStateInvalidMediaIsPermanentFailure(t *testing.T) {
 	client := &fakeMetadataClient{
 		errs: map[string]error{"https://assets.example/a.mp4": &VideoMetadataError{Kind: VideoMetadataInvalidMedia}},
 	}
-	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"})
+	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"}, 1)
 	_, err := state.Metadata(context.Background())
 	require.Error(t, err)
 	var metadataErr *VideoMetadataError
@@ -382,7 +397,7 @@ func TestProfitRoutingRequestStateCachesErrorAcrossCalls(t *testing.T) {
 		Calls: &calls,
 		errs:  map[string]error{"https://assets.example/a.mp4": &VideoMetadataError{Kind: VideoMetadataUnavailable}},
 	}
-	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"})
+	state := NewProfitRoutingRequestState(client, []string{"https://assets.example/a.mp4"}, 1)
 	_, firstErr := state.Metadata(context.Background())
 	_, secondErr := state.Metadata(context.Background())
 	require.Error(t, firstErr)
@@ -449,7 +464,7 @@ func TestSetVideoMetadataClientSwapsGlobalClient(t *testing.T) {
 	// Restoring nil must fall back to the fail-safe unavailable client.
 	SetVideoMetadataClient(nil)
 	SetVideoMetadataClient(currentVideoMetadataClient())
-	_, err = NewProfitRoutingRequestState(currentVideoMetadataClient(), urls).Metadata(context.Background())
+	_, err = NewProfitRoutingRequestState(currentVideoMetadataClient(), urls, len(urls)).Metadata(context.Background())
 	require.Error(t, err)
 	var metadataErr *VideoMetadataError
 	require.ErrorAs(t, err, &metadataErr)

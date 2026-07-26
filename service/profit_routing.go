@@ -687,8 +687,12 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	var metadataState *ProfitRoutingRequestState
 	if c != nil {
 		input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput)
-		if ok && len(input.ReferenceVideoURLs) > 0 {
-			metadataState = NewProfitRoutingRequestState(currentVideoMetadataClient(), input.ReferenceVideoURLs)
+		if ok && (input.ReferenceVideos > 0 || len(input.ReferenceVideoURLs) > 0) {
+			referenceVideoCount := input.ReferenceVideos
+			if referenceVideoCount <= 0 {
+				referenceVideoCount = len(input.ReferenceVideoURLs)
+			}
+			metadataState = NewProfitRoutingRequestState(currentVideoMetadataClient(), input.ReferenceVideoURLs, referenceVideoCount)
 		}
 	}
 

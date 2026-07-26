@@ -222,25 +222,31 @@ type videoMetadataResult struct {
 // The URL slice and the resolved metadata never escape this struct: they are not
 // copied onto Facts, Audit, diagnostics, or logs.
 type ProfitRoutingRequestState struct {
-	client VideoMetadataClient
-	urls   []string
+	client              VideoMetadataClient
+	urls                []string
+	referenceVideoCount int
 
 	once   sync.Once
 	result videoMetadataResult
 	err    error
 }
 
-// NewProfitRoutingRequestState builds a request-level state that will resolve urls
-// (the normalized reference video URLs captured by the routing middleware) lazily.
-func NewProfitRoutingRequestState(client VideoMetadataClient, urls []string) *ProfitRoutingRequestState {
-	return &ProfitRoutingRequestState{client: client, urls: urls}
+// NewProfitRoutingRequestState builds a request-level state that will resolve the
+// fetchable URLs lazily. referenceVideoCount is the total number of reference videos
+// in the request, including embedded media that cannot be fetched by the metadata
+// service.
+func NewProfitRoutingRequestState(client VideoMetadataClient, urls []string, referenceVideoCount int) *ProfitRoutingRequestState {
+	if referenceVideoCount < 0 {
+		referenceVideoCount = 0
+	}
+	return &ProfitRoutingRequestState{client: client, urls: urls, referenceVideoCount: referenceVideoCount}
 }
 
 // HasReferenceVideos reports whether the request carries any input reference video
 // without triggering a metadata lookup. Callers use it to short-circuit the metadata
 // service for text/image-only requests.
 func (s *ProfitRoutingRequestState) HasReferenceVideos() bool {
-	return len(s.urls) > 0
+	return s != nil && s.referenceVideoCount > 0
 }
 
 // Metadata resolves all reference video URLs at most once and returns the aggregate.
@@ -255,8 +261,11 @@ func (s *ProfitRoutingRequestState) Metadata(ctx context.Context) (videoMetadata
 }
 
 func (s *ProfitRoutingRequestState) resolve(ctx context.Context) (videoMetadataResult, error) {
-	if len(s.urls) == 0 {
+	if s.referenceVideoCount == 0 {
 		return videoMetadataResult{HasReferenceVideos: false}, nil
+	}
+	if len(s.urls) != s.referenceVideoCount {
+		return videoMetadataResult{HasReferenceVideos: true}, &VideoMetadataError{Kind: VideoMetadataUnavailable}
 	}
 	resolveCtx, cancel := context.WithTimeout(ctx, videoMetadataSharedDeadline)
 	defer cancel()

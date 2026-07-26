@@ -283,17 +283,17 @@ func TestCostTaskSubmitPersistsDispatchAuthorizationBeforeTransport(t *testing.T
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
 	previousLookup := service.CostCapabilityLookup
 	service.CostCapabilityLookup = CostCapabilitiesForRoute
-	service.InvalidateCostCoverage(channelID, modelName)
+	service.InvalidateCostCoverage(channelID, modelName, "")
 	t.Cleanup(func() {
 		service.CostCapabilityLookup = previousLookup
-		service.InvalidateCostCoverage(channelID, modelName)
+		service.InvalidateCostCoverage(channelID, modelName, "")
 	})
 
 	type transportObservation struct {
@@ -442,17 +442,17 @@ func seedTaskCostSubmitRuleForChannel(t *testing.T, channelID, channelType int, 
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(mode), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
 	previousLookup := service.CostCapabilityLookup
 	service.CostCapabilityLookup = CostCapabilitiesForRoute
-	service.InvalidateCostCoverage(channelID, modelName)
+	service.InvalidateCostCoverage(channelID, modelName, "")
 	t.Cleanup(func() {
 		service.CostCapabilityLookup = previousLookup
-		service.InvalidateCostCoverage(channelID, modelName)
+		service.InvalidateCostCoverage(channelID, modelName, "")
 	})
 }
 

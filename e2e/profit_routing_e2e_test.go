@@ -39,7 +39,7 @@ func setupStrictProfitRoutingE2E(t *testing.T, preview service.RoutingRevenuePre
 	previousPreview := service.RevenuePreviewHookForTest()
 	service.CostCapabilityLookup = relay.CostCapabilitiesForRoute
 	service.SetRoutingRevenuePreview(preview)
-	service.InvalidateCostCoverage(0, "")
+	service.InvalidateCostCoverage(0, "", "")
 
 	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
 	previousConfig, err := config.ConfigToMap(costConfig)
@@ -54,7 +54,7 @@ func setupStrictProfitRoutingE2E(t *testing.T, preview service.RoutingRevenuePre
 		cost_setting.UpdateAndSync()
 		service.CostCapabilityLookup = previousLookup
 		service.SetRoutingRevenuePreview(previousPreview)
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 	})
 	return env
 }
@@ -154,19 +154,25 @@ func performProfitRoutingRequest(t *testing.T, engine http.Handler, authorizatio
 }
 
 func seedProfitRoutingRuleE2E(t *testing.T, channelID int, modelName string, mode types.CostMode, config types.CostRuleConfigV1) {
+	seedProfitRoutingRuleWithVariantE2E(t, channelID, modelName, string(types.DefaultCostVariantKey), mode, config)
+}
+
+func seedProfitRoutingRuleWithVariantE2E(t *testing.T, channelID int, modelName, costVariantKey string, mode types.CostMode, config types.CostRuleConfigV1) *model.ChannelModelCostRule {
 	t.Helper()
 	configValue, err := service.NormalizeCostRuleConfig(mode, config)
 	require.NoError(t, err)
 	configJSON, err := common.Marshal(configValue)
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+	rule := &model.ChannelModelCostRule{
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: costVariantKey, Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(mode), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
-	}).Error)
-	service.InvalidateCostCoverage(channelID, modelName)
+	}
+	require.NoError(t, model.DB.Create(rule).Error)
+	service.InvalidateCostCoverage(channelID, modelName, costVariantKey)
+	return rule
 }
 
 func seedProfitRoutingTokenRuleE2E(t *testing.T, channelID int, modelName, pricePerMillion string) {
@@ -274,7 +280,52 @@ func replaceProfitRoutingRequestPriceE2E(t *testing.T, channelID int, modelName,
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
 		Where("channel_id = ? AND billable_upstream_model = ?", channelID, modelName).
 		Update("config_json", string(configJSON)).Error)
-	service.InvalidateCostCoverage(channelID, modelName)
+	service.InvalidateCostCoverage(channelID, modelName, "")
+}
+
+func TestProfitRoutingUsesTargetCostVariantForMarginAndAttemptE2E(t *testing.T) {
+	env := setupStrictProfitRoutingE2E(t, func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return 2_000_000_000, "1000", nil
+	})
+	request := env.standardRequest
+	for index := range request.Targets {
+		if request.Targets[index].ChannelID == capabilityChannelB && request.Targets[index].UpstreamModel == upstreamStandardMG {
+			request.Targets[index].CostVariantKey = "720p"
+		}
+	}
+	_, err := service.SaveRoutingPolicy(env.standardPolicy, request)
+	require.NoError(t, err)
+
+	price480 := "100"
+	rule480 := seedProfitRoutingRuleWithVariantE2E(t, capabilityChannelB, upstreamStandardMG, "480p", types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &price480, ChargeEvent: types.CostChargeSubmitAccepted,
+	})
+	price720 := "1"
+	rule720 := seedProfitRoutingRuleWithVariantE2E(t, capabilityChannelB, upstreamStandardMG, "720p", types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &price720, ChargeEvent: types.CostChargeSubmitAccepted,
+	})
+
+	body := capabilityRequestBody(t, modelrouting.Seedance20, "720p", 10, "16:9", modelrouting.ReferenceLimits{}, false)
+	status, response := performProfitRoutingRequest(t, env.engine, "Bearer e2e", "", body)
+
+	require.Equal(t, http.StatusOK, status, string(response))
+	assert.Empty(t, env.channelA.snapshot())
+	require.Len(t, env.channelB.snapshot(), 1)
+	var attempt model.CostAccountingAttempt
+	require.NoError(t, model.DB.Order("id DESC").First(&attempt).Error)
+	assert.Equal(t, capabilityChannelB, attempt.ChannelID)
+	assert.Equal(t, rule720.ID, attempt.RuleID)
+	assert.NotEqual(t, rule480.ID, attempt.RuleID)
+	assert.Equal(t, "720p", attempt.CostVariantKey)
+
+	var task model.Task
+	require.NoError(t, model.DB.Order("id DESC").First(&task).Error)
+	require.NotNil(t, task.PrivateData.Routing)
+	assert.Equal(t, "720p", task.PrivateData.Routing.CostVariantKey)
 }
 
 func TestProfitRoutingDispatchesFreeAndPerDurationRulesE2E(t *testing.T) {

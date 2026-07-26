@@ -217,7 +217,7 @@ func TestStrictCostAdaptorRejectsSnapshotChangedBeforePrepare(t *testing.T) {
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	newRule := model.ChannelModelCostRule{
-		ChannelID: info.ChannelId, BillableUpstreamModel: info.BillableUpstreamModel, Version: 2,
+		ChannelID: info.ChannelId, BillableUpstreamModel: info.BillableUpstreamModel, CostVariantKey: string(types.DefaultCostVariantKey), Version: 2,
 		Status: string(types.CostRuleDraft), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(newConfigJSON), Source: "manual", CreatedAt: now, UpdatedAt: now,
 	}
@@ -309,17 +309,17 @@ func prepareStrictPerRequestCostRelay(t *testing.T, requestID string, fake *cost
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: "vendor-model", Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: "vendor-model", CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
 	previousLookup := service.CostCapabilityLookup
 	service.CostCapabilityLookup = CostCapabilitiesForRoute
-	service.InvalidateCostCoverage(channelID, "vendor-model")
+	service.InvalidateCostCoverage(channelID, "vendor-model", "")
 	t.Cleanup(func() {
 		service.CostCapabilityLookup = previousLookup
-		service.InvalidateCostCoverage(channelID, "vendor-model")
+		service.InvalidateCostCoverage(channelID, "vendor-model", "")
 	})
 
 	wrapped := newCostAccountingAdaptor(fake, 1)

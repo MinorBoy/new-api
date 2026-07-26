@@ -78,6 +78,7 @@ const (
 	ContextKeyRoutingTargetID       ContextKey = "routing_target_id"
 	ContextKeyRoutingTargetName     ContextKey = "routing_target_name"
 	ContextKeyRoutingUpstreamModel  ContextKey = "routing_upstream_model"
+	ContextKeyRoutingCostVariant   ContextKey = "routing_cost_variant"
 	ContextKeyRoutingFacts          ContextKey = "routing_facts"
 	ContextKeyRoutingMismatchCounts ContextKey = "routing_mismatch_counts"
 	ContextKeyRoutingDiagnostics    ContextKey = "routing_diagnostics"

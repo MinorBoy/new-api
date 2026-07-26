@@ -130,7 +130,7 @@ func setupCostAccountingE2E(t *testing.T) {
 	service.SetRoutingRevenuePreview(func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
 		return 1_000_000, "500000", nil
 	})
-	service.InvalidateCostCoverage(0, "")
+	service.InvalidateCostCoverage(0, "", "")
 
 	cfg := config.GlobalConfig.Get(cost_setting.ConfigName)
 	previousConfig, err := config.ConfigToMap(cfg)
@@ -142,7 +142,7 @@ func setupCostAccountingE2E(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(cfg, previousConfig))
 		cost_setting.UpdateAndSync()
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 		service.CostCapabilityLookup = previousLookup
 		service.SetRoutingRevenuePreview(previousPreview)
 		common.MemoryCacheEnabled = previousMemoryCache
@@ -212,12 +212,12 @@ func seedCostAccountingRule(t *testing.T, channelID int, modelName string, charg
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", CreatedBy: 1, ActivatedBy: 1,
 		EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
 	}).Error)
-	service.InvalidateCostCoverage(channelID, modelName)
+	service.InvalidateCostCoverage(channelID, modelName, "")
 }
 
 func TestCostAccountingPreservesRequestQueryE2E(t *testing.T) {

@@ -68,8 +68,7 @@ func TestMain(m *testing.M) {
 
 func truncate(t *testing.T) {
 	t.Helper()
-	resetQuotaDataCache()
-	t.Cleanup(func() {
+	clearManagedTables := func() {
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
 		model.DB.Exec("DELETE FROM tokens")
@@ -80,6 +79,11 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
 		model.DB.Exec("DELETE FROM quota_data")
+	}
+	resetQuotaDataCache()
+	clearManagedTables()
+	t.Cleanup(func() {
+		clearManagedTables()
 		resetQuotaDataCache()
 	})
 }

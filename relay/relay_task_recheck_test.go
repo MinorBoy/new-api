@@ -57,14 +57,14 @@ func TestProfitRecheckBlocksDispatchAfterRuleChange(t *testing.T) {
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
 	previousLookup := service.CostCapabilityLookup
 	service.CostCapabilityLookup = CostCapabilitiesForRoute
-	service.InvalidateCostCoverage(channelID, modelName)
+	service.InvalidateCostCoverage(channelID, modelName, "")
 	// Inject a small positive revenue so the predictor has a real figure to compare
 	// against the $100 cost (otherwise revenue_unknown would also exclude, but for the
 	// wrong reason and the recheck would not exercise the margin comparison).
@@ -74,7 +74,7 @@ func TestProfitRecheckBlocksDispatchAfterRuleChange(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		service.CostCapabilityLookup = previousLookup
-		service.InvalidateCostCoverage(channelID, modelName)
+		service.InvalidateCostCoverage(channelID, modelName, "")
 		service.SetRoutingRevenuePreview(previousRevenueHook)
 	})
 
@@ -188,7 +188,7 @@ func TestProfitRecheckRejectsSnapshotChangedBeforePrepare(t *testing.T) {
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	newRule := model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 2,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 2,
 		Status: string(types.CostRuleDraft), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(newConfigJSON), Source: "manual", CreatedAt: now, UpdatedAt: now,
 	}

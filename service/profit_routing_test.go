@@ -249,9 +249,9 @@ func TestFilterProfitEligibleChannelsAllowsTokenPricingWithoutReferenceVideo(t *
 	require.NoError(t, err)
 	configJSON, err := common.Marshal(config)
 	require.NoError(t, err)
-	candidate := ProfitRoutingCandidate{ChannelID: 7, PredictedUpstreamModel: "vendor-model"}
+	candidate := ProfitRoutingCandidate{ChannelID: 7, PredictedUpstreamModel: "vendor-model", CostVariantKey: string(types.DefaultCostVariantKey)}
 	rules := map[CostRuleCandidate]*model.ChannelModelCostRule{
-		{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel}: {
+		{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel, CostVariantKey: string(types.DefaultCostVariantKey)}: {
 			ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel,
 			CostMode: string(types.CostModePerToken), SchemaVersion: 1, ConfigJSON: string(configJSON),
 		},
@@ -288,8 +288,8 @@ func TestFilterProfitEligibleChannelsMetadataUnavailableExcludesOnlyTokenCandida
 	requestConfigJSON, err := common.Marshal(requestConfig)
 	require.NoError(t, err)
 
-	tokenCandidate := ProfitRoutingCandidate{ChannelID: 7, PredictedUpstreamModel: "token-model"}
-	requestCandidate := ProfitRoutingCandidate{ChannelID: 8, PredictedUpstreamModel: "request-model"}
+	tokenCandidate := ProfitRoutingCandidate{ChannelID: 7, PredictedUpstreamModel: "token-model", CostVariantKey: string(types.DefaultCostVariantKey)}
+	requestCandidate := ProfitRoutingCandidate{ChannelID: 8, PredictedUpstreamModel: "request-model", CostVariantKey: string(types.DefaultCostVariantKey)}
 	state := NewProfitRoutingRequestState(&fakeMetadataClient{
 		errs: map[string]error{"https://assets.example/input.mp4?signature=secret": &VideoMetadataError{Kind: VideoMetadataUnavailable}},
 	}, []string{"https://assets.example/input.mp4?signature=secret"}, 1)
@@ -301,11 +301,11 @@ func TestFilterProfitEligibleChannelsMetadataUnavailableExcludesOnlyTokenCandida
 		Candidates:     []ProfitRoutingCandidate{tokenCandidate, requestCandidate},
 		MetadataState:  state,
 	}, map[CostRuleCandidate]*model.ChannelModelCostRule{
-		{ChannelID: tokenCandidate.ChannelID, BillableUpstreamModel: tokenCandidate.PredictedUpstreamModel}: {
+		{ChannelID: tokenCandidate.ChannelID, BillableUpstreamModel: tokenCandidate.PredictedUpstreamModel, CostVariantKey: string(types.DefaultCostVariantKey)}: {
 			ID: 70, ChannelID: tokenCandidate.ChannelID, BillableUpstreamModel: tokenCandidate.PredictedUpstreamModel,
 			Version: 1, CostMode: string(types.CostModePerToken), SchemaVersion: 1, ConfigJSON: string(tokenConfigJSON),
 		},
-		{ChannelID: requestCandidate.ChannelID, BillableUpstreamModel: requestCandidate.PredictedUpstreamModel}: {
+		{ChannelID: requestCandidate.ChannelID, BillableUpstreamModel: requestCandidate.PredictedUpstreamModel, CostVariantKey: string(types.DefaultCostVariantKey)}: {
 			ID: 80, ChannelID: requestCandidate.ChannelID, BillableUpstreamModel: requestCandidate.PredictedUpstreamModel,
 			Version: 1, CostMode: string(types.CostModePerRequest), SchemaVersion: 1, ConfigJSON: string(requestConfigJSON),
 		},

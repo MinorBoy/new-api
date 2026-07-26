@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -59,6 +62,72 @@ func TestPrepareCostAttemptRejectsMissingCoverage(t *testing.T) {
 	assert.Zero(t, requestCount)
 }
 
+func TestPrepareCostAttemptUsesSelectedRoutingCostVariant(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+
+	rule480 := seedActiveAttemptRuleWithVariant(t, "480p", types.CostModePerRequest, normalizedPerRequestConfig(t, "0.1"))
+	rule720 := seedActiveAttemptRuleWithVariant(t, "720p", types.CostModePerRequest, normalizedPerRequestConfig(t, "0.2"))
+	configureProfitRecheckSettings(t, 0)
+
+	target := model.RouteTarget{
+		ID: 41, PolicyID: 42, ChannelID: 7, Name: "supplier", UpstreamModel: "vendor-model",
+		CostVariantKey: "720p", TargetPriority: 100, Constraints: `{}`, Enabled: true,
+	}
+	require.NoError(t, model.DB.Create(&target).Error)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	common.SetContextKey(c, constant.ContextKeyRoutingCostVariant, "720p")
+	info := profitRecheckRelayInfo(target.ID, target.PolicyID)
+	setProfitRecheckRevenue(t)
+	require.NoError(t, RecheckSelectedChannelProfit(c, info))
+	require.NotNil(t, info.CostProfitRecheckSnapshot)
+	assert.Equal(t, rule720.ID, info.CostProfitRecheckSnapshot.RuleID)
+	assert.Equal(t, "720p", info.CostProfitRecheckSnapshot.CostVariantKey)
+	require.NotNil(t, info.CostProfitRecheckSnapshot.RouteTarget)
+	assert.Equal(t, target.ID, info.CostProfitRecheckSnapshot.RouteTarget.TargetID)
+	assert.Equal(t, "720p", info.CostProfitRecheckSnapshot.RouteTarget.CostVariantKey)
+	assert.Equal(t, target.TargetPriority, info.CostProfitRecheckSnapshot.RouteTarget.Priority)
+
+	input := preparedAttemptInput()
+	input.CostProfitRecheckSnapshot = info.CostProfitRecheckSnapshot
+	handle, err := PrepareCostAttempt(context.Background(), input)
+	require.NoError(t, err)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, rule720.ID, attempt.RuleID)
+	assert.NotEqual(t, rule480.ID, attempt.RuleID)
+	assert.Equal(t, "720p", attempt.CostVariantKey)
+}
+
+func TestRecheckSelectedChannelProfitDoesNotFallbackAcrossCostVariants(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+	seedActiveAttemptRule(t, types.CostModePerRequest, normalizedPerRequestConfig(t, "0.1"))
+	configureProfitRecheckSettings(t, 0)
+
+	target := model.RouteTarget{
+		ID: 41, PolicyID: 42, ChannelID: 7, Name: "supplier", UpstreamModel: "vendor-model",
+		CostVariantKey: "720p", TargetPriority: 100, Constraints: `{}`, Enabled: true,
+	}
+	require.NoError(t, model.DB.Create(&target).Error)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	common.SetContextKey(c, constant.ContextKeyRoutingCostVariant, "720p")
+	info := profitRecheckRelayInfo(target.ID, target.PolicyID)
+	setProfitRecheckRevenue(t)
+	err := RecheckSelectedChannelProfit(c, info)
+
+	require.ErrorIs(t, err, ErrProfitEligibility)
+	var eligibilityErr *ProfitEligibilityError
+	require.ErrorAs(t, err, &eligibilityErr)
+	assert.Equal(t, ProfitReasonCostRuleMissing, eligibilityErr.Reason)
+	assert.Nil(t, info.CostProfitRecheckSnapshot)
+}
+
 func TestPrepareCostAttemptRejectsChangedProfitRecheckTarget(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))
@@ -69,7 +138,8 @@ func TestPrepareCostAttemptRejectsChangedProfitRecheckTarget(t *testing.T) {
 	threshold := 100
 	target := model.RouteTarget{
 		ID: 41, PolicyID: 42, ChannelID: 7, Name: "supplier", UpstreamModel: "vendor-model",
-		TargetPriority: 100, MinimumExpectedMarginBPS: &threshold, Constraints: `{}`, Enabled: true,
+		CostVariantKey: string(types.DefaultCostVariantKey), TargetPriority: 100,
+		MinimumExpectedMarginBPS: &threshold, Constraints: `{}`, Enabled: true,
 	}
 	require.NoError(t, model.DB.Create(&target).Error)
 	info := profitRecheckRelayInfo(target.ID, target.PolicyID)
@@ -314,18 +384,24 @@ func prepareCostAttemptServiceDB(t *testing.T) {
 }
 
 func seedActiveAttemptRule(t *testing.T, mode types.CostMode, config types.CostRuleConfigV1) {
+	seedActiveAttemptRuleWithVariant(t, string(types.DefaultCostVariantKey), mode, config)
+}
+
+func seedActiveAttemptRuleWithVariant(t *testing.T, costVariantKey string, mode types.CostMode, config types.CostRuleConfigV1) *model.ChannelModelCostRule {
 	t.Helper()
 	normalized, err := NormalizeCostRuleConfig(mode, config)
 	require.NoError(t, err)
 	configJSON, err := common.Marshal(normalized)
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: 7, BillableUpstreamModel: "vendor-model", Version: 1,
+	rule := &model.ChannelModelCostRule{
+		ChannelID: 7, BillableUpstreamModel: "vendor-model", CostVariantKey: costVariantKey, Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(mode), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
-	}).Error)
+	}
+	require.NoError(t, model.DB.Create(rule).Error)
+	return rule
 }
 
 func normalizedTokenCostConfig(t *testing.T) types.CostRuleConfigV1 {

@@ -67,16 +67,16 @@ func TestRecordProfitExclusionsKeepsCompleteAdminDiagnostic(t *testing.T) {
 	configJSON, err := common.Marshal(config)
 	require.NoError(t, err)
 
-	candidate := ProfitRoutingCandidate{ChannelID: 17, PredictedUpstreamModel: "vendor-video-model"}
+	candidate := ProfitRoutingCandidate{ChannelID: 17, PredictedUpstreamModel: "vendor-video-model", CostVariantKey: string(types.DefaultCostVariantKey)}
 	rule := &model.ChannelModelCostRule{
 		ID: 88, ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel,
-		Version: 3, CostMode: string(types.CostModePerRequest), SchemaVersion: 1, ConfigJSON: string(configJSON),
+		CostVariantKey: string(types.DefaultCostVariantKey), Version: 3, CostMode: string(types.CostModePerRequest), SchemaVersion: 1, ConfigJSON: string(configJSON),
 	}
 	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
 		RevenueNanoUSD: nano("10"), HasRevenue: true, GlobalMarginBPS: 1_000,
 		Candidates: []ProfitRoutingCandidate{candidate},
 	}, map[CostRuleCandidate]*model.ChannelModelCostRule{
-		{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel}: rule,
+		{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel, CostVariantKey: string(types.DefaultCostVariantKey)}: rule,
 	})
 	require.Len(t, filterResult.Exclusions, 1)
 

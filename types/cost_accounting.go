@@ -145,6 +145,7 @@ type CostAttemptHandle struct {
 type CostProfitRecheckSnapshot struct {
 	ChannelID                      int
 	BillableUpstreamModel          string
+	CostVariantKey                 string
 	RuleID                         int64
 	RuleVersion                    int
 	GlobalMinimumExpectedMarginBPS int
@@ -154,10 +155,12 @@ type CostProfitRecheckSnapshot struct {
 // CostRoutingTargetSnapshot holds the routing values that affect profit
 // eligibility for the selected target. A nil target means legacy routing.
 type CostRoutingTargetSnapshot struct {
-	ID                       int
 	PolicyID                 int
+	TargetID                 int
 	ChannelID                int
 	UpstreamModel            string
+	CostVariantKey           string
+	Priority                 int
 	MinimumExpectedMarginBPS *int
 }
 

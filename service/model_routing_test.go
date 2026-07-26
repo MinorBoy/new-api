@@ -25,6 +25,7 @@ func TestSelectCapabilityChannelPublishesTargetDecision(t *testing.T) {
 	prepareCapabilitySelectionTest(t)
 	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
 	policy := capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "provider-1080p", "1080p")
+	policy.Targets[0].CostVariantKey = "720p"
 	saved, err := service.SaveRoutingPolicy(0, policy)
 	require.NoError(t, err)
 
@@ -43,6 +44,7 @@ func TestSelectCapabilityChannelPublishesTargetDecision(t *testing.T) {
 	assert.Equal(t, saved.ID, common.GetContextKeyInt(c, constant.ContextKeyRoutingPolicyID))
 	assert.Equal(t, saved.Targets[0].ID, common.GetContextKeyInt(c, constant.ContextKeyRoutingTargetID))
 	assert.Equal(t, "provider-1080p", common.GetContextKeyString(c, constant.ContextKeyRoutingUpstreamModel))
+	assert.Equal(t, "720p", common.GetContextKeyString(c, constant.ContextKeyRoutingCostVariant))
 	facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
 	require.True(t, ok)
 	assert.Equal(t, "分组A", facts.GroupName)
@@ -85,6 +87,7 @@ func TestSelectCapabilityChannelPreservesLegacyWithoutPolicy(t *testing.T) {
 	assert.Equal(t, "分组A", group)
 	assert.Equal(t, 11, channel.Id)
 	assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode))
+	assert.Equal(t, string(types.DefaultCostVariantKey), common.GetContextKeyString(c, constant.ContextKeyRoutingCostVariant))
 }
 
 func TestCostRoutingExcludesChannelWithoutCapabilityPolicy(t *testing.T) {
@@ -153,6 +156,29 @@ func TestCostRoutingKnownCapabilityUsesTargetModelForCoverage(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, compatible)
 	assert.Equal(t, "provider-target", common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingUpstreamModel))
+}
+
+func TestCostRoutingKnownCapabilityDoesNotFallbackToDefaultCostVariant(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "known", "分组A", modelrouting.Seedance20, true)
+	policy := capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "provider-target", "1080p")
+	policy.Targets[0].CostVariantKey = "720p"
+	_, err := service.SaveRoutingPolicy(0, policy)
+	require.NoError(t, err)
+	seedActiveFreeCostRuleForRouting(t, 11, "provider-target")
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}
+	compatible, err := service.ValidateKnownChannelForRouting(param, "分组A", 11)
+
+	assert.False(t, compatible)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, "720p", common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingCostVariant))
 }
 
 func TestCostRoutingRechecksExcludedMissesAuthoritatively(t *testing.T) {
@@ -433,9 +459,9 @@ func TestProfitRoutingNoOpOutsideStrictMode(t *testing.T) {
 	prepareCapabilitySelectionTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}))
 	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
-	service.InvalidateCostCoverage(0, "")
+	service.InvalidateCostCoverage(0, "", "")
 	t.Cleanup(func() {
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 		model.DB.Exec("DELETE FROM channel_model_cost_rules")
 	})
 	seedRoutingCandidate(t, 11, "cheap", "分组A", modelrouting.Seedance20, true)
@@ -517,7 +543,7 @@ func seedPerRequestCostRuleForRouting(t *testing.T, channelID int, modelName, un
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
@@ -545,7 +571,7 @@ func seedTokenCostRuleForRouting(t *testing.T, channelID int, modelName string) 
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerToken), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
@@ -739,7 +765,7 @@ func prepareStrictCostRoutingServiceTest(t *testing.T) {
 	prepareCapabilitySelectionTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}))
 	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
-	service.InvalidateCostCoverage(0, "")
+	service.InvalidateCostCoverage(0, "", "")
 
 	previousLookup := service.CostCapabilityLookup
 	service.CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
@@ -770,7 +796,7 @@ func prepareStrictCostRoutingServiceTest(t *testing.T) {
 		cost_setting.UpdateAndSync()
 		service.CostCapabilityLookup = previousLookup
 		service.SetRoutingRevenuePreview(previousRevenueHook)
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 		require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
 	})
 }
@@ -793,7 +819,7 @@ func seedActiveFreeCostRuleForRouting(t *testing.T, channelID int, modelName str
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModeFree), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,

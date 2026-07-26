@@ -41,7 +41,7 @@ func TestPersistSubmittedTaskMarksOrphanWithoutChangingAcceptedCost(t *testing.T
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
@@ -55,10 +55,10 @@ func TestPersistSubmittedTaskMarksOrphanWithoutChangingAcceptedCost(t *testing.T
 			MeterSources:            []types.CostMeterSource{types.CostMeterValidatedRequest, types.CostMeterUpstreamActual, types.CostMeterUpstreamUsage},
 		}
 	}
-	service.InvalidateCostCoverage(channelID, modelName)
+	service.InvalidateCostCoverage(channelID, modelName, "")
 	t.Cleanup(func() {
 		service.CostCapabilityLookup = previousLookup
-		service.InvalidateCostCoverage(channelID, modelName)
+		service.InvalidateCostCoverage(channelID, modelName, "")
 	})
 	handle, err := service.PrepareCostAttempt(t.Context(), service.PrepareCostAttemptInput{
 		RequestID: "task-orphan-request", TaskID: common.GetPointer(taskID),

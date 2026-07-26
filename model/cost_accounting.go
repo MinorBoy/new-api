@@ -94,6 +94,7 @@ type CostAccountingAttempt struct {
 	ChannelType            int    `json:"channel_type"`
 	PredictedUpstreamModel string `json:"predicted_upstream_model" gorm:"type:varchar(191);index"`
 	BillableUpstreamModel  string `json:"billable_upstream_model" gorm:"type:varchar(191);index"`
+	CostVariantKey         string `json:"cost_variant_key" gorm:"type:varchar(64);not null;index"`
 	RuleID                 int64  `json:"rule_id" gorm:"index"`
 	RuleVersion            int    `json:"rule_version"`
 	CostMode               string `json:"cost_mode" gorm:"type:varchar(32)"`
@@ -233,15 +234,50 @@ func prepareCostAttempt(
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		now := common.GetTimestamp()
+		selectedVariant, err := types.NormalizeCostVariantKey(attempt.CostVariantKey)
+		if err != nil {
+			return err
+		}
 		if validateRule != nil {
-			if profitSnapshot != nil &&
-				(profitSnapshot.ChannelID != attempt.ChannelID || profitSnapshot.BillableUpstreamModel != attempt.BillableUpstreamModel) {
-				return ErrCostRuleSnapshotConflict
+			if profitSnapshot != nil {
+				snapshotVariant, variantErr := types.NormalizeCostVariantKey(profitSnapshot.CostVariantKey)
+				if variantErr != nil {
+					return ErrCostRuleSnapshotConflict
+				}
+				if profitSnapshot.ChannelID != attempt.ChannelID || profitSnapshot.BillableUpstreamModel != attempt.BillableUpstreamModel {
+					return ErrCostRuleSnapshotConflict
+				}
+				selectedVariant = snapshotVariant
+				if profitSnapshot.RouteTarget != nil {
+					targetSnapshot := profitSnapshot.RouteTarget
+					var target RouteTarget
+					err := lockForUpdate(tx).Where(
+						"id = ? AND policy_id = ? AND channel_id = ? AND upstream_model = ? AND cost_variant_key = ? AND enabled = ?",
+						targetSnapshot.TargetID,
+						targetSnapshot.PolicyID,
+						targetSnapshot.ChannelID,
+						targetSnapshot.UpstreamModel,
+						targetSnapshot.CostVariantKey,
+						true,
+					).First(&target).Error
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return ErrCostRuleSnapshotConflict
+					}
+					if err != nil {
+						return err
+					}
+					lockedVariant, variantErr := types.NormalizeCostVariantKey(target.CostVariantKey)
+					if variantErr != nil || lockedVariant != selectedVariant ||
+						target.TargetPriority != targetSnapshot.Priority ||
+						!sameCostProfitMarginThreshold(target.MinimumExpectedMarginBPS, targetSnapshot.MinimumExpectedMarginBPS) {
+						return ErrCostRuleSnapshotConflict
+					}
+				}
 			}
 			var activeRules []ChannelModelCostRule
 			if err := lockForUpdate(tx).Where(
-				"channel_id = ? AND billable_upstream_model = ? AND status = ?",
-				attempt.ChannelID, attempt.BillableUpstreamModel, types.CostRuleActive,
+				"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
+				attempt.ChannelID, attempt.BillableUpstreamModel, selectedVariant, types.CostRuleActive,
 			).Order("version DESC").Limit(2).Find(&activeRules).Error; err != nil {
 				return err
 			}
@@ -251,27 +287,9 @@ func prepareCostAttempt(
 			if len(activeRules) > 1 {
 				return ErrCostActiveRuleConflict
 			}
-			if profitSnapshot != nil {
-				if activeRules[0].ID != profitSnapshot.RuleID || activeRules[0].Version != profitSnapshot.RuleVersion {
-					return ErrCostRuleSnapshotConflict
-				}
-				if profitSnapshot.RouteTarget != nil {
-					var target RouteTarget
-					err := lockForUpdate(tx).Where("id = ?", profitSnapshot.RouteTarget.ID).First(&target).Error
-					if errors.Is(err, gorm.ErrRecordNotFound) {
-						return ErrCostRuleSnapshotConflict
-					}
-					if err != nil {
-						return err
-					}
-					if target.PolicyID != profitSnapshot.RouteTarget.PolicyID ||
-						target.ChannelID != profitSnapshot.RouteTarget.ChannelID ||
-						!target.Enabled ||
-						target.UpstreamModel != profitSnapshot.RouteTarget.UpstreamModel ||
-						!sameCostProfitMarginThreshold(target.MinimumExpectedMarginBPS, profitSnapshot.RouteTarget.MinimumExpectedMarginBPS) {
-						return ErrCostRuleSnapshotConflict
-					}
-				}
+			if profitSnapshot != nil &&
+				(activeRules[0].ID != profitSnapshot.RuleID || activeRules[0].Version != profitSnapshot.RuleVersion) {
+				return ErrCostRuleSnapshotConflict
 			}
 			if err := validateRule(&activeRules[0]); err != nil {
 				return err
@@ -279,7 +297,7 @@ func prepareCostAttempt(
 		}
 
 		var persisted CostAccountingRequest
-		err := lockForUpdate(tx).Where("request_id = ?", request.RequestID).First(&persisted).Error
+		err = lockForUpdate(tx).Where("request_id = ?", request.RequestID).First(&persisted).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			persisted = *request
 			if persisted.RevenueStatus == "" {
@@ -329,6 +347,8 @@ func prepareCostAttempt(
 			}
 			attempt.AttemptNo = latestAttemptNo + 1
 		}
+		// Persist the same normalized key used by the locked active-rule query.
+		attempt.CostVariantKey = selectedVariant
 		attempt.Status = string(types.CostAttemptPrepared)
 		attempt.BillableRequestCount = 1
 		if attempt.ReconciliationStatus == "" {

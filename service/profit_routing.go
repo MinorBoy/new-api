@@ -347,6 +347,10 @@ func PreviewRoutingRevenue(ctx context.Context, input RoutingRevenuePreviewInput
 type ProfitRoutingCandidate struct {
 	ChannelID              int
 	PredictedUpstreamModel string
+	// CostVariantKey identifies which supplier price contract the selected route
+	// target binds. Capability routing copies it from the matched target; legacy
+	// routing uses types.DefaultCostVariantKey because there is no target to bind.
+	CostVariantKey string
 	// TargetThresholdBPS is the route-target override (nil = inherit the global threshold).
 	TargetThresholdBPS *int
 }
@@ -473,7 +477,11 @@ func evaluateCandidateProfit(
 		exclusion.Reason = ProfitReasonCostRuleMissing
 		return exclusion
 	}
-	rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: predictedModel}]
+	candidateVariant := candidate.CostVariantKey
+	if candidateVariant == "" {
+		candidateVariant = string(types.DefaultCostVariantKey)
+	}
+	rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: predictedModel, CostVariantKey: candidateVariant}]
 	if rule == nil {
 		exclusion.Reason = ProfitReasonCostRuleMissing
 		return exclusion
@@ -658,7 +666,6 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		ctx = c.Request.Context()
 	}
 
-	candidate := ProfitRoutingCandidate{ChannelID: channelID, PredictedUpstreamModel: billableModel}
 	group := info.UsingGroup
 	if group == "" {
 		group = info.TokenGroup
@@ -669,16 +676,25 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		(facts.OutputDurationSeconds <= 0 || facts.Width <= 0 || facts.Height <= 0 || facts.FrameRateNum <= 0 || facts.FrameRateDen <= 0) {
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonMeterUnknown}
 	}
-	ruleCandidate := CostRuleCandidate{ChannelID: channelID, BillableUpstreamModel: billableModel}
-	rules, err := ActiveCostRules([]CostRuleCandidate{ruleCandidate}, true)
-	if err != nil {
-		common.SysError(fmt.Sprintf("profit recheck active rule lookup failed: %s", err.Error()))
-		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
-	}
 	globalThreshold := cost_setting.Runtime().MinimumExpectedMarginBPS
 	threshold, targetSnapshot, err := currentRecheckMarginThreshold(info, globalThreshold)
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit recheck routing threshold lookup failed: %s", err.Error()))
+		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
+	}
+	variant := selectedCostVariantKey(c)
+	if targetSnapshot != nil {
+		variant = targetSnapshot.CostVariantKey
+	}
+	candidate := ProfitRoutingCandidate{
+		ChannelID:              channelID,
+		PredictedUpstreamModel: billableModel,
+		CostVariantKey:         variant,
+	}
+	ruleCandidate := CostRuleCandidate{ChannelID: channelID, BillableUpstreamModel: billableModel, CostVariantKey: candidate.CostVariantKey}
+	rules, err := ActiveCostRules([]CostRuleCandidate{ruleCandidate}, true)
+	if err != nil {
+		common.SysError(fmt.Sprintf("profit recheck active rule lookup failed: %s", err.Error()))
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
 	}
 	// Resolve any input reference video metadata so per-token candidates price with the
@@ -713,6 +729,7 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		info.CostProfitRecheckSnapshot = &types.CostProfitRecheckSnapshot{
 			ChannelID:                      channelID,
 			BillableUpstreamModel:          billableModel,
+			CostVariantKey:                 candidate.CostVariantKey,
 			RuleID:                         rule.ID,
 			RuleVersion:                    rule.Version,
 			GlobalMinimumExpectedMarginBPS: globalThreshold,
@@ -747,11 +764,23 @@ func currentRecheckMarginThreshold(info *relaycommon.RelayInfo, globalThreshold 
 	if strings.TrimSpace(target.UpstreamModel) != strings.TrimSpace(info.BillableUpstreamModel) {
 		return 0, nil, fmt.Errorf("selected routing target model changed")
 	}
+	variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+	if err != nil {
+		return 0, nil, fmt.Errorf("selected routing target cost variant key: %w", err)
+	}
+	if strings.TrimSpace(routing.CostVariantKey) != "" {
+		auditVariant, auditErr := types.NormalizeCostVariantKey(routing.CostVariantKey)
+		if auditErr != nil || auditVariant != variant {
+			return 0, nil, fmt.Errorf("selected routing target cost variant changed")
+		}
+	}
 	targetSnapshot := &types.CostRoutingTargetSnapshot{
-		ID:            target.ID,
-		PolicyID:      target.PolicyID,
-		ChannelID:     target.ChannelID,
-		UpstreamModel: target.UpstreamModel,
+		TargetID:       target.ID,
+		PolicyID:       target.PolicyID,
+		ChannelID:      target.ChannelID,
+		UpstreamModel:  target.UpstreamModel,
+		CostVariantKey: variant,
+		Priority:       target.TargetPriority,
 	}
 	if target.MinimumExpectedMarginBPS != nil {
 		threshold := *target.MinimumExpectedMarginBPS

@@ -142,9 +142,14 @@ func profitCandidates(param *RetryParam, group string, result groupRoutingResult
 			if !filter.Allows(channelID) {
 				continue
 			}
+			variant := target.CostVariantKey
+			if variant == "" {
+				variant = string(types.DefaultCostVariantKey)
+			}
 			candidates = append(candidates, ProfitRoutingCandidate{
 				ChannelID:              channelID,
 				PredictedUpstreamModel: target.UpstreamModel,
+				CostVariantKey:         variant,
 				TargetThresholdBPS:     target.MinimumExpectedMarginBPS,
 			})
 		}
@@ -161,6 +166,7 @@ func profitCandidates(param *RetryParam, group string, result groupRoutingResult
 		candidates = append(candidates, ProfitRoutingCandidate{
 			ChannelID:              channelID,
 			PredictedUpstreamModel: predictedModel,
+			CostVariantKey:         string(types.DefaultCostVariantKey),
 		})
 	}
 	return candidates
@@ -169,7 +175,11 @@ func profitCandidates(param *RetryParam, group string, result groupRoutingResult
 func profitCandidateKeys(candidates []ProfitRoutingCandidate) []CostRuleCandidate {
 	keys := make([]CostRuleCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		keys = append(keys, CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: candidate.PredictedUpstreamModel})
+		keys = append(keys, CostRuleCandidate{
+			ChannelID:             candidate.ChannelID,
+			BillableUpstreamModel: candidate.PredictedUpstreamModel,
+			CostVariantKey:        candidate.CostVariantKey,
+		})
 	}
 	return keys
 }
@@ -320,15 +330,19 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 	}
 	predictedModel := ""
 	threshold := (*int)(nil)
+	variant := string(types.DefaultCostVariantKey)
 	if result.Capability {
 		if target, ok := result.Evaluation.CompatibleByChannel[channelID]; ok {
 			predictedModel = target.UpstreamModel
 			threshold = target.MinimumExpectedMarginBPS
+			if target.CostVariantKey != "" {
+				variant = target.CostVariantKey
+			}
 		}
 	} else {
 		predictedModel = resolveLegacyPredictedModel(param, channelID)
 	}
-	candidate := ProfitRoutingCandidate{ChannelID: channelID, PredictedUpstreamModel: predictedModel, TargetThresholdBPS: threshold}
+	candidate := ProfitRoutingCandidate{ChannelID: channelID, PredictedUpstreamModel: predictedModel, CostVariantKey: variant, TargetThresholdBPS: threshold}
 
 	facts, revenueNanoUSD, hasRevenue, _ := profitFilterFacts(param, group)
 	rules, err := ActiveCostRules(profitCandidateKeys([]ProfitRoutingCandidate{candidate}), false)
@@ -405,6 +419,8 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 			}
 		}
 		publishRoutingDecision(param.Ctx, result, target)
+	} else {
+		publishLegacyRoutingCostVariant(param.Ctx)
 	}
 	return channel, result, nil
 }
@@ -445,6 +461,8 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 			return false, nil
 		}
 		publishRoutingDecision(param.Ctx, result, target)
+	} else {
+		publishLegacyRoutingCostVariant(param.Ctx)
 	}
 
 	channel, err := model.GetChannelById(channelID, false)
@@ -528,6 +546,7 @@ func CheckSelectedChannelCostCoverage(param *RetryParam, channel *model.Channel,
 	input := PredictedCoverageInput{
 		ChannelID:              channel.Id,
 		PredictedUpstreamModel: predictedModel,
+		CostVariantKey:         selectedCostVariantKey(param.Ctx),
 		RequestPath:            param.RequestPath,
 		TaskPlatform:           taskPlatform,
 	}
@@ -575,11 +594,16 @@ func RecheckCostCoverageMisses(param *RetryParam) (bool, error) {
 }
 
 func publishRoutingDecision(c *gin.Context, result groupRoutingResult, target modelrouting.Target) {
+	variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+	if err != nil {
+		variant = string(types.DefaultCostVariantKey)
+	}
 	common.SetContextKey(c, constant.ContextKeyRoutingCapabilityMode, true)
 	common.SetContextKey(c, constant.ContextKeyRoutingPolicyID, result.Snapshot.ID)
 	common.SetContextKey(c, constant.ContextKeyRoutingTargetID, target.ID)
 	common.SetContextKey(c, constant.ContextKeyRoutingTargetName, target.Name)
 	common.SetContextKey(c, constant.ContextKeyRoutingUpstreamModel, target.UpstreamModel)
+	common.SetContextKey(c, constant.ContextKeyRoutingCostVariant, variant)
 	common.SetContextKey(c, constant.ContextKeyRoutingFacts, result.Facts)
 	common.SetContextKey(c, constant.ContextKeyRoutingMismatchCounts, result.Evaluation.MismatchCounts)
 }
@@ -593,8 +617,32 @@ func clearRoutingDecision(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyRoutingTargetID, 0)
 	common.SetContextKey(c, constant.ContextKeyRoutingTargetName, "")
 	common.SetContextKey(c, constant.ContextKeyRoutingUpstreamModel, "")
+	delete(c.Keys, string(constant.ContextKeyRoutingCostVariant))
 	common.SetContextKey(c, constant.ContextKeyRoutingFacts, modelrouting.Facts{})
 	common.SetContextKey(c, constant.ContextKeyRoutingMismatchCounts, map[modelrouting.MismatchReason]int{})
+}
+
+func publishLegacyRoutingCostVariant(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyRoutingCostVariant, string(types.DefaultCostVariantKey))
+}
+
+// selectedCostVariantKey reads the cost variant identity the routing layer
+// published for the current request. Capability routing publishes the variant
+// bound to the matched target; legacy routing explicitly publishes default so
+// existing single-contract channels keep resolving the same active cost rule.
+func selectedCostVariantKey(c *gin.Context) string {
+	if c == nil {
+		return string(types.DefaultCostVariantKey)
+	}
+	variant, _ := common.GetContextKeyType[string](c, constant.ContextKeyRoutingCostVariant)
+	normalized, err := types.NormalizeCostVariantKey(variant)
+	if err != nil {
+		return string(types.DefaultCostVariantKey)
+	}
+	return normalized
 }
 
 func RecordRoutingSelectionFailure(c *gin.Context, canonicalModel string, selectionErr *ChannelSelectionError) {

@@ -637,6 +637,9 @@ func migrateCostVariantKeys() error {
 	if err := migrateCostVariantKeyColumn(&RouteTarget{}, "route_targets", "cost_variant_key"); err != nil {
 		return err
 	}
+	if err := migrateCostVariantKeyColumn(&CostAccountingAttempt{}, "cost_accounting_attempts", "cost_variant_key"); err != nil {
+		return err
+	}
 	return nil
 }
 

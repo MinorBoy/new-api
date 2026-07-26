@@ -136,7 +136,7 @@ func prepareCostRoutingControllerTest(t *testing.T, mode types.CostAccountingMod
 	service.CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
 		return types.CostCapabilities{CanResolveBillableModel: true}
 	}
-	service.InvalidateCostCoverage(0, "")
+	service.InvalidateCostCoverage(0, "", "")
 
 	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
 	require.NotNil(t, costConfig)
@@ -156,7 +156,7 @@ func prepareCostRoutingControllerTest(t *testing.T, mode types.CostAccountingMod
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{cost_setting.KeyMode: string(previousMode)}))
 		cost_setting.UpdateAndSync()
-		service.InvalidateCostCoverage(0, "")
+		service.InvalidateCostCoverage(0, "", "")
 		service.CostCapabilityLookup = previousLookup
 		service.SetRoutingRevenuePreview(previousRevenueHook)
 		common.MemoryCacheEnabled = previousMemoryCacheEnabled
@@ -201,7 +201,7 @@ func seedActiveFreeCostRule(t *testing.T, channelID int, modelName string) {
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
-		ChannelID: channelID, BillableUpstreamModel: modelName, Version: 1,
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
 		Status: string(types.CostRuleActive), CostMode: string(types.CostModeFree), SchemaVersion: 1,
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,

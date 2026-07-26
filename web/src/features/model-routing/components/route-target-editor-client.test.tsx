@@ -27,6 +27,8 @@ import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form'
 import { I18nextProvider } from 'react-i18next'
 
 import {
+  copyPolicyForm,
+  copyTargetForm,
   createEmptyPolicyForm,
   createEmptyTarget,
   fromPolicyResponse,
@@ -357,6 +359,47 @@ test('routing target cost variants survive write and response mappings', () => {
     (form.targets[0] as unknown as Record<string, unknown>).cost_variant_key,
     '720p'
   )
+})
+
+test('routing target copies retain their cost variant', () => {
+  const target: RouteTargetFormValues = {
+    ...createEmptyTarget(),
+    channel_id: 1,
+    channel_name: 'A1',
+    name: 'target',
+    upstream_model: 'vendor-model',
+    cost_variant_key: '720p',
+  }
+  const copiedTarget = copyTargetForm(target)
+  assert.equal(copiedTarget.cost_variant_key, '720p')
+
+  const policy = createEmptyPolicyForm()
+  const request = toWriteRequest({
+    ...policy,
+    group_name: 'default',
+    enabled: true,
+    targets: [target],
+  })
+  const requestTarget = request.targets[0]
+  assert.ok(requestTarget)
+  const copiedPolicy = copyPolicyForm({
+    id: 1,
+    group_name: 'default',
+    model: policy.model,
+    enabled: true,
+    defaults: policy.defaults,
+    targets: [
+      {
+        ...requestTarget,
+        id: 1,
+        channel_name: 'A1',
+      },
+    ],
+    created_at: 1,
+    updated_at: 1,
+  } as RoutingPolicy)
+
+  assert.equal(copiedPolicy.targets[0]?.cost_variant_key, '720p')
 })
 
 test('edits input modes and reference minimums in the submitted constraints', async () => {

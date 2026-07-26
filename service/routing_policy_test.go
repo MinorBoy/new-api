@@ -136,6 +136,9 @@ func TestSaveRoutingPolicyRejectsInvalidCostVariantKey(t *testing.T) {
 
 	_, err := service.SaveRoutingPolicy(0, request)
 	assertRoutingPolicyServiceError(t, err, "invalid_cost_variant_key", nil)
+	var serviceErr *service.RoutingPolicyServiceError
+	require.ErrorAs(t, err, &serviceErr)
+	assert.Equal(t, "targets.0.cost_variant_key", serviceErr.Field)
 }
 
 func routingPolicyWriteRequestForTest(view *service.RoutingPolicyView) service.RoutingPolicyWriteRequest {

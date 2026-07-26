@@ -66,6 +66,16 @@ func TestRoutingPolicyControllerReturnsStructuredOverlapError(t *testing.T) {
 	assert.JSONEq(t, `{"success":false,"message":"targets overlap at the same channel priority","code":"routing_target_overlap","data":{"field":"targets","target_indexes":[0,1]}}`, response.Body.String())
 }
 
+func TestRoutingPolicyControllerReturnsCostVariantValidationError(t *testing.T) {
+	prepareRoutingPolicyControllerTest(t)
+	request := controllerRoutingPolicyRequest(t)
+	request.Targets[0].CostVariantKey = "not a variant"
+
+	response := performRoutingPolicyRequest(t, http.MethodPost, "/", "", request, CreateRoutingPolicy)
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.JSONEq(t, `{"success":false,"message":"invalid cost variant key","code":"invalid_cost_variant_key","data":{"field":"targets.0.cost_variant_key"}}`, response.Body.String())
+}
+
 func prepareRoutingPolicyControllerTest(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

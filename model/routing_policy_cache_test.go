@@ -35,6 +35,21 @@ func TestInitRoutingPolicyCacheLoadsOnlyEnabledPoliciesAndTargets(t *testing.T) 
 	assert.False(t, ok)
 }
 
+func TestInitRoutingPolicyCacheDefaultsLegacyBlankCostVariant(t *testing.T) {
+	db := openRoutingTestDB(t)
+	prepareRoutingCacheTest(t, db)
+	policy := createCachedPolicy(t, modelrouting.Seedance20, true, 11, "provider-standard", true)
+	require.NoError(t, db.Model(&model.RouteTarget{}).
+		Where("policy_id = ?", policy.ID).
+		Update("cost_variant_key", "").Error)
+
+	require.NoError(t, model.InitRoutingPolicyCache())
+	snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
+	require.True(t, ok)
+	require.Len(t, snapshot.TargetsByChannel[11], 1)
+	assert.Equal(t, "default", snapshot.TargetsByChannel[11][0].CostVariantKey)
+}
+
 func TestRefreshRoutingPolicyCacheReplacesOnlyOneKey(t *testing.T) {
 	db := openRoutingTestDB(t)
 	prepareRoutingCacheTest(t, db)

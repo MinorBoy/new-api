@@ -350,59 +350,76 @@ func TestCostTaskSubmitPersistsDispatchAuthorizationBeforeTransport(t *testing.T
 }
 
 func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service.InitHttpClient()
-	withCostAccountingMode(t, types.CostAccountingStrict)
-	configureNewAPIVideoFixedPricing(t, "client-video")
-	setupTaskCostSubmitDB(t)
-
-	const (
-		channelID = 700010
-		modelName = "seedance-720p-token"
-	)
-	pricePerSecond := "0.1"
-	seedTaskCostSubmitRule(t, channelID, modelName, types.CostModePerDuration, types.CostRuleConfigV1{
-		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
-		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
-		PricePerSecond: &pricePerSecond, ChargeEvent: types.CostChargeSubmitAccepted,
-		MeterSource: types.CostMeterValidatedRequest,
-	})
-
-	upstreamCalled := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		upstreamCalled <- struct{}{}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"upstream-duration-task","status":"queued"}`))
-	}))
-	t.Cleanup(server.Close)
-	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
-	c.Set(string(constant.ContextKeyChannelId), channelID)
-	c.Set(string(constant.ContextKeyChannelName), "task supplier")
-	info.RequestId = "task-cost-validated-duration"
-	info.RequestURLPath = "/v1/video/generations"
-
-	result, taskErr := RelayTaskSubmit(c, info)
-
-	require.Nil(t, taskErr)
-	require.NotNil(t, result)
-	select {
-	case <-upstreamCalled:
-	default:
-		t.Fatal("upstream was not called")
+	tests := []struct {
+		name        string
+		channelType int
+	}{
+		{name: "NewAPIVideo", channelType: constant.ChannelTypeNewAPIVideo},
+		{name: "Lucen", channelType: constant.ChannelTypeLucen},
 	}
-	require.NotNil(t, info.CostAttempt)
-	var attempt model.CostAccountingAttempt
-	require.NoError(t, model.DB.First(&attempt, info.CostAttempt.AttemptID).Error)
-	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
-	assert.JSONEq(t, `{"source":"validated_request","duration_seconds":"5"}`, attempt.RequestMeterJSON)
-	require.NotNil(t, attempt.CostNanoUSD)
-	assert.Equal(t, int64(500_000_000), *attempt.CostNanoUSD)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			service.InitHttpClient()
+			withCostAccountingMode(t, types.CostAccountingStrict)
+			configureNewAPIVideoFixedPricing(t, "client-video")
+			setupTaskCostSubmitDB(t)
+
+			const (
+				channelID = 700010
+				modelName = "seedance-720p-token"
+			)
+			pricePerSecond := "0.1"
+			seedTaskCostSubmitRuleForChannel(t, channelID, tt.channelType, modelName, types.CostModePerDuration, types.CostRuleConfigV1{
+				Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+				RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+				PricePerSecond: &pricePerSecond, ChargeEvent: types.CostChargeSubmitAccepted,
+				MeterSource: types.CostMeterValidatedRequest,
+			})
+
+			upstreamCalled := make(chan struct{}, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamCalled <- struct{}{}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"upstream-duration-task","status":"queued"}`))
+			}))
+			t.Cleanup(server.Close)
+			c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
+			c.Set(string(constant.ContextKeyChannelType), tt.channelType)
+			c.Set(string(constant.ContextKeyChannelId), channelID)
+			c.Set(string(constant.ContextKeyChannelName), "task supplier")
+			info.RequestId = "task-cost-validated-duration"
+			info.RequestURLPath = "/v1/video/generations"
+
+			result, taskErr := RelayTaskSubmit(c, info)
+
+			require.Nil(t, taskErr)
+			require.NotNil(t, result)
+			select {
+			case <-upstreamCalled:
+			default:
+				t.Fatal("upstream was not called")
+			}
+			require.NotNil(t, info.CostAttempt)
+			var attempt model.CostAccountingAttempt
+			require.NoError(t, model.DB.First(&attempt, info.CostAttempt.AttemptID).Error)
+			assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+			assert.JSONEq(t, `{"source":"validated_request","duration_seconds":"5"}`, attempt.RequestMeterJSON)
+			require.NotNil(t, attempt.CostNanoUSD)
+			assert.Equal(t, int64(500_000_000), *attempt.CostNanoUSD)
+		})
+	}
 }
 
 func seedTaskCostSubmitRule(t *testing.T, channelID int, modelName string, mode types.CostMode, config types.CostRuleConfigV1) {
 	t.Helper()
+	seedTaskCostSubmitRuleForChannel(t, channelID, constant.ChannelTypeNewAPIVideo, modelName, mode, config)
+}
+
+func seedTaskCostSubmitRuleForChannel(t *testing.T, channelID, channelType int, modelName string, mode types.CostMode, config types.CostRuleConfigV1) {
+	t.Helper()
 	require.NoError(t, model.DB.Create(&model.Channel{
-		Id: channelID, Type: constant.ChannelTypeNewAPIVideo, Name: "task supplier", Key: "secret",
+		Id: channelID, Type: channelType, Name: "task supplier", Key: "secret",
 	}).Error)
 	normalized, err := service.NormalizeCostRuleConfig(mode, config)
 	require.NoError(t, err)

@@ -589,7 +589,10 @@ func TestDimensioTaskAdaptorIsTaskOnly(t *testing.T) {
 
 func TestNewAPIVideoTaskAdaptorIsTaskOnly(t *testing.T) {
 	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("60")))
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("62")))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeNewAPIVideo)
+	require.False(t, success)
+	_, success = common.ChannelType2APIType(constant.ChannelTypeLucen)
 	require.False(t, success)
 }
 
@@ -626,12 +629,18 @@ const newAPIVideoDetailedZeroUsage = `{
 	}
 }`
 
-func createNewAPIVideoQueryTask(t *testing.T) *model.Task {
+func createNewAPIVideoQueryTask(t *testing.T, channelTypes ...int) *model.Task {
 	t.Helper()
+	channelType := constant.ChannelTypeNewAPIVideo
+	taskID := "task_public_newapi"
+	if len(channelTypes) > 0 {
+		channelType = channelTypes[0]
+		taskID = "task_public_lucen"
+	}
 	now := time.Now().Unix()
 	task := &model.Task{
-		TaskID:     "task_public_newapi",
-		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		TaskID:     taskID,
+		Platform:   constant.TaskPlatform(strconv.Itoa(channelType)),
 		UserId:     7,
 		ChannelId:  14,
 		Group:      "secret-group",
@@ -651,6 +660,40 @@ func createNewAPIVideoQueryTask(t *testing.T) *model.Task {
 	}
 	require.NoError(t, model.DB.Create(task).Error)
 	return task
+}
+
+func TestLucenARKAndOpenAIQueriesUsePublicProjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := createNewAPIVideoQueryTask(t, constant.ChannelTypeLucen)
+
+	single, _ := gin.CreateTestContext(httptest.NewRecorder())
+	single.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/"+task.TaskID, nil)
+	single.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	single.Set("id", 7)
+	body, taskErr := SeedanceTaskFetch(single)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	assert.Contains(t, string(body), task.TaskID)
+	assert.Contains(t, string(body), `"model":"client-model"`)
+
+	list, _ := gin.CreateTestContext(httptest.NewRecorder())
+	list.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks", nil)
+	list.Set("id", 7)
+	body, taskErr = SeedanceTaskFetch(list)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	assert.Contains(t, string(body), task.TaskID)
+
+	openAI, _ := gin.CreateTestContext(httptest.NewRecorder())
+	openAI.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID, nil)
+	openAI.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	openAI.Set("id", 7)
+	body, taskErr = videoFetchByIDRespBodyBuilder(openAI)
+	require.Nil(t, taskErr)
+	assertNewAPIVideoPublicBody(t, body)
+	assert.Contains(t, string(body), task.TaskID)
+	assert.Contains(t, string(body), `"model":"client-model"`)
 }
 
 func TestNewAPIVideoOpenAIQueryUsesDirectPublicProjection(t *testing.T) {

@@ -105,6 +105,7 @@ export function getChannelTypeIcon(type: number): string {
     59: 'Dimensio', // Dimensio
     60: 'NewAPI', // NewAPIVideo
     61: 'Jimeng', // CLMM Mall
+    62: 'NewAPI', // Lucen
 
     // Tools & Platforms
     37: 'Dify', // Dify

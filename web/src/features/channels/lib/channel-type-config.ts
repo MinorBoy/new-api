@@ -185,9 +185,35 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Use client-visible Ark model names and map them to complete CLMM Mall model names.',
     },
   },
+  62: {
+    id: 62,
+    name: CHANNEL_TYPES[62],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://lucen.asia',
+    supportedModels: [
+      'seedance-480p-5s',
+      'seedance-480p-10s',
+      'seedance-480p-15s',
+      'seedance-720p-5s',
+      'seedance-720p-10s',
+      'seedance-720p-15s',
+      'seedance-1080p-5s',
+      'seedance-1080p-10s',
+      'seedance-1080p-15s',
+      'seedance-480p-token',
+      'seedance-720p-token',
+      'seedance-1080p-token',
+    ],
+    hints: {
+      baseUrl: 'Default: https://lucen.asia',
+      key: 'Enter the API key issued by Lucen',
+      models:
+        "Select Lucen models matching this channel's fixed-duration or token-billing API key",
+    },
+  },
 }
 
-const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)
@@ -251,6 +277,20 @@ export function getBaseUrlOnChannelTypeChange(
  */
 export function getChannelTypeHints(type: number) {
   return CHANNEL_TYPE_CONFIGS[type]?.hints || {}
+}
+
+export function getChannelModelOptions(
+  type: number,
+  availableModels: string[],
+  selectedModels: string[]
+): string[] {
+  return [
+    ...new Set([
+      ...(getChannelTypeConfig(type).supportedModels ?? []),
+      ...availableModels,
+      ...selectedModels,
+    ]),
+  ]
 }
 
 /**

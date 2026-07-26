@@ -84,6 +84,7 @@ func supportsGenericChannelTest(channelType int) bool {
 		constant.ChannelTypeDimensio,
 		constant.ChannelTypeNewAPIVideo,
 		constant.ChannelTypeClmmMall,
+		constant.ChannelTypeLucen,
 	}
 	return !lo.Contains(unsupportedChannelTypes, channelType)
 }

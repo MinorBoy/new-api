@@ -817,7 +817,7 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 	properties := task.Properties
 	data := task.Data
-	if task.PrivateData.Routing != nil && !includeAdmin {
+	if !includeAdmin && (isSeedanceTaskPlatform(task.Platform) || task.PrivateData.Routing != nil) {
 		properties = model.Properties{OriginModelName: task.Properties.OriginModelName}
 		data = nil
 	}

@@ -159,6 +159,26 @@ func TestTaskModel2DtoHidesCapabilityRouteFromUsers(t *testing.T) {
 	assert.Equal(t, task.Data, adminDTO.Data)
 }
 
+func TestTaskModel2DtoHidesMegaByAIDataWithoutRoutingFromUsers(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task-megabyai-private",
+		Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMegaByAI)),
+		Properties: model.Properties{
+			OriginModelName:   "client-video",
+			UpstreamModelName: "videos-mini",
+		},
+		Data: json.RawMessage(`{"task_id":"upstream-private-id","model":"videos-mini"}`),
+	}
+
+	userDTO := TaskModel2Dto(task, false)
+	assert.Equal(t, model.Properties{OriginModelName: "client-video"}, userDTO.Properties)
+	assert.Nil(t, userDTO.Data)
+
+	adminDTO := TaskModel2Dto(task, true)
+	assert.Equal(t, task.Properties, adminDTO.Properties)
+	assert.Equal(t, task.Data, adminDTO.Data)
+}
+
 func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()

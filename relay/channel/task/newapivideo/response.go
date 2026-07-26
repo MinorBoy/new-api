@@ -93,9 +93,20 @@ func (a *TaskAdaptor) ParseTaskPollingHTTPError(body []byte, statusCode int) *re
 			}
 		}
 	}
-	result := relaycommon.FailTaskInfo(message)
+	result := relaycommon.FailTaskInfo(sanitizeUpstreamFailure(message))
 	result.ErrorCode = code
 	return result
+}
+
+func sanitizeUpstreamFailure(message string) string {
+	return strings.TrimSpace(common.MaskSensitiveInfo(message))
+}
+
+func sanitizePublicTaskFailure(message string, upstreamTaskID string) string {
+	if upstreamTaskID != "" {
+		message = strings.ReplaceAll(message, upstreamTaskID, "[redacted]")
+	}
+	return sanitizeUpstreamFailure(message)
 }
 
 func parseTaskProjection(body []byte) (*parsedTask, error) {
@@ -170,6 +181,7 @@ func parseDetailedTask(envelope detailedEnvelope) (*parsedTask, error) {
 	if status == model.TaskStatusFailure {
 		parsed.Reason = envelope.Data.FailReason
 		if nested.Error != nil {
+			nested.Error = &upstreamError{Code: nested.Error.Code, Message: sanitizeUpstreamFailure(nested.Error.Message)}
 			parsed.ErrorCode = nested.Error.Code
 			if parsed.Reason == "" {
 				parsed.Reason = nested.Error.Message
@@ -181,6 +193,7 @@ func parseDetailedTask(envelope detailedEnvelope) (*parsedTask, error) {
 		if parsed.Reason == "" {
 			parsed.Reason = "task failed"
 		}
+		parsed.Reason = sanitizeUpstreamFailure(parsed.Reason)
 	}
 	return parsed, nil
 }
@@ -220,12 +233,13 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 	parsed.URL = directTaskVideoURL(direct)
 	if status == model.TaskStatusFailure {
 		if nested.Error != nil {
+			nested.Error = &upstreamError{Code: nested.Error.Code, Message: sanitizeUpstreamFailure(nested.Error.Message)}
 			parsed.ErrorCode = nested.Error.Code
 			parsed.Reason = nested.Error.Message
 		}
 		if parsed.Reason == "" && direct.Error != nil {
 			parsed.ErrorCode = direct.Error.Code
-			parsed.Reason = direct.Error.Message
+			parsed.Reason = sanitizeUpstreamFailure(direct.Error.Message)
 		}
 		if parsed.Reason == "" {
 			parsed.Reason = envelopeMessage
@@ -233,6 +247,7 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 		if parsed.Reason == "" {
 			parsed.Reason = "task failed"
 		}
+		parsed.Reason = sanitizeUpstreamFailure(parsed.Reason)
 	}
 	return parsed, nil
 }
@@ -421,7 +436,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 		if code == "" {
 			code = "task_failed"
 		}
-		video.Error = &dto.OpenAIVideoError{Code: code, Message: message}
+		video.Error = &dto.OpenAIVideoError{Code: code, Message: sanitizePublicTaskFailure(message, task.GetUpstreamTaskID())}
 	}
 	return common.Marshal(video)
 }
@@ -479,15 +494,26 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if (response.Content == nil || response.Content.VideoURL == "") && task.PrivateData.ResultURL != "" {
 		response.Content = &arkVideoContent{VideoURL: task.PrivateData.ResultURL}
 	}
-	if task.Status == model.TaskStatusFailure && (response.Error == nil || response.Error.Message == "") {
-		message := parsed.Reason
-		if message == "" {
-			message = task.FailReason
+	if task.Status == model.TaskStatusFailure {
+		if response.Error != nil {
+			response.Error = &upstreamError{
+				Code:    response.Error.Code,
+				Message: sanitizePublicTaskFailure(response.Error.Message, task.GetUpstreamTaskID()),
+			}
 		}
-		if message == "" {
-			message = "task failed"
+		if response.Error == nil || response.Error.Message == "" {
+			message := parsed.Reason
+			if message == "" {
+				message = task.FailReason
+			}
+			if message == "" {
+				message = "task failed"
+			}
+			response.Error = &upstreamError{
+				Code:    parsed.ErrorCode,
+				Message: sanitizePublicTaskFailure(message, task.GetUpstreamTaskID()),
+			}
 		}
-		response.Error = &upstreamError{Code: parsed.ErrorCode, Message: message}
 	}
 	return common.Marshal(response)
 }
@@ -524,6 +550,7 @@ func parsePublicTaskProjection(task *model.Task) (*parsedTask, error) {
 	if parsed.Reason == "" {
 		parsed.Reason = "task failed"
 	}
+	parsed.Reason = sanitizeUpstreamFailure(parsed.Reason)
 	return parsed, nil
 }
 

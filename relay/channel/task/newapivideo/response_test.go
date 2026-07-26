@@ -263,6 +263,23 @@ func TestParseTaskPollingHTTPError(t *testing.T) {
 	assert.Nil(t, adaptor.ParseTaskPollingHTTPError([]byte(`{}`), 503))
 }
 
+func TestParseTaskFailureSanitizesUpstreamMessage(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"status":"failed",
+		"error":{
+			"code":"provider_error",
+			"message":"Authorization: Bearer secret-token; asset https://assets.example/private.mp4?signature=signed-secret"
+		}
+	}`))
+	require.NoError(t, err)
+
+	assert.Equal(t, "provider_error", result.ErrorCode)
+	assert.Contains(t, result.Reason, "Bearer ***")
+	assert.Contains(t, result.Reason, "signature=***")
+	assert.NotContains(t, result.Reason, "secret-token")
+	assert.NotContains(t, result.Reason, "signed-secret")
+}
+
 func TestConvertToOpenAIVideoUsesOnlyPublicTaskFacts(t *testing.T) {
 	task := reportTaskFixture()
 	body, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)
@@ -333,6 +350,33 @@ func TestPublicConvertersFallbackToLocalPollingFailure(t *testing.T) {
 	require.NotNil(t, arkResponse.Error)
 	assert.Equal(t, "not_found", arkResponse.Error.Code)
 	assert.Equal(t, "task not found or expired", arkResponse.Error.Message)
+}
+
+func TestPublicConvertersSanitizePrivateFailureDetails(t *testing.T) {
+	task := reportTaskFixture()
+	task.Status = model.TaskStatusFailure
+	task.FailReason = "sanitized fallback"
+	task.PrivateData.ResultURL = ""
+	task.Data = json.RawMessage(`{
+		"status":"failed",
+		"error":{
+			"code":"provider_error",
+			"message":"Authorization: Bearer secret-token; asset https://assets.example/private.mp4?signature=signed-secret; task upstream-secret"
+		}
+	}`)
+
+	openAIBody, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)
+	require.NoError(t, err)
+	arkBody, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
+	require.NoError(t, err)
+
+	for _, body := range [][]byte{openAIBody, arkBody} {
+		assert.Contains(t, string(body), "Bearer ***")
+		assert.Contains(t, string(body), "[redacted]")
+		for _, privateValue := range []string{"secret-token", "signed-secret", "upstream-secret"} {
+			assert.NotContains(t, string(body), privateValue)
+		}
+	}
 }
 
 func reportTaskFixture() *model.Task {

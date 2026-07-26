@@ -262,7 +262,8 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if audioCount > 0 && imageCount == 0 && videoCount == 0 {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "audio input requires an image or video"}
 	}
-	if (firstCount > 0 || lastCount > 0) && (referenceImageCount > 0 || videoCount > 0 || audioCount > 0) {
+	singleFrameIsReference := profile.singleFrameImagesAreReferences && firstCount == 1 && lastCount == 0
+	if (firstCount > 0 || lastCount > 0) && (referenceImageCount > 0 || videoCount > 0 || audioCount > 0) && !singleFrameIsReference {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "first/last frame content cannot mix with reference media"}
 	}
 	if firstCount > 1 || lastCount > 1 || (lastCount > 0 && (firstCount != 1 || lastIndex < firstIndex)) {
@@ -320,9 +321,10 @@ func validMediaURL(value string, profile protocolProfile) bool {
 		return true
 	}
 	protection := common.SSRFProtection{
-		DomainFilterMode: false,
-		DomainList:       []string{"localhost", "*.localhost", "local", "*.local"},
-		IpFilterMode:     false,
+		DomainFilterMode:       false,
+		DomainList:             []string{"localhost", "*.localhost", "local", "*.local"},
+		IpFilterMode:           false,
+		ApplyIPFilterForDomain: true,
 	}
 	return protection.ValidateURL(media.Value) == nil
 }

@@ -114,9 +114,9 @@ func TestBuildMegaByAIRequest(t *testing.T) {
 		"model":"doubao-seedance-2-0-260128",
 		"content":[
 			{"type":"text","text":"camera pushes in"},
-			{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}},
-			{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/ref.mp4"}},
-			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}
 		],
 		"duration":8,"ratio":"16:9","resolution":"720p"
 	}`), megaByAIProtocolProfile())
@@ -127,9 +127,9 @@ func TestBuildMegaByAIRequest(t *testing.T) {
 	assert.JSONEq(t, `{
 		"model":"videos-mini","prompt":"camera pushes in","duration":8,
 		"ratio":"16:9","resolution":"720p",
-		"referenceImages":["https://x/ref.jpg"],
-		"referenceVideos":["https://x/ref.mp4"],
-		"referenceAudios":["https://x/ref.mp3"]
+		"referenceImages":["https://8.8.8.8/ref.jpg"],
+		"referenceVideos":["https://8.8.8.8/ref.mp4"],
+		"referenceAudios":["https://8.8.8.8/ref.mp3"]
 	}`, string(body))
 }
 
@@ -139,20 +139,44 @@ func TestBuildMegaByAIRequestTreatsSingleFrameImageAsReference(t *testing.T) {
 			request, err := parseARKRequest([]byte(fmt.Sprintf(`{
 				"model":"client","content":[
 					{"type":"text","text":"text"},
-					{"type":"image_url","role":%q,"image_url":{"url":"https://x/ref.jpg"}}
+					{"type":"image_url","role":%q,"image_url":{"url":"https://8.8.8.8/ref.jpg"}}
 				],"duration":5}`, role)), megaByAIProtocolProfile())
 			require.NoError(t, err)
 			body, err := buildMegaByAIRequest(request, "videos-standard")
 			require.NoError(t, err)
-			assert.JSONEq(t, `{"model":"videos-standard","prompt":"text","duration":5,"referenceImages":["https://x/ref.jpg"]}`, string(body))
+			assert.JSONEq(t, `{"model":"videos-standard","prompt":"text","duration":5,"referenceImages":["https://8.8.8.8/ref.jpg"]}`, string(body))
+		})
+	}
+}
+
+func TestBuildMegaByAIRequestAllowsSingleFrameImageWithReferenceMedia(t *testing.T) {
+	for _, role := range []string{"", "first_frame"} {
+		t.Run(fmt.Sprintf("role_%s", role), func(t *testing.T) {
+			request, err := parseARKRequest([]byte(fmt.Sprintf(`{
+				"model":"client","content":[
+					{"type":"text","text":"text"},
+					{"type":"image_url","role":%q,"image_url":{"url":"https://8.8.8.8/ref.jpg"}},
+					{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},
+					{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}
+				]}`, role)), megaByAIProtocolProfile())
+			require.NoError(t, err)
+
+			body, err := buildMegaByAIRequest(request, "videos-standard")
+			require.NoError(t, err)
+			assert.JSONEq(t, `{
+				"model":"videos-standard","prompt":"text",
+				"referenceImages":["https://8.8.8.8/ref.jpg"],
+				"referenceVideos":["https://8.8.8.8/ref.mp4"],
+				"referenceAudios":["https://8.8.8.8/ref.mp3"]
+			}`, string(body))
 		})
 	}
 }
 
 func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
-	images := strings.Repeat(`,{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}}`, 10)
-	videos := strings.Repeat(`,{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/ref.mp4"}}`, 4)
-	audios := strings.Repeat(`,{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}`, 4)
+	images := strings.Repeat(`,{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}}`, 10)
+	videos := strings.Repeat(`,{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}}`, 4)
+	audios := strings.Repeat(`,{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}`, 4)
 	tests := []struct {
 		name string
 		body string
@@ -162,17 +186,17 @@ func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
 		{name: "duration above maximum", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duration":16}`, code: "InvalidParameter.duration"},
 		{name: "unsupported ratio", body: `{"model":"m","content":[{"type":"text","text":"text"}],"ratio":"4:3"}`, code: "InvalidParameter.ratio"},
 		{name: "unsupported resolution", body: `{"model":"m","content":[{"type":"text","text":"text"}],"resolution":"1080p"}`, code: "InvalidParameter.resolution"},
-		{name: "last frame", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"last_frame","image_url":{"url":"https://x/last.jpg"}}]}`, code: "InvalidParameter.content"},
+		{name: "last frame", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"last_frame","image_url":{"url":"https://8.8.8.8/last.jpg"}}]}`, code: "InvalidParameter.content"},
 		{name: "non HTTP media", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"asset://ref"}}]}`, code: "InvalidParameter.content"},
 		{name: "loopback image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://127.0.0.1/ref.jpg"}}]}`, code: "InvalidParameter.content"},
 		{name: "link-local image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://169.254.169.254/latest/meta-data"}}]}`, code: "InvalidParameter.content"},
 		{name: "localhost image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://localhost/ref.jpg"}}]}`, code: "InvalidParameter.content"},
-		{name: "audio only", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}]}`, code: "InvalidParameter.content"},
+		{name: "audio only", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}]}`, code: "InvalidParameter.content"},
 		{name: "too many images", body: `{"model":"m","content":[{"type":"text","text":"text"}` + images + `]}`, code: "InvalidParameter.content"},
 		{name: "too many videos", body: `{"model":"m","content":[{"type":"text","text":"text"}` + videos + `]}`, code: "InvalidParameter.content"},
-		{name: "too many audios", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}}` + audios + `]}`, code: "InvalidParameter.content"},
-		{name: "audio conflict", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
-		{name: "unsupported control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"callback_url":"https://x/callback"}`, code: "InvalidParameter.callback_url"},
+		{name: "too many audios", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}}` + audios + `]}`, code: "InvalidParameter.content"},
+		{name: "audio conflict", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
+		{name: "unsupported control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"callback_url":"https://8.8.8.8/callback"}`, code: "InvalidParameter.callback_url"},
 		{name: "misspelled control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duraton":5}`, code: "InvalidParameter.duraton"},
 	}
 
@@ -193,6 +217,20 @@ func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
 			assert.Error(t, buildErr, "invalid input must not produce an upstream body")
 		})
 	}
+}
+
+func TestMegaByAIRejectsHostnameResolvingToLoopback(t *testing.T) {
+	_, err := parseARKRequest([]byte(`{
+		"model":"m",
+		"content":[
+			{"type":"text","text":"text"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://127.0.0.1.nip.io/ref.jpg"}}
+		]
+	}`), megaByAIProtocolProfile())
+	require.Error(t, err)
+	var requestErr *arkRequestError
+	require.ErrorAs(t, err, &requestErr)
+	assert.Equal(t, "InvalidParameter.content", requestErr.Code)
 }
 
 func TestMegaByAIExplicitGenerateAudioWithoutReferenceAudioIsAcceptedAndNotMapped(t *testing.T) {
@@ -221,18 +259,18 @@ func TestBuildMegaByAIRequestDefensivelyRevalidates(t *testing.T) {
 func TestMegaByAIValidatesReferenceDurationsBeforeBuilding(t *testing.T) {
 	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
 	service.SetVideoMetadataClient(megaByAIVideoMetadataClient{durations: map[string]int64{
-		"https://x/a.mp4": 9000,
-		"https://x/b.mp4": 6000,
+		"https://8.8.8.8/a.mp4": 9000,
+		"https://8.8.8.8/b.mp4": 6000,
 	}})
 	service.SetReferenceAudioDurationResolver(megaByAIAudioDurationResolver{duration: 15000})
 	t.Cleanup(func() { service.SetReferenceAudioDurationResolver(nil) })
 
 	body := `{"model":"client","content":[
 		{"type":"text","text":"text"},
-		{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}},
-		{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/a.mp4"}},
-		{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/b.mp4"}},
-		{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/a.wav"}}
+		{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},
+		{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/a.mp4"}},
+		{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/b.mp4"}},
+		{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/a.wav"}}
 	],"duration":8,"ratio":"1:1","resolution":"480p"}`
 	c, info := megaByAIValidationContext(body)
 	adaptor := NewMegaByAITaskAdaptor()
@@ -242,14 +280,14 @@ func TestMegaByAIValidatesReferenceDurationsBeforeBuilding(t *testing.T) {
 	require.NoError(t, err)
 	upstreamBody, err := io.ReadAll(reader)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"model":"videos-mini","prompt":"text","duration":8,"ratio":"1:1","resolution":"480p","referenceImages":["https://x/ref.jpg"],"referenceVideos":["https://x/a.mp4","https://x/b.mp4"],"referenceAudios":["https://x/a.wav"]}`, string(upstreamBody))
+	assert.JSONEq(t, `{"model":"videos-mini","prompt":"text","duration":8,"ratio":"1:1","resolution":"480p","referenceImages":["https://8.8.8.8/ref.jpg"],"referenceVideos":["https://8.8.8.8/a.mp4","https://8.8.8.8/b.mp4"],"referenceAudios":["https://8.8.8.8/a.wav"]}`, string(upstreamBody))
 }
 
 func TestMegaByAIMediaValidationIsMemoizedAcrossRetries(t *testing.T) {
 	var videoCalls atomic.Int32
 	var audioCalls atomic.Int32
 	service.SetVideoMetadataClient(megaByAIVideoMetadataClient{
-		durations: map[string]int64{"https://x/a.mp4": 1000}, calls: &videoCalls,
+		durations: map[string]int64{"https://8.8.8.8/a.mp4": 1000}, calls: &videoCalls,
 	})
 	service.SetReferenceAudioDurationResolver(megaByAIAudioDurationResolver{duration: 1000, calls: &audioCalls})
 	t.Cleanup(func() {
@@ -259,8 +297,8 @@ func TestMegaByAIMediaValidationIsMemoizedAcrossRetries(t *testing.T) {
 
 	body := `{"model":"client","content":[
 		{"type":"text","text":"text"},
-		{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/a.mp4"}},
-		{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/a.wav"}}
+		{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/a.mp4"}},
+		{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/a.wav"}}
 	]}`
 	c, info := megaByAIValidationContext(body)
 	adaptor := NewMegaByAITaskAdaptor()
@@ -290,7 +328,7 @@ func TestMegaByAIRejectsReferenceDurationOverLimit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service.SetVideoMetadataClient(megaByAIVideoMetadataClient{durations: map[string]int64{"https://x/a.mp4": tt.videoMS}, err: tt.videoError})
+			service.SetVideoMetadataClient(megaByAIVideoMetadataClient{durations: map[string]int64{"https://8.8.8.8/a.mp4": tt.videoMS}, err: tt.videoError})
 			service.SetReferenceAudioDurationResolver(megaByAIAudioDurationResolver{duration: tt.audioMS, err: tt.audioError})
 			t.Cleanup(func() {
 				service.SetVideoMetadataClient(nil)
@@ -299,8 +337,8 @@ func TestMegaByAIRejectsReferenceDurationOverLimit(t *testing.T) {
 
 			body := `{"model":"client","content":[
 				{"type":"text","text":"text"},
-				{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/a.mp4"}},
-				{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/a.wav"}}
+				{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/a.mp4"}},
+				{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/a.wav"}}
 			],"duration":8}`
 			c, info := megaByAIValidationContext(body)
 			adaptor := NewMegaByAITaskAdaptor()

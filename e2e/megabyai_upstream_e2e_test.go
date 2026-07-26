@@ -155,9 +155,9 @@ func TestMegaByAIARKLifecycleAndPreConsumeValidationE2E(t *testing.T) {
 	requestBody := `{
 		"model":"client-video","content":[
 			{"type":"text","text":"multimodal MegaByAI acceptance"},
-			{"type":"image_url","role":"reference_image","image_url":{"url":"https://assets.example/ref.jpg"}},
-			{"type":"video_url","role":"reference_video","video_url":{"url":"https://assets.example/ref.mp4"}},
-			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://assets.example/ref.wav"}}
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.wav"}}
 		],"duration":8,"ratio":"16:9","resolution":"720p","generate_audio":true
 	}`
 
@@ -179,9 +179,9 @@ func TestMegaByAIARKLifecycleAndPreConsumeValidationE2E(t *testing.T) {
 	assert.JSONEq(t, `{
 		"model":"videos-mini","prompt":"multimodal MegaByAI acceptance","duration":8,
 		"ratio":"16:9","resolution":"720p",
-		"referenceImages":["https://assets.example/ref.jpg"],
-		"referenceVideos":["https://assets.example/ref.mp4"],
-		"referenceAudios":["https://assets.example/ref.wav"]
+		"referenceImages":["https://8.8.8.8/ref.jpg"],
+		"referenceVideos":["https://8.8.8.8/ref.mp4"],
+		"referenceAudios":["https://8.8.8.8/ref.wav"]
 	}`, string(requests[0].Body))
 	assert.NotContains(t, string(requests[0].Body), "generate_audio")
 

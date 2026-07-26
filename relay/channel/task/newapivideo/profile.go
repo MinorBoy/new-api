@@ -32,6 +32,7 @@ type protocolProfile struct {
 	ignoredARKFields                   map[string]struct{}
 	allowEmbeddedMedia                 bool
 	requirePublicHTTPMedia             bool
+	singleFrameImagesAreReferences     bool
 	useRoutingDurationDefault          bool
 	submitPath                         string
 	pollPath                           string
@@ -78,14 +79,15 @@ func lucenProtocolProfile() protocolProfile {
 
 func megaByAIProtocolProfile() protocolProfile {
 	return protocolProfile{
-		channelName:            ChannelNameMegaByAI,
-		modelList:              []string{"videos-standard", "videos-fast", "videos-mini"},
-		submitPath:             "/v1/videos",
-		pollPath:               "/v1/videos/{task_id}",
-		contentType:            "application/json",
-		requestDialect:         videoRequestDialectMegaReferenceArrays,
-		requirePublicHTTPMedia: true,
-		defaultDurationSeconds: 5,
+		channelName:                    ChannelNameMegaByAI,
+		modelList:                      []string{"videos-standard", "videos-fast", "videos-mini"},
+		submitPath:                     "/v1/videos",
+		pollPath:                       "/v1/videos/{task_id}",
+		contentType:                    "application/json",
+		requestDialect:                 videoRequestDialectMegaReferenceArrays,
+		requirePublicHTTPMedia:         true,
+		singleFrameImagesAreReferences: true,
+		defaultDurationSeconds:         5,
 	}
 }
 

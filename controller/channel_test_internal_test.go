@@ -218,7 +218,16 @@ func TestSupportsGenericChannelTestRejectsDimensio(t *testing.T) {
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeLucen))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeMegaByAI))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeCangyuan))
+	require.False(t, supportsGenericChannelTest(constant.ChannelTypePaipu))
 	require.True(t, supportsGenericChannelTest(constant.ChannelTypeOpenAI))
+}
+
+func TestValidateChannelNormalizesPaipuBaseURL(t *testing.T) {
+	baseURL := " https://override.paipu.example/// "
+	channel := &model.Channel{Type: constant.ChannelTypePaipu, BaseURL: &baseURL}
+	require.NoError(t, validateChannel(channel, false))
+	require.NotNil(t, channel.BaseURL)
+	require.Equal(t, "https://override.paipu.example", *channel.BaseURL)
 }
 
 func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {

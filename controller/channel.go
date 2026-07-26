@@ -491,6 +491,10 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
 	}
+	if channel.Type == constant.ChannelTypePaipu && channel.BaseURL != nil {
+		normalized := strings.TrimRight(strings.TrimSpace(*channel.BaseURL), "/")
+		channel.BaseURL = &normalized
+	}
 
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {

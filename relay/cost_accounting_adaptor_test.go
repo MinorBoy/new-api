@@ -73,6 +73,9 @@ func TestTaskCostCapabilitiesAreRegisteredPerPlatform(t *testing.T) {
 		{name: "cangyuan video", channel: constant.ChannelTypeCangyuan, expected: []types.CostMeterSource{
 			types.CostMeterValidatedRequest, types.CostMeterUpstreamActual, types.CostMeterUpstreamUsage,
 		}},
+		{name: "paipu video", channel: constant.ChannelTypePaipu, expected: []types.CostMeterSource{
+			types.CostMeterValidatedRequest, types.CostMeterUpstreamActual, types.CostMeterUpstreamUsage,
+		}},
 		{name: "doubao usage", channel: constant.ChannelTypeDoubaoVideo, expected: []types.CostMeterSource{
 			types.CostMeterUpstreamUsage,
 		}},

@@ -640,6 +640,18 @@ func TestCangyuanTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
 	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeCangyuan))
 }
 
+func TestPaipuTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypePaipu)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "Paipu", adaptor.GetChannelName())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypePaipu))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypePaipu))
+}
+
 const newAPIVideoDetailedZeroUsage = `{
 	"code":"success",
 	"message":"",

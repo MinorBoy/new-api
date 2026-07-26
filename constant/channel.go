@@ -62,7 +62,8 @@ const (
 	ChannelTypeLucen          = 62 // Lucen Seedance task protocol
 	ChannelTypeMegaByAI       = 63 // MegaByAI Seedance task protocol
 	ChannelTypeCangyuan       = 64 // Cangyuan Seedance task protocol
-	ChannelTypeDummy          = 65 // this one is only for count, do not add any channel after this
+	ChannelTypePaipu          = 65 // Paipu Seedance task protocol
+	ChannelTypeDummy          = 66 // this one is only for count, do not add any channel after this
 
 )
 
@@ -132,6 +133,7 @@ var ChannelBaseURLs = []string{
 	"https://lucen.asia",                        //62 Lucen
 	"https://newapi.megabyai.cc",                //63 MegaByAI
 	"https://ai.cangyuansuanli.cn",              //64 Cangyuan
+	"https://api.paipu.net",                     //65 Paipu
 }
 
 var ChannelTypeNames = map[int]string{
@@ -196,6 +198,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeLucen:          "Lucen",
 	ChannelTypeMegaByAI:       "MegaByAI",
 	ChannelTypeCangyuan:       "Cangyuan",
+	ChannelTypePaipu:          "Paipu",
 }
 
 func GetChannelTypeName(channelType int) string {

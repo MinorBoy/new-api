@@ -11,6 +11,7 @@ import {
 } from '../src/features/channels/constants'
 import {
   getBaseUrlOnChannelTypeChange,
+  getChannelModelOptions,
   getChannelTypeConfig,
   getChannelTypeHints,
   getDefaultBaseUrl,
@@ -212,5 +213,22 @@ describe('Lucen channel configuration', () => {
       models:
         "Select Lucen models matching this channel's fixed-duration or token-billing API key",
     })
+  })
+
+  test('exposes configured Lucen models when the upstream catalog is empty', () => {
+    expect(getChannelModelOptions(62, [], [])).toEqual([
+      'seedance-480p-5s',
+      'seedance-480p-10s',
+      'seedance-480p-15s',
+      'seedance-720p-5s',
+      'seedance-720p-10s',
+      'seedance-720p-15s',
+      'seedance-1080p-5s',
+      'seedance-1080p-10s',
+      'seedance-1080p-15s',
+      'seedance-480p-token',
+      'seedance-720p-token',
+      'seedance-1080p-token',
+    ])
   })
 })

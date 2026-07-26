@@ -220,3 +220,13 @@ func TestGenericARKProfileRejectsEmbeddedMedia(t *testing.T) {
 	_, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}}]}`), genericProtocolProfile())
 	require.Error(t, err)
 }
+
+func TestLucenRejectsUnknownFieldsButIgnoresApprovedOptionalFields(t *testing.T) {
+	_, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}],"duraton":10}`), lucenProtocolProfile())
+	var requestErr *arkRequestError
+	require.ErrorAs(t, err, &requestErr)
+	assert.Equal(t, "InvalidParameter.duraton", requestErr.Code)
+
+	_, err = parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}],"callback_url":"https://client.example/callback","return_last_frame":true,"priority":7,"execution_expires_after":3600}`), lucenProtocolProfile())
+	require.NoError(t, err)
+}

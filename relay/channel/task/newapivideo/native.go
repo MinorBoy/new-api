@@ -43,9 +43,15 @@ func parseARKRequest(body []byte, profiles ...protocolProfile) (arkRequest, erro
 		return arkRequest{}, &arkRequestError{Code: "InvalidParameter", Message: "request body contains invalid parameters"}
 	}
 	for field := range fields {
-		if _, accepted := acceptedARKFields[field]; !accepted && !profile.ignoreUnsupportedOptionalARKFields {
-			return arkRequest{}, &arkRequestError{Code: "InvalidParameter." + field, Message: "field is not supported by this channel"}
+		if _, accepted := acceptedARKFields[field]; accepted {
+			continue
 		}
+		if profile.ignoreUnsupportedOptionalARKFields {
+			if _, ignored := profile.ignoredARKFields[field]; ignored {
+				continue
+			}
+		}
+		return arkRequest{}, &arkRequestError{Code: "InvalidParameter." + field, Message: "field is not supported by this channel"}
 	}
 
 	var request arkRequest

@@ -97,8 +97,11 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		return nil
 	}
 	state, err := getRequestState(c)
-	if err != nil || state.ARK == nil {
+	if err != nil {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+	}
+	if state.ARK == nil {
+		return nil
 	}
 	if !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
 		upstreamModel := ""
@@ -114,6 +117,7 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		if duration := routingDurationSeconds(c); duration > 0 {
 			value := decimal.NewFromInt(int64(duration))
 			state.Seconds = &value
+			state.ARK.Duration = common.GetPointer(duration)
 			c.Set(requestStateContextKey, state)
 			taskRequest, requestErr := relaycommon.GetTaskRequest(c)
 			if requestErr == nil {

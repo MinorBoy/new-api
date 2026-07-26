@@ -164,6 +164,7 @@ import {
   extractMappingSourceModels,
   getBaseUrlOnChannelTypeChange,
   getChannelTypeHints,
+  getChannelModelOptions,
   hasModelConfigChanged,
   findMissingModelsInMapping,
   validateModelMappingJson,
@@ -1139,12 +1140,15 @@ export function ChannelMutateDrawer({
 
   // Transform models to multi-select options
   const modelOptions = useMemo(() => {
-    const allModels = new Set([...allModelsList, ...currentModelsArray])
-    return [...allModels].map((model) => ({
+    return getChannelModelOptions(
+      currentType,
+      allModelsList,
+      currentModelsArray
+    ).map((model) => ({
       value: model,
       label: model,
     }))
-  }, [allModelsList, currentModelsArray])
+  }, [allModelsList, currentModelsArray, currentType])
 
   const modelMappingGuardrail = useMemo<ModelMappingGuardrail>(() => {
     if (!currentModelMapping?.trim()) {

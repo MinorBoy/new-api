@@ -222,3 +222,31 @@ func TestLucenUsesRoutingDurationForOmittedDurationBilling(t *testing.T) {
 	require.Nil(t, taskErr)
 	assert.Equal(t, 10, seconds)
 }
+
+func TestLucenEncodesRoutingDurationWhenArkDurationIsOmitted(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client","content":[{"type":"text","text":"text"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-720p-token"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	common.SetContextKey(c, constant.ContextKeyRoutingFacts, modelrouting.Facts{DurationSeconds: 10})
+	adaptor := NewLucenTaskAdaptor()
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	require.Nil(t, adaptor.ValidateBillingRequest(c, info))
+
+	reader, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	body, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"seedance-720p-token","prompt":"text","seconds":"10"}`, string(body))
+}
+
+func TestLucenBillingValidationAllowsOpenAIRequests(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", strings.NewReader(`{"model":"client","prompt":"text","seconds":"10"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-720p-token"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor := NewLucenTaskAdaptor()
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Nil(t, adaptor.ValidateBillingRequest(c, info))
+}

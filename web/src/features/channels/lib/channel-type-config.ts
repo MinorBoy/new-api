@@ -279,6 +279,20 @@ export function getChannelTypeHints(type: number) {
   return CHANNEL_TYPE_CONFIGS[type]?.hints || {}
 }
 
+export function getChannelModelOptions(
+  type: number,
+  availableModels: string[],
+  selectedModels: string[]
+): string[] {
+  return [
+    ...new Set([
+      ...(getChannelTypeConfig(type).supportedModels ?? []),
+      ...availableModels,
+      ...selectedModels,
+    ]),
+  ]
+}
+
 /**
  * Validate API key format for channel type
  */

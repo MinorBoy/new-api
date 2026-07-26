@@ -6,6 +6,7 @@ type protocolProfile struct {
 	channelName                        string
 	modelList                          []string
 	ignoreUnsupportedOptionalARKFields bool
+	ignoredARKFields                   map[string]struct{}
 	allowEmbeddedMedia                 bool
 	useRoutingDurationDefault          bool
 }
@@ -24,8 +25,14 @@ func lucenProtocolProfile() protocolProfile {
 			"seedance-480p-token", "seedance-720p-token", "seedance-1080p-token",
 		},
 		ignoreUnsupportedOptionalARKFields: true,
-		allowEmbeddedMedia:                 true,
-		useRoutingDurationDefault:          true,
+		ignoredARKFields: map[string]struct{}{
+			"callback_url":            {},
+			"return_last_frame":       {},
+			"priority":                {},
+			"execution_expires_after": {},
+		},
+		allowEmbeddedMedia:        true,
+		useRoutingDurationDefault: true,
 	}
 }
 

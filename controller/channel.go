@@ -599,6 +599,10 @@ type AddChannelRequest struct {
 	Channel                   *model.Channel        `json:"channel"`
 }
 
+type AddChannelResponse struct {
+	ChannelIDs []int `json:"channel_ids"`
+}
+
 func getVertexArrayKeys(keys string) ([]string, error) {
 	if keys == "" {
 		return nil, nil
@@ -732,6 +736,12 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	channelIDs := make([]int, 0, len(channels))
+	for index := range channels {
+		if channels[index].Id > 0 {
+			channelIDs = append(channelIDs, channels[index].Id)
+		}
+	}
 	recordManageAudit(c, "channel.create", map[string]interface{}{
 		"name":  addChannelRequest.Channel.Name,
 		"type":  addChannelRequest.Channel.Type,
@@ -740,6 +750,7 @@ func AddChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data":    AddChannelResponse{ChannelIDs: channelIDs},
 	})
 	return
 }

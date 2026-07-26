@@ -10,14 +10,15 @@ type ConfigImportUploadRequest struct {
 }
 
 type ConfigImportBindingRequest struct {
-	BatchRef string                     `json:"batch_ref"`
 	Bindings []ConfigImportBindingInput `json:"bindings"`
 }
 
 type ConfigImportBindingInput struct {
-	ItemBusinessID   string                          `json:"item_business_id"`
-	Action           types.ConfigImportBindingAction `json:"action"`
-	TargetBusinessID string                          `json:"target_business_id,omitempty"`
+	LineRef              string                          `json:"line_ref"`
+	Action               types.ConfigImportBindingAction `json:"action"`
+	ChannelID            *int                            `json:"channel_id,omitempty"`
+	CredentialsConfirmed bool                            `json:"credentials_confirmed"`
+	Reason               string                          `json:"reason,omitempty"`
 }
 
 type ConfigImportResolutionRequest struct {

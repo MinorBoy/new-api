@@ -314,6 +314,43 @@ func TestAddChannelRejectsSecureMultiToSingle(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+func TestAddChannelReturnsCreatedIDs(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	channel := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Name:   "Batch supplier",
+		Key:    "key-one\nkey-two",
+		Models: "gpt-test",
+		Group:  "default",
+	}
+	requestBody, err := common.Marshal(AddChannelRequest{Mode: "batch", Channel: channel})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/", bytes.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	AddChannel(ctx)
+
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ChannelIDs []int `json:"channel_ids"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Len(t, response.Data.ChannelIDs, 2)
+	for _, channelID := range response.Data.ChannelIDs {
+		assert.Positive(t, channelID)
+	}
+	var count int64
+	require.NoError(t, db.Model(&model.Channel{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count)
+}
+
 func TestUpdateChannelValidatesMergedSecureConfiguration(t *testing.T) {
 	tests := []struct {
 		name        string

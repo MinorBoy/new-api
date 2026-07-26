@@ -21,6 +21,7 @@ import { api, type ApiRequestConfig } from '@/lib/api'
 
 import type {
   AddChannelRequest,
+  AddChannelResponse,
   BatchDeleteParams,
   BatchSetTagParams,
   Channel,
@@ -119,7 +120,7 @@ export async function getChannelOps(): Promise<ChannelOpsResponse> {
  */
 export async function createChannel(
   data: AddChannelRequest
-): Promise<{ success: boolean; message?: string }> {
+): Promise<AddChannelResponse> {
   const res = await api.post('/api/channel', data, channelActionConfig())
   return res.data
 }

@@ -34,9 +34,11 @@ type megaByAIMediaValidation struct {
 
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
-	apiKey  string
-	baseURL string
-	profile protocolProfile
+	apiKey             string
+	baseURL            string
+	profile            protocolProfile
+	profileErr         error
+	requestContentType string
 }
 
 func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
@@ -69,17 +71,34 @@ type upstreamError struct {
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
+	a.requestContentType = ""
+	a.profileErr = nil
 	if info == nil {
 		return
 	}
 	a.apiKey = info.ApiKey
 	a.baseURL = strings.TrimRight(info.ChannelBaseUrl, "/")
+	if a.profile.channelName == ChannelNameSecure {
+		profile, err := secureProtocolProfile(info.ChannelOtherSettings.SecureVideoGroup)
+		if err != nil {
+			a.profile = protocolProfile{
+				channelName: ChannelNameSecure,
+				modelList:   append([]string(nil), secureModels...),
+			}
+			a.profileErr = err
+			return
+		}
+		a.profile = profile
+	}
 }
 
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("new-api video requests must use application/json"), "unsupported_media_type", http.StatusUnsupportedMediaType)
+	}
+	if c.GetBool(common.KeySeedanceOfficialAPI) && a.profileErr != nil {
+		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
 	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
@@ -93,6 +112,25 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		profile := a.activeProfile()
 		if taskErr := validateARKRequest(c, info, body, profile); taskErr != nil {
 			return taskErr
+		}
+		if profile.secureRequest != nil {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			if err := validateSecureRequest(*state.ARK, *profile.secureRequest, ""); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "internal_error", http.StatusInternalServerError)
+			}
+			if profile.secureRequest.group == dto.SecureVideoGroupOverseas {
+				if taskErr := validateSecureOverseasReferenceVideos(c.Request.Context(), *state.ARK); taskErr != nil {
+					return taskErr
+				}
+			}
+			return nil
 		}
 		if profile.requestDialect == videoRequestDialectTextJSON {
 			state, err := getRequestState(c)
@@ -194,7 +232,31 @@ func validateMegaByAIMedia(ctx context.Context, request arkRequest) *dto.TaskErr
 // duration from capability-routing facts, so provider constraints cannot be bypassed
 // by a client alias or discovered only while building the upstream body.
 func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+	if a.profileErr != nil {
+		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
+	}
 	profile := a.activeProfile()
+	if profile.secureRequest != nil {
+		state, err := getRequestState(c)
+		if err != nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		if state.ARK == nil {
+			return nil
+		}
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+		}
+		if err := validateSecureRequest(*state.ARK, *profile.secureRequest, upstreamModel); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "internal_error", http.StatusInternalServerError)
+		}
+		return nil
+	}
 	if profile.channelName != ChannelNameLucen && (profile.textRequest == nil || !profile.textRequest.enforceModelResolutionSuffix) {
 		return nil
 	}
@@ -252,17 +314,31 @@ func routingDurationSeconds(c *gin.Context) int {
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	if a.profileErr != nil {
+		return "", a.profileErr
+	}
 	return a.baseURL + a.activeProfile().submitPath, nil
 }
 
 func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
-	req.Header.Set("Content-Type", a.activeProfile().contentType)
+	if a.profileErr != nil {
+		return a.profileErr
+	}
+	contentType := a.activeProfile().contentType
+	if a.requestContentType != "" {
+		contentType = a.requestContentType
+	}
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 	return nil
 }
 
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	if a.profileErr != nil {
+		return nil, a.profileErr
+	}
+	a.requestContentType = ""
 	modelName := ""
 	if info != nil {
 		modelName = info.UpstreamModelName
@@ -275,6 +351,25 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
 		profile := a.activeProfile()
 		switch profile.requestDialect {
+		case videoRequestDialectSecureDiscount, videoRequestDialectSecureOverseas, videoRequestDialectSecureEnterprise:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if profile.secureRequest == nil {
+				return nil, fmt.Errorf("Secure request profile is missing")
+			}
+			switch profile.requestDialect {
+			case videoRequestDialectSecureDiscount:
+				body, a.requestContentType, err = buildSecureDiscountRequest(*state.ARK, modelName, *profile.secureRequest)
+			case videoRequestDialectSecureOverseas:
+				body, a.requestContentType, err = buildSecureOverseasRequest(*state.ARK, modelName, *profile.secureRequest)
+			case videoRequestDialectSecureEnterprise:
+				body, err = buildSecureEnterpriseRequest(*state.ARK, modelName, *profile.secureRequest)
+			}
 		case videoRequestDialectTextJSON:
 			state, stateErr := getRequestState(c)
 			if stateErr != nil {
@@ -372,6 +467,9 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 }
 
 func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy string) (*http.Response, error) {
+	if a.profileErr != nil {
+		return nil, a.profileErr
+	}
 	taskID, ok := body["task_id"].(string)
 	if !ok || strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("invalid task_id")

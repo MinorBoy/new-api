@@ -1,6 +1,11 @@
 package newapivideo
 
-import relaycommon "github.com/QuantumNous/new-api/relay/common"
+import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+)
 
 const ChannelNameLucen = "Lucen"
 
@@ -10,12 +15,17 @@ const ChannelNameCangyuan = "Cangyuan"
 
 const ChannelNamePaipu = "Paipu"
 
+const ChannelNameSecure = "Secure"
+
 type videoRequestDialect string
 
 const (
 	videoRequestDialectNewAPIGenerations   videoRequestDialect = "newapi_generations"
 	videoRequestDialectMegaReferenceArrays videoRequestDialect = "mega_reference_arrays"
 	videoRequestDialectTextJSON            videoRequestDialect = "text_json"
+	videoRequestDialectSecureDiscount      videoRequestDialect = "secure_discount"
+	videoRequestDialectSecureOverseas      videoRequestDialect = "secure_overseas"
+	videoRequestDialectSecureEnterprise    videoRequestDialect = "secure_enterprise"
 )
 
 type textRequestProfile struct {
@@ -43,6 +53,7 @@ type protocolProfile struct {
 	requestDialect                     videoRequestDialect
 	defaultDurationSeconds             int
 	textRequest                        *textRequestProfile
+	secureRequest                      *secureRequestProfile
 }
 
 func genericProtocolProfile() protocolProfile {
@@ -155,6 +166,36 @@ func paipuProtocolProfile() protocolProfile {
 	}
 }
 
+var secureModels = []string{"video-2.0-fast", "video-2.0-mini", "video-2.0-pro"}
+
+func secureProtocolProfile(group dto.SecureVideoGroup) (protocolProfile, error) {
+	profile := protocolProfile{
+		channelName:                    ChannelNameSecure,
+		modelList:                      append([]string(nil), secureModels...),
+		requirePublicHTTPMedia:         true,
+		singleFrameImagesAreReferences: true,
+		secureRequest:                  &secureRequestProfile{group: group},
+	}
+	switch group {
+	case dto.SecureVideoGroupDiscount:
+		profile.submitPath = "/api/generate-video"
+		profile.pollPath = "/api/task/{task_id}"
+		profile.requestDialect = videoRequestDialectSecureDiscount
+	case dto.SecureVideoGroupOverseas:
+		profile.submitPath = "/api/generate-video"
+		profile.pollPath = "/api/task/{task_id}"
+		profile.requestDialect = videoRequestDialectSecureOverseas
+	case dto.SecureVideoGroupEnterprise:
+		profile.submitPath = "/v1/videos"
+		profile.pollPath = "/v1/videos/{task_id}"
+		profile.contentType = "application/json"
+		profile.requestDialect = videoRequestDialectSecureEnterprise
+	default:
+		return protocolProfile{}, fmt.Errorf("invalid secure_video_group: %s", group)
+	}
+	return profile.normalized(), nil
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -185,6 +226,13 @@ func NewCangyuanTaskAdaptor() *TaskAdaptor {
 
 func NewPaipuTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: paipuProtocolProfile()}
+}
+
+func NewSecureTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: protocolProfile{
+		channelName: ChannelNameSecure,
+		modelList:   append([]string(nil), secureModels...),
+	}}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

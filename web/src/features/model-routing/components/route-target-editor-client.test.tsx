@@ -291,6 +291,30 @@ test('routing target cost variants normalize valid keys and reject invalid keys'
   )
 })
 
+test('routing target forms normalize blank cost variants to default', () => {
+  const policy = createEmptyPolicyForm()
+  for (const costVariantKey of ['', ' \t ']) {
+    const target: RouteTargetFormValues = {
+      ...createEmptyTarget(),
+      channel_id: 1,
+      name: 'target',
+      upstream_model: 'vendor-model',
+      cost_variant_key: costVariantKey,
+    }
+
+    const parsed = routeTargetFormSchema.parse(target)
+    assert.equal(parsed.cost_variant_key, 'default')
+
+    const request = toWriteRequest({
+      ...policy,
+      group_name: 'default',
+      enabled: true,
+      targets: [target],
+    })
+    assert.equal(request.targets[0]?.cost_variant_key, 'default')
+  }
+})
+
 test('routing target cost variants survive write and response mappings', () => {
   const target = createEmptyTarget() as unknown as Record<string, unknown>
   target.channel_id = 1

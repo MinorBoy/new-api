@@ -306,10 +306,10 @@ func prepareCostAttemptServiceDB(t *testing.T) {
 	CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
 		return completeCostCapabilities()
 	}
-	InvalidateCostCoverage(0, "")
+	InvalidateCostCoverage(0, "", "")
 	t.Cleanup(func() {
 		CostCapabilityLookup = previousLookup
-		InvalidateCostCoverage(0, "")
+		InvalidateCostCoverage(0, "", "")
 	})
 }
 

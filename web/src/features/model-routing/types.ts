@@ -111,11 +111,16 @@ export const costVariantKeySchema = z
   .string()
   .trim()
   .toLowerCase()
-  .regex(
-    /^[a-z0-9][a-z0-9._-]{0,63}$/,
-    t(
-      'Cost variant key must use 1-64 lowercase letters, digits, dots, hyphens, or underscores'
-    )
+  .transform((value) => (value === '' ? 'default' : value))
+  .pipe(
+    z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9._-]{0,63}$/,
+        t(
+          'Cost variant key must use 1-64 lowercase letters, digits, dots, hyphens, or underscores'
+        )
+      )
   )
 
 const costVariantKeyApiSchema = costVariantKeySchema.default('default')

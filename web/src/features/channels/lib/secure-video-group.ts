@@ -12,3 +12,18 @@ export type SecureVideoGroup =
 export function shouldShowSecureVideoGroup(type: number): boolean {
   return type === SECURE_CHANNEL_TYPE
 }
+
+export function filterSecureAddModeOptions<T extends { value: string }>(
+  type: number,
+  options: readonly T[]
+): readonly T[] {
+  if (type !== SECURE_CHANNEL_TYPE) return options
+  return options.filter((option) => option.value !== 'multi_to_single')
+}
+
+export function shouldLockSecureVideoIdentity(
+  isEditing: boolean,
+  originalType?: number
+): boolean {
+  return isEditing && originalType === SECURE_CHANNEL_TYPE
+}

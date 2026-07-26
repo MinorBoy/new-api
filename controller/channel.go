@@ -503,6 +503,9 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if err := channel.GetOtherSettings().ValidateSecureVideoGroup(channel.Type); err != nil {
 		return err
 	}
+	if channel.Type == constant.ChannelTypeSecure && channel.ChannelInfo.IsMultiKey {
+		return fmt.Errorf("Secure channels do not support multi-key mode")
+	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
@@ -633,6 +636,15 @@ func AddChannel(c *gin.Context) {
 	err := c.ShouldBindJSON(&addChannelRequest)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if addChannelRequest.Channel != nil &&
+		addChannelRequest.Channel.Type == constant.ChannelTypeSecure &&
+		addChannelRequest.Mode == "multi_to_single" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Secure channels do not support multi_to_single mode",
+		})
 		return
 	}
 
@@ -1028,15 +1040,6 @@ func UpdateChannel(c *gin.Context) {
 	}
 	clearChannelReadOnlyFields(&channel, requestData)
 
-	// 使用统一的校验函数
-	if err := validateChannel(&channel.Channel, false); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
-	// Preserve existing ChannelInfo to ensure multi-key channels keep correct state even if the client does not send ChannelInfo in the request.
 	originChannel, err := model.GetChannelById(channel.Id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -1045,6 +1048,55 @@ func UpdateChannel(c *gin.Context) {
 		})
 		return
 	}
+	if _, settingsProvided := requestData["settings"]; settingsProvided && strings.TrimSpace(channel.OtherSettings) == "" {
+		// GORM skips zero-value strings in Updates. Persist an explicit empty
+		// object so clearing settings cannot leave provider-specific fields behind.
+		channel.OtherSettings = "{}"
+	}
+
+	// Validate the effective record, not the sparse request. A partial update
+	// must not bypass invariants held by fields omitted from the payload.
+	effectiveChannel := *originChannel
+	if _, ok := requestData["type"]; ok {
+		effectiveChannel.Type = channel.Type
+	}
+	if _, ok := requestData["key"]; ok {
+		effectiveChannel.Key = channel.Key
+	}
+	if _, ok := requestData["base_url"]; ok {
+		effectiveChannel.BaseURL = channel.BaseURL
+	}
+	if _, ok := requestData["other"]; ok {
+		effectiveChannel.Other = channel.Other
+	}
+	if _, ok := requestData["setting"]; ok {
+		effectiveChannel.Setting = channel.Setting
+	}
+	if _, ok := requestData["settings"]; ok {
+		effectiveChannel.OtherSettings = channel.OtherSettings
+	}
+	if err := validateChannel(&effectiveChannel, false); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if _, ok := requestData["base_url"]; ok {
+		channel.BaseURL = effectiveChannel.BaseURL
+	}
+	if originChannel.Type == constant.ChannelTypeSecure {
+		originGroup := strings.TrimSpace(string(originChannel.GetOtherSettings().SecureVideoGroup))
+		effectiveGroup := strings.TrimSpace(string(effectiveChannel.GetOtherSettings().SecureVideoGroup))
+		if effectiveChannel.Type != constant.ChannelTypeSecure || effectiveGroup != originGroup {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "secure_video_group cannot be changed after a Secure channel is created",
+			})
+			return
+		}
+	}
+
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	if _, settingProvided := requestData["setting"]; settingProvided {

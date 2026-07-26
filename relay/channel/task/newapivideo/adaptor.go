@@ -62,12 +62,16 @@ type upstreamSubmitResponse struct {
 type upstreamErrorEnvelope struct {
 	Code    string         `json:"code"`
 	Message string         `json:"message"`
+	ID      string         `json:"id,omitempty"`
+	TaskID  string         `json:"task_id,omitempty"`
 	Error   *upstreamError `json:"error,omitempty"`
 }
 
 type upstreamError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
+	ID      string `json:"id,omitempty"`
+	TaskID  string `json:"task_id,omitempty"`
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
@@ -499,7 +503,7 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 func (a *TaskAdaptor) ParseTaskError(body []byte, statusCode int) *dto.TaskError {
 	var response upstreamErrorEnvelope
 	if err := common.Unmarshal(body, &response); err != nil {
-		return service.TaskErrorWrapper(fmt.Errorf("%s", string(body)), "fail_to_fetch_task", statusCode)
+		return service.TaskErrorWrapper(fmt.Errorf("upstream returned invalid response"), "fail_to_fetch_task", statusCode)
 	}
 	code, message := response.Code, response.Message
 	if response.Error != nil {
@@ -511,7 +515,7 @@ func (a *TaskAdaptor) ParseTaskError(body []byte, statusCode int) *dto.TaskError
 		}
 	}
 	if code == "" && message == "" {
-		return service.TaskErrorWrapper(fmt.Errorf("%s", string(body)), "fail_to_fetch_task", statusCode)
+		return service.TaskErrorWrapper(fmt.Errorf("upstream returned invalid response"), "fail_to_fetch_task", statusCode)
 	}
 	if message == "" {
 		message = code
@@ -519,5 +523,18 @@ func (a *TaskAdaptor) ParseTaskError(body []byte, statusCode int) *dto.TaskError
 	if code == "" {
 		code = "upstream_error"
 	}
+	privateValues := []string{a.apiKey, response.ID, response.TaskID}
+	if response.Error != nil {
+		privateValues = append(privateValues, response.Error.ID, response.Error.TaskID)
+	}
+	for _, privateValue := range privateValues {
+		if privateValue == "" {
+			continue
+		}
+		code = strings.ReplaceAll(code, privateValue, "[redacted]")
+		message = strings.ReplaceAll(message, privateValue, "[redacted]")
+	}
+	code = sanitizeUpstreamFailure(code)
+	message = sanitizeUpstreamFailure(message)
 	return service.TaskErrorWrapper(fmt.Errorf("%s", message), code, statusCode)
 }

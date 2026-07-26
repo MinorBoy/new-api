@@ -4371,6 +4371,7 @@
     "Secure": "Secure",
     "Secure & Reliable": "Безопасно и надежно",
     "Secure by default": "Secure by default",
+    "Secure channels do not support multi-key-to-single mode": "Каналы Secure не поддерживают объединение нескольких ключей в один канал",
     "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure поддерживает только задачи. Создайте отдельные каналы для ключей со скидкой, зарубежного и корпоративного.",
     "Secure video group": "Группа видео Secure",
     "Secured": "Защищено",

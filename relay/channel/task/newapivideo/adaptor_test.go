@@ -157,6 +157,49 @@ func TestParseTaskError(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, invalid.StatusCode)
 }
 
+func TestParseTaskErrorSanitizesStructuredUpstreamFailure(t *testing.T) {
+	adaptor := &TaskAdaptor{apiKey: "sk-provider-private"}
+	body := []byte(`{
+		"code":"top-level-code",
+		"message":"top-level-message",
+		"task_id":"upstream-private-id",
+		"private_diagnostic":"raw-body-private",
+		"error":{
+			"code":"secure_invalid_duration",
+			"message":"api key sk-provider-private; Authorization: Bearer bearer-private; task upstream-private-id; asset https://assets.example/private.mp4?signature=signed-private"
+		}
+	}`)
+
+	taskErr := adaptor.ParseTaskError(body, http.StatusUnprocessableEntity)
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "secure_invalid_duration", taskErr.Code)
+	assert.Equal(t, http.StatusUnprocessableEntity, taskErr.StatusCode)
+	assert.Contains(t, taskErr.Message, "Bearer ***")
+	assert.Contains(t, taskErr.Message, "signature=***")
+	for _, privateValue := range []string{
+		"sk-provider-private",
+		"bearer-private",
+		"upstream-private-id",
+		"signed-private",
+		"raw-body-private",
+	} {
+		assert.NotContains(t, taskErr.Message, privateValue)
+		assert.NotContains(t, taskErr.Error.Error(), privateValue)
+	}
+}
+
+func TestParseTaskErrorDoesNotExposeUnparsedResponseBody(t *testing.T) {
+	body := []byte(`not-json api key sk-provider-private; Authorization: Bearer bearer-private; task upstream-private-id; asset https://assets.example/private.mp4?signature=signed-private; raw-body-private`)
+
+	taskErr := (&TaskAdaptor{apiKey: "sk-provider-private"}).ParseTaskError(body, http.StatusBadGateway)
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "fail_to_fetch_task", taskErr.Code)
+	assert.Equal(t, "upstream returned invalid response", taskErr.Message)
+	assert.EqualError(t, taskErr.Error, "upstream returned invalid response")
+}
+
 func TestTaskAdaptorRejectsUnsupportedMediaType(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", strings.NewReader(`{"model":"m","prompt":"text"}`))

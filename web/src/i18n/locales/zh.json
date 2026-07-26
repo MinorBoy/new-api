@@ -4371,6 +4371,7 @@
     "Secure": "Secure",
     "Secure & Reliable": "安全可靠",
     "Secure by default": "默认安全",
+    "Secure channels do not support multi-key-to-single mode": "Secure 渠道不支持多 Key 合并为单渠道模式",
     "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure 仅支持任务接口。请分别为特价、海外和企业 Key 创建独立渠道。",
     "Secure video group": "Secure 视频分组",
     "Secured": "已保护",

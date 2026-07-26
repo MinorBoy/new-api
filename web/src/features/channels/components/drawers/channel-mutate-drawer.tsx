@@ -173,6 +173,8 @@ import {
 import {
   SECURE_CHANNEL_TYPE,
   SECURE_VIDEO_GROUP_OPTIONS,
+  filterSecureAddModeOptions,
+  shouldLockSecureVideoIdentity,
   shouldShowSecureVideoGroup,
 } from '../../lib/secure-video-group'
 import {
@@ -723,6 +725,10 @@ export function ChannelMutateDrawer({
   const keyMode = form.watch('key_mode')
   const currentGroups = form.watch('group')
   const currentType = form.watch('type')
+  const secureChannelIdentityLocked = shouldLockSecureVideoIdentity(
+    isEditing,
+    channelData?.data?.type
+  )
   const currentStatus = form.watch('status')
   const currentBaseUrl = form.watch('base_url')
   const currentKey = form.watch('key')
@@ -860,13 +866,12 @@ export function ChannelMutateDrawer({
   const isChannelDetailLoading = isEditing && isChannelLoading
   const supportsMultiKeyAddMode =
     currentType !== 57 && !(currentType === 41 && vertexKeyType === 'api_key')
-  const addModeOptions = useMemo(
-    () =>
-      supportsMultiKeyAddMode
-        ? ADD_MODE_OPTIONS
-        : ADD_MODE_OPTIONS.filter((option) => option.value === 'single'),
-    [supportsMultiKeyAddMode]
-  )
+  const addModeOptions = useMemo(() => {
+    const availableOptions = supportsMultiKeyAddMode
+      ? ADD_MODE_OPTIONS
+      : ADD_MODE_OPTIONS.filter((option) => option.value === 'single')
+    return filterSecureAddModeOptions(currentType, availableOptions)
+  }, [currentType, supportsMultiKeyAddMode])
 
   const advancedCustomStats = useMemo(
     () => getAdvancedCustomStats(currentAdvancedCustom),
@@ -1313,14 +1318,18 @@ export function ChannelMutateDrawer({
   }, [currentBaseUrl, currentType, form])
 
   useEffect(() => {
-    if (isEditing || supportsMultiKeyAddMode) return
-    if (multiKeyMode && multiKeyMode !== 'single') {
+    if (isEditing) return
+    const unsupportedMode =
+      (!supportsMultiKeyAddMode && multiKeyMode !== 'single') ||
+      (currentType === SECURE_CHANNEL_TYPE &&
+        multiKeyMode === 'multi_to_single')
+    if (unsupportedMode) {
       form.setValue('multi_key_mode', 'single', {
         shouldDirty: true,
         shouldValidate: true,
       })
     }
-  }, [form, isEditing, multiKeyMode, supportsMultiKeyAddMode])
+  }, [currentType, form, isEditing, multiKeyMode, supportsMultiKeyAddMode])
 
   // Validate base_url - warn if it ends with /v1
   useEffect(() => {
@@ -1986,7 +1995,9 @@ export function ChannelMutateDrawer({
                       <ChannelBasicSection>
                         <div className='grid gap-4 sm:grid-cols-2'>
                           <fieldset
-                            disabled={sensitiveLocked}
+                            disabled={
+                              sensitiveLocked || secureChannelIdentityLocked
+                            }
                             className='min-w-0 disabled:opacity-60'
                           >
                             <FormField
@@ -2077,6 +2088,7 @@ export function ChannelMutateDrawer({
                               <FormItem>
                                 <FormLabel>{t('Secure video group')}</FormLabel>
                                 <Select
+                                  disabled={secureChannelIdentityLocked}
                                   value={field.value}
                                   onValueChange={field.onChange}
                                 >

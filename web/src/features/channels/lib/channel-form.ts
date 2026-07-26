@@ -258,6 +258,16 @@ export const channelFormSchema = z
         'Secure video group is required for Secure channels'
       )
     }
+    if (
+      data.type === SECURE_CHANNEL_TYPE &&
+      data.multi_key_mode === 'multi_to_single'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['multi_key_mode'],
+        message: 'Secure channels do not support multi-key-to-single mode',
+      })
+    }
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
       addRequiredIssue(
         ctx,

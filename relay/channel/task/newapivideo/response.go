@@ -262,6 +262,9 @@ func directTaskVideoURL(task directTask) string {
 			return value
 		}
 	}
+	if len(task.Output) > 0 && strings.TrimSpace(task.Output[0].URL) != "" {
+		return task.Output[0].URL
+	}
 	if task.Metadata != nil {
 		for _, value := range []string{
 			task.Metadata.URL,

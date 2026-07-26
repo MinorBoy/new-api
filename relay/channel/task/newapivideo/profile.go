@@ -170,11 +170,10 @@ var secureModels = []string{"video-2.0-fast", "video-2.0-mini", "video-2.0-pro"}
 
 func secureProtocolProfile(group dto.SecureVideoGroup) (protocolProfile, error) {
 	profile := protocolProfile{
-		channelName:                    ChannelNameSecure,
-		modelList:                      append([]string(nil), secureModels...),
-		requirePublicHTTPMedia:         true,
-		singleFrameImagesAreReferences: true,
-		secureRequest:                  &secureRequestProfile{group: group},
+		channelName:            ChannelNameSecure,
+		modelList:              append([]string(nil), secureModels...),
+		requirePublicHTTPMedia: true,
+		secureRequest:          &secureRequestProfile{group: group},
 	}
 	switch group {
 	case dto.SecureVideoGroupDiscount:

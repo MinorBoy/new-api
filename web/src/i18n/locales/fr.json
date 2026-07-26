@@ -4371,6 +4371,7 @@
     "Secure": "Secure",
     "Secure & Reliable": "Sécurisé et fiable",
     "Secure by default": "Secure by default",
+    "Secure channels do not support multi-key-to-single mode": "Les canaux Secure ne prennent pas en charge le regroupement de plusieurs clés dans un seul canal",
     "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure est réservé aux tâches. Créez des canaux distincts pour les clés à prix réduit, internationales et d’entreprise.",
     "Secure video group": "Groupe vidéo Secure",
     "Secured": "Sécurisé",

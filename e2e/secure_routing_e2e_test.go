@@ -25,9 +25,10 @@ import (
 const secureRoutingGroup = "secure-routing"
 
 type secureRoutingRecorder struct {
-	mu       sync.Mutex
-	taskID   string
-	requests []secureE2ERequest
+	mu           sync.Mutex
+	taskID       string
+	responseCode int
+	requests     []secureE2ERequest
 }
 
 func (r *secureRoutingRecorder) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -40,8 +41,14 @@ func (r *secureRoutingRecorder) ServeHTTP(writer http.ResponseWriter, request *h
 		contentType:   request.Header.Get("Content-Type"),
 		body:          append([]byte(nil), body...),
 	})
+	responseCode := r.responseCode
 	r.mu.Unlock()
 	writer.Header().Set("Content-Type", "application/json")
+	if responseCode != 0 {
+		writer.WriteHeader(responseCode)
+		_, _ = writer.Write([]byte(`{"error":{"code":"temporary_upstream_failure","message":"retry later"}}`))
+		return
+	}
 	_, _ = writer.Write([]byte(`{"task_id":"` + r.taskID + `","status":"queued"}`))
 }
 
@@ -322,5 +329,35 @@ func TestSecureRoutingUsesOnlyCapabilityMatchingGroupE2E(t *testing.T) {
 			require.NotNil(t, task.PrivateData.Routing)
 			assert.Equal(t, "video-2.0-pro", task.PrivateData.Routing.UpstreamModel)
 		})
+	}
+}
+
+func TestSecureRoutingRetryStaysWithinCapabilityMatchingGroupsE2E(t *testing.T) {
+	env := setupSecureRoutingE2E(t)
+	enterprise := env.recorders[dto.SecureVideoGroupEnterprise]
+	enterprise.mu.Lock()
+	enterprise.responseCode = http.StatusInternalServerError
+	enterprise.mu.Unlock()
+
+	previousRetryTimes := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
+
+	body := `{"model":"` + modelrouting.Seedance20 + `","content":[{"type":"text","text":"retry text route"}],"duration":8,"ratio":"16:9","resolution":"720p"}`
+	status, response := performJSONRequest(
+		t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", body,
+	)
+
+	require.Equal(t, http.StatusOK, status, string(response))
+	assert.Len(t, env.recorders[dto.SecureVideoGroupEnterprise].snapshot(), 1)
+	assert.Len(t, env.recorders[dto.SecureVideoGroupOverseas].snapshot(), 1)
+	assert.Empty(t, env.recorders[dto.SecureVideoGroupDiscount].snapshot())
+	for _, privateValue := range []string{
+		env.keys[dto.SecureVideoGroupEnterprise],
+		env.keys[dto.SecureVideoGroupOverseas],
+		"temporary_upstream_failure",
+		"secure_video_group",
+	} {
+		assert.NotContains(t, string(response), privateValue)
 	}
 }

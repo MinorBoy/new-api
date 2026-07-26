@@ -4371,6 +4371,7 @@
     "Secure": "Secure",
     "Secure & Reliable": "セキュア＆信頼性",
     "Secure by default": "Secure by default",
+    "Secure channels do not support multi-key-to-single mode": "Secure チャンネルでは複数キーを1つのチャンネルにまとめるモードは使用できません",
     "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure はタスク専用です。特価、海外、エンタープライズのキーごとに別のチャンネルを作成してください。",
     "Secure video group": "Secure 動画グループ",
     "Secured": "保護済み",

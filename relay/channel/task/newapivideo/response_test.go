@@ -222,6 +222,19 @@ func TestParseMegaByAIDirectTaskURLPrecedence(t *testing.T) {
 	}
 }
 
+func TestParseTaskResultUsesFirstOutputURL(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"status":"completed",
+		"output":[
+			{"url":"https://x/secure-result.mp4"},
+			{"url":"https://x/ignored.mp4"}
+		]
+	}`))
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://x/secure-result.mp4", result.Url)
+}
+
 func TestParseTaskResultFailurePrecedence(t *testing.T) {
 	tests := []struct {
 		name string

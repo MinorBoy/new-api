@@ -264,6 +264,214 @@ func TestValidateChannelSecureVideoGroup(t *testing.T) {
 		channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
 		require.ErrorContains(t, validateChannel(channel, false), "secure_video_group is only valid for Secure")
 	})
+
+	t.Run("secure rejects multi key channel", func(t *testing.T) {
+		channel := &model.Channel{
+			Type: constant.ChannelTypeSecure,
+			ChannelInfo: model.ChannelInfo{
+				IsMultiKey: true,
+			},
+		}
+		channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+		require.ErrorContains(t, validateChannel(channel, false), "Secure channels do not support multi-key mode")
+	})
+}
+
+func TestAddChannelRejectsSecureMultiToSingle(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	channel := &model.Channel{
+		Type:   constant.ChannelTypeSecure,
+		Name:   "Secure discount",
+		Key:    "key-one\nkey-two",
+		Models: "video-2.0-pro",
+		Group:  "default",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+	requestBody, err := common.Marshal(AddChannelRequest{
+		Mode:         "multi_to_single",
+		MultiKeyMode: constant.MultiKeyModeRandom,
+		Channel:      channel,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/", bytes.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	AddChannel(ctx)
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "Secure channels do not support multi_to_single mode")
+	var count int64
+	require.NoError(t, db.Model(&model.Channel{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestUpdateChannelValidatesMergedSecureConfiguration(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     func(channel *model.Channel) map[string]any
+		wantSuccess bool
+		wantMessage string
+		wantType    int
+		wantGroup   dto.SecureVideoGroup
+	}{
+		{
+			name: "partial update retains existing secure configuration",
+			request: func(channel *model.Channel) map[string]any {
+				return map[string]any{"id": channel.Id, "name": "renamed"}
+			},
+			wantSuccess: true,
+			wantType:    constant.ChannelTypeSecure,
+			wantGroup:   dto.SecureVideoGroupDiscount,
+		},
+		{
+			name: "secure group is immutable",
+			request: func(channel *model.Channel) map[string]any {
+				return map[string]any{
+					"id":       channel.Id,
+					"type":     constant.ChannelTypeSecure,
+					"settings": `{"secure_video_group":"enterprise"}`,
+				}
+			},
+			wantMessage: "secure_video_group cannot be changed",
+			wantType:    constant.ChannelTypeSecure,
+			wantGroup:   dto.SecureVideoGroupDiscount,
+		},
+		{
+			name: "changing secure channel type cannot bypass group immutability",
+			request: func(channel *model.Channel) map[string]any {
+				return map[string]any{"id": channel.Id, "type": constant.ChannelTypeOpenAI, "settings": ""}
+			},
+			wantMessage: "secure_video_group cannot be changed",
+			wantType:    constant.ChannelTypeSecure,
+			wantGroup:   dto.SecureVideoGroupDiscount,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := setupModelListControllerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Log{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+			channel := &model.Channel{
+				Type:   constant.ChannelTypeSecure,
+				Name:   "Secure discount",
+				Key:    "secret",
+				Models: "video-2.0-pro",
+				Group:  "default",
+				Status: common.ChannelStatusEnabled,
+			}
+			channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+			require.NoError(t, db.Create(channel).Error)
+			requestBody, err := common.Marshal(test.request(channel))
+			require.NoError(t, err)
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("role", common.RoleRootUser)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(requestBody))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			UpdateChannel(ctx)
+
+			var response struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, test.wantSuccess, response.Success)
+			if test.wantMessage != "" {
+				assert.Contains(t, response.Message, test.wantMessage)
+			}
+
+			var persisted model.Channel
+			require.NoError(t, db.First(&persisted, channel.Id).Error)
+			assert.Equal(t, test.wantType, persisted.Type)
+			assert.Equal(t, test.wantGroup, persisted.GetOtherSettings().SecureVideoGroup)
+		})
+	}
+}
+
+func TestUpdateChannelClearsExplicitEmptySettings(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	channel := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Name:   "legacy contaminated channel",
+		Key:    "secret",
+		Models: "gpt-4o",
+		Group:  "default",
+		Status: common.ChannelStatusEnabled,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+	require.NoError(t, db.Create(channel).Error)
+	requestBody, err := common.Marshal(map[string]any{
+		"id":       channel.Id,
+		"type":     constant.ChannelTypeOpenAI,
+		"settings": "",
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleRootUser)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	UpdateChannel(ctx)
+
+	var response struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	var persisted model.Channel
+	require.NoError(t, db.First(&persisted, channel.Id).Error)
+	assert.Equal(t, "{}", persisted.OtherSettings)
+	assert.Empty(t, persisted.GetOtherSettings().SecureVideoGroup)
+}
+
+func TestUpdateChannelRejectsPartialUpdateWhenExistingConfigurationIsInvalid(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	channel := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Name:   "legacy contaminated channel",
+		Key:    "secret",
+		Models: "gpt-4o",
+		Group:  "default",
+		Status: common.ChannelStatusEnabled,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+	require.NoError(t, db.Create(channel).Error)
+	requestBody, err := common.Marshal(map[string]any{
+		"id":   channel.Id,
+		"name": "rename must not bypass validation",
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleRootUser)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	UpdateChannel(ctx)
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "secure_video_group is only valid for Secure")
+	var persisted model.Channel
+	require.NoError(t, db.First(&persisted, channel.Id).Error)
+	assert.Equal(t, "legacy contaminated channel", persisted.Name)
 }
 
 func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {

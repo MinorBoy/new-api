@@ -4371,6 +4371,7 @@
     "Secure": "Secure",
     "Secure & Reliable": "An toàn & Đáng tin cậy",
     "Secure by default": "Secure by default",
+    "Secure channels do not support multi-key-to-single mode": "Kênh Secure không hỗ trợ chế độ gộp nhiều khóa vào một kênh",
     "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure chỉ hỗ trợ tác vụ. Hãy tạo các kênh riêng cho khóa ưu đãi, quốc tế và doanh nghiệp.",
     "Secure video group": "Nhóm video Secure",
     "Secured": "Đã bảo vệ",

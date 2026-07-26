@@ -122,7 +122,10 @@ type directTask struct {
 	URL         string `json:"url"`
 	VideoURL    string `json:"video_url"`
 	ResultURL   string `json:"result_url"`
-	Metadata    *struct {
+	Output      []struct {
+		URL string `json:"url,omitempty"`
+	} `json:"output,omitempty"`
+	Metadata *struct {
 		URL        string `json:"url,omitempty"`
 		ContentURL string `json:"content_url,omitempty"`
 		LocalURL   string `json:"local_url,omitempty"`

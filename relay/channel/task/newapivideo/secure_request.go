@@ -55,8 +55,7 @@ func collectSecureMedia(request arkRequest) secureMediaInputs {
 
 func validateSecureRequest(request arkRequest, profile secureRequestProfile, upstreamModel string) error {
 	if err := validateARKSemantics(request, protocolProfile{
-		requirePublicHTTPMedia:         true,
-		singleFrameImagesAreReferences: true,
+		requirePublicHTTPMedia: true,
 	}); err != nil {
 		return err
 	}

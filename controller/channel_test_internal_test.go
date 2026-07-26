@@ -230,6 +230,41 @@ func TestValidateChannelNormalizesPaipuBaseURL(t *testing.T) {
 	require.Equal(t, "https://override.paipu.example", *channel.BaseURL)
 }
 
+func TestValidateChannelSecureVideoGroup(t *testing.T) {
+	for _, group := range []dto.SecureVideoGroup{
+		dto.SecureVideoGroupDiscount,
+		dto.SecureVideoGroupOverseas,
+		dto.SecureVideoGroupEnterprise,
+	} {
+		t.Run(string(group), func(t *testing.T) {
+			channel := &model.Channel{Type: constant.ChannelTypeSecure}
+			channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: group})
+			require.NoError(t, validateChannel(channel, false))
+		})
+	}
+
+	for _, test := range []struct {
+		name  string
+		group dto.SecureVideoGroup
+		want  string
+	}{
+		{name: "missing", want: "secure_video_group is required"},
+		{name: "unknown", group: "other", want: "secure_video_group must be one of"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			channel := &model.Channel{Type: constant.ChannelTypeSecure}
+			channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: test.group})
+			require.ErrorContains(t, validateChannel(channel, false), test.want)
+		})
+	}
+
+	t.Run("non secure rejects leaked group", func(t *testing.T) {
+		channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+		channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+		require.ErrorContains(t, validateChannel(channel, false), "secure_video_group is only valid for Secure")
+	})
+}
+
 func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {
 	channels := []*model.Channel{
 		{Id: 1, Status: common.ChannelStatusEnabled},

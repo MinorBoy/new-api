@@ -53,6 +53,33 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	SecureVideoGroup                      SecureVideoGroup      `json:"secure_video_group,omitempty"`
+}
+
+type SecureVideoGroup string
+
+const (
+	SecureVideoGroupDiscount   SecureVideoGroup = "discount"
+	SecureVideoGroupOverseas   SecureVideoGroup = "overseas"
+	SecureVideoGroupEnterprise SecureVideoGroup = "enterprise"
+)
+
+func (s ChannelOtherSettings) ValidateSecureVideoGroup(channelType int) error {
+	group := SecureVideoGroup(strings.TrimSpace(string(s.SecureVideoGroup)))
+	if channelType != constant.ChannelTypeSecure {
+		if group != "" {
+			return fmt.Errorf("secure_video_group is only valid for Secure channels")
+		}
+		return nil
+	}
+	switch group {
+	case SecureVideoGroupDiscount, SecureVideoGroupOverseas, SecureVideoGroupEnterprise:
+		return nil
+	case "":
+		return fmt.Errorf("secure_video_group is required for Secure channels")
+	default:
+		return fmt.Errorf("secure_video_group must be one of discount, overseas, enterprise")
+	}
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

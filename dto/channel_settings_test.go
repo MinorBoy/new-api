@@ -477,3 +477,31 @@ func TestAdvancedCustomSupportedEndpointTypesForModel(t *testing.T) {
 		constant.EndpointTypeAnthropic,
 	}, config.SupportedEndpointTypesForModel("other-model"))
 }
+
+func TestChannelOtherSettingsValidateSecureVideoGroup(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		group       SecureVideoGroup
+		wantErr     string
+	}{
+		{name: "discount", channelType: constant.ChannelTypeSecure, group: SecureVideoGroupDiscount},
+		{name: "overseas", channelType: constant.ChannelTypeSecure, group: SecureVideoGroupOverseas},
+		{name: "enterprise", channelType: constant.ChannelTypeSecure, group: SecureVideoGroupEnterprise},
+		{name: "missing", channelType: constant.ChannelTypeSecure, wantErr: "secure_video_group is required"},
+		{name: "unknown", channelType: constant.ChannelTypeSecure, group: "other", wantErr: "secure_video_group must be one of"},
+		{name: "leak to other type", channelType: constant.ChannelTypeOpenAI, group: SecureVideoGroupDiscount, wantErr: "secure_video_group is only valid for Secure"},
+		{name: "empty on other type", channelType: constant.ChannelTypeOpenAI},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := ChannelOtherSettings{SecureVideoGroup: tt.group}
+			err := settings.ValidateSecureVideoGroup(tt.channelType)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}

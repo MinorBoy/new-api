@@ -63,7 +63,8 @@ const (
 	ChannelTypeMegaByAI       = 63 // MegaByAI Seedance task protocol
 	ChannelTypeCangyuan       = 64 // Cangyuan Seedance task protocol
 	ChannelTypePaipu          = 65 // Paipu Seedance task protocol
-	ChannelTypeDummy          = 66 // this one is only for count, do not add any channel after this
+	ChannelTypeSecure         = 66 // Secure grouped Seedance task protocol
+	ChannelTypeDummy          = 67 // this one is only for count, do not add any channel after this
 
 )
 
@@ -134,6 +135,7 @@ var ChannelBaseURLs = []string{
 	"https://newapi.megabyai.cc",                //63 MegaByAI
 	"https://ai.cangyuansuanli.cn",              //64 Cangyuan
 	"https://api.paipu.net",                     //65 Paipu
+	"https://token.secure-skill.com",            //66 Secure
 }
 
 var ChannelTypeNames = map[int]string{
@@ -199,6 +201,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeMegaByAI:       "MegaByAI",
 	ChannelTypeCangyuan:       "Cangyuan",
 	ChannelTypePaipu:          "Paipu",
+	ChannelTypeSecure:         "Secure",
 }
 
 func GetChannelTypeName(channelType int) string {

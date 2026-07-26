@@ -80,7 +80,11 @@ func UpdateConfigImportBindings(
 				return configImportError("BINDING_LINE_NOT_FOUND", "line_ref %q does not belong to batch %d", input.LineRef, batchID)
 			}
 			if input.Action == types.ConfigImportBindingActionSkip {
-				skipStateJSON, err := excludeConfigImportLineDependents(tx, batchID, items, input.LineRef, input.Reason)
+				var currentItems []model.ConfigImportItem
+				if err := tx.Where("batch_id = ?", batchID).Order("id ASC").Find(&currentItems).Error; err != nil {
+					return err
+				}
+				skipStateJSON, err := excludeConfigImportLineDependents(tx, batchID, currentItems, input.LineRef, input.Reason)
 				if err != nil {
 					return err
 				}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/videometa"
-	"github.com/shopspring/decimal"
 )
 
 // VideoMetadataErrorKind classifies a video metadata lookup outcome into one of the
@@ -332,15 +332,21 @@ func (s *ProfitRoutingRequestState) resolve(ctx context.Context) (videoMetadataR
 		return videoMetadataResult{HasReferenceVideos: true}, err
 	}
 
-	total := decimal.NewFromInt(0)
+	var total int64
 	for _, metadata := range results {
 		if metadata.DurationMS <= 0 {
 			return videoMetadataResult{HasReferenceVideos: true}, &VideoMetadataError{Kind: VideoMetadataInvalidResponse}
 		}
-		total = total.Add(decimal.NewFromInt(metadata.DurationMS))
+		if total > math.MaxInt64-metadata.DurationMS {
+			// Saturate instead of allowing an overflowing aggregate to become
+			// negative and bypass provider duration limits.
+			total = math.MaxInt64
+			break
+		}
+		total += metadata.DurationMS
 	}
 	return videoMetadataResult{
-		TotalDurationMS:    total.IntPart(),
+		TotalDurationMS:    total,
 		HasReferenceVideos: true,
 	}, nil
 }

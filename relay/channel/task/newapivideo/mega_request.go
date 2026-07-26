@@ -20,8 +20,8 @@ type megaByAIRequest struct {
 }
 
 func validateMegaByAIRequest(request arkRequest) error {
-	if request.GenerateAudio != nil {
-		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "generate_audio is not supported by MegaByAI"}
+	if request.GenerateAudio != nil && !*request.GenerateAudio && hasReferenceAudio(request.Content) {
+		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "reference audio conflicts with generate_audio=false"}
 	}
 	if request.Duration != nil && (*request.Duration < 4 || *request.Duration > 15) {
 		return &arkRequestError{Code: "InvalidParameter.duration", Message: "MegaByAI duration must be between 4 and 15"}

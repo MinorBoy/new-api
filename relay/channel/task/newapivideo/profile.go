@@ -17,6 +17,7 @@ type protocolProfile struct {
 	ignoreUnsupportedOptionalARKFields bool
 	ignoredARKFields                   map[string]struct{}
 	allowEmbeddedMedia                 bool
+	requirePublicHTTPMedia             bool
 	useRoutingDurationDefault          bool
 	submitPath                         string
 	pollPath                           string
@@ -68,6 +69,7 @@ func megaByAIProtocolProfile() protocolProfile {
 		pollPath:               "/v1/videos/{task_id}",
 		contentType:            "application/json",
 		requestDialect:         videoRequestDialectMegaReferenceArrays,
+		requirePublicHTTPMedia: true,
 		defaultDurationSeconds: 5,
 	}
 }

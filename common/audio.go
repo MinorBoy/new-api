@@ -19,33 +19,70 @@ import (
 // GetAudioDuration 使用纯 Go 库获取音频文件的时长（秒）。
 // 它不再依赖外部的 ffmpeg 或 ffprobe 程序。
 func GetAudioDuration(ctx context.Context, f io.ReadSeeker, ext string) (duration float64, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	reader := &contextReadSeeker{ctx: ctx, reader: f}
 	SysLog(fmt.Sprintf("GetAudioDuration: ext=%s", ext))
 	// 根据文件扩展名选择解析器
 	switch ext {
 	case ".mp3":
-		duration, err = getMP3Duration(f)
+		duration, err = getMP3Duration(reader)
 	case ".wav":
-		duration, err = getWAVDuration(f)
+		duration, err = getWAVDuration(reader)
 	case ".flac":
-		duration, err = getFLACDuration(f)
+		duration, err = getFLACDuration(reader)
 	case ".m4a", ".mp4":
-		duration, err = getM4ADuration(f)
+		duration, err = getM4ADuration(reader)
 	case ".ogg", ".oga", ".opus":
-		duration, err = getOGGDuration(f)
+		duration, err = getOGGDuration(reader)
 		if err != nil {
-			duration, err = getOpusDuration(f)
+			duration, err = getOpusDuration(reader)
 		}
 	case ".aiff", ".aif", ".aifc":
-		duration, err = getAIFFDuration(f)
+		duration, err = getAIFFDuration(reader)
 	case ".webm":
-		duration, err = getWebMDuration(f)
+		duration, err = getWebMDuration(reader)
 	case ".aac":
-		duration, err = getAACDuration(f)
+		duration, err = getAACDuration(reader)
 	default:
 		return 0, fmt.Errorf("unsupported audio format: %s", ext)
 	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		return 0, contextErr
+	}
 	SysLog(fmt.Sprintf("GetAudioDuration: duration=%f", duration))
 	return duration, err
+}
+
+type contextReadSeeker struct {
+	ctx    context.Context
+	reader io.ReadSeeker
+}
+
+func (r *contextReadSeeker) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(buffer)
+	if contextErr := r.ctx.Err(); contextErr != nil {
+		return n, contextErr
+	}
+	return n, err
+}
+
+func (r *contextReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	position, err := r.reader.Seek(offset, whence)
+	if contextErr := r.ctx.Err(); contextErr != nil {
+		return position, contextErr
+	}
+	return position, err
 }
 
 // getMP3Duration 解析 MP3 文件以获取时长。

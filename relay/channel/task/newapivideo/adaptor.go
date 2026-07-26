@@ -2,6 +2,7 @@ package newapivideo
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,12 @@ import (
 )
 
 const ChannelName = "NewAPIVideo"
+
+const megaByAIMediaValidationContextKey = "newapi_video_megabyai_media_validation"
+
+type megaByAIMediaValidation struct {
+	taskErr *dto.TaskError
+}
 
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
@@ -103,41 +110,19 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
 		}
 
-		videoURLs := make([]string, 0, 3)
-		audioURLs := make([]string, 0, 3)
-		for _, item := range state.ARK.Content {
-			switch item.Type {
-			case "video_url":
-				videoURLs = append(videoURLs, item.VideoURL.URL)
-			case "audio_url":
-				audioURLs = append(audioURLs, item.AudioURL.URL)
+		var validation megaByAIMediaValidation
+		if cached, exists := c.Get(megaByAIMediaValidationContextKey); exists {
+			var ok bool
+			validation, ok = cached.(megaByAIMediaValidation)
+			if !ok {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("MegaByAI media validation state is invalid"), "internal_error", http.StatusInternalServerError)
 			}
+		} else {
+			validation.taskErr = validateMegaByAIMedia(c.Request.Context(), *state.ARK)
+			c.Set(megaByAIMediaValidationContextKey, validation)
 		}
-		if len(videoURLs) > 0 {
-			durationMS, err := service.ResolveReferenceVideoDurationMS(c.Request.Context(), videoURLs)
-			if err != nil {
-				var metadataErr *service.VideoMetadataError
-				if errors.As(err, &metadataErr) && metadataErr.Kind == service.VideoMetadataInvalidMedia {
-					return service.TaskErrorWrapperLocal(fmt.Errorf("reference video is invalid"), "InvalidParameter.content", http.StatusBadRequest)
-				}
-				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
-			}
-			if durationMS > maxMegaByAIReferenceDurationMS {
-				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video duration exceeds 15 seconds"), "InvalidParameter.content", http.StatusBadRequest)
-			}
-		}
-		if len(audioURLs) > 0 {
-			durationMS, err := service.ResolveReferenceAudioDurationMS(c.Request.Context(), audioURLs)
-			if err != nil {
-				var durationErr *service.ReferenceAudioDurationError
-				if errors.As(err, &durationErr) && durationErr.Kind == service.ReferenceAudioInvalidMedia {
-					return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio is invalid"), "InvalidParameter.content", http.StatusBadRequest)
-				}
-				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
-			}
-			if durationMS > maxMegaByAIReferenceDurationMS {
-				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio duration exceeds 15 seconds"), "InvalidParameter.content", http.StatusBadRequest)
-			}
+		if validation.taskErr != nil {
+			return validation.taskErr
 		}
 
 		state.ProviderValidationComplete = true
@@ -145,6 +130,46 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return nil
 	}
 	return validateOpenAIRequest(c, info, body)
+}
+
+func validateMegaByAIMedia(ctx context.Context, request arkRequest) *dto.TaskError {
+	videoURLs := make([]string, 0, 3)
+	audioURLs := make([]string, 0, 3)
+	for _, item := range request.Content {
+		switch item.Type {
+		case "video_url":
+			videoURLs = append(videoURLs, item.VideoURL.URL)
+		case "audio_url":
+			audioURLs = append(audioURLs, item.AudioURL.URL)
+		}
+	}
+	if len(videoURLs) > 0 {
+		durationMS, err := service.ResolveReferenceVideoDurationMS(ctx, videoURLs)
+		if err != nil {
+			var metadataErr *service.VideoMetadataError
+			if errors.As(err, &metadataErr) && metadataErr.Kind == service.VideoMetadataInvalidMedia {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(fmt.Errorf("reference video metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+		}
+		if durationMS > maxMegaByAIReferenceDurationMS {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("reference video duration exceeds 15 seconds"), "InvalidParameter.content", http.StatusBadRequest)
+		}
+	}
+	if len(audioURLs) > 0 {
+		durationMS, err := service.ResolveReferenceAudioDurationMS(ctx, audioURLs)
+		if err != nil {
+			var durationErr *service.ReferenceAudioDurationError
+			if errors.As(err, &durationErr) && durationErr.Kind == service.ReferenceAudioInvalidMedia {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+		}
+		if durationMS > maxMegaByAIReferenceDurationMS {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio duration exceeds 15 seconds"), "InvalidParameter.content", http.StatusBadRequest)
+		}
+	}
+	return nil
 }
 
 // ValidateBillingRequest runs after model mapping and before pricing/pre-consume.

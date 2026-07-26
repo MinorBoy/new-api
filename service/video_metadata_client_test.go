@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -332,6 +333,20 @@ func TestProfitRoutingRequestStateSumsMultipleDurations(t *testing.T) {
 	assert.Equal(t, int64(11000), result.TotalDurationMS)
 	assert.True(t, result.HasReferenceVideos)
 	assert.Equal(t, int32(3), calls.Load())
+}
+
+func TestProfitRoutingRequestStateSaturatesDurationOverflow(t *testing.T) {
+	client := &fakeMetadataClient{results: map[string]videometa.Metadata{
+		"https://assets.example/a.mp4": {DurationMS: math.MaxInt64, Width: 1280, Height: 720, FrameRateNum: 24, FrameRateDen: 1, Container: "mp4", ContentLength: 1},
+		"https://assets.example/b.mp4": {DurationMS: 1, Width: 1280, Height: 720, FrameRateNum: 24, FrameRateDen: 1, Container: "mp4", ContentLength: 1},
+	}}
+	state := NewProfitRoutingRequestState(client, []string{
+		"https://assets.example/a.mp4", "https://assets.example/b.mp4",
+	}, 2)
+
+	result, err := state.Metadata(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(math.MaxInt64), result.TotalDurationMS)
 }
 
 func TestProfitRoutingRequestStateConcurrencyCappedAtThree(t *testing.T) {

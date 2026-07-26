@@ -313,7 +313,18 @@ func validMediaURL(value string, profile protocolProfile) bool {
 	if err != nil {
 		return false
 	}
-	return media.FetchableHTTP() || profile.allowEmbeddedMedia
+	if !media.FetchableHTTP() {
+		return profile.allowEmbeddedMedia
+	}
+	if !profile.requirePublicHTTPMedia {
+		return true
+	}
+	protection := common.SSRFProtection{
+		DomainFilterMode: false,
+		DomainList:       []string{"localhost", "*.localhost", "local", "*.local"},
+		IpFilterMode:     false,
+	}
+	return protection.ValidateURL(media.Value) == nil
 }
 
 func marshalUpstreamRequest(request upstreamRequest) ([]byte, error) {

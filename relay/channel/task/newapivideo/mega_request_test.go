@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,9 +22,13 @@ import (
 type megaByAIVideoMetadataClient struct {
 	durations map[string]int64
 	err       error
+	calls     *atomic.Int32
 }
 
 func (f megaByAIVideoMetadataClient) Metadata(_ context.Context, url string) (videometa.Metadata, error) {
+	if f.calls != nil {
+		f.calls.Add(1)
+	}
 	if f.err != nil {
 		return videometa.Metadata{}, f.err
 	}
@@ -36,9 +41,13 @@ func (f megaByAIVideoMetadataClient) Metadata(_ context.Context, url string) (vi
 type megaByAIAudioDurationResolver struct {
 	duration int64
 	err      error
+	calls    *atomic.Int32
 }
 
 func (f megaByAIAudioDurationResolver) ResolveMS(_ context.Context, _ []string) (int64, error) {
+	if f.calls != nil {
+		f.calls.Add(1)
+	}
 	return f.duration, f.err
 }
 
@@ -155,13 +164,14 @@ func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
 		{name: "unsupported resolution", body: `{"model":"m","content":[{"type":"text","text":"text"}],"resolution":"1080p"}`, code: "InvalidParameter.resolution"},
 		{name: "last frame", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"last_frame","image_url":{"url":"https://x/last.jpg"}}]}`, code: "InvalidParameter.content"},
 		{name: "non HTTP media", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"asset://ref"}}]}`, code: "InvalidParameter.content"},
+		{name: "loopback image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://127.0.0.1/ref.jpg"}}]}`, code: "InvalidParameter.content"},
+		{name: "link-local image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://169.254.169.254/latest/meta-data"}}]}`, code: "InvalidParameter.content"},
+		{name: "localhost image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://localhost/ref.jpg"}}]}`, code: "InvalidParameter.content"},
 		{name: "audio only", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}]}`, code: "InvalidParameter.content"},
 		{name: "too many images", body: `{"model":"m","content":[{"type":"text","text":"text"}` + images + `]}`, code: "InvalidParameter.content"},
 		{name: "too many videos", body: `{"model":"m","content":[{"type":"text","text":"text"}` + videos + `]}`, code: "InvalidParameter.content"},
 		{name: "too many audios", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}}` + audios + `]}`, code: "InvalidParameter.content"},
 		{name: "audio conflict", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
-		{name: "generate audio true", body: `{"model":"m","content":[{"type":"text","text":"text"}],"generate_audio":true}`, code: "InvalidParameter.generate_audio"},
-		{name: "generate audio false", body: `{"model":"m","content":[{"type":"text","text":"text"}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
 		{name: "unsupported control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"callback_url":"https://x/callback"}`, code: "InvalidParameter.callback_url"},
 		{name: "misspelled control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duraton":5}`, code: "InvalidParameter.duraton"},
 	}
@@ -181,6 +191,18 @@ func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
 			assert.Equal(t, tt.code, taskErr.Code)
 			_, buildErr := adaptor.BuildRequestBody(c, info)
 			assert.Error(t, buildErr, "invalid input must not produce an upstream body")
+		})
+	}
+}
+
+func TestMegaByAIExplicitGenerateAudioWithoutReferenceAudioIsAcceptedAndNotMapped(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		t.Run(value, func(t *testing.T) {
+			request, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}],"generate_audio":`+value+`}`), megaByAIProtocolProfile())
+			require.NoError(t, err)
+			body, err := buildMegaByAIRequest(request, "videos-mini")
+			require.NoError(t, err)
+			assert.NotContains(t, string(body), "generateAudio")
 		})
 	}
 }
@@ -221,6 +243,32 @@ func TestMegaByAIValidatesReferenceDurationsBeforeBuilding(t *testing.T) {
 	upstreamBody, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"model":"videos-mini","prompt":"text","duration":8,"ratio":"1:1","resolution":"480p","referenceImages":["https://x/ref.jpg"],"referenceVideos":["https://x/a.mp4","https://x/b.mp4"],"referenceAudios":["https://x/a.wav"]}`, string(upstreamBody))
+}
+
+func TestMegaByAIMediaValidationIsMemoizedAcrossRetries(t *testing.T) {
+	var videoCalls atomic.Int32
+	var audioCalls atomic.Int32
+	service.SetVideoMetadataClient(megaByAIVideoMetadataClient{
+		durations: map[string]int64{"https://x/a.mp4": 1000}, calls: &videoCalls,
+	})
+	service.SetReferenceAudioDurationResolver(megaByAIAudioDurationResolver{duration: 1000, calls: &audioCalls})
+	t.Cleanup(func() {
+		service.SetVideoMetadataClient(nil)
+		service.SetReferenceAudioDurationResolver(nil)
+	})
+
+	body := `{"model":"client","content":[
+		{"type":"text","text":"text"},
+		{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/a.mp4"}},
+		{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/a.wav"}}
+	]}`
+	c, info := megaByAIValidationContext(body)
+	adaptor := NewMegaByAITaskAdaptor()
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	assert.Equal(t, int32(1), videoCalls.Load())
+	assert.Equal(t, int32(1), audioCalls.Load())
 }
 
 func TestMegaByAIRejectsReferenceDurationOverLimit(t *testing.T) {

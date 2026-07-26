@@ -5638,6 +5638,10 @@
     "Overseas Video": "海外 Video",
     "Enterprise Video": "企業 Video",
     "Use the API key issued for the selected Secure group": "使用所選 Secure 分組簽發的 API Key",
-    "Select a Secure video group": "選擇 Secure 影片分組"
+    "Select a Secure video group": "選擇 Secure 影片分組",
+    "Secure": "Secure",
+    "Enter the API key issued for the selected Secure video group": "輸入所選 Secure 影片分組簽發的 API Key",
+    "Select only models enabled for this Secure group API key": "僅選擇此 Secure 分組 API Key 已啟用的模型",
+    "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure 僅支援任務介面。請分別為優惠、海外和企業 Key 建立獨立渠道。"
   }
 }

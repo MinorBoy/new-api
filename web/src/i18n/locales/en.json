@@ -5638,6 +5638,10 @@
     "Overseas Video": "Overseas Video",
     "Enterprise Video": "Enterprise Video",
     "Use the API key issued for the selected Secure group": "Use the API key issued for the selected Secure group",
-    "Select a Secure video group": "Select a Secure video group"
+    "Select a Secure video group": "Select a Secure video group",
+    "Secure": "Secure",
+    "Enter the API key issued for the selected Secure video group": "Enter the API key issued for the selected Secure video group",
+    "Select only models enabled for this Secure group API key": "Select only models enabled for this Secure group API key",
+    "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys."
   }
 }

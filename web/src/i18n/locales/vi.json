@@ -5638,6 +5638,10 @@
     "Overseas Video": "Video quốc tế",
     "Enterprise Video": "Video doanh nghiệp",
     "Use the API key issued for the selected Secure group": "Sử dụng khóa API được cấp cho nhóm Secure đã chọn",
-    "Select a Secure video group": "Chọn nhóm video Secure"
+    "Select a Secure video group": "Chọn nhóm video Secure",
+    "Secure": "Secure",
+    "Enter the API key issued for the selected Secure video group": "Nhập khóa API được cấp cho nhóm video Secure đã chọn",
+    "Select only models enabled for this Secure group API key": "Chỉ chọn các model được bật cho khóa API Secure này",
+    "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure chỉ hỗ trợ tác vụ. Hãy tạo các kênh riêng cho khóa ưu đãi, quốc tế và doanh nghiệp."
   }
 }

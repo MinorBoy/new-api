@@ -274,9 +274,21 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Select from the 24 documented Paipu /v1/videos models',
     },
   },
+  66: {
+    id: 66,
+    name: CHANNEL_TYPES[66],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://token.secure-skill.com',
+    supportedModels: ['video-2.0-fast', 'video-2.0-mini', 'video-2.0-pro'],
+    hints: {
+      baseUrl: 'Default: https://token.secure-skill.com',
+      key: 'Enter the API key issued for the selected Secure video group',
+      models: 'Select only models enabled for this Secure group API key',
+    },
+  },
 }
 
-const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63, 64, 65])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63, 64, 65, 66])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)

@@ -109,6 +109,7 @@ export function getChannelTypeIcon(type: number): string {
     63: 'NewAPI', // MegaByAI
     64: 'NewAPI', // Cangyuan
     65: 'NewAPI', // Paipu
+    66: 'NewAPI', // Secure
 
     // Tools & Platforms
     37: 'Dify', // Dify

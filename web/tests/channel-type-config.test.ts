@@ -236,7 +236,10 @@ describe('Lucen channel configuration', () => {
 describe('MegaByAI channel configuration', () => {
   test('registers task-only type 63', () => {
     expect(CHANNEL_TYPES[63]).toBe('MegaByAI')
-    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 63, label: 'MegaByAI' })
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 63,
+      label: 'MegaByAI',
+    })
     expect(getChannelTypeIcon(63)).toBe('NewAPI')
     expect(TASK_ONLY_CHANNEL_TYPES.has(63)).toBe(true)
     expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(63)).toBe(true)
@@ -278,7 +281,10 @@ describe('MegaByAI channel configuration', () => {
 describe('Cangyuan channel configuration', () => {
   test('registers task-only type 64', () => {
     expect(CHANNEL_TYPES[64]).toBe('Cangyuan')
-    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 64, label: 'Cangyuan' })
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 64,
+      label: 'Cangyuan',
+    })
     expect(getChannelTypeIcon(64)).toBe('NewAPI')
     expect(TASK_ONLY_CHANNEL_TYPES.has(64)).toBe(true)
     expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(64)).toBe(true)
@@ -309,9 +315,7 @@ describe('Cangyuan channel configuration', () => {
   })
 
   test('exposes the configured model and applies the managed default URL', () => {
-    expect(getChannelModelOptions(64, [], [])).toEqual([
-      'seedance-2.0-720p',
-    ])
+    expect(getChannelModelOptions(64, [], [])).toEqual(['seedance-2.0-720p'])
     expect(
       getBaseUrlOnChannelTypeChange(64, 'https://newapi.megabyai.cc', false)
     ).toBe('https://ai.cangyuansuanli.cn')
@@ -383,6 +387,53 @@ describe('Paipu channel configuration', () => {
     ).toBe('https://api.paipu.net')
     expect(
       getBaseUrlOnChannelTypeChange(65, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+})
+
+describe('Secure channel configuration', () => {
+  test('registers task-only type 66', () => {
+    expect(CHANNEL_TYPES[66]).toBe('Secure')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 66, label: 'Secure' })
+    expect(getChannelTypeIcon(66)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(66)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(66)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(66)).toBe(false)
+  })
+
+  test('uses the Secure default, models, and group-specific key guidance', () => {
+    expect(getChannelTypeConfig(66)).toMatchObject({
+      id: 66,
+      name: 'Secure',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://token.secure-skill.com',
+      supportedModels: ['video-2.0-fast', 'video-2.0-mini', 'video-2.0-pro'],
+    })
+    expect(getDefaultBaseUrl(66)).toBe('https://token.secure-skill.com')
+    expect(getChannelTypeHints(66)).toEqual({
+      baseUrl: 'Default: https://token.secure-skill.com',
+      key: 'Enter the API key issued for the selected Secure video group',
+      models: 'Select only models enabled for this Secure group API key',
+    })
+    expect(TYPE_TO_KEY_PROMPT[66]).toBe(
+      'Enter the API key issued for the selected Secure video group'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[66]).toBe(
+      'Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.'
+    )
+  })
+
+  test('applies the managed Secure default URL and exposes the model list', () => {
+    expect(getChannelModelOptions(66, [], [])).toEqual([
+      'video-2.0-fast',
+      'video-2.0-mini',
+      'video-2.0-pro',
+    ])
+    expect(
+      getBaseUrlOnChannelTypeChange(66, 'https://api.paipu.net', false)
+    ).toBe('https://token.secure-skill.com')
+    expect(
+      getBaseUrlOnChannelTypeChange(66, 'https://proxy.example.com', false)
     ).toBe('https://proxy.example.com')
   })
 })

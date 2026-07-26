@@ -5638,6 +5638,10 @@
     "Overseas Video": "Vidéo internationale",
     "Enterprise Video": "Vidéo d’entreprise",
     "Use the API key issued for the selected Secure group": "Utilisez la clé API émise pour le groupe Secure sélectionné",
-    "Select a Secure video group": "Sélectionner un groupe vidéo Secure"
+    "Select a Secure video group": "Sélectionner un groupe vidéo Secure",
+    "Secure": "Secure",
+    "Enter the API key issued for the selected Secure video group": "Saisissez la clé API émise pour le groupe vidéo Secure sélectionné",
+    "Select only models enabled for this Secure group API key": "Sélectionnez uniquement les modèles activés pour cette clé API Secure",
+    "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure est réservé aux tâches. Créez des canaux distincts pour les clés à prix réduit, internationales et d’entreprise."
   }
 }

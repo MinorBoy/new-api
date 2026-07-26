@@ -5638,6 +5638,10 @@
     "Overseas Video": "海外 Video",
     "Enterprise Video": "エンタープライズ Video",
     "Use the API key issued for the selected Secure group": "選択した Secure グループ向けに発行された API キーを使用します",
-    "Select a Secure video group": "Secure 動画グループを選択"
+    "Select a Secure video group": "Secure 動画グループを選択",
+    "Secure": "Secure",
+    "Enter the API key issued for the selected Secure video group": "選択した Secure 動画グループ向けに発行された API キーを入力します",
+    "Select only models enabled for this Secure group API key": "この Secure グループ API キーで有効なモデルだけを選択します",
+    "Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.": "Secure はタスク専用です。特価、海外、エンタープライズのキーごとに別のチャンネルを作成してください。"
   }
 }

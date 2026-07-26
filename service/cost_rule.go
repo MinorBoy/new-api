@@ -572,6 +572,53 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 			results = append(results, variantResult)
 		}
 	}
+
+	var routingTargets []struct {
+		ChannelID      int
+		OriginModel    string
+		UpstreamModel  string
+		CostVariantKey string
+	}
+	if model.DB.Migrator().HasTable(&model.RouteTarget{}) && model.DB.Migrator().HasTable(&model.RoutingPolicy{}) {
+		if err := model.DB.Table("route_targets").
+			Select("route_targets.channel_id, routing_policies.model AS origin_model, route_targets.upstream_model, route_targets.cost_variant_key").
+			Joins("JOIN routing_policies ON routing_policies.id = route_targets.policy_id").
+			Where("route_targets.enabled = ? AND routing_policies.enabled = ?", true, true).
+			Order("route_targets.channel_id ASC, route_targets.upstream_model ASC, route_targets.cost_variant_key ASC, route_targets.id ASC").
+			Scan(&routingTargets).Error; err != nil {
+			return nil, err
+		}
+	}
+	for _, target := range routingTargets {
+		variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+		if err != nil {
+			return nil, err
+		}
+		key := costCoverageKey{channelID: target.ChannelID, model: target.UpstreamModel, variant: variant}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result := CostCoverageResult{
+			ChannelID:              target.ChannelID,
+			OriginModel:            target.OriginModel,
+			PredictedUpstreamModel: target.UpstreamModel,
+			CostVariantKey:         variant,
+		}
+		result.Covered, err = CheckPredictedCostCoverage(PredictedCoverageInput{
+			ChannelID:              target.ChannelID,
+			PredictedUpstreamModel: target.UpstreamModel,
+			CostVariantKey:         variant,
+			Authoritative:          true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !result.Covered {
+			result.Reason = "missing_or_incompatible_cost_rule"
+		}
+		results = append(results, result)
+	}
 	return results, nil
 }
 

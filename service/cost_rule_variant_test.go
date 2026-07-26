@@ -125,6 +125,44 @@ func TestCheckAuthoritativeCostCoverageEvaluatesActiveVariants(t *testing.T) {
 	assert.True(t, coveredByVariant["480p"])
 }
 
+func TestCheckAuthoritativeCostCoverageIncludesEnabledRoutingTargetVariant(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	})
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "default", Model: "vendor-model", ChannelId: 7, Enabled: true,
+	}).Error)
+	defaultRule := costRuleWithVariant(t, string(types.DefaultCostVariantKey), 1, types.CostRuleActive, "0.2")
+	require.NoError(t, model.DB.Create(&defaultRule).Error)
+	policy := model.RoutingPolicy{
+		GroupName: "default", Model: "vendor-model", Enabled: true,
+		DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9",
+	}
+	require.NoError(t, model.DB.Create(&policy).Error)
+	require.NoError(t, model.DB.Create(&model.RouteTarget{
+		PolicyID: policy.ID, ChannelID: 7, Name: "480p route", UpstreamModel: "vendor-model",
+		CostVariantKey: "480p", TargetPriority: 1, Constraints: "{}", Enabled: true,
+	}).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	coveredByVariant := make(map[string]bool, len(results))
+	for _, result := range results {
+		coveredByVariant[result.CostVariantKey] = result.Covered
+	}
+	assert.True(t, coveredByVariant[string(types.DefaultCostVariantKey)])
+	assert.Contains(t, coveredByVariant, "480p")
+	assert.False(t, coveredByVariant["480p"])
+}
+
 func TestListCostRulesFiltersByVariant(t *testing.T) {
 	prepareCostRuleServiceDB(t)
 

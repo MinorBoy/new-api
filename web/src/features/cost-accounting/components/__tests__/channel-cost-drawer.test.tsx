@@ -313,6 +313,28 @@ test('shows each cost variant as a distinct rule row', async () => {
   }
 })
 
+test('opens an editable new cost variant from an existing rule', async () => {
+  const mounted = await mount(
+    <ChannelCostDrawer open channel={channel} onOpenChange={() => {}} />
+  )
+  try {
+    const action = browserWindow.document.querySelector(
+      'button[aria-label="New cost variant"]'
+    ) as HTMLButtonElement | null
+    assert.ok(action)
+    await act(async () => action.click())
+
+    const input = browserWindow.document.querySelector(
+      '#cost-rule-cost-variant-key'
+    ) as HTMLInputElement | null
+    assert.ok(input)
+    assert.equal(input.value, 'default')
+    assert.equal(input.disabled, false)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
 test('filters cost rules by cost variant', async () => {
   const queryClient = createQueryClient()
   const rule720 = {

@@ -446,7 +446,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                     className='sr-only'
                     htmlFor='channel-cost-variant-filter'
                   >
-                    cost_variant_key
+                    {t('Cost variant')}
                   </label>
                   <Input
                     id='channel-cost-variant-filter'
@@ -480,7 +480,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                       <TableHeader className='bg-background sticky top-0'>
                         <TableRow>
                           <TableHead>{t('Billable upstream model')}</TableHead>
-                          <TableHead>cost_variant_key</TableHead>
+                          <TableHead>{t('Cost variant')}</TableHead>
                           <TableHead>{t('Client models')}</TableHead>
                           <TableHead>{t('Official price')}</TableHead>
                           <TableHead>{t('Rule')}</TableHead>
@@ -584,6 +584,35 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                                       </TooltipTrigger>
                                       <TooltipContent>
                                         {t('Preview cost')}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  ) : null}
+
+                                  {canWrite && displayedRule ? (
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            type='button'
+                                            variant='ghost'
+                                            size='icon-sm'
+                                            aria-label={t('New cost variant')}
+                                            onClick={() =>
+                                              setEditor({
+                                                billableModel:
+                                                  row.billableModel,
+                                                costVariantKey: 'default',
+                                                originModel,
+                                                rule: null,
+                                              })
+                                            }
+                                          />
+                                        }
+                                      >
+                                        <Plus aria-hidden='true' />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        {t('New cost variant')}
                                       </TooltipContent>
                                     </Tooltip>
                                   ) : null}

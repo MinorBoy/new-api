@@ -539,7 +539,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
 
               <Field data-invalid={costVariantKeyInvalid || undefined}>
                 <FieldLabel htmlFor='cost-rule-cost-variant-key'>
-                  cost_variant_key
+                  {t('Cost variant')}
                 </FieldLabel>
                 <Input
                   id='cost-rule-cost-variant-key'

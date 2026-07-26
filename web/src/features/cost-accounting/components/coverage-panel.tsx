@@ -76,7 +76,7 @@ export function CoveragePanel(props: CoveragePanelProps) {
               <TableRow>
                 <TableHead>{t('Client model')}</TableHead>
                 <TableHead>{t('Billable upstream model')}</TableHead>
-                <TableHead>cost_variant_key</TableHead>
+                <TableHead>{t('Cost variant')}</TableHead>
                 <TableHead>{t('Reason')}</TableHead>
               </TableRow>
             </TableHeader>

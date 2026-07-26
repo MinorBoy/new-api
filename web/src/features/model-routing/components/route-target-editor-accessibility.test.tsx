@@ -96,3 +96,19 @@ test('target model mapping fields explain management and replacement values', ()
     />The exact model ID configured by the selected channel\. A matched request replaces the canonical model with this value\.</
   )
 })
+
+test('target cost variant has an accessible label and description', () => {
+  const html = renderToStaticMarkup(
+    createElement(I18nextProvider, { i18n }, createElement(TargetEditorFixture))
+  )
+
+  assert.match(html, />Cost variant</)
+  assert.match(
+    html,
+    /<label[^>]*for="[^"]+">Cost variant<\/label>[\s\S]*?<input[^>]*name="targets\.0\.cost_variant_key"[^>]*\/>/
+  )
+  assert.match(
+    html,
+    />Links this route target to the matching channel cost rule\.</
+  )
+})

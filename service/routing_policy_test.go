@@ -68,6 +68,76 @@ func TestSaveRoutingPolicyPreservesExplicitZeroMinimumExpectedMargin(t *testing.
 	assert.Zero(t, *updated.Targets[0].MinimumExpectedMarginBPS)
 }
 
+func TestSaveRoutingPolicyCarriesCostVariantThroughPersistenceCacheAndView(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	request := validRoutingPolicyWriteRequest()
+	request.Targets[0].CostVariantKey = " 720P "
+
+	saved, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	require.Len(t, saved.Targets, 1)
+	assert.Equal(t, "720p", saved.Targets[0].CostVariantKey)
+
+	var persisted model.RouteTarget
+	require.NoError(t, model.DB.Where("policy_id = ?", saved.ID).First(&persisted).Error)
+	assert.Equal(t, "720p", persisted.CostVariantKey)
+
+	snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.Seedance20)
+	require.True(t, ok)
+	require.Len(t, snapshot.TargetsByChannel[11], 1)
+	assert.Equal(t, "720p", snapshot.TargetsByChannel[11][0].CostVariantKey)
+
+	view, err := service.GetRoutingPolicyView(saved.ID)
+	require.NoError(t, err)
+	require.Len(t, view.Targets, 1)
+	assert.Equal(t, "720p", view.Targets[0].CostVariantKey)
+
+	updated, err := service.SetRoutingPolicyStatus(saved.ID, false)
+	require.NoError(t, err)
+	require.Len(t, updated.Targets, 1)
+	assert.Equal(t, "720p", updated.Targets[0].CostVariantKey)
+	require.NoError(t, model.DB.Where("policy_id = ?", saved.ID).First(&persisted).Error)
+	assert.Equal(t, "720p", persisted.CostVariantKey)
+}
+
+func TestGetRoutingPolicyViewDefaultsLegacyBlankCostVariant(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	saved, err := service.SaveRoutingPolicy(0, validRoutingPolicyWriteRequest())
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).
+		Where("policy_id = ?", saved.ID).
+		Update("cost_variant_key", "").Error)
+
+	view, err := service.GetRoutingPolicyView(saved.ID)
+	require.NoError(t, err)
+	require.Len(t, view.Targets, 1)
+	assert.Equal(t, "default", view.Targets[0].CostVariantKey)
+}
+
+func TestSaveRoutingPolicyNormalizesBlankCostVariant(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	request := validRoutingPolicyWriteRequest()
+	request.Targets[0].CostVariantKey = "  "
+
+	saved, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	require.Len(t, saved.Targets, 1)
+	assert.Equal(t, "default", saved.Targets[0].CostVariantKey)
+}
+
+func TestSaveRoutingPolicyRejectsInvalidCostVariantKey(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	request := validRoutingPolicyWriteRequest()
+	request.Targets[0].CostVariantKey = "not a variant"
+
+	_, err := service.SaveRoutingPolicy(0, request)
+	assertRoutingPolicyServiceError(t, err, "invalid_cost_variant_key", nil)
+}
+
 func routingPolicyWriteRequestForTest(view *service.RoutingPolicyView) service.RoutingPolicyWriteRequest {
 	request := service.RoutingPolicyWriteRequest{
 		GroupName: view.GroupName, Model: view.Model, Enabled: view.Enabled, Defaults: view.Defaults,

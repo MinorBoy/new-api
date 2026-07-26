@@ -397,6 +397,25 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
             </FormItem>
           )}
         />
+
+        <FormField
+          control={props.form.control}
+          name={`targets.${props.index}.cost_variant_key`}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Cost variant')}</FormLabel>
+              <FormControl>
+                <Input className='font-mono text-xs' {...field} />
+              </FormControl>
+              <FormDescription className='text-xs'>
+                {t(
+                  'Links this route target to the matching channel cost rule.'
+                )}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
       </div>
 
       <FormField

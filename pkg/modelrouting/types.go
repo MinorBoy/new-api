@@ -81,6 +81,7 @@ type Target struct {
 	ChannelID                int         `json:"channel_id"`
 	Name                     string      `json:"name"`
 	UpstreamModel            string      `json:"upstream_model"`
+	CostVariantKey           string      `json:"cost_variant_key"`
 	Priority                 int         `json:"target_priority"`
 	MinimumExpectedMarginBPS *int        `json:"minimum_expected_margin_bps,omitempty"`
 	Enabled                  bool        `json:"enabled"`

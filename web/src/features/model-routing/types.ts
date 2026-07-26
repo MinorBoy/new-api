@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { t } from 'i18next'
 import { z } from 'zod'
 
 export const CANONICAL_SEEDANCE_MODELS = [
@@ -106,6 +107,19 @@ function validateReferenceRange(value: ReferenceRange, ctx: z.RefinementCtx) {
 
 const marginBPSSchema = z.number().int().min(0).max(10_000)
 
+export const costVariantKeySchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(
+    /^[a-z0-9][a-z0-9._-]{0,63}$/,
+    t(
+      'Cost variant key must use 1-64 lowercase letters, digits, dots, hyphens, or underscores'
+    )
+  )
+
+const costVariantKeyApiSchema = costVariantKeySchema.default('default')
+
 export const routeTargetFormSchema = z
   .object({
     id: z.number().int().positive().optional(),
@@ -113,6 +127,7 @@ export const routeTargetFormSchema = z
     channel_name: z.string(),
     name: z.string().trim().min(1, 'Target name is required'),
     upstream_model: z.string().trim().min(1, 'Upstream model is required'),
+    cost_variant_key: costVariantKeySchema,
     target_priority: z.number().int(),
     minimum_expected_margin_bps: marginBPSSchema.nullable(),
     enabled: z.boolean(),
@@ -197,6 +212,7 @@ export const routeTargetSchema = z.object({
   channel_name: z.string(),
   name: z.string(),
   upstream_model: z.string(),
+  cost_variant_key: costVariantKeyApiSchema,
   target_priority: z.number().int(),
   minimum_expected_margin_bps: marginBPSSchema.nullable(),
   enabled: z.boolean(),
@@ -403,9 +419,10 @@ export function createEmptyTarget(): RouteTargetFormValues {
     channel_name: '',
     name: '',
     upstream_model: '',
+    cost_variant_key: 'default',
     target_priority: 0,
     minimum_expected_margin_bps: null,
-    enabled: true,
+    enabled: false,
     output_resolutions: ['720p'],
     durations: { mode: 'range', values: [], min: 4, max: 15 },
     aspect_ratios: [],
@@ -478,6 +495,7 @@ export function toWriteRequest(
       channel_id: target.channel_id,
       name: target.name,
       upstream_model: target.upstream_model,
+      cost_variant_key: target.cost_variant_key,
       target_priority: target.target_priority,
       minimum_expected_margin_bps: target.minimum_expected_margin_bps,
       enabled: target.enabled,
@@ -535,6 +553,7 @@ export function fromPolicyResponse(
         channel_name: target.channel_name,
         name: target.name,
         upstream_model: target.upstream_model,
+        cost_variant_key: target.cost_variant_key,
         target_priority: target.target_priority,
         minimum_expected_margin_bps: target.minimum_expected_margin_bps,
         enabled: target.enabled,

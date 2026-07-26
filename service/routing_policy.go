@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
 )
 
@@ -25,6 +26,7 @@ type RouteTargetWriteRequest struct {
 	ChannelID                int                      `json:"channel_id"`
 	Name                     string                   `json:"name"`
 	UpstreamModel            string                   `json:"upstream_model"`
+	CostVariantKey           string                   `json:"cost_variant_key"`
 	TargetPriority           int                      `json:"target_priority"`
 	MinimumExpectedMarginBPS *int                     `json:"minimum_expected_margin_bps"`
 	Enabled                  bool                     `json:"enabled"`
@@ -66,6 +68,7 @@ type RouteTargetView struct {
 	ChannelName              string                   `json:"channel_name"`
 	Name                     string                   `json:"name"`
 	UpstreamModel            string                   `json:"upstream_model"`
+	CostVariantKey           string                   `json:"cost_variant_key"`
 	TargetPriority           int                      `json:"target_priority"`
 	MinimumExpectedMarginBPS *int                     `json:"minimum_expected_margin_bps"`
 	Enabled                  bool                     `json:"enabled"`
@@ -123,6 +126,10 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 		if target.UpstreamModel == "" {
 			return nil, newRoutingPolicyServiceError("invalid_target", fmt.Sprintf("targets.%d.upstream_model", index), "upstream model is required")
 		}
+		variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+		if err != nil {
+			return nil, newRoutingPolicyServiceError("invalid_cost_variant_key", fmt.Sprintf("targets.%d.cost_variant_key", index), err.Error())
+		}
 		targetID := -(index + 1)
 		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], modelrouting.Target{
 			ID:                       targetID,
@@ -130,6 +137,7 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,
+			CostVariantKey:           variant,
 			Priority:                 target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,
@@ -145,6 +153,7 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,
+			CostVariantKey:           variant,
 			TargetPriority:           target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,
@@ -361,12 +370,17 @@ func routingPolicyViewFromRow(row *model.RoutingPolicy, channelNames map[int]str
 		if err := common.UnmarshalJsonStr(target.Constraints, &constraints); err != nil {
 			return nil, newRoutingPolicyServiceError("routing_policy_error", "", err.Error())
 		}
+		variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+		if err != nil {
+			return nil, newRoutingPolicyServiceError("routing_policy_error", "", err.Error())
+		}
 		view.Targets = append(view.Targets, RouteTargetView{
 			ID:                       target.ID,
 			ChannelID:                target.ChannelID,
 			ChannelName:              channelNames[target.ChannelID],
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,
+			CostVariantKey:           variant,
 			TargetPriority:           target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,
@@ -389,6 +403,7 @@ func routingPolicyWriteRequestFromView(view *RoutingPolicyView) RoutingPolicyWri
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,
+			CostVariantKey:           target.CostVariantKey,
 			TargetPriority:           target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,

@@ -113,6 +113,7 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,
+			CostVariantKey:           target.CostVariantKey,
 			Priority:                 target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,

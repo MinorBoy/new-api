@@ -29,9 +29,11 @@ import { I18nextProvider } from 'react-i18next'
 import {
   createEmptyPolicyForm,
   createEmptyTarget,
+  fromPolicyResponse,
   routeTargetFormSchema,
   toWriteRequest,
   type RouteTargetFormValues,
+  type RoutingPolicy,
   type RoutingPolicyFormValues,
 } from '../types'
 import { RouteTargetEditor } from './route-target-editor'
@@ -258,6 +260,78 @@ test('routing target margin keeps null inheritance and explicit zero', () => {
       minimum_expected_margin_bps: 10001,
     }).success,
     false
+  )
+})
+
+test('empty routing targets default to the default cost variant', () => {
+  const target = createEmptyTarget() as unknown as Record<string, unknown>
+
+  assert.equal(target.cost_variant_key, 'default')
+})
+
+test('routing target cost variants normalize valid keys and reject invalid keys', () => {
+  const target = {
+    ...createEmptyTarget(),
+    channel_id: 1,
+    name: 'target',
+    upstream_model: 'vendor-model',
+  }
+
+  const parsed = routeTargetFormSchema.parse({
+    ...target,
+    cost_variant_key: ' 720P ',
+  }) as unknown as Record<string, unknown>
+  assert.equal(parsed.cost_variant_key, '720p')
+  assert.equal(
+    routeTargetFormSchema.safeParse({
+      ...target,
+      cost_variant_key: 'not a variant',
+    }).success,
+    false
+  )
+})
+
+test('routing target cost variants survive write and response mappings', () => {
+  const target = createEmptyTarget() as unknown as Record<string, unknown>
+  target.channel_id = 1
+  target.name = 'target'
+  target.upstream_model = 'vendor-model'
+  target.cost_variant_key = ' 720P '
+  const policy = createEmptyPolicyForm()
+  const request = toWriteRequest({
+    ...policy,
+    group_name: 'default',
+    enabled: true,
+    targets: [target as unknown as RouteTargetFormValues],
+  })
+  const requestTarget = request.targets[0]
+  assert.ok(requestTarget)
+  assert.equal(
+    (requestTarget as unknown as Record<string, unknown>).cost_variant_key,
+    '720p'
+  )
+
+  const form = fromPolicyResponse({
+    id: 1,
+    group_name: 'default',
+    model: policy.model,
+    enabled: true,
+    defaults: policy.defaults,
+    targets: [
+      {
+        ...requestTarget,
+        id: 1,
+        channel_name: 'A1',
+        cost_variant_key: '720p',
+      },
+    ],
+    created_at: 1,
+    updated_at: 1,
+  } as unknown as RoutingPolicy)
+
+  assert.equal(
+    (form.targets[0] as unknown as Record<string, unknown>).cost_variant_key,
+    '720p'
   )
 })
 

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
 )
 
@@ -170,12 +171,21 @@ func routingPolicySnapshotFromRows(policy RoutingPolicy, targets []RouteTarget) 
 		if err := common.UnmarshalJsonStr(target.Constraints, &constraints); err != nil {
 			return modelrouting.PolicySnapshot{}, fmt.Errorf("decode route target %d constraints: %w", target.ID, err)
 		}
+		// Normalize the variant identity defensively: the migration backfills
+		// legacy rows to default, but external tooling or partial test fixtures
+		// may still persist blanks. A blank here would silently break strict
+		// variant matching downstream, so resolve it to default.
+		variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+		if err != nil {
+			return modelrouting.PolicySnapshot{}, fmt.Errorf("route target %d cost variant key: %w", target.ID, err)
+		}
 		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], modelrouting.Target{
 			ID:                       target.ID,
 			PolicyID:                 target.PolicyID,
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,
+			CostVariantKey:           variant,
 			Priority:                 target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,

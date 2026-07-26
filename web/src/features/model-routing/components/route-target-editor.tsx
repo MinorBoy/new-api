@@ -50,6 +50,7 @@ import { cn } from '@/lib/utils'
 import {
   ASPECT_RATIOS,
   buildRoutingTargetName,
+  INPUT_MODES,
   MAX_TASK_DURATION_SECONDS,
   OUTPUT_RESOLUTIONS,
   shouldUpdateRoutingTargetName,
@@ -73,6 +74,13 @@ function numericValue(value: string): number {
 
 const ROUTING_SELECTED_CLASS =
   'data-[state=on]:border-primary data-[state=on]:bg-primary/15 data-[state=on]:text-primary dark:data-[state=on]:bg-primary/20'
+
+const INPUT_MODE_LABELS = {
+  text: 'Text to video',
+  first_frame: 'First frame',
+  first_last_frames: 'First and last frames',
+  omni_reference: 'Omni reference',
+} satisfies Record<(typeof INPUT_MODES)[number], string>
 
 export function RouteTargetEditor(props: RouteTargetEditorProps) {
   const { t } = useTranslation()
@@ -591,6 +599,64 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
         )}
       />
 
+      <FormField
+        control={props.form.control}
+        name={`targets.${props.index}.input_modes`}
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t('Input modes')}</FormLabel>
+            <FormControl>
+              <ToggleGroup
+                multiple
+                value={field.value}
+                onValueChange={field.onChange}
+                variant='outline'
+                spacing={1}
+                className='flex w-full flex-wrap justify-start'
+              >
+                {INPUT_MODES.map((mode) => (
+                  <ToggleGroupItem
+                    key={mode}
+                    value={mode}
+                    className={ROUTING_SELECTED_CLASS}
+                  >
+                    {t(INPUT_MODE_LABELS[mode])}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <div className='grid gap-4 sm:grid-cols-3'>
+        {(['images', 'videos', 'audios'] as const).map((kind) => (
+          <FormField
+            key={kind}
+            control={props.form.control}
+            name={`targets.${props.index}.reference_minimums.${kind}`}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t(`Minimum reference ${kind}`)}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={0}
+                    max={target?.reference_limits[kind] ?? 0}
+                    value={field.value}
+                    onChange={(event) =>
+                      field.onChange(numericValue(event.target.value))
+                    }
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        ))}
+      </div>
+
       <div className='grid gap-4 sm:grid-cols-3'>
         {(['images', 'videos', 'audios'] as const).map((kind) => {
           const maximum = kind === 'images' ? 9 : 3
@@ -605,7 +671,7 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
                   <FormControl>
                     <Input
                       type='number'
-                      min={0}
+                      min={target?.reference_minimums[kind] ?? 0}
                       max={maximum}
                       value={field.value}
                       onChange={(event) =>

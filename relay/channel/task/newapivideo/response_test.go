@@ -134,12 +134,15 @@ func TestParseTaskResultStatusMappings(t *testing.T) {
 	}
 
 	directStatuses := map[string]model.TaskStatus{
+		"pending":     model.TaskStatusQueued,
 		"queued":      model.TaskStatusQueued,
 		"in_progress": model.TaskStatusInProgress,
 		"running":     model.TaskStatusInProgress,
 		"completed":   model.TaskStatusSuccess,
 		"succeeded":   model.TaskStatusSuccess,
 		"failed":      model.TaskStatusFailure,
+		"error":       model.TaskStatusFailure,
+		"canceled":    model.TaskStatusFailure,
 		"cancelled":   model.TaskStatusFailure,
 	}
 	for upstream, expected := range directStatuses {

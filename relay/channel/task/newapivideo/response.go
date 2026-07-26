@@ -349,13 +349,13 @@ func mapUpstreamTaskStatus(status string) (model.TaskStatus, error) {
 		return model.TaskStatusNotStart, nil
 	case "SUBMITTED":
 		return model.TaskStatusSubmitted, nil
-	case "QUEUED":
+	case "QUEUED", "PENDING":
 		return model.TaskStatusQueued, nil
 	case "IN_PROGRESS", "RUNNING", "PROCESSING":
 		return model.TaskStatusInProgress, nil
 	case "SUCCESS", "SUCCEEDED", "COMPLETED":
 		return model.TaskStatusSuccess, nil
-	case "FAILURE", "FAILED", "CANCELLED", "EXPIRED":
+	case "FAILURE", "FAILED", "ERROR", "CANCELED", "CANCELLED", "EXPIRED":
 		return model.TaskStatusFailure, nil
 	default:
 		return model.TaskStatusUnknown, fmt.Errorf("unknown new-api video task status: %s", status)

@@ -33,10 +33,13 @@ describe('model routing data contract', () => {
           name: 'A1 720p',
           upstream_model: 'provider-720p',
           target_priority: 100,
+          minimum_expected_margin_bps: null,
           enabled: true,
           output_resolutions: ['720p'],
           durations: { mode: 'values', values: [5, 10] },
           aspect_ratios: [],
+          input_modes: ['first_frame', 'omni_reference'],
+          reference_minimums: { images: 1, videos: 0, audios: 0 },
           reference_limits: { images: 9, videos: 3, audios: 3 },
           supports_real_person: 'unknown',
         },
@@ -50,6 +53,15 @@ describe('model routing data contract', () => {
       'generation_resolution'
     )
     expect(payload.targets[0]?.constraints).not.toHaveProperty('upscaled')
+    expect(payload.targets[0]?.constraints.input_modes).toEqual([
+      'first_frame',
+      'omni_reference',
+    ])
+    expect(payload.targets[0]?.constraints.reference_minimums).toEqual({
+      images: 1,
+      videos: 0,
+      audios: 0,
+    })
     expect(payload.targets[0]?.constraints.supports_real_person).toBeNull()
   })
 
@@ -74,6 +86,7 @@ describe('model routing data contract', () => {
             name: 'upscaled 1080p',
             upstream_model: 'provider-1080p',
             target_priority: 110,
+            minimum_expected_margin_bps: null,
             enabled: true,
             constraints: {
               output_resolutions: ['1080p'],
@@ -99,10 +112,28 @@ describe('model routing data contract', () => {
       max: 15,
     })
     expect(form.targets[0]?.supports_real_person).toBe('no')
+    expect(form.targets[0]?.input_modes).toEqual([
+      'text',
+      'first_frame',
+      'first_last_frames',
+      'omni_reference',
+    ])
+    expect(form.targets[0]?.reference_minimums).toEqual({
+      images: 0,
+      videos: 0,
+      audios: 0,
+    })
     expect(response.data.targets[0]?.constraints).toEqual({
       output_resolutions: ['1080p'],
       durations: { min: 4, max: 15 },
       aspect_ratios: [],
+      input_modes: [
+        'text',
+        'first_frame',
+        'first_last_frames',
+        'omni_reference',
+      ],
+      reference_minimums: { images: 0, videos: 0, audios: 0 },
       reference_limits: { images: 4, videos: 3, audios: 1 },
       supports_real_person: false,
     })
@@ -120,6 +151,17 @@ describe('model routing data contract', () => {
       values: [],
       min: 4,
       max: 15,
+    })
+    expect(first.targets[0]?.input_modes).toEqual([
+      'text',
+      'first_frame',
+      'first_last_frames',
+      'omni_reference',
+    ])
+    expect(first.targets[0]?.reference_minimums).toEqual({
+      images: 0,
+      videos: 0,
+      audios: 0,
     })
   })
 
@@ -157,6 +199,7 @@ describe('model routing data contract', () => {
             name: 'A1 target',
             upstream_model: 'provider-model',
             target_priority: 100,
+            minimum_expected_margin_bps: null,
             enabled: true,
             constraints: {
               output_resolutions: ['720p'],
@@ -187,12 +230,72 @@ describe('model routing data contract', () => {
 
     const copy = copyTargetForm(source)
     copy.durations.values.push(10)
+    copy.input_modes.pop()
+    copy.reference_minimums.images = 1
     copy.reference_limits.images = 4
 
     expect(copy.id).toBeUndefined()
     expect(copy.name).toBe('A1 target copy')
     expect(source.durations.values).toEqual([])
+    expect(source.input_modes).toEqual([
+      'text',
+      'first_frame',
+      'first_last_frames',
+      'omni_reference',
+    ])
+    expect(source.reference_minimums.images).toBe(0)
     expect(source.reference_limits.images).toBe(9)
+  })
+
+  test('rejects reference minimums above their matching maximums', () => {
+    const target = createEmptyTarget()
+    target.channel_id = 1
+    target.name = 'discount target'
+    target.upstream_model = 'provider-model'
+    target.reference_minimums.images = 2
+    target.reference_limits.images = 1
+
+    const result = routingPolicyFormSchema.safeParse({
+      ...createEmptyPolicyForm(),
+      group_name: 'discount',
+      targets: [target],
+    })
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual([
+        'targets',
+        0,
+        'reference_minimums',
+        'images',
+      ])
+    }
+  })
+
+  test('rejects an all-deselected input mode list', () => {
+    const target = createEmptyTarget()
+    target.channel_id = 1
+    target.name = 'discount target'
+    target.upstream_model = 'provider-model'
+    target.input_modes = []
+
+    const result = routingPolicyFormSchema.safeParse({
+      ...createEmptyPolicyForm(),
+      group_name: 'discount',
+      targets: [target],
+    })
+
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual([
+        'targets',
+        0,
+        'input_modes',
+      ])
+      expect(result.error.issues[0]?.message).toBe(
+        'At least one input mode is required'
+      )
+    }
   })
 
   test('clears only target channels missing from the latest candidates', () => {

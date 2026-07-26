@@ -260,3 +260,81 @@ test('routing target margin keeps null inheritance and explicit zero', () => {
     false
   )
 })
+
+test('edits input modes and reference minimums in the submitted constraints', async () => {
+  const mounted = await mountTargetEditor()
+  try {
+    const buttons = [...browserWindow.document.querySelectorAll('button')]
+    const textMode = buttons.find(
+      (button) => button.textContent?.trim() === 'Text to video'
+    )
+    const framePairMode = buttons.find(
+      (button) => button.textContent?.trim() === 'First and last frames'
+    )
+    assert.ok(textMode)
+    assert.ok(framePairMode)
+
+    await act(async () => {
+      textMode.click()
+    })
+    await act(async () => {
+      framePairMode.click()
+    })
+
+    const minimumImagesLabel = [
+      ...browserWindow.document.querySelectorAll('label'),
+    ].find((label) => label.textContent?.trim() === 'Minimum reference images')
+    assert.ok(minimumImagesLabel instanceof browserWindow.HTMLLabelElement)
+    const minimumImages = browserWindow.document.querySelector(
+      `input[id="${minimumImagesLabel.htmlFor}"]`
+    )
+    assert.ok(minimumImages instanceof browserWindow.HTMLInputElement)
+    const inputValueSetter = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(minimumImages) as object,
+      'value'
+    )?.set
+    assert.ok(inputValueSetter)
+    const eventTarget = minimumImages as unknown as {
+      dispatchEvent: (event: unknown) => boolean
+    }
+
+    await act(async () => {
+      inputValueSetter.call(minimumImages, '1')
+      eventTarget.dispatchEvent(
+        new browserWindow.Event('input', { bubbles: true })
+      )
+    })
+
+    assert.deepEqual(mounted.form.getValues('targets.0.input_modes'), [
+      'first_frame',
+      'omni_reference',
+    ])
+    assert.deepEqual(mounted.form.getValues('targets.0.reference_minimums'), {
+      images: 1,
+      videos: 0,
+      audios: 0,
+    })
+
+    const policy = mounted.form.getValues()
+    policy.group_name = 'discount'
+    policy.enabled = true
+    const policyTarget = policy.targets[0]
+    assert.ok(policyTarget)
+    policyTarget.channel_id = 1
+    policyTarget.name = 'discount target'
+    policyTarget.upstream_model = 'provider-model'
+    const payload = toWriteRequest(policy)
+
+    assert.deepEqual(payload.targets[0]?.constraints.input_modes, [
+      'first_frame',
+      'omni_reference',
+    ])
+    assert.deepEqual(payload.targets[0]?.constraints.reference_minimums, {
+      images: 1,
+      videos: 0,
+      audios: 0,
+    })
+  } finally {
+    await unmountTargetEditor(mounted.root, mounted.container)
+  }
+})

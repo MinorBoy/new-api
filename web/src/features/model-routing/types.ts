@@ -35,9 +35,16 @@ export const ASPECT_RATIOS = [
   '21:9',
   'adaptive',
 ] as const
+export const INPUT_MODES = [
+  'text',
+  'first_frame',
+  'first_last_frames',
+  'omni_reference',
+] as const
 
 const resolutionSchema = z.enum(OUTPUT_RESOLUTIONS)
 const aspectRatioSchema = z.enum(ASPECT_RATIOS)
+const inputModeSchema = z.enum(INPUT_MODES)
 const durationValueSchema = z
   .number()
   .int()
@@ -79,25 +86,49 @@ const referenceLimitsSchema = z.object({
   audios: z.number().int().min(0).max(3),
 })
 
+type ReferenceRange = {
+  reference_minimums: z.infer<typeof referenceLimitsSchema>
+  reference_limits: z.infer<typeof referenceLimitsSchema>
+}
+
+function validateReferenceRange(value: ReferenceRange, ctx: z.RefinementCtx) {
+  for (const kind of ['images', 'videos', 'audios'] as const) {
+    if (value.reference_minimums[kind] <= value.reference_limits[kind]) {
+      continue
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reference_minimums', kind],
+      message: 'Minimum cannot exceed maximum',
+    })
+  }
+}
+
 const marginBPSSchema = z.number().int().min(0).max(10_000)
 
-export const routeTargetFormSchema = z.object({
-  id: z.number().int().positive().optional(),
-  channel_id: z.number().int().positive('Channel is required'),
-  channel_name: z.string(),
-  name: z.string().trim().min(1, 'Target name is required'),
-  upstream_model: z.string().trim().min(1, 'Upstream model is required'),
-  target_priority: z.number().int(),
-  minimum_expected_margin_bps: marginBPSSchema.nullable(),
-  enabled: z.boolean(),
-  output_resolutions: z
-    .array(resolutionSchema)
-    .min(1, 'At least one output resolution is required'),
-  durations: durationConstraintFormSchema,
-  aspect_ratios: z.array(aspectRatioSchema),
-  reference_limits: referenceLimitsSchema,
-  supports_real_person: z.enum(['unknown', 'yes', 'no']),
-})
+export const routeTargetFormSchema = z
+  .object({
+    id: z.number().int().positive().optional(),
+    channel_id: z.number().int().positive('Channel is required'),
+    channel_name: z.string(),
+    name: z.string().trim().min(1, 'Target name is required'),
+    upstream_model: z.string().trim().min(1, 'Upstream model is required'),
+    target_priority: z.number().int(),
+    minimum_expected_margin_bps: marginBPSSchema.nullable(),
+    enabled: z.boolean(),
+    output_resolutions: z
+      .array(resolutionSchema)
+      .min(1, 'At least one output resolution is required'),
+    durations: durationConstraintFormSchema,
+    aspect_ratios: z.array(aspectRatioSchema),
+    input_modes: z
+      .array(inputModeSchema)
+      .min(1, 'At least one input mode is required'),
+    reference_minimums: referenceLimitsSchema,
+    reference_limits: referenceLimitsSchema,
+    supports_real_person: z.enum(['unknown', 'yes', 'no']),
+  })
+  .superRefine(validateReferenceRange)
 
 export const routingPolicyFormSchema = z
   .object({
@@ -144,13 +175,21 @@ export const durationConstraintApiSchema = z.union([
   durationRangeApiSchema,
 ])
 
-export const routeConstraintsApiSchema = z.object({
-  output_resolutions: z.array(resolutionSchema).min(1),
-  durations: durationConstraintApiSchema,
-  aspect_ratios: z.array(aspectRatioSchema).default([]),
-  reference_limits: referenceLimitsSchema,
-  supports_real_person: z.boolean().nullable(),
-})
+export const routeConstraintsApiSchema = z
+  .object({
+    output_resolutions: z.array(resolutionSchema).min(1),
+    durations: durationConstraintApiSchema,
+    aspect_ratios: z.array(aspectRatioSchema).default([]),
+    input_modes: z.array(inputModeSchema).default([...INPUT_MODES]),
+    reference_minimums: referenceLimitsSchema.default({
+      images: 0,
+      videos: 0,
+      audios: 0,
+    }),
+    reference_limits: referenceLimitsSchema,
+    supports_real_person: z.boolean().nullable(),
+  })
+  .superRefine(validateReferenceRange)
 
 export const routeTargetSchema = z.object({
   id: z.number().int().positive(),
@@ -370,6 +409,8 @@ export function createEmptyTarget(): RouteTargetFormValues {
     output_resolutions: ['720p'],
     durations: { mode: 'range', values: [], min: 4, max: 15 },
     aspect_ratios: [],
+    input_modes: [...INPUT_MODES],
+    reference_minimums: { images: 0, videos: 0, audios: 0 },
     reference_limits: { images: 9, videos: 3, audios: 3 },
     supports_real_person: 'unknown',
   }
@@ -405,6 +446,8 @@ function cloneTargetForm(
       values: [...target.durations.values],
     },
     aspect_ratios: [...target.aspect_ratios],
+    input_modes: [...target.input_modes],
+    reference_minimums: { ...target.reference_minimums },
     reference_limits: { ...target.reference_limits },
   }
 }
@@ -448,6 +491,8 @@ export function toWriteRequest(
                 max: target.durations.max as number,
               },
         aspect_ratios: target.aspect_ratios,
+        input_modes: target.input_modes,
+        reference_minimums: target.reference_minimums,
         reference_limits: target.reference_limits,
         supports_real_person:
           target.supports_real_person === 'unknown'
@@ -496,6 +541,8 @@ export function fromPolicyResponse(
         output_resolutions: target.constraints.output_resolutions,
         durations: durationForm,
         aspect_ratios: target.constraints.aspect_ratios,
+        input_modes: target.constraints.input_modes,
+        reference_minimums: target.constraints.reference_minimums,
         reference_limits: target.constraints.reference_limits,
         supports_real_person: supportsRealPersonForm,
       }

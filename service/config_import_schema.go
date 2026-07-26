@@ -325,26 +325,36 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 	sourceIDs := make(map[string]struct{}, len(entities.Sources))
 	for index := range entities.Sources {
 		source := &entities.Sources[index]
+		if err := normalizeConfigImportSourceURL(source); err != nil {
+			return err
+		}
 		if err := validateConfigImportAuthoritativeEntity(&source.ConfigImportAuthoritativeEntity, "sources", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("sources", index, source, source.EntityHash); err != nil {
 			return err
 		}
 		if source.SourceRef != source.BusinessID {
 			return configImportError("REFERENCE_SOURCE", "sources[%d].source_ref must equal its business_id", index)
 		}
-		if err := normalizeConfigImportSourceURL(source); err != nil {
-			return err
-		}
 		sourceIDs[source.BusinessID] = struct{}{}
 	}
 
 	for index := range entities.Channels {
-		if err := validateConfigImportAuthoritativeEntity(&entities.Channels[index].ConfigImportAuthoritativeEntity, "channels", index, businessIDs); err != nil {
+		channel := &entities.Channels[index]
+		if err := validateConfigImportAuthoritativeEntity(&channel.ConfigImportAuthoritativeEntity, "channels", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("channels", index, channel, channel.EntityHash); err != nil {
 			return err
 		}
 	}
 	for index := range entities.ChannelLines {
 		line := &entities.ChannelLines[index]
 		if err := validateConfigImportAuthoritativeEntity(&line.ConfigImportAuthoritativeEntity, "channel_lines", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("channel_lines", index, line, line.EntityHash); err != nil {
 			return err
 		}
 		if line.LineRef == "" || line.LineRef != line.BusinessID {
@@ -359,13 +369,20 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		}
 	}
 	for index := range entities.ModelSKUs {
-		if err := validateConfigImportAuthoritativeEntity(&entities.ModelSKUs[index].ConfigImportAuthoritativeEntity, "model_skus", index, businessIDs); err != nil {
+		modelSKU := &entities.ModelSKUs[index]
+		if err := validateConfigImportAuthoritativeEntity(&modelSKU.ConfigImportAuthoritativeEntity, "model_skus", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("model_skus", index, modelSKU, modelSKU.EntityHash); err != nil {
 			return err
 		}
 	}
 	for index := range entities.SaleProposals {
 		proposal := &entities.SaleProposals[index]
 		if err := validateConfigImportAuthoritativeEntity(&proposal.ConfigImportAuthoritativeEntity, "sale_proposals", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("sale_proposals", index, proposal, proposal.EntityHash); err != nil {
 			return err
 		}
 		for field, value := range map[string]*string{
@@ -379,6 +396,9 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 	for index := range entities.CostRuleDrafts {
 		draft := &entities.CostRuleDrafts[index]
 		if err := validateConfigImportAuthoritativeEntity(&draft.ConfigImportAuthoritativeEntity, "cost_rule_drafts", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("cost_rule_drafts", index, draft, draft.EntityHash); err != nil {
 			return err
 		}
 		for field, value := range map[string]*string{
@@ -398,13 +418,17 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 				return err
 			}
 		}
-		if _, err := types.NormalizeCostVariantKey(draft.CostVariantKey); err != nil || draft.CostVariantKey == "" {
+		canonicalCostVariantKey, err := types.NormalizeCostVariantKey(draft.CostVariantKey)
+		if err != nil || draft.CostVariantKey == "" || canonicalCostVariantKey != draft.CostVariantKey {
 			return configImportError("SCHEMA_COST_VARIANT_KEY", "cost_rule_drafts[%d].cost_variant_key is invalid", index)
 		}
 	}
 	for index := range entities.ModelMappings {
 		mapping := &entities.ModelMappings[index]
 		if err := validateConfigImportAuthoritativeEntity(&mapping.ConfigImportAuthoritativeEntity, "model_mappings", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("model_mappings", index, mapping, mapping.EntityHash); err != nil {
 			return err
 		}
 		if strings.TrimSpace(mapping.CanonicalModel) == "" || strings.TrimSpace(mapping.ClientModel) == "" ||
@@ -415,6 +439,9 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 	for index := range entities.RouteBlueprints {
 		blueprint := &entities.RouteBlueprints[index]
 		if err := validateConfigImportAuthoritativeEntity(&blueprint.ConfigImportAuthoritativeEntity, "route_blueprints", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("route_blueprints", index, blueprint, blueprint.EntityHash); err != nil {
 			return err
 		}
 		if strings.TrimSpace(blueprint.CanonicalModel) == "" || strings.TrimSpace(blueprint.ClientModel) == "" {
@@ -431,7 +458,11 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		}
 	}
 	for index := range entities.UnresolvedVariants {
-		if err := validateConfigImportAuthoritativeEntity(&entities.UnresolvedVariants[index].ConfigImportAuthoritativeEntity, "unresolved_variants", index, businessIDs); err != nil {
+		variant := &entities.UnresolvedVariants[index]
+		if err := validateConfigImportAuthoritativeEntity(&variant.ConfigImportAuthoritativeEntity, "unresolved_variants", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("unresolved_variants", index, variant, variant.EntityHash); err != nil {
 			return err
 		}
 	}
@@ -457,6 +488,42 @@ func validateConfigImportAuthoritativeEntity(entity *types.ConfigImportAuthorita
 	}
 	businessIDs[entity.BusinessID] = collection
 	return nil
+}
+
+// configImportEntitySHA256 hashes an entity's canonical authoritative content:
+// its typed JSON fields (including source location) become a key-sorted object,
+// and unordered contract arrays are normalized. entity_hash itself is removed
+// before hashing, so the converter can produce a stable digest without a
+// self-referential fixed-point calculation. Source URLs are normalized before
+// this function is called.
+func validateConfigImportEntityHash(collection string, index int, entity any, suppliedHash string) error {
+	actualHash, err := configImportEntitySHA256(entity)
+	if err != nil {
+		return configImportError("SCHEMA_ENTITY_HASH", "%s[%d] canonicalization failed: %v", collection, index, err)
+	}
+	if suppliedHash != actualHash {
+		return configImportError("SCHEMA_ENTITY_HASH", "%s[%d].entity_hash does not match canonical entity content", collection, index)
+	}
+	return nil
+}
+
+func configImportEntitySHA256(entity any) (string, error) {
+	encoded, err := common.Marshal(entity)
+	if err != nil {
+		return "", err
+	}
+	var canonical map[string]any
+	if err := common.Unmarshal(encoded, &canonical); err != nil {
+		return "", err
+	}
+	delete(canonical, "entity_hash")
+	canonicalizeConfigImportGenericValue(canonical)
+	payload, err := common.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", digest), nil
 }
 
 func normalizeConfigImportSourceURL(source *types.ConfigImportSource) error {
@@ -498,7 +565,8 @@ func validateConfigImportRouteTarget(target *types.ConfigImportRouteTarget, blue
 		strings.TrimSpace(target.UpstreamModel) == "" || strings.TrimSpace(target.SKURef) == "" {
 		return configImportError("SCHEMA_ROUTE_TARGET", "route_blueprints[%d].targets[%d] requires route_target_ref, line_ref, upstream_model, and sku_ref", blueprintIndex, targetIndex)
 	}
-	if _, err := types.NormalizeCostVariantKey(target.CostVariantKey); err != nil || target.CostVariantKey == "" {
+	canonicalCostVariantKey, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+	if err != nil || target.CostVariantKey == "" || canonicalCostVariantKey != target.CostVariantKey {
 		return configImportError("SCHEMA_COST_VARIANT_KEY", "route_blueprints[%d].targets[%d].cost_variant_key is invalid", blueprintIndex, targetIndex)
 	}
 	if target.Enabled == nil || *target.Enabled {
@@ -531,9 +599,14 @@ func validateConfigImportRouteTarget(target *types.ConfigImportRouteTarget, blue
 func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, sourceIDs map[string]struct{}, businessIDs map[string]string) error {
 	routeTargets := make(map[string]*types.ConfigImportRouteTarget)
 	linesByRef := make(map[string]*types.ConfigImportChannelLine, len(entities.ChannelLines))
+	skusByRef := make(map[string]*types.ConfigImportModelSKU, len(entities.ModelSKUs))
 	for index := range entities.ChannelLines {
 		line := &entities.ChannelLines[index]
 		linesByRef[line.LineRef] = line
+	}
+	for index := range entities.ModelSKUs {
+		modelSKU := &entities.ModelSKUs[index]
+		skusByRef[modelSKU.BusinessID] = modelSKU
 	}
 	for blueprintIndex := range entities.RouteBlueprints {
 		for targetIndex := range entities.RouteBlueprints[blueprintIndex].Targets {
@@ -610,6 +683,10 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportReference("model_mappings", index, "sku_ref", mapping.SKURef, businessIDs, "model_skus"); err != nil {
 			return err
 		}
+		modelSKU := skusByRef[mapping.SKURef]
+		if mapping.LineRef != modelSKU.LineRef || (modelSKU.UpstreamModel != "" && mapping.UpstreamModel != modelSKU.UpstreamModel) {
+			return configImportError("ROUTING_REFERENCE_TUPLE", "model_mappings[%d] does not match sku_ref %q", index, mapping.SKURef)
+		}
 	}
 	for index := range entities.RouteBlueprints {
 		blueprint := entities.RouteBlueprints[index]
@@ -630,7 +707,11 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 				return err
 			}
 			line := linesByRef[target.LineRef]
-			if line.SupportsRealPerson != nil && target.SupportsRealPerson != nil && *line.SupportsRealPerson != *target.SupportsRealPerson {
+			modelSKU := skusByRef[target.SKURef]
+			if target.LineRef != modelSKU.LineRef || (modelSKU.UpstreamModel != "" && target.UpstreamModel != modelSKU.UpstreamModel) {
+				return configImportError("ROUTING_REFERENCE_TUPLE", "route_blueprints[%d].targets[%d] does not match sku_ref %q", index, targetIndex, target.SKURef)
+			}
+			if line.SupportsRealPerson != nil && (target.SupportsRealPerson == nil || *line.SupportsRealPerson != *target.SupportsRealPerson) {
 				return configImportError("ROUTING_REAL_PERSON_MISMATCH", "route_blueprints[%d].targets[%d].supports_real_person conflicts with line_ref %q", index, targetIndex, target.LineRef)
 			}
 		}
@@ -810,4 +891,70 @@ func canonicalizeConfigImportStrings(values []string) {
 
 func canonicalizeConfigImportInts(values []int) {
 	sort.Ints(values)
+}
+
+func canonicalizeConfigImportGenericValue(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, child := range typed {
+			canonicalizeConfigImportGenericValue(child)
+		}
+	case []any:
+		for _, child := range typed {
+			canonicalizeConfigImportGenericValue(child)
+		}
+		if len(typed) < 2 {
+			return
+		}
+		if configImportAllStrings(typed) {
+			sort.Slice(typed, func(left, right int) bool { return typed[left].(string) < typed[right].(string) })
+			return
+		}
+		if configImportAllNumbers(typed) {
+			sort.Slice(typed, func(left, right int) bool { return typed[left].(float64) < typed[right].(float64) })
+			return
+		}
+		if configImportAllObjectsWithKey(typed, "business_id") {
+			sort.Slice(typed, func(left, right int) bool {
+				return typed[left].(map[string]any)["business_id"].(string) < typed[right].(map[string]any)["business_id"].(string)
+			})
+			return
+		}
+		if configImportAllObjectsWithKey(typed, "route_target_ref") {
+			sort.Slice(typed, func(left, right int) bool {
+				return typed[left].(map[string]any)["route_target_ref"].(string) < typed[right].(map[string]any)["route_target_ref"].(string)
+			})
+		}
+	}
+}
+
+func configImportAllStrings(values []any) bool {
+	for _, value := range values {
+		if _, ok := value.(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func configImportAllNumbers(values []any) bool {
+	for _, value := range values {
+		if _, ok := value.(float64); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func configImportAllObjectsWithKey(values []any, key string) bool {
+	for _, value := range values {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		if _, ok := object[key].(string); !ok {
+			return false
+		}
+	}
+	return true
 }

@@ -336,6 +336,102 @@ func TestConfigImportSchemaRejectsNegativeDecimalFact(t *testing.T) {
 	requireCode(t, err, "SCHEMA_DECIMAL")
 }
 
+func TestConfigImportSchemaRejectsNonCanonicalCostVariantKeys(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		value string
+	}{
+		{name: "uppercase cost draft", value: "STANDARD"},
+		{name: "surrounding whitespace cost draft", value: " standard "},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			payload := configImportDocumentJSON(t, map[string]any{
+				"cost_rule_drafts": []any{map[string]any{
+					"business_id": "cost-one", "entity_hash": strings.Repeat("c", 64), "source_ref": "source-workbook",
+					"line_ref": "missing-line", "cost_variant_key": testCase.value, "route_target_ref": "missing-target",
+				}},
+			})
+
+			_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+			requireCode(t, err, "SCHEMA_COST_VARIANT_KEY")
+		})
+	}
+}
+
+func TestConfigImportSchemaRejectsNonCanonicalRouteTargetCostVariantKey(t *testing.T) {
+	for _, value := range []string{"DEFAULT", " default "} {
+		t.Run(value, func(t *testing.T) {
+			entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+			target := entities["route_blueprints"].([]any)[0].(map[string]any)["targets"].([]any)[0].(map[string]any)
+			target["cost_variant_key"] = value
+			payload := configImportDocumentJSON(t, entities)
+
+			_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+			requireCode(t, err, "SCHEMA_COST_VARIANT_KEY")
+		})
+	}
+}
+
+func TestConfigImportSchemaRequiresRouteTargetRealPersonConstraintWhenLineSetsIt(t *testing.T) {
+	lineSupportsRealPerson := true
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", &lineSupportsRealPerson, nil)
+	payload := configImportDocumentJSON(t, entities)
+
+	_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	requireCode(t, err, "ROUTING_REAL_PERSON_MISMATCH")
+}
+
+func TestConfigImportSchemaRejectsConflictingRouteTargetRealPersonConstraint(t *testing.T) {
+	lineSupportsRealPerson := true
+	targetSupportsRealPerson := false
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", &lineSupportsRealPerson, &targetSupportsRealPerson)
+	payload := configImportDocumentJSON(t, entities)
+
+	_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	requireCode(t, err, "ROUTING_REAL_PERSON_MISMATCH")
+}
+
+func TestConfigImportSchemaRejectsReferenceTupleMismatch(t *testing.T) {
+	for _, testCase := range []struct {
+		name         string
+		targetLine   string
+		targetModel  string
+		mappingLine  string
+		mappingModel string
+	}{
+		{name: "target line differs from sku", targetLine: "line-two", targetModel: "model-one", mappingLine: "line-one", mappingModel: "model-one"},
+		{name: "target model differs from sku", targetLine: "line-one", targetModel: "model-other", mappingLine: "line-one", mappingModel: "model-one"},
+		{name: "mapping line differs from sku", targetLine: "line-one", targetModel: "model-one", mappingLine: "line-two", mappingModel: "model-one"},
+		{name: "mapping model differs from sku", targetLine: "line-one", targetModel: "model-one", mappingLine: "line-one", mappingModel: "model-other"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			entities := configImportReferenceTupleEntities(testCase.targetLine, testCase.targetModel, testCase.mappingLine, testCase.mappingModel, nil, nil)
+			payload := configImportDocumentJSON(t, entities)
+
+			_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+			requireCode(t, err, "ROUTING_REFERENCE_TUPLE")
+		})
+	}
+}
+
+func TestConfigImportSchemaRejectsTamperedEntityHash(t *testing.T) {
+	payload := configImportDocumentJSON(t, map[string]any{})
+	var document map[string]any
+	require.NoError(t, common.Unmarshal([]byte(payload), &document))
+	document["entities"].(map[string]any)["sources"].([]any)[0].(map[string]any)["entity_hash"] = strings.Repeat("0", 64)
+	encoded, err := common.Marshal(document)
+	require.NoError(t, err)
+
+	_, err = ParseConfigImportDocument(strings.NewReader(string(encoded)))
+
+	requireCode(t, err, "SCHEMA_ENTITY_HASH")
+}
+
 func TestConfigImportSchemaAcceptsStructuredV2LineCostAndRoute(t *testing.T) {
 	payload := configImportDocumentJSON(t, map[string]any{
 		"channels": []any{map[string]any{
@@ -440,6 +536,52 @@ func TestConfigImportSchemaRejectsCredentialValueUnderAllowedField(t *testing.T)
 	requireCode(t, err, "SECURITY_CREDENTIAL_FIELD")
 }
 
+func configImportReferenceTupleEntities(targetLine, targetModel, mappingLine, mappingModel string, lineSupportsRealPerson, targetSupportsRealPerson *bool) map[string]any {
+	lineOne := map[string]any{
+		"business_id": "line-one", "entity_hash": strings.Repeat("c", 64), "source_ref": "source-workbook",
+		"line_ref": "line-one", "channel_ref": "channel-one", "display_name": "Line one",
+		"provider_type_hint": "openai", "region": "global", "protocol": "openai", "status_proposal": "disabled",
+	}
+	if lineSupportsRealPerson != nil {
+		lineOne["supports_real_person"] = *lineSupportsRealPerson
+	}
+	target := map[string]any{
+		"route_target_ref": "target-one", "line_ref": targetLine, "upstream_model": targetModel, "sku_ref": "sku-one",
+		"cost_variant_key": "default", "enabled": false,
+	}
+	if targetSupportsRealPerson != nil {
+		target["supports_real_person"] = *targetSupportsRealPerson
+	}
+	return mergeConfigImportEntities(map[string]any{
+		"channels": []any{
+			map[string]any{"business_id": "channel-one", "entity_hash": strings.Repeat("a", 64), "source_ref": "source-workbook"},
+			map[string]any{"business_id": "channel-two", "entity_hash": strings.Repeat("b", 64), "source_ref": "source-workbook"},
+		},
+		"channel_lines": []any{
+			lineOne,
+			map[string]any{
+				"business_id": "line-two", "entity_hash": strings.Repeat("d", 64), "source_ref": "source-workbook",
+				"line_ref": "line-two", "channel_ref": "channel-two", "display_name": "Line two",
+				"provider_type_hint": "openai", "region": "global", "protocol": "openai", "status_proposal": "disabled",
+			},
+		},
+		"model_skus": []any{map[string]any{
+			"business_id": "sku-one", "entity_hash": strings.Repeat("e", 64), "source_ref": "source-workbook",
+			"line_ref": "line-one", "upstream_model": "model-one",
+		}},
+		"model_mappings": []any{map[string]any{
+			"business_id": "mapping-one", "entity_hash": strings.Repeat("f", 64), "source_ref": "source-workbook",
+			"canonical_model": "model-one", "client_model": "model-one", "line_ref": mappingLine,
+			"upstream_model": mappingModel, "sku_ref": "sku-one",
+		}},
+		"route_blueprints": []any{map[string]any{
+			"business_id": "route-one", "entity_hash": strings.Repeat("1", 64), "source_ref": "source-workbook",
+			"canonical_model": "model-one", "client_model": "model-one", "model_mapping_refs": []any{"mapping-one"},
+			"targets": []any{target},
+		}},
+	})
+}
+
 func requireCode(t *testing.T, err error, code string) {
 	t.Helper()
 	require.Error(t, err)
@@ -452,8 +594,7 @@ func configImportDocumentJSON(t *testing.T, extraEntities map[string]any) string
 
 func configImportDocumentJSONWithIssues(t *testing.T, extraEntities map[string]any, issues []any) string {
 	entities := mergeConfigImportEntities(extraEntities)
-	canonicalEntities := cloneConfigImportEntitiesForHash(t, entities)
-	canonicalizeConfigImportEntitiesForHash(canonicalEntities)
+	canonicalEntities := prepareConfigImportEntitiesForHash(t, entities, entities)
 	canonical := map[string]any{"entities": canonicalEntities}
 	canonicalJSON, err := common.Marshal(canonical)
 	require.NoError(t, err)
@@ -485,8 +626,7 @@ func configImportDocumentJSONForCanonicalEntities(t *testing.T, documentEntities
 	if canonicalEntities == nil {
 		canonicalEntities = documentEntities
 	}
-	canonicalEntities = cloneConfigImportEntitiesForHash(t, canonicalEntities)
-	canonicalizeConfigImportEntitiesForHash(canonicalEntities)
+	canonicalEntities = prepareConfigImportEntitiesForHash(t, documentEntities, canonicalEntities)
 	canonicalJSON, err := common.Marshal(map[string]any{"entities": canonicalEntities})
 	require.NoError(t, err)
 	hash := sha256.Sum256(canonicalJSON)
@@ -520,6 +660,47 @@ func cloneConfigImportEntitiesForHash(t *testing.T, entities map[string]any) map
 	var cloned map[string]any
 	require.NoError(t, common.Unmarshal(encoded, &cloned))
 	return cloned
+}
+
+func prepareConfigImportEntitiesForHash(t *testing.T, documentEntities, canonicalEntities map[string]any) map[string]any {
+	t.Helper()
+	prepared := cloneConfigImportEntitiesForHash(t, canonicalEntities)
+	canonicalizeConfigImportEntitiesForHash(prepared)
+	for _, collection := range []string{
+		"channels", "channel_lines", "model_skus", "sale_proposals", "cost_rule_drafts",
+		"model_mappings", "route_blueprints", "sources", "unresolved_variants",
+	} {
+		for _, item := range prepared[collection].([]any) {
+			entity := item.(map[string]any)
+			entity["entity_hash"] = configImportEntityHashForTest(t, entity)
+		}
+	}
+	for _, collection := range []string{
+		"channels", "channel_lines", "model_skus", "sale_proposals", "cost_rule_drafts",
+		"model_mappings", "route_blueprints", "sources", "unresolved_variants",
+	} {
+		canonicalHashes := make(map[string]string)
+		for _, item := range prepared[collection].([]any) {
+			entity := item.(map[string]any)
+			canonicalHashes[entity["business_id"].(string)] = entity["entity_hash"].(string)
+		}
+		for _, item := range documentEntities[collection].([]any) {
+			entity := item.(map[string]any)
+			entity["entity_hash"] = canonicalHashes[entity["business_id"].(string)]
+		}
+	}
+	return prepared
+}
+
+func configImportEntityHashForTest(t *testing.T, entity map[string]any) string {
+	t.Helper()
+	canonical := cloneConfigImportEntitiesForHash(t, map[string]any{"entity": entity})["entity"].(map[string]any)
+	delete(canonical, "entity_hash")
+	canonicalizeConfigImportGenericValueForHash(canonical)
+	encoded, err := common.Marshal(canonical)
+	require.NoError(t, err)
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest)
 }
 
 func canonicalizeConfigImportEntitiesForHash(entities map[string]any) {
@@ -586,6 +767,76 @@ func configImportDurationForHash(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+func canonicalizeConfigImportGenericValueForHash(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, child := range typed {
+			canonicalizeConfigImportGenericValueForHash(child)
+		}
+	case []any:
+		for _, child := range typed {
+			canonicalizeConfigImportGenericValueForHash(child)
+		}
+		if len(typed) < 2 {
+			return
+		}
+		if configImportAllStringsForHash(typed) {
+			sort.Slice(typed, func(left, right int) bool { return typed[left].(string) < typed[right].(string) })
+			return
+		}
+		if configImportAllNumbersForHash(typed) {
+			sort.Slice(typed, func(left, right int) bool {
+				return configImportDurationForHash(typed[left]) < configImportDurationForHash(typed[right])
+			})
+			return
+		}
+		if configImportAllObjectsWithKeyForHash(typed, "business_id") {
+			sort.Slice(typed, func(left, right int) bool {
+				return typed[left].(map[string]any)["business_id"].(string) < typed[right].(map[string]any)["business_id"].(string)
+			})
+			return
+		}
+		if configImportAllObjectsWithKeyForHash(typed, "route_target_ref") {
+			sort.Slice(typed, func(left, right int) bool {
+				return typed[left].(map[string]any)["route_target_ref"].(string) < typed[right].(map[string]any)["route_target_ref"].(string)
+			})
+		}
+	}
+}
+
+func configImportAllStringsForHash(values []any) bool {
+	for _, value := range values {
+		if _, ok := value.(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func configImportAllNumbersForHash(values []any) bool {
+	for _, value := range values {
+		switch value.(type) {
+		case int, float64:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func configImportAllObjectsWithKeyForHash(values []any, key string) bool {
+	for _, value := range values {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		if _, ok := object[key].(string); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func configImportManifestCounts(entities map[string]any) map[string]any {

@@ -18,6 +18,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -279,6 +280,48 @@ func TestUpdateVideoSingleTaskHTTPPermanentFailures(t *testing.T) {
 	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
 	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
 	assert.Equal(t, "duration invalid", task.FailReason)
+}
+
+func TestUpdateVideoSingleTaskSanitizesFailurePersistenceAndLogs(t *testing.T) {
+	truncate(t)
+	const upstreamID = "upstream-private-id"
+	responseBody := []byte(`{"code":"bad_request","message":"Authorization: Bearer secret-token; asset https://assets.example/private.mp4?signature=signed-secret; task upstream-private-id"}`)
+	task := seedPollingTask(t, 0, "task_public_failure", upstreamID)
+	adaptor := &taskPollingHTTPFetchAdaptor{&taskPollingFetchAdaptor{
+		statusCode: http.StatusBadRequest, responseBody: responseBody,
+	}}
+
+	var logs bytes.Buffer
+	previousDebug := common.DebugEnabled
+	common.DebugEnabled = true
+	common.LogWriterMu.Lock()
+	previousWriter := gin.DefaultWriter
+	previousErrorWriter := gin.DefaultErrorWriter
+	gin.DefaultWriter = &logs
+	gin.DefaultErrorWriter = &logs
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.DebugEnabled = previousDebug
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = previousWriter
+		gin.DefaultErrorWriter = previousErrorWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	const expectedReason = "Authorization: Bearer ***; asset https://***.example/***?*** task [redacted]"
+	assert.Equal(t, expectedReason, task.FailReason)
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, expectedReason, stored.FailReason)
+
+	logOutput := logs.String()
+	assert.Contains(t, logOutput, fmt.Sprintf("updateVideoSingleTask response: status=%d bytes=%d", http.StatusBadRequest, len(responseBody)))
+	assert.Contains(t, logOutput, task.TaskID)
+	for _, sensitive := range []string{"secret-token", "signed-secret", upstreamID} {
+		assert.NotContains(t, logOutput, sensitive)
+	}
 }
 
 func TestUpdateVideoSingleTaskMalformedSuccessLeavesTaskUnchanged(t *testing.T) {

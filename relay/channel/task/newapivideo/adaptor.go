@@ -94,6 +94,23 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if taskErr := validateARKRequest(c, info, body, profile); taskErr != nil {
 			return taskErr
 		}
+		if profile.requestDialect == videoRequestDialectTextJSON {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			if profile.textRequest == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("text request profile is missing"), "internal_error", http.StatusInternalServerError)
+			}
+			if err := validateTextVideoRequest(*state.ARK, *profile.textRequest); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+			}
+			return nil
+		}
 		if profile.requestDialect != videoRequestDialectMegaReferenceArrays {
 			return nil
 		}
@@ -248,6 +265,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
 		profile := a.activeProfile()
 		switch profile.requestDialect {
+		case videoRequestDialectTextJSON:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if profile.textRequest == nil {
+				return nil, fmt.Errorf("text request profile is missing")
+			}
+			body, err = buildTextVideoRequest(*state.ARK, modelName, *profile.textRequest)
 		case videoRequestDialectMegaReferenceArrays:
 			state, stateErr := getRequestState(c)
 			if stateErr != nil {

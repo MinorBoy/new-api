@@ -2,6 +2,15 @@ package newapivideo
 
 const ChannelNameLucen = "Lucen"
 
+const ChannelNameMegaByAI = "MegaByAI"
+
+type videoRequestDialect string
+
+const (
+	videoRequestDialectNewAPIGenerations   videoRequestDialect = "newapi_generations"
+	videoRequestDialectMegaReferenceArrays videoRequestDialect = "mega_reference_arrays"
+)
+
 type protocolProfile struct {
 	channelName                        string
 	modelList                          []string
@@ -9,10 +18,21 @@ type protocolProfile struct {
 	ignoredARKFields                   map[string]struct{}
 	allowEmbeddedMedia                 bool
 	useRoutingDurationDefault          bool
+	submitPath                         string
+	pollPath                           string
+	contentType                        string
+	requestDialect                     videoRequestDialect
+	defaultDurationSeconds             int
 }
 
 func genericProtocolProfile() protocolProfile {
-	return protocolProfile{channelName: ChannelName}
+	return protocolProfile{
+		channelName:    ChannelName,
+		submitPath:     "/v1/video/generations",
+		pollPath:       "/v1/video/generations/{task_id}",
+		contentType:    "application/json",
+		requestDialect: videoRequestDialectNewAPIGenerations,
+	}
 }
 
 func lucenProtocolProfile() protocolProfile {
@@ -33,25 +53,61 @@ func lucenProtocolProfile() protocolProfile {
 		},
 		allowEmbeddedMedia:        true,
 		useRoutingDurationDefault: true,
+		submitPath:                "/v1/video/generations",
+		pollPath:                  "/v1/video/generations/{task_id}",
+		contentType:               "application/json",
+		requestDialect:            videoRequestDialectNewAPIGenerations,
 	}
+}
+
+func megaByAIProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:            ChannelNameMegaByAI,
+		modelList:              []string{"videos-standard", "videos-fast", "videos-mini"},
+		submitPath:             "/v1/videos",
+		pollPath:               "/v1/videos/{task_id}",
+		contentType:            "application/json",
+		requestDialect:         videoRequestDialectMegaReferenceArrays,
+		defaultDurationSeconds: 5,
+	}
+}
+
+func (p protocolProfile) normalized() protocolProfile {
+	if p.submitPath == "" {
+		p.submitPath = "/v1/video/generations"
+	}
+	if p.pollPath == "" {
+		p.pollPath = "/v1/video/generations/{task_id}"
+	}
+	if p.contentType == "" {
+		p.contentType = "application/json"
+	}
+	if p.requestDialect == "" {
+		p.requestDialect = videoRequestDialectNewAPIGenerations
+	}
+	return p
 }
 
 func NewLucenTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: lucenProtocolProfile()}
 }
 
+func NewMegaByAITaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: megaByAIProtocolProfile()}
+}
+
 func (a *TaskAdaptor) activeProfile() protocolProfile {
 	if a == nil || a.profile.channelName == "" {
 		return genericProtocolProfile()
 	}
-	return a.profile
+	return a.profile.normalized()
 }
 
 func selectProtocolProfile(profiles []protocolProfile) protocolProfile {
 	if len(profiles) == 0 || profiles[0].channelName == "" {
 		return genericProtocolProfile()
 	}
-	return profiles[0]
+	return profiles[0].normalized()
 }
 
 func (a *TaskAdaptor) GetModelList() []string {

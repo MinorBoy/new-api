@@ -84,11 +84,16 @@ func validateARKRequest(c *gin.Context, info *relaycommon.RelayInfo, body []byte
 	if request.Duration != nil {
 		duration := decimal.NewFromInt(int64(*request.Duration))
 		state.Seconds = &duration
+	} else if profile.defaultDurationSeconds > 0 {
+		duration := decimal.NewFromInt(int64(profile.defaultDurationSeconds))
+		state.Seconds = &duration
 	}
 	c.Set(requestStateContextKey, state)
 	taskRequest := relaycommon.TaskSubmitReq{Model: request.Model, Prompt: prompt}
 	if request.Duration != nil {
 		taskRequest.Duration = *request.Duration
+	} else if profile.defaultDurationSeconds > 0 {
+		taskRequest.Duration = profile.defaultDurationSeconds
 	}
 	relaycommon.StoreTaskRequest(c, info, constant.TaskActionGenerate, taskRequest)
 	return nil

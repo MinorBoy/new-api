@@ -493,3 +493,46 @@ func TestNewHTTPVideoMetadataClientMissingConfigIsUnavailable(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveReferenceVideoDurationMS(t *testing.T) {
+	original := currentVideoMetadataClient()
+	t.Cleanup(func() { SetVideoMetadataClient(original) })
+	SetVideoMetadataClient(&fakeMetadataClient{results: map[string]videometa.Metadata{
+		"https://assets.example/a.mp4": {DurationMS: 9000, Width: 1280, Height: 720, FrameRateNum: 24, FrameRateDen: 1, Container: "mp4", ContentLength: 1},
+		"https://assets.example/b.mp4": {DurationMS: 6000, Width: 1280, Height: 720, FrameRateNum: 24, FrameRateDen: 1, Container: "mp4", ContentLength: 1},
+	}})
+
+	duration, err := ResolveReferenceVideoDurationMS(context.Background(), []string{
+		"https://assets.example/a.mp4",
+		"https://assets.example/b.mp4",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(15000), duration)
+}
+
+func TestResolveReferenceVideoDurationMSPreservesErrorKindWithoutURL(t *testing.T) {
+	tests := []struct {
+		name string
+		kind VideoMetadataErrorKind
+	}{
+		{name: "invalid media", kind: VideoMetadataInvalidMedia},
+		{name: "unavailable", kind: VideoMetadataUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := currentVideoMetadataClient()
+			t.Cleanup(func() { SetVideoMetadataClient(original) })
+			secretURL := "https://assets.example/input.mp4?signature=do-not-leak"
+			SetVideoMetadataClient(&fakeMetadataClient{errs: map[string]error{
+				secretURL: &VideoMetadataError{Kind: tt.kind},
+			}})
+
+			_, err := ResolveReferenceVideoDurationMS(context.Background(), []string{secretURL})
+			var metadataErr *VideoMetadataError
+			require.ErrorAs(t, err, &metadataErr)
+			assert.Equal(t, tt.kind, metadataErr.Kind)
+			assert.NotContains(t, err.Error(), "do-not-leak")
+			assert.NotContains(t, err.Error(), "assets.example")
+		})
+	}
+}

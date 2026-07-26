@@ -11,10 +11,11 @@ import (
 const requestStateContextKey = "newapi_video_request_state"
 
 type requestState struct {
-	OpenAIFields map[string]json.RawMessage
-	ARK          *arkRequest
-	Duration     *decimal.Decimal
-	Seconds      *decimal.Decimal
+	OpenAIFields               map[string]json.RawMessage
+	ARK                        *arkRequest
+	Duration                   *decimal.Decimal
+	Seconds                    *decimal.Decimal
+	ProviderValidationComplete bool
 }
 
 type arkRequest struct {

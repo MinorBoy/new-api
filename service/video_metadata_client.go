@@ -242,6 +242,17 @@ func NewProfitRoutingRequestState(client VideoMetadataClient, urls []string, ref
 	return &ProfitRoutingRequestState{client: client, urls: urls, referenceVideoCount: referenceVideoCount}
 }
 
+// ResolveReferenceVideoDurationMS resolves and sums a request's public reference
+// video URLs through the process-wide metadata service.
+func ResolveReferenceVideoDurationMS(ctx context.Context, urls []string) (int64, error) {
+	state := NewProfitRoutingRequestState(currentVideoMetadataClient(), urls, len(urls))
+	result, err := state.Metadata(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return result.TotalDurationMS, nil
+}
+
 // HasReferenceVideos reports whether the request carries any input reference video
 // without triggering a metadata lookup. Callers use it to short-circuit the metadata
 // service for text/image-only requests.

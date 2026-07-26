@@ -2,6 +2,7 @@ package newapivideo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -82,7 +83,66 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return service.TaskErrorWrapperLocal(err, "invalid_json", http.StatusBadRequest)
 	}
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		return validateARKRequest(c, info, body, a.activeProfile())
+		profile := a.activeProfile()
+		if taskErr := validateARKRequest(c, info, body, profile); taskErr != nil {
+			return taskErr
+		}
+		if profile.requestDialect != videoRequestDialectMegaReferenceArrays {
+			return nil
+		}
+
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		if err := validateMegaByAIRequest(*state.ARK); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+
+		videoURLs := make([]string, 0, 3)
+		audioURLs := make([]string, 0, 3)
+		for _, item := range state.ARK.Content {
+			switch item.Type {
+			case "video_url":
+				videoURLs = append(videoURLs, item.VideoURL.URL)
+			case "audio_url":
+				audioURLs = append(audioURLs, item.AudioURL.URL)
+			}
+		}
+		if len(videoURLs) > 0 {
+			durationMS, err := service.ResolveReferenceVideoDurationMS(c.Request.Context(), videoURLs)
+			if err != nil {
+				var metadataErr *service.VideoMetadataError
+				if errors.As(err, &metadataErr) && metadataErr.Kind == service.VideoMetadataInvalidMedia {
+					return service.TaskErrorWrapperLocal(fmt.Errorf("reference video is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+			}
+			if durationMS > maxMegaByAIReferenceDurationMS {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video duration exceeds 15 seconds"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+		}
+		if len(audioURLs) > 0 {
+			durationMS, err := service.ResolveReferenceAudioDurationMS(c.Request.Context(), audioURLs)
+			if err != nil {
+				var durationErr *service.ReferenceAudioDurationError
+				if errors.As(err, &durationErr) && durationErr.Kind == service.ReferenceAudioInvalidMedia {
+					return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+			}
+			if durationMS > maxMegaByAIReferenceDurationMS {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio duration exceeds 15 seconds"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+		}
+
+		state.ProviderValidationComplete = true
+		c.Set(requestStateContextKey, state)
+		return nil
 	}
 	return validateOpenAIRequest(c, info, body)
 }
@@ -140,11 +200,11 @@ func routingDurationSeconds(c *gin.Context) int {
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
-	return a.baseURL + "/v1/video/generations", nil
+	return a.baseURL + a.activeProfile().submitPath, nil
 }
 
 func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", a.activeProfile().contentType)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 	return nil
@@ -161,7 +221,23 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	var body []byte
 	var err error
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		body, err = buildARKRequestBody(c, info, a.activeProfile())
+		profile := a.activeProfile()
+		switch profile.requestDialect {
+		case videoRequestDialectMegaReferenceArrays:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if !state.ProviderValidationComplete {
+				return nil, fmt.Errorf("MegaByAI provider validation is incomplete")
+			}
+			body, err = buildMegaByAIRequest(*state.ARK, modelName)
+		default:
+			body, err = buildARKRequestBody(c, info, profile)
+		}
 	} else {
 		body, err = buildOpenAIRequestBody(c, modelName)
 	}
@@ -236,7 +312,12 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	if !ok || strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
-	requestURL := strings.TrimRight(baseURL, "/") + "/v1/video/generations/" + url.PathEscape(taskID)
+	pollPath := a.activeProfile().pollPath
+	if !strings.Contains(pollPath, "{task_id}") {
+		return nil, fmt.Errorf("task polling path must contain {task_id}")
+	}
+	pollPath = strings.Replace(pollPath, "{task_id}", url.PathEscape(taskID), 1)
+	requestURL := strings.TrimRight(baseURL, "/") + pollPath
 	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, err

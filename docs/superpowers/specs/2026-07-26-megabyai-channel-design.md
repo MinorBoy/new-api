@@ -25,7 +25,7 @@
 - 时长：4 至 15 秒，默认 5 秒
 - 比例：`16:9`、`9:16`、`1:1`
 - 分辨率：`480p`、`720p`
-- 参考图最多 9 张，参考视频最多 3 个，参考音频最多 3 个
+- 参考图最多 9 张，参考视频最多 3 个且总时长不超过 15 秒，参考音频最多 3 个且总时长不超过 15 秒
 - 素材仅支持公开 HTTP(S) URL
 - 上游不支持 `first_image`、`last_image` 字段
 - 状态：`queued`、`in_progress`、`completed`、`failed`
@@ -51,6 +51,7 @@
 - Ark `ratio` 原样转为上游 `ratio`。
 - Ark `resolution` 原样转发，只允许 `480p`、`720p`。
 - `reference_image`、`reference_video`、`reference_audio` 分别进入三个上游数组。
+- 参考视频和参考音频分别在提交前解析总时长；任一类别超过 15 秒返回 `InvalidParameter.content`，素材无效返回 400，元数据解析服务不可用返回 503，且都发生在预扣前。
 - 单张无 role 或 `first_frame` 图片可作为普通参考图进入 `referenceImages`。
 - `last_frame` 以及严格首尾帧组合返回 `InvalidParameter.content`，不得降级成普通多图参考。
 - 只接受公开 HTTP(S) URL；`data:`、`asset://` 和其他协议在调用上游前返回 400。
@@ -91,7 +92,7 @@
 
 ## 8. 测试与验收
 
-- 请求翻译覆盖纯文本、图片、视频、音频、混合素材和所有上限。
+- 请求翻译覆盖纯文本、图片、视频、音频、混合素材、数量上限和视频/音频各自 15 秒总时长上限。
 - 覆盖 `last_frame`、非 HTTP URL、纯音频、非法时长/比例/分辨率和未支持控制字段。
 - 响应投影覆盖四种状态、四个结果 URL 位置、失败错误和 URL 缺失的伪成功。
 - mock E2E 必须从 Ark 创建入口进入，经过分发、预扣、上游提交、轮询、Ark 单查/列表和失败退款。
@@ -103,4 +104,3 @@
 - 不代理 `/v1/videos/{task_id}/content` 的二进制流。
 - 不把 `cost_credits` 直接换算成用户 quota。
 - 不伪造 MegaByAI 未支持的严格首尾帧语义。
-

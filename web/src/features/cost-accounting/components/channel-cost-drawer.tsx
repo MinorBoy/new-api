@@ -60,6 +60,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -158,7 +159,10 @@ function buildChannelCostRows(
   }
 
   for (const item of coverage) {
-    const row = rowFor(item.predicted_upstream_model)
+    const row = rowFor(
+      item.predicted_upstream_model,
+      item.cost_variant_key || 'default'
+    )
     if (!row.originModels.includes(item.origin_model)) {
       row.originModels.push(item.origin_model)
     }
@@ -277,20 +281,26 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
     ADMIN_PERMISSION_ACTIONS.WRITE
   )
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const [costVariantFilter, setCostVariantFilter] = useState('')
   const [historyTarget, setHistoryTarget] = useState<HistoryState | null>(
     null
   )
   const [confirmation, setConfirmation] =
     useState<LifecycleConfirmation | null>(null)
 
+  const requestedCostVariantKey = costVariantFilter.trim().toLowerCase()
+  const costRuleListParams = requestedCostVariantKey
+    ? { channel_id: channelID, cost_variant_key: requestedCostVariantKey }
+    : { channel_id: channelID }
+
   const rulesQuery = useQuery({
-    queryKey: costAccountingQueryKeys.ruleList({ channel_id: channelID }),
-    queryFn: () => listCostRules({ channel_id: channelID }),
+    queryKey: costAccountingQueryKeys.ruleList(costRuleListParams),
+    queryFn: () => listCostRules(costRuleListParams),
     enabled: props.open && channelID > 0 && canRead,
   })
   const coverageQuery = useQuery({
-    queryKey: costAccountingQueryKeys.coverage({ channel_id: channelID }),
-    queryFn: () => getCostCoverage({ channel_id: channelID }),
+    queryKey: costAccountingQueryKeys.coverage(costRuleListParams),
+    queryFn: () => getCostCoverage(costRuleListParams),
     enabled: props.open && channelID > 0 && canRead,
   })
   const pricingQuery = useQuery({
@@ -341,6 +351,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       setEditor(null)
+      setCostVariantFilter('')
       setHistoryTarget(null)
       setConfirmation(null)
     }
@@ -430,6 +441,23 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
             ) : null}
             {canRead && !isLoading && !error ? (
               <>
+                <div className='flex justify-end'>
+                  <label
+                    className='sr-only'
+                    htmlFor='channel-cost-variant-filter'
+                  >
+                    cost_variant_key
+                  </label>
+                  <Input
+                    id='channel-cost-variant-filter'
+                    className='max-w-52 font-mono text-xs'
+                    value={costVariantFilter}
+                    onChange={(event) =>
+                      setCostVariantFilter(event.target.value)
+                    }
+                    autoComplete='off'
+                  />
+                </div>
                 <CoveragePanel items={coverage} />
 
                 {rows.length === 0 ? (

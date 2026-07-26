@@ -313,6 +313,69 @@ test('shows each cost variant as a distinct rule row', async () => {
   }
 })
 
+test('filters cost rules by cost variant', async () => {
+  const queryClient = createQueryClient()
+  const rule720 = {
+    ...activeRule,
+    id: 22,
+    cost_variant_key: '720p',
+  }
+  queryClient.setQueryData(
+    costAccountingQueryKeys.ruleList({
+      channel_id: channel.id,
+      cost_variant_key: '720p',
+    }),
+    { success: true, message: '', data: [rule720] }
+  )
+  queryClient.setQueryData(
+    costAccountingQueryKeys.coverage({
+      channel_id: channel.id,
+      cost_variant_key: '720p',
+    }),
+    {
+      success: true,
+      message: '',
+      data: [
+        {
+          channel_id: channel.id,
+          origin_model: 'client-model',
+          predicted_upstream_model: 'vendor-model',
+          cost_variant_key: '720p',
+          covered: true,
+        },
+      ],
+    }
+  )
+
+  const mounted = await mount(
+    <ChannelCostDrawer open channel={channel} onOpenChange={() => {}} />,
+    queryClient
+  )
+  try {
+    const input = browserWindow.document.querySelector(
+      '#channel-cost-variant-filter'
+    ) as HTMLInputElement | null
+    assert.ok(input)
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        browserWindow.HTMLInputElement.prototype,
+        'value'
+      )?.set
+      assert.ok(setValue)
+      setValue.call(input, '720p')
+      input.dispatchEvent(
+        new browserWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+    })
+
+    const text = browserWindow.document.body.textContent ?? ''
+    assert.match(text, /720p/)
+    assert.doesNotMatch(text, /default/)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
 test('switching cost mode replaces conditional price and meter fields', async () => {
   const mounted = await mount(
     <CostRuleDrawer

@@ -55,12 +55,14 @@ type CostCoverageFilter struct {
 	ChannelID             int
 	OriginModel           string
 	BillableUpstreamModel string
+	CostVariantKey        string
 }
 
 type CostCoverageRow struct {
 	ChannelID             int    `json:"channel_id"`
 	OriginModel           string `json:"origin_model"`
 	BillableUpstreamModel string `json:"billable_upstream_model"`
+	CostVariantKey        string `json:"cost_variant_key"`
 	Covered               bool   `json:"covered"`
 	Reason                string `json:"reason,omitempty"`
 }
@@ -261,6 +263,13 @@ func CheckCostCoverage(filter CostCoverageFilter) ([]CostCoverageRow, error) {
 	}
 	originModel := strings.TrimSpace(filter.OriginModel)
 	billableModel := strings.TrimSpace(filter.BillableUpstreamModel)
+	costVariantKey := strings.TrimSpace(filter.CostVariantKey)
+	if costVariantKey != "" {
+		costVariantKey, err = types.NormalizeCostVariantKey(costVariantKey)
+		if err != nil {
+			return nil, err
+		}
+	}
 	rows := make([]CostCoverageRow, 0, len(results))
 	for _, result := range results {
 		if filter.ChannelID > 0 && result.ChannelID != filter.ChannelID {
@@ -272,10 +281,14 @@ func CheckCostCoverage(filter CostCoverageFilter) ([]CostCoverageRow, error) {
 		if billableModel != "" && result.PredictedUpstreamModel != billableModel {
 			continue
 		}
+		if costVariantKey != "" && result.CostVariantKey != costVariantKey {
+			continue
+		}
 		rows = append(rows, CostCoverageRow{
 			ChannelID:             result.ChannelID,
 			OriginModel:           result.OriginModel,
 			BillableUpstreamModel: result.PredictedUpstreamModel,
+			CostVariantKey:        result.CostVariantKey,
 			Covered:               result.Covered,
 			Reason:                result.Reason,
 		})

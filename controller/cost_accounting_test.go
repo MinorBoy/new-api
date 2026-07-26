@@ -214,11 +214,13 @@ func TestCostRequestDetailResponseSerializesLedgerNanoUSDAsStrings(t *testing.T)
 
 func TestCostCoverageResponseKeepsPredictedUpstreamModelContract(t *testing.T) {
 	response := costCoverageResponse(service.CostCoverageRow{
-		ChannelID: 7, OriginModel: "client-model", BillableUpstreamModel: "vendor-model", Covered: true,
+		ChannelID: 7, OriginModel: "client-model", BillableUpstreamModel: "vendor-model",
+		CostVariantKey: "720p", Covered: true,
 	})
 	assert.Equal(t, 7, response.ChannelID)
 	assert.Equal(t, "client-model", response.OriginModel)
 	assert.Equal(t, "vendor-model", response.PredictedUpstreamModel)
+	assert.Equal(t, "720p", response.CostVariantKey)
 	assert.True(t, response.Covered)
 }
 

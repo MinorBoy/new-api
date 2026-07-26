@@ -76,19 +76,23 @@ export function CoveragePanel(props: CoveragePanelProps) {
               <TableRow>
                 <TableHead>{t('Client model')}</TableHead>
                 <TableHead>{t('Billable upstream model')}</TableHead>
+                <TableHead>cost_variant_key</TableHead>
                 <TableHead>{t('Reason')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {uncovered.map((item) => (
                 <TableRow
-                  key={`${item.origin_model}:${item.predicted_upstream_model}`}
+                  key={`${item.origin_model}:${item.predicted_upstream_model}:${item.cost_variant_key || 'default'}`}
                 >
                   <TableCell className='font-mono text-xs'>
                     {item.origin_model}
                   </TableCell>
                   <TableCell className='font-mono text-xs'>
                     {item.predicted_upstream_model}
+                  </TableCell>
+                  <TableCell className='font-mono text-xs'>
+                    {item.cost_variant_key || 'default'}
                   </TableCell>
                   <TableCell className='text-muted-foreground max-w-56 whitespace-normal'>
                     {coverageReason(item.reason, t)}

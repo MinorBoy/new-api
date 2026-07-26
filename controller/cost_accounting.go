@@ -258,6 +258,7 @@ func GetCostCoverage(c *gin.Context) {
 	results, err := service.CheckCostCoverage(service.CostCoverageFilter{
 		ChannelID: channelID, OriginModel: c.Query("origin_model"),
 		BillableUpstreamModel: c.Query("billable_upstream_model"),
+		CostVariantKey:        c.Query("cost_variant_key"),
 	})
 	if err != nil {
 		writeCostAccountingError(c, err)
@@ -603,7 +604,8 @@ func costAttemptLedgerResponse(attempt model.CostAccountingAttempt) costAttemptL
 func costCoverageResponse(row service.CostCoverageRow) dto.CostCoverageItem {
 	return dto.CostCoverageItem{
 		ChannelID: row.ChannelID, OriginModel: row.OriginModel,
-		PredictedUpstreamModel: row.BillableUpstreamModel, Covered: row.Covered, Reason: row.Reason,
+		PredictedUpstreamModel: row.BillableUpstreamModel, CostVariantKey: row.CostVariantKey,
+		Covered: row.Covered, Reason: row.Reason,
 	}
 }
 

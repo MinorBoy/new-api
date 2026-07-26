@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,6 +58,7 @@ type CostCoverageResult struct {
 	ChannelID              int
 	OriginModel            string
 	PredictedUpstreamModel string
+	CostVariantKey         string
 	Covered                bool
 	Reason                 string
 }
@@ -493,7 +495,31 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	results := make([]CostCoverageResult, 0, len(abilities))
+	var activeRules []model.ChannelModelCostRule
+	if err := model.DB.Select("channel_id", "billable_upstream_model", "cost_variant_key").
+		Where("status = ?", types.CostRuleActive).Find(&activeRules).Error; err != nil {
+		return nil, err
+	}
+	activeVariants := make(map[int]map[string]map[string]struct{})
+	for _, rule := range activeRules {
+		variant, err := types.NormalizeCostVariantKey(rule.CostVariantKey)
+		if err != nil {
+			return nil, err
+		}
+		models, ok := activeVariants[rule.ChannelID]
+		if !ok {
+			models = make(map[string]map[string]struct{})
+			activeVariants[rule.ChannelID] = models
+		}
+		variants, ok := models[rule.BillableUpstreamModel]
+		if !ok {
+			variants = make(map[string]struct{})
+			models[rule.BillableUpstreamModel] = variants
+		}
+		variants[variant] = struct{}{}
+	}
+
+	results := make([]CostCoverageResult, 0, len(abilities)+len(activeRules))
 	seen := make(map[costCoverageKey]struct{}, len(abilities))
 	for _, ability := range abilities {
 		channel, err := model.GetChannelById(ability.ChannelId, false)
@@ -505,30 +531,46 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 			ChannelID:              ability.ChannelId,
 			OriginModel:            ability.Model,
 			PredictedUpstreamModel: predictedModel,
+			CostVariantKey:         string(types.DefaultCostVariantKey),
 		}
 		if err != nil {
 			result.Reason = "invalid_model_mapping"
 			results = append(results, result)
 			continue
 		}
-		key := costCoverageKey{channelID: ability.ChannelId, model: predictedModel, variant: string(types.DefaultCostVariantKey)}
-		if _, ok := seen[key]; ok {
-			continue
+		variants := map[string]struct{}{string(types.DefaultCostVariantKey): {}}
+		if models, ok := activeVariants[ability.ChannelId]; ok {
+			for variant := range models[predictedModel] {
+				variants[variant] = struct{}{}
+			}
 		}
-		seen[key] = struct{}{}
-		result.Covered, err = CheckPredictedCostCoverage(PredictedCoverageInput{
-			ChannelID:              ability.ChannelId,
-			PredictedUpstreamModel: predictedModel,
-			CostVariantKey:         string(types.DefaultCostVariantKey),
-			Authoritative:          true,
-		})
-		if err != nil {
-			return nil, err
+		variantKeys := make([]string, 0, len(variants))
+		for variant := range variants {
+			variantKeys = append(variantKeys, variant)
 		}
-		if !result.Covered {
-			result.Reason = "missing_or_incompatible_cost_rule"
+		sort.Strings(variantKeys)
+		for _, variant := range variantKeys {
+			key := costCoverageKey{channelID: ability.ChannelId, model: predictedModel, variant: variant}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			variantResult := result
+			variantResult.CostVariantKey = variant
+			variantResult.Covered, err = CheckPredictedCostCoverage(PredictedCoverageInput{
+				ChannelID:              ability.ChannelId,
+				PredictedUpstreamModel: predictedModel,
+				CostVariantKey:         variant,
+				Authoritative:          true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if !variantResult.Covered {
+				variantResult.Reason = "missing_or_incompatible_cost_rule"
+			}
+			results = append(results, variantResult)
 		}
-		results = append(results, result)
 	}
 	return results, nil
 }

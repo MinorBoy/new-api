@@ -94,6 +94,7 @@ type CostCoverageItem struct {
 	ChannelID              int    `json:"channel_id"`
 	OriginModel            string `json:"origin_model"`
 	PredictedUpstreamModel string `json:"predicted_upstream_model"`
+	CostVariantKey         string `json:"cost_variant_key"`
 	Covered                bool   `json:"covered"`
 	Reason                 string `json:"reason,omitempty"`
 }

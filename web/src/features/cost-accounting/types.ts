@@ -280,12 +280,14 @@ export interface CostCoverageParams {
   channel_id?: number
   origin_model?: string
   billable_upstream_model?: string
+  cost_variant_key?: string
 }
 
 export interface CostCoverageItem {
   channel_id: number
   origin_model: string
   predicted_upstream_model: string
+  cost_variant_key?: string
   covered: boolean
   reason?: string
 }

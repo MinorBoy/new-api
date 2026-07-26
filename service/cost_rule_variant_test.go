@@ -99,6 +99,32 @@ func TestActiveCostRulesResolvesEachVariantSeparately(t *testing.T) {
 	assert.Equal(t, rule720.ID, found720.ID)
 }
 
+func TestCheckAuthoritativeCostCoverageEvaluatesActiveVariants(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	})
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "default", Model: "vendor-model", ChannelId: 7, Enabled: true,
+	}).Error)
+
+	rule480 := costRuleWithVariant(t, "480p", 1, types.CostRuleActive, "0.2")
+	require.NoError(t, model.DB.Create(&rule480).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	coveredByVariant := make(map[string]bool, len(results))
+	for _, result := range results {
+		coveredByVariant[result.CostVariantKey] = result.Covered
+	}
+	assert.False(t, coveredByVariant[string(types.DefaultCostVariantKey)])
+	assert.True(t, coveredByVariant["480p"])
+}
+
 func TestListCostRulesFiltersByVariant(t *testing.T) {
 	prepareCostRuleServiceDB(t)
 

@@ -23,11 +23,12 @@ type FactsInput struct {
 	ReferenceVideos   int
 	ReferenceAudios   int
 	RequireRealPerson bool
-	// ReferenceVideoURLs holds the normalized HTTP(S) URLs of every reference_video
-	// input, captured so downstream profit routing can resolve their durations via the
-	// standalone metadata service. The URLs carry signed query parameters and other
-	// sensitive material, so this slice is never serialized: it stays in request memory
-	// and is excluded from Facts, Audit, diagnostics and logs.
+	// ReferenceVideoURLs holds only normalized, fetchable HTTP(S) URLs from
+	// reference_video inputs. ReferenceVideos remains the total count, including
+	// embedded data: and asset:// media that cannot be inspected by the metadata
+	// service. URLs carry signed query parameters and other sensitive material, so this
+	// slice is never serialized: it stays in request memory and is excluded from Facts,
+	// Audit, diagnostics and logs.
 	ReferenceVideoURLs []string `json:"-"`
 }
 

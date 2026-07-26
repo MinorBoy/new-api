@@ -177,6 +177,28 @@ func TestExtractSeedanceRoutingInputCollectsReferenceVideoURLs(t *testing.T) {
 	assert.NotContains(t, string(serialized), "ReferenceVideoURLs")
 }
 
+func TestExtractSeedanceRoutingInputAcceptsEmbeddedMediaWithoutMetadataURLs(t *testing.T) {
+	body := `{
+		"model":"doubao-seedance-2-0-260128",
+		"content":[
+			{"type":"text","text":"make a video"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"asset://video-reference-1"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"data:audio/wav;base64,UklGRg=="}}
+		],
+		"resolution":"720p","duration":10,"ratio":"16:9"
+	}`
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", body, true)
+
+	input, routeErr := extractSeedanceRoutingInput(c, modelrouting.Seedance20)
+	require.Nil(t, routeErr)
+	require.NotNil(t, input)
+	assert.Equal(t, 1, input.ReferenceImages)
+	assert.Equal(t, 1, input.ReferenceVideos)
+	assert.Equal(t, 1, input.ReferenceAudios)
+	assert.Empty(t, input.ReferenceVideoURLs)
+}
+
 func TestExtractSeedanceRoutingInputRejectsInvalidReferenceVideoURLs(t *testing.T) {
 	tests := []struct {
 		name string

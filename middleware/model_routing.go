@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -185,7 +184,7 @@ func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFac
 				return facts, newRoutingInputError("InvalidParameter.content", "unsupported image role")
 			}
 		case "video_url":
-			normalized, err := validateRoutingMedia(item["video_url"])
+			media, err := validateRoutingMedia(item["video_url"])
 			if err != nil {
 				return facts, err
 			}
@@ -194,7 +193,9 @@ func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFac
 				return facts, newRoutingInputError("InvalidParameter.content", "video role must be reference_video")
 			}
 			facts.videos++
-			facts.videoURLs = append(facts.videoURLs, normalized)
+			if media.FetchableHTTP() {
+				facts.videoURLs = append(facts.videoURLs, media.Value)
+			}
 		case "audio_url":
 			if _, err := validateRoutingMedia(item["audio_url"]); err != nil {
 				return facts, err
@@ -255,37 +256,30 @@ func optionalRoutingRole(raw json.RawMessage) (string, *routingInputError) {
 	return strings.TrimSpace(role), nil
 }
 
-// validateRoutingMedia parses a media URL object, rejecting empty, non-string,
-// non-HTTP(S) and host-less URLs. It returns the normalized URL so callers handling
-// reference videos can collect it for downstream profit routing. The URL — including
-// any signed query parameters — is only ever stored on FactsInput.ReferenceVideoURLs
-// (which is `json:"-"`); it must never be copied onto Facts, Audit, error messages,
-// diagnostics or logs.
-func validateRoutingMedia(raw json.RawMessage) (string, *routingInputError) {
+// validateRoutingMedia parses a media URL object and accepts the schemes supported
+// by task providers. Only HTTP(S) values are fetchable by the metadata service; the
+// caller decides whether to retain that normalized value for downstream routing.
+func validateRoutingMedia(raw json.RawMessage) (relaycommon.TaskMediaURL, *routingInputError) {
 	if common.GetJsonType(raw) != "object" {
-		return "", newRoutingInputError("InvalidParameter.content", "media URL must be an object")
+		return relaycommon.TaskMediaURL{}, newRoutingInputError("InvalidParameter.content", "media URL must be an object")
 	}
 	var media map[string]json.RawMessage
 	if err := common.Unmarshal(raw, &media); err != nil {
-		return "", newRoutingInputError("InvalidParameter.content", "media URL is invalid")
+		return relaycommon.TaskMediaURL{}, newRoutingInputError("InvalidParameter.content", "media URL is invalid")
 	}
 	urlRaw, ok := media["url"]
 	if !ok || common.GetJsonType(urlRaw) != "string" {
-		return "", newRoutingInputError("InvalidParameter.content", "media URL is required")
+		return relaycommon.TaskMediaURL{}, newRoutingInputError("InvalidParameter.content", "media URL is required")
 	}
 	var value string
 	if common.Unmarshal(urlRaw, &value) != nil {
-		return "", newRoutingInputError("InvalidParameter.content", "media URL is invalid")
+		return relaycommon.TaskMediaURL{}, newRoutingInputError("InvalidParameter.content", "media URL is invalid")
 	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", newRoutingInputError("InvalidParameter.content", "media URL is required")
+	parsed, err := relaycommon.ParseTaskMediaURL(value)
+	if err != nil {
+		return relaycommon.TaskMediaURL{}, newRoutingInputError("InvalidParameter.content", "media URL is invalid")
 	}
-	parsed, err := url.ParseRequestURI(value)
-	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", newRoutingInputError("InvalidParameter.content", "media URL is invalid")
-	}
-	return value, nil
+	return parsed, nil
 }
 
 func containsRoutingString(values []string, expected string) bool {

@@ -362,6 +362,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 		{name: "NewAPIVideo", channelType: constant.ChannelTypeNewAPIVideo, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
 		{name: "Lucen", channelType: constant.ChannelTypeLucen, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
 		{name: "MegaByAI", channelType: constant.ChannelTypeMegaByAI, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "videos-mini", durationSeconds: 8, arkOfficialRoute: true},
+		{name: "Paipu", channelType: constant.ChannelTypePaipu, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "lec-seedance-2-0", durationSeconds: 8, arkOfficialRoute: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

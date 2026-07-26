@@ -274,3 +274,49 @@ describe('MegaByAI channel configuration', () => {
     ])
   })
 })
+
+describe('Cangyuan channel configuration', () => {
+  test('registers task-only type 64', () => {
+    expect(CHANNEL_TYPES[64]).toBe('Cangyuan')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 64, label: 'Cangyuan' })
+    expect(getChannelTypeIcon(64)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(64)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(64)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(64)).toBe(false)
+  })
+
+  test('provides the documented default and initial model', () => {
+    expect(getChannelTypeConfig(64)).toMatchObject({
+      id: 64,
+      name: 'Cangyuan',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://ai.cangyuansuanli.cn',
+      supportedModels: ['seedance-2.0-720p'],
+    })
+    expect(getDefaultBaseUrl(64)).toBe('https://ai.cangyuansuanli.cn')
+    expect(getChannelTypeHints(64)).toEqual({
+      baseUrl: 'Default: https://ai.cangyuansuanli.cn',
+      key: 'Enter the raw API key issued by Cangyuan',
+      models:
+        'The documented initial model is seedance-2.0-720p; administrators may add verified models manually',
+    })
+    expect(TYPE_TO_KEY_PROMPT[64]).toBe(
+      'Enter the raw API key issued by Cangyuan'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[64]).toBe(
+      'Cangyuan is task-only. Call it through the Ark /api/v3 task API.'
+    )
+  })
+
+  test('exposes the configured model and applies the managed default URL', () => {
+    expect(getChannelModelOptions(64, [], [])).toEqual([
+      'seedance-2.0-720p',
+    ])
+    expect(
+      getBaseUrlOnChannelTypeChange(64, 'https://newapi.megabyai.cc', false)
+    ).toBe('https://ai.cangyuansuanli.cn')
+    expect(
+      getBaseUrlOnChannelTypeChange(64, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+})

@@ -97,3 +97,67 @@ type ConfigImportDetailResponse struct {
 	Document types.ConfigImportDocument      `json:"document"`
 	Issues   []types.ConfigImportSourceIssue `json:"issues"`
 }
+
+// ConfigImportBatchSummary is the normalized, credential-free metadata that
+// can be listed without loading every persisted entity.
+type ConfigImportBatchSummary struct {
+	ID              int64                          `json:"id"`
+	SchemaVersion   int                            `json:"schema_version"`
+	TemplateVersion string                         `json:"template_version"`
+	SourceSHA256    string                         `json:"source_sha256"`
+	PayloadSHA256   string                         `json:"payload_sha256"`
+	Status          types.ConfigImportBatchStatus  `json:"status"`
+	CreatedBy       int                            `json:"created_by"`
+	ItemCounts      types.ConfigImportEntityCounts `json:"item_counts"`
+	IssueCount      int                            `json:"issue_count"`
+	AllowedActions  []string                       `json:"allowed_actions"`
+	CreatedAt       int64                          `json:"created_at"`
+	UpdatedAt       int64                          `json:"updated_at"`
+}
+
+// ConfigImportItemDetail exposes a normalized authoritative entity. It does
+// not contain the uploaded document body or any credential material.
+type ConfigImportItemDetail struct {
+	ID               int64                       `json:"id"`
+	EntityType       string                      `json:"entity_type"`
+	BusinessID       string                      `json:"business_id"`
+	EntityHash       string                      `json:"entity_hash"`
+	CanonicalJSON    string                      `json:"canonical_json"`
+	State            types.ConfigImportItemState `json:"state"`
+	SourceRef        string                      `json:"source_ref"`
+	SourceSheet      string                      `json:"source_sheet"`
+	SourceRow        *int                        `json:"source_row,omitempty"`
+	MaterializedType string                      `json:"materialized_type,omitempty"`
+	MaterializedID   *int                        `json:"materialized_id,omitempty"`
+	ConflictReason   string                      `json:"conflict_reason,omitempty"`
+	ExclusionReason  string                      `json:"exclusion_reason,omitempty"`
+}
+
+type ConfigImportIssueDetail struct {
+	ID               int64                           `json:"id"`
+	Severity         types.ConfigImportIssueSeverity `json:"severity"`
+	Code             string                          `json:"code"`
+	EntityType       string                          `json:"entity_type,omitempty"`
+	BusinessID       string                          `json:"business_id,omitempty"`
+	Sheet            string                          `json:"sheet,omitempty"`
+	Row              *int                            `json:"row,omitempty"`
+	Field            string                          `json:"field,omitempty"`
+	Message          string                          `json:"message"`
+	Suggestion       string                          `json:"suggestion,omitempty"`
+	ResolutionStatus string                          `json:"resolution_status"`
+}
+
+// ConfigImportBatchDetail recovers a resumable batch from normalized rows. It
+// deliberately omits the raw upload and its derived preview.
+type ConfigImportBatchDetail struct {
+	ConfigImportBatchSummary
+	Items  []ConfigImportItemDetail  `json:"items"`
+	Issues []ConfigImportIssueDetail `json:"issues"`
+}
+
+type ConfigImportBatchPage struct {
+	Items    []ConfigImportBatchSummary `json:"items"`
+	Total    int64                      `json:"total"`
+	Page     int                        `json:"page"`
+	PageSize int                        `json:"page_size"`
+}

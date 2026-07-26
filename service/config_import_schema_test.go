@@ -536,6 +536,21 @@ func TestConfigImportSchemaRejectsCredentialValueUnderAllowedField(t *testing.T)
 	requireCode(t, err, "SECURITY_CREDENTIAL_FIELD")
 }
 
+func TestConfigImportSchemaRejectsHighConfidenceCredentialValue(t *testing.T) {
+	payload := configImportDocumentJSON(t, map[string]any{
+		"channels": []any{map[string]any{
+			"business_id":  "channel-one",
+			"entity_hash":  strings.Repeat("c", 64),
+			"source_ref":   "source-workbook",
+			"display_name": "sk-abcdefghijklmnopqrstuvwxyz0123456789",
+		}},
+	})
+
+	_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	requireCode(t, err, "SECURITY_CREDENTIAL_VALUE")
+}
+
 func configImportReferenceTupleEntities(targetLine, targetModel, mappingLine, mappingModel string, lineSupportsRealPerson, targetSupportsRealPerson *bool) map[string]any {
 	lineOne := map[string]any{
 		"business_id": "line-one", "entity_hash": strings.Repeat("c", 64), "source_ref": "source-workbook",

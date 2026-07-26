@@ -29,8 +29,13 @@ const (
 )
 
 var (
-	configImportHashPattern            = regexp.MustCompile(`^[a-f0-9]{64}$`)
-	configImportCredentialFieldPattern = regexp.MustCompile(`(?i)(api[_-]?key|access[_-]?token|auth[_-]?token|authorization|cookie|secret|password)`)
+	configImportHashPattern             = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	configImportCredentialFieldPattern  = regexp.MustCompile(`(?i)(api[_-]?key|access[_-]?token|auth[_-]?token|authorization|cookie|secret|password)`)
+	configImportCredentialValuePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`),
+		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
+		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`),
+	}
 )
 
 // ConfigImportSchemaError is stable enough for API handlers to map into a
@@ -78,6 +83,13 @@ func ParseConfigImportDocument(reader io.Reader) (*types.ConfigImportDocument, e
 		return nil, err
 	}
 	return &document, nil
+}
+
+// normalizeConfigImportDocument sorts authoritative collections and their
+// constraint values before they are persisted as canonical entity rows. The
+// parser has already verified each entity hash against this normalization.
+func normalizeConfigImportDocument(document *types.ConfigImportDocument) {
+	canonicalizeConfigImportEntities(&document.Entities)
 }
 
 func scanConfigImportJSON(body []byte) error {
@@ -178,6 +190,11 @@ func validateConfigImportGenericValue(value any, fieldName string) error {
 			}
 		}
 	case string:
+		for _, credentialPattern := range configImportCredentialValuePatterns {
+			if credentialPattern.MatchString(typed) {
+				return configImportError("SECURITY_CREDENTIAL_VALUE", "credential-like value is not allowed in field %q", fieldName)
+			}
+		}
 		maxBytes := configImportMaxStringBytes
 		code := "LIMIT_STRING_LENGTH"
 		if isConfigImportNoteField(fieldName) {

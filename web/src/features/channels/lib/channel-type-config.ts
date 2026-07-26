@@ -237,9 +237,46 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'The documented initial model is seedance-2.0-720p; administrators may add verified models manually',
     },
   },
+  65: {
+    id: 65,
+    name: CHANNEL_TYPES[65],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://api.paipu.net',
+    supportedModels: [
+      'lec-sz-seedance-2-0-480p',
+      'lec-gongteng-seedance-2-0-720p',
+      'lec-gongteng-seedance-2-0-fast-720p',
+      'lec-gongteng-seedance-2-0-1080p',
+      'lec-seedance-2-0',
+      'lec-feituo-seedance-2-0-hn-fast-720p',
+      'lec-feituo-seedance-2-0-hn-720p',
+      'lec-feituo-seedance-2-0-xh-fast-933-720p',
+      'lec-feituo-seedance-2-0-xh-pro-933-720p',
+      'lec-feituo-seedance-2-0-ld-cvk-2',
+      'lec-feituo-seedance-2-0-limited-720p',
+      'lec-feituo-seedance-2-0-my-fast-upscaled-1080p',
+      'lec-feituo-seedance-2-0-my-upscaled-1080p',
+      'lec-seedance-videos-standard',
+      'lec-seedance-videos-face-standard',
+      'lec-seedance-videos-face-fast',
+      'lec-seedance-videos-stable',
+      'lec-seedance-videos-stable-fast',
+      'lec-seedance-videos-stable-mini',
+      'lec-seedance-videos-stable-720p',
+      'lec-seedance-videos-fast-720p',
+      'lec-seedance-videos-mini-720p',
+      'lec-seedance-videos-fast',
+      'lec-seedance-videos-mini',
+    ],
+    hints: {
+      baseUrl: 'Default: https://api.paipu.net',
+      key: 'Enter the raw API key issued by Paipu',
+      models: 'Select from the 24 documented Paipu /v1/videos models',
+    },
+  },
 }
 
-const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63, 64])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63, 64, 65])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)

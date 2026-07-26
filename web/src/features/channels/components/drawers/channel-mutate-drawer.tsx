@@ -171,6 +171,11 @@ import {
   hasAdvancedSettingsErrors,
 } from '../../lib'
 import {
+  SECURE_CHANNEL_TYPE,
+  SECURE_VIDEO_GROUP_OPTIONS,
+  shouldShowSecureVideoGroup,
+} from '../../lib/secure-video-group'
+import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
@@ -2008,6 +2013,18 @@ export function ChannelMutateDrawer({
                                             nextType > 0
                                           ) {
                                             field.onChange(nextType)
+                                            if (
+                                              nextType !== SECURE_CHANNEL_TYPE
+                                            ) {
+                                              form.setValue(
+                                                'secure_video_group',
+                                                undefined,
+                                                {
+                                                  shouldDirty: true,
+                                                  shouldValidate: false,
+                                                }
+                                              )
+                                            }
                                           }
                                         }}
                                         placeholder={t('Select channel type')}
@@ -2051,6 +2068,52 @@ export function ChannelMutateDrawer({
                             )}
                           />
                         </div>
+
+                        {shouldShowSecureVideoGroup(currentType) && (
+                          <FormField
+                            control={form.control}
+                            name='secure_video_group'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Secure video group')}</FormLabel>
+                                <Select
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue
+                                        placeholder={t(
+                                          'Select a Secure video group'
+                                        )}
+                                      />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      {SECURE_VIDEO_GROUP_OPTIONS.map(
+                                        (option) => (
+                                          <SelectItem
+                                            key={option.value}
+                                            value={option.value}
+                                          >
+                                            {t(option.label)}
+                                          </SelectItem>
+                                        )
+                                      )}
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Use the API key issued for the selected Secure group'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
 
                         {!isEditing && (
                           <FormField

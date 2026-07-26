@@ -5632,6 +5632,12 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Secure video group": "Secure 動画グループ",
+    "Discount Video": "特価 Video",
+    "Overseas Video": "海外 Video",
+    "Enterprise Video": "エンタープライズ Video",
+    "Use the API key issued for the selected Secure group": "選択した Secure グループ向けに発行された API キーを使用します",
+    "Select a Secure video group": "Secure 動画グループを選択"
   }
 }

@@ -90,6 +90,7 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
+  secure_video_group?: 'discount' | 'overseas' | 'enterprise'
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean

@@ -32,6 +32,7 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import { SECURE_CHANNEL_TYPE } from './secure-video-group'
 
 // ============================================================================
 // Form Validation Schema
@@ -211,6 +212,9 @@ export const channelFormSchema = z
       .optional()
       .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
     advanced_custom: z.string().optional(),
+    secure_video_group: z
+      .enum(['discount', 'overseas', 'enterprise'])
+      .optional(),
     other: z.string().optional(),
     // Multi-key options (not sent to backend directly)
     multi_key_mode: z.enum(['single', 'batch', 'multi_to_single']).optional(),
@@ -247,6 +251,13 @@ export const channelFormSchema = z
     upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    if (data.type === SECURE_CHANNEL_TYPE && !data.secure_video_group) {
+      addRequiredIssue(
+        ctx,
+        'secure_video_group',
+        'Secure video group is required for Secure channels'
+      )
+    }
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
       addRequiredIssue(
         ctx,
@@ -395,6 +406,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
   advanced_custom: '',
+  secure_video_group: undefined,
 }
 
 // ============================================================================
@@ -451,6 +463,7 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
+  let secureVideoGroup: 'discount' | 'overseas' | 'enterprise' | undefined
 
   if (channel.settings) {
     try {
@@ -478,6 +491,14 @@ export function transformChannelToFormDefaults(
         : ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
+      }
+      if (
+        channel.type === SECURE_CHANNEL_TYPE &&
+        ['discount', 'overseas', 'enterprise'].includes(
+          parsed.secure_video_group
+        )
+      ) {
+        secureVideoGroup = parsed.secure_video_group
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -530,6 +551,7 @@ export function transformChannelToFormDefaults(
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     advanced_custom: advancedCustom,
+    secure_video_group: secureVideoGroup,
   }
 }
 
@@ -675,6 +697,12 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   } else if ('advanced_custom' in settingsObj) {
     delete settingsObj.advanced_custom
+  }
+
+  if (formData.type === SECURE_CHANNEL_TYPE && formData.secure_video_group) {
+    settingsObj.secure_video_group = formData.secure_video_group
+  } else if ('secure_video_group' in settingsObj) {
+    delete settingsObj.secure_video_group
   }
 
   return JSON.stringify(settingsObj)

@@ -5632,6 +5632,12 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Secure video group": "Nhóm video Secure",
+    "Discount Video": "Video ưu đãi",
+    "Overseas Video": "Video quốc tế",
+    "Enterprise Video": "Video doanh nghiệp",
+    "Use the API key issued for the selected Secure group": "Sử dụng khóa API được cấp cho nhóm Secure đã chọn",
+    "Select a Secure video group": "Chọn nhóm video Secure"
   }
 }

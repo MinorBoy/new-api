@@ -5632,6 +5632,12 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Secure video group": "Secure 影片分組",
+    "Discount Video": "優惠 Video",
+    "Overseas Video": "海外 Video",
+    "Enterprise Video": "企業 Video",
+    "Use the API key issued for the selected Secure group": "使用所選 Secure 分組簽發的 API Key",
+    "Select a Secure video group": "選擇 Secure 影片分組"
   }
 }

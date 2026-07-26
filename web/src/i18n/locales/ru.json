@@ -5632,6 +5632,12 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Secure video group": "Группа видео Secure",
+    "Discount Video": "Видео со скидкой",
+    "Overseas Video": "Зарубежное видео",
+    "Enterprise Video": "Корпоративное видео",
+    "Use the API key issued for the selected Secure group": "Используйте API-ключ, выданный для выбранной группы Secure",
+    "Select a Secure video group": "Выберите группу видео Secure"
   }
 }

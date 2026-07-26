@@ -6,6 +6,7 @@ import {
   CHANNEL_TYPES,
   GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES,
   MODEL_FETCHABLE_TYPES,
+  TASK_ONLY_CHANNEL_TYPES,
   TYPE_TO_KEY_PROMPT,
 } from '../src/features/channels/constants'
 import {
@@ -172,5 +173,44 @@ describe('CLMM Mall channel configuration', () => {
 describe('Channel base URL transition policy', () => {
   test('does not auto-fill configured defaults for unmanaged providers', () => {
     expect(getBaseUrlOnChannelTypeChange(1, '', false)).toBe('')
+  })
+})
+
+describe('Lucen channel configuration', () => {
+  test('uses one ordinary task-only channel type with all Lucen models', () => {
+    expect(CHANNEL_TYPES[62]).toBe('Lucen')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 62, label: 'Lucen' })
+    expect(getChannelTypeIcon(62)).toBe('NewAPI')
+    expect(getDefaultBaseUrl(62)).toBe('https://lucen.asia')
+    expect(getChannelTypeConfig(62).supportedModels).toEqual([
+      'seedance-480p-5s',
+      'seedance-480p-10s',
+      'seedance-480p-15s',
+      'seedance-720p-5s',
+      'seedance-720p-10s',
+      'seedance-720p-15s',
+      'seedance-1080p-5s',
+      'seedance-1080p-10s',
+      'seedance-1080p-15s',
+      'seedance-480p-token',
+      'seedance-720p-token',
+      'seedance-1080p-token',
+    ])
+    expect(MODEL_FETCHABLE_TYPES.has(62)).toBe(false)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(62)).toBe(true)
+    expect(TASK_ONLY_CHANNEL_TYPES.has(62)).toBe(true)
+  })
+
+  test('explains the two ordinary API-key channels without a group field', () => {
+    expect(TYPE_TO_KEY_PROMPT[62]).toBe('Enter the API key issued by Lucen')
+    expect(CHANNEL_TYPE_WARNINGS[62]).toBe(
+      'Lucen is task-only. Create separate channels for the fixed-duration key and token-billing key.'
+    )
+    expect(getChannelTypeHints(62)).toEqual({
+      baseUrl: 'Default: https://lucen.asia',
+      key: 'Enter the API key issued by Lucen',
+      models:
+        "Select Lucen models matching this channel's fixed-duration or token-billing API key",
+    })
   })
 })

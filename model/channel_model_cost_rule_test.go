@@ -66,6 +66,7 @@ func validCostRule(version int, status types.CostRuleStatus) ChannelModelCostRul
 	return ChannelModelCostRule{
 		ChannelID:             7,
 		BillableUpstreamModel: "vendor-model",
+		CostVariantKey:        string(types.DefaultCostVariantKey),
 		Version:               version,
 		Status:                string(status),
 		CostMode:              string(types.CostModePerRequest),

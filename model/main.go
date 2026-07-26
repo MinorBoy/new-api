@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/clickhouse"
@@ -265,6 +266,12 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	// Extend cost rule and route target business keys with cost_variant_key
+	// before AutoMigrate runs, so the new column is present, backfilled, and
+	// the old three-column unique index is replaced by the four-column one.
+	if err := migrateCostVariantKeys(); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -335,6 +342,14 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+
+	// Extend cost rule and route target business keys with cost_variant_key
+	// before AutoMigrate runs. The fast path still needs this because it
+	// skips the linear ordering and would otherwise create the columns with
+	// the wrong index shape.
+	if err := migrateCostVariantKeys(); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -600,6 +615,79 @@ PRIMARY KEY (` + "`id`" + `)
 		}
 	}
 	return nil
+}
+
+// migrateCostVariantKeys extends the channel_model_cost_rules and route_targets
+// business keys with a cost_variant_key column. It is idempotent and must run
+// before AutoMigrate so the four-column unique index replaces the legacy
+// three-column one without leaving a duplicate index behind.
+//
+// Existing rows are backfilled to types.DefaultCostVariantKey ("default") so
+// legacy queries keep resolving a single active rule per business key. We do
+// not use a GORM default tag because MySQL and PostgreSQL normalize boolean
+// and string defaults differently, which can make AutoMigrate re-issue ALTER
+// statements on every restart.
+func migrateCostVariantKeys() error {
+	if DB == nil {
+		return nil
+	}
+	if err := migrateCostVariantKeyColumn(&ChannelModelCostRule{}, "channel_model_cost_rules", "cost_variant_key"); err != nil {
+		return err
+	}
+	if err := migrateCostVariantKeyColumn(&RouteTarget{}, "route_targets", "cost_variant_key"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateCostVariantKeyColumn adds the variant column to one table, backfills
+// blank values to the default variant, and drops the legacy three-column
+// cost-rule unique index when present so AutoMigrate recreates it with the new
+// four-column shape.
+func migrateCostVariantKeyColumn(model interface{}, tableName, columnName string) error {
+	if !DB.Migrator().HasTable(model) {
+		return nil
+	}
+	quotedColumn := quoteIdentifier(columnName)
+	quotedTable := quoteIdentifier(tableName)
+	if !DB.Migrator().HasColumn(model, columnName) {
+		columnDDL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s VARCHAR(64) NOT NULL DEFAULT 'default'", quotedTable, quotedColumn)
+		if err := DB.Exec(columnDDL).Error; err != nil {
+			return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
+		}
+	}
+
+	// Backfill any blank/NULL values to the default variant. NULL cannot occur
+	// after the ADD COLUMN above (NOT NULL DEFAULT), but legacy rows copied by
+	// external tooling or partial migrations may still be blank.
+	updateSQL := fmt.Sprintf("UPDATE %s SET %s = ? WHERE %s IS NULL OR %s = ''",
+		quotedTable, quotedColumn, quotedColumn, quotedColumn)
+	if err := DB.Exec(updateSQL, string(types.DefaultCostVariantKey)).Error; err != nil {
+		return fmt.Errorf("backfill %s.%s: %w", tableName, columnName, err)
+	}
+
+	// Drop the legacy three-column unique index on channel_model_cost_rules so
+	// AutoMigrate recreates idx_cost_rule_version with the new four-column
+	// shape. SQLite and PostgreSQL store indexes by name; MySQL does too, so a
+	// shared DropIfExists on the index name is sufficient across all three.
+	if tableName == "channel_model_cost_rules" {
+		legacy := &ChannelModelCostRule{}
+		if DB.Migrator().HasIndex(legacy, "idx_cost_rule_version") {
+			if err := DB.Migrator().DropIndex(legacy, "idx_cost_rule_version"); err != nil {
+				return fmt.Errorf("drop legacy idx_cost_rule_version: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// quoteIdentifier quotes a single SQL identifier for the active dialect:
+// PostgreSQL uses double quotes while MySQL and SQLite use backticks.
+func quoteIdentifier(identifier string) string {
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		return `"` + identifier + `"`
+	}
+	return "`" + identifier + "`"
 }
 
 // migrateTokenModelLimitsToText migrates model_limits column from varchar(1024) to text

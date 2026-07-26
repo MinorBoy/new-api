@@ -1,5 +1,42 @@
 package types
 
+import (
+	"errors"
+	"regexp"
+	"strings"
+)
+
+// DefaultCostVariantKey is the variant identity used by every cost rule and
+// route target that does not need to distinguish multiple price contracts under
+// the same channel + upstream model. Existing rows are backfilled to this
+// value so legacy queries keep resolving a single active rule.
+const DefaultCostVariantKey = "default"
+
+// ErrInvalidCostVariantKey is returned when a variant identity cannot serve as
+// a stable business key (cache fragment, JSON contract field, or unique index
+// member).
+var ErrInvalidCostVariantKey = errors.New("invalid cost variant key")
+
+// costVariantKeyPattern limits variant identities to stable lowercase ASCII
+// tokens so they can be used as business keys, cache fragments, and JSON
+// contract fields without quoting. Blank input maps to DefaultCostVariantKey.
+var costVariantKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// NormalizeCostVariantKey trims and lowercases a variant identity and maps an
+// empty value to DefaultCostVariantKey. It rejects identities that cannot be
+// used as a stable business key.
+func NormalizeCostVariantKey(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return DefaultCostVariantKey, nil
+	}
+	lowered := strings.ToLower(trimmed)
+	if !costVariantKeyPattern.MatchString(lowered) {
+		return "", ErrInvalidCostVariantKey
+	}
+	return lowered, nil
+}
+
 type CostAccountingMode string
 
 const (

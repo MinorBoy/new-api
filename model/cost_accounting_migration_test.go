@@ -233,6 +233,7 @@ func testCostAccountingMigrationContracts(t *testing.T, db *gorm.DB, dialect com
 func migrationCostRule(channelID int, modelName string, version int, status types.CostRuleStatus) ChannelModelCostRule {
 	return ChannelModelCostRule{
 		ChannelID: channelID, BillableUpstreamModel: modelName, Version: version,
+		CostVariantKey: string(types.DefaultCostVariantKey),
 		Status: string(status), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
 		ConfigJSON: `{"unit_price":"0.25"}`, Source: "manual", CreatedBy: 11,
 	}

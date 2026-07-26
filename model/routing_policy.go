@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
 )
 
@@ -28,6 +29,7 @@ type RouteTarget struct {
 	ChannelID                int    `json:"channel_id" gorm:"not null;index"`
 	Name                     string `json:"name" gorm:"type:varchar(128);not null"`
 	UpstreamModel            string `json:"upstream_model" gorm:"type:varchar(255);not null"`
+	CostVariantKey           string `json:"cost_variant_key" gorm:"type:varchar(64);not null;index"`
 	TargetPriority           int    `json:"target_priority" gorm:"not null;index"`
 	MinimumExpectedMarginBPS *int   `json:"minimum_expected_margin_bps"`
 	Constraints              string `json:"constraints" gorm:"type:text;not null"`
@@ -168,6 +170,12 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 		persistedTargets := make([]RouteTarget, len(targets))
 		copy(persistedTargets, targets)
 		for index := range persistedTargets {
+			normalized, err := types.NormalizeCostVariantKey(persistedTargets[index].CostVariantKey)
+			if err != nil {
+				tx.Rollback()
+				return nil, err
+			}
+			persistedTargets[index].CostVariantKey = normalized
 			persistedTargets[index].ID = 0
 			persistedTargets[index].PolicyID = policy.ID
 			persistedTargets[index].CreatedAt = 0

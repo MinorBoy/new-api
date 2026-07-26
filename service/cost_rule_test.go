@@ -256,6 +256,7 @@ func TestActivateCostRuleRejectsDuplicateActiveRows(t *testing.T) {
 		rule := costRuleWithConfig(t, types.CostModePerRequest, normalizedPerRequestConfig(t, "0.2"))
 		rule.Version = version
 		rule.Status = string(types.CostRuleActive)
+		rule.CostVariantKey = string(types.DefaultCostVariantKey)
 		require.NoError(t, model.DB.Create(&rule).Error)
 	}
 	draft := costRuleWithConfig(t, types.CostModePerRequest, normalizedPerRequestConfig(t, "0.3"))

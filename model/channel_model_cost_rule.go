@@ -18,7 +18,8 @@ type ChannelModelCostRule struct {
 	ID                    int64  `json:"id" gorm:"primaryKey"`
 	ChannelID             int    `json:"channel_id" gorm:"uniqueIndex:idx_cost_rule_version,priority:1;index"`
 	BillableUpstreamModel string `json:"billable_upstream_model" gorm:"type:varchar(191);uniqueIndex:idx_cost_rule_version,priority:2;index"`
-	Version               int    `json:"version" gorm:"uniqueIndex:idx_cost_rule_version,priority:3"`
+	CostVariantKey        string `json:"cost_variant_key" gorm:"type:varchar(64);not null;uniqueIndex:idx_cost_rule_version,priority:3;index"`
+	Version               int    `json:"version" gorm:"uniqueIndex:idx_cost_rule_version,priority:4"`
 	Status                string `json:"status" gorm:"type:varchar(32);index"`
 	CostMode              string `json:"cost_mode" gorm:"type:varchar(32)"`
 	SchemaVersion         int    `json:"schema_version"`
@@ -43,6 +44,11 @@ func CreateCostRuleDraft(rule *ChannelModelCostRule) error {
 	if rule.Status != string(types.CostRuleDraft) {
 		return ErrCostRuleStateConflict
 	}
+	normalized, err := types.NormalizeCostVariantKey(rule.CostVariantKey)
+	if err != nil {
+		return err
+	}
+	rule.CostVariantKey = normalized
 	now := common.GetTimestamp()
 	if rule.CreatedAt == 0 {
 		rule.CreatedAt = now
@@ -63,7 +69,12 @@ func ActivateChannelModelCostRule(id int64, adminID int, now int64, validate fun
 
 		var businessRules []ChannelModelCostRule
 		if err := lockForUpdate(tx).
-			Where("channel_id = ? AND billable_upstream_model = ?", candidate.ChannelID, candidate.BillableUpstreamModel).
+			Where(
+				"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ?",
+				candidate.ChannelID,
+				candidate.BillableUpstreamModel,
+				candidate.CostVariantKey,
+			).
 			Order("id ASC").
 			Find(&businessRules).Error; err != nil {
 			return err

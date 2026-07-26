@@ -99,17 +99,24 @@ func (a *TaskAdaptor) ParseTaskPollingHTTPError(body []byte, statusCode int) *re
 }
 
 func parseTaskProjection(body []byte) (*parsedTask, error) {
-	var envelope detailedEnvelope
-	if err := common.Unmarshal(body, &envelope); err != nil {
+	var header struct {
+		Code    json.RawMessage `json:"code"`
+		Message string          `json:"message"`
+	}
+	if err := common.Unmarshal(body, &header); err != nil {
 		return nil, fmt.Errorf("unmarshal new-api video task response: %w", err)
 	}
 
 	var parsed *parsedTask
 	var err error
-	if envelope.Code != nil {
+	if len(header.Code) > 0 && strings.TrimSpace(string(header.Code)) != "null" {
+		var envelope detailedEnvelope
+		if err := common.Unmarshal(body, &envelope); err != nil {
+			return nil, fmt.Errorf("unmarshal detailed new-api video task response: %w", err)
+		}
 		parsed, err = parseDetailedTask(envelope)
 	} else {
-		parsed, err = parseDirectTask(body, envelope.Message)
+		parsed, err = parseDirectTask(body, header.Message)
 	}
 	if err != nil {
 		return nil, err
@@ -210,15 +217,7 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 	} else if direct.CompletedAt != 0 {
 		parsed.UpdatedAt = direct.CompletedAt
 	}
-	if direct.Metadata != nil {
-		parsed.URL = direct.Metadata.URL
-	}
-	if parsed.URL == "" && direct.Content != nil {
-		parsed.URL = direct.Content.VideoURL
-	}
-	if parsed.URL == "" && direct.Data != nil {
-		parsed.URL = direct.Data.URL
-	}
+	parsed.URL = directTaskVideoURL(direct)
 	if status == model.TaskStatusFailure {
 		if nested.Error != nil {
 			parsed.ErrorCode = nested.Error.Code
@@ -236,6 +235,58 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 		}
 	}
 	return parsed, nil
+}
+
+func directTaskVideoURL(task directTask) string {
+	for _, value := range []string{
+		task.VideoURL,
+		task.URL,
+		task.ResultURL,
+	} {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	if task.Metadata != nil {
+		for _, value := range []string{
+			task.Metadata.URL,
+			task.Metadata.ContentURL,
+			task.Metadata.LocalURL,
+		} {
+			if strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	if task.Content != nil && strings.TrimSpace(task.Content.VideoURL) != "" {
+		return task.Content.VideoURL
+	}
+	if len(task.Data) == 0 || strings.TrimSpace(string(task.Data)) == "null" {
+		return ""
+	}
+
+	type dataURL struct {
+		URL       string `json:"url,omitempty"`
+		VideoURL  string `json:"video_url,omitempty"`
+		ResultURL string `json:"result_url,omitempty"`
+	}
+	var object dataURL
+	if err := common.Unmarshal(task.Data, &object); err == nil {
+		for _, value := range []string{object.URL, object.VideoURL, object.ResultURL} {
+			if strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	var items []dataURL
+	if err := common.Unmarshal(task.Data, &items); err == nil && len(items) > 0 {
+		for _, value := range []string{items[0].URL, items[0].VideoURL, items[0].ResultURL} {
+			if strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func populateBillingUsage(parsed *parsedTask) error {

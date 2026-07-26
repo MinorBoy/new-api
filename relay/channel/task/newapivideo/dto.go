@@ -119,15 +119,18 @@ type directTask struct {
 	Progress    int    `json:"progress"`
 	CreatedAt   int64  `json:"created_at"`
 	CompletedAt int64  `json:"completed_at"`
+	URL         string `json:"url"`
+	VideoURL    string `json:"video_url"`
+	ResultURL   string `json:"result_url"`
 	Metadata    *struct {
-		URL string `json:"url,omitempty"`
+		URL        string `json:"url,omitempty"`
+		ContentURL string `json:"content_url,omitempty"`
+		LocalURL   string `json:"local_url,omitempty"`
 	} `json:"metadata,omitempty"`
 	Content *arkVideoContent `json:"content,omitempty"`
-	Data    *struct {
-		URL string `json:"url,omitempty"`
-	} `json:"data,omitempty"`
-	Usage *tokenUsage    `json:"usage,omitempty"`
-	Error *upstreamError `json:"error,omitempty"`
+	Data    json.RawMessage  `json:"data,omitempty"`
+	Usage   *tokenUsage      `json:"usage,omitempty"`
+	Error   *upstreamError   `json:"error,omitempty"`
 }
 
 type arkTaskResponse struct {

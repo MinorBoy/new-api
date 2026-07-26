@@ -196,6 +196,29 @@ func TestParseTaskResultURLPrecedence(t *testing.T) {
 	}
 }
 
+func TestParseMegaByAIDirectTaskURLPrecedence(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "video_url", body: `{"status":"completed","video_url":"https://x/video.mp4","url":"https://x/url.mp4"}`, want: "https://x/video.mp4"},
+		{name: "url", body: `{"status":"completed","url":"https://x/url.mp4","result_url":"https://x/result.mp4"}`, want: "https://x/url.mp4"},
+		{name: "result_url", body: `{"status":"completed","result_url":"https://x/result.mp4"}`, want: "https://x/result.mp4"},
+		{name: "metadata content_url", body: `{"status":"completed","metadata":{"content_url":"https://x/content.mp4"}}`, want: "https://x/content.mp4"},
+		{name: "metadata local_url", body: `{"status":"completed","metadata":{"local_url":"https://x/local.mp4"}}`, want: "https://x/local.mp4"},
+		{name: "data object", body: `{"status":"completed","data":{"url":"https://x/data.mp4"}}`, want: "https://x/data.mp4"},
+		{name: "data array", body: `{"status":"completed","data":[{"url":"https://x/array.mp4"}]}`, want: "https://x/array.mp4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(tt.body))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, result.Url)
+		})
+	}
+}
+
 func TestParseTaskResultFailurePrecedence(t *testing.T) {
 	tests := []struct {
 		name string

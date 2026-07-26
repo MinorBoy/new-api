@@ -319,6 +319,12 @@ func migrateDB() error {
 		&CostAccountingRequest{},
 		&CostAccountingAttempt{},
 		&CostAccountingAudit{},
+		&ConfigImportBatch{},
+		&ConfigImportItem{},
+		&ConfigImportBinding{},
+		&ConfigImportIssue{},
+		&ConfigImportResolution{},
+		&ConfigImportPublishAudit{},
 	)
 	if err != nil {
 		return err
@@ -394,6 +400,12 @@ func migrateDBFast() error {
 		{&CostAccountingRequest{}, "CostAccountingRequest"},
 		{&CostAccountingAttempt{}, "CostAccountingAttempt"},
 		{&CostAccountingAudit{}, "CostAccountingAudit"},
+		{&ConfigImportBatch{}, "ConfigImportBatch"},
+		{&ConfigImportItem{}, "ConfigImportItem"},
+		{&ConfigImportBinding{}, "ConfigImportBinding"},
+		{&ConfigImportIssue{}, "ConfigImportIssue"},
+		{&ConfigImportResolution{}, "ConfigImportResolution"},
+		{&ConfigImportPublishAudit{}, "ConfigImportPublishAudit"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

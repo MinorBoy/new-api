@@ -60,7 +60,8 @@ const (
 	ChannelTypeNewAPIVideo    = 60 // new-api /v1/video/generations task protocol
 	ChannelTypeClmmMall       = 61 // CLMM Mall 视频生成(ARK v3 协议翻译网关)
 	ChannelTypeLucen          = 62 // Lucen Seedance task protocol
-	ChannelTypeDummy          = 63 // this one is only for count, do not add any channel after this
+	ChannelTypeMegaByAI       = 63 // MegaByAI Seedance task protocol
+	ChannelTypeDummy          = 64 // this one is only for count, do not add any channel after this
 
 )
 
@@ -128,6 +129,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //60 NewAPIVideo
 	"https://clmm-mall.top",                     //61 CLMM Mall
 	"https://lucen.asia",                        //62 Lucen
+	"https://newapi.megabyai.cc",                //63 MegaByAI
 }
 
 var ChannelTypeNames = map[int]string{
@@ -190,6 +192,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeNewAPIVideo:    "NewAPIVideo",
 	ChannelTypeClmmMall:       "CLMM Mall",
 	ChannelTypeLucen:          "Lucen",
+	ChannelTypeMegaByAI:       "MegaByAI",
 }
 
 func GetChannelTypeName(channelType int) string {

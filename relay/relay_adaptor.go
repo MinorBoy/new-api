@@ -173,6 +173,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &newapivideo.TaskAdaptor{}
 		case constant.ChannelTypeLucen:
 			return newapivideo.NewLucenTaskAdaptor()
+		case constant.ChannelTypeMegaByAI:
+			return newapivideo.NewMegaByAITaskAdaptor()
 		case constant.ChannelTypeClmmMall:
 			return &taskclmmmall.TaskAdaptor{}
 		case constant.ChannelTypeSora, constant.ChannelTypeOpenAI:

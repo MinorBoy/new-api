@@ -211,9 +211,22 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         "Select Lucen models matching this channel's fixed-duration or token-billing API key",
     },
   },
+  63: {
+    id: 63,
+    name: CHANNEL_TYPES[63],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://newapi.megabyai.cc',
+    supportedModels: ['videos-standard', 'videos-fast', 'videos-mini'],
+    hints: {
+      baseUrl: 'Default: https://newapi.megabyai.cc',
+      key: 'Enter the raw API key issued by MegaByAI',
+      models:
+        'Supported upstream models: videos-standard, videos-fast, videos-mini',
+    },
+  },
 }
 
-const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)

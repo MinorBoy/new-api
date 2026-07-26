@@ -232,3 +232,45 @@ describe('Lucen channel configuration', () => {
     ])
   })
 })
+
+describe('MegaByAI channel configuration', () => {
+  test('registers task-only type 63', () => {
+    expect(CHANNEL_TYPES[63]).toBe('MegaByAI')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 63, label: 'MegaByAI' })
+    expect(getChannelTypeIcon(63)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(63)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(63)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(63)).toBe(false)
+  })
+
+  test('provides defaults and models', () => {
+    expect(getChannelTypeConfig(63)).toMatchObject({
+      id: 63,
+      name: 'MegaByAI',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://newapi.megabyai.cc',
+      supportedModels: ['videos-standard', 'videos-fast', 'videos-mini'],
+    })
+    expect(getDefaultBaseUrl(63)).toBe('https://newapi.megabyai.cc')
+    expect(getChannelTypeHints(63)).toEqual({
+      baseUrl: 'Default: https://newapi.megabyai.cc',
+      key: 'Enter the raw API key issued by MegaByAI',
+      models:
+        'Supported upstream models: videos-standard, videos-fast, videos-mini',
+    })
+    expect(TYPE_TO_KEY_PROMPT[63]).toBe(
+      'Enter the raw API key issued by MegaByAI'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[63]).toBe(
+      'MegaByAI is task-only. Call it through the Ark /api/v3 task API.'
+    )
+  })
+
+  test('exposes configured models when the upstream catalog is empty', () => {
+    expect(getChannelModelOptions(63, [], [])).toEqual([
+      'videos-standard',
+      'videos-fast',
+      'videos-mini',
+    ])
+  })
+})

@@ -216,6 +216,7 @@ func TestSupportsGenericChannelTestRejectsDimensio(t *testing.T) {
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeNewAPIVideo))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeClmmMall))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeLucen))
+	require.False(t, supportsGenericChannelTest(constant.ChannelTypeMegaByAI))
 	require.True(t, supportsGenericChannelTest(constant.ChannelTypeOpenAI))
 }
 

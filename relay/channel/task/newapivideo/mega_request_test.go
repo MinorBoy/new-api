@@ -94,6 +94,10 @@ func TestMegaByAITransportUsesProfile(t *testing.T) {
 	adaptor.profile.pollPath = "/v1/videos/tasks"
 	_, err = adaptor.FetchTask(server.URL, "key", map[string]any{"task_id": "task"}, "")
 	assert.ErrorContains(t, err, "{task_id}")
+
+	adaptor.profile.pollPath = "/v1/videos/{task_id}/copies/{task_id}"
+	_, err = adaptor.FetchTask(server.URL, "key", map[string]any{"task_id": "task"}, "")
+	assert.ErrorContains(t, err, "exactly once")
 }
 
 func TestBuildMegaByAIRequest(t *testing.T) {
@@ -156,6 +160,8 @@ func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
 		{name: "too many videos", body: `{"model":"m","content":[{"type":"text","text":"text"}` + videos + `]}`, code: "InvalidParameter.content"},
 		{name: "too many audios", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}}` + audios + `]}`, code: "InvalidParameter.content"},
 		{name: "audio conflict", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.jpg"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.mp3"}}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
+		{name: "generate audio true", body: `{"model":"m","content":[{"type":"text","text":"text"}],"generate_audio":true}`, code: "InvalidParameter.generate_audio"},
+		{name: "generate audio false", body: `{"model":"m","content":[{"type":"text","text":"text"}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
 		{name: "unsupported control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"callback_url":"https://x/callback"}`, code: "InvalidParameter.callback_url"},
 		{name: "misspelled control", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duraton":5}`, code: "InvalidParameter.duraton"},
 	}

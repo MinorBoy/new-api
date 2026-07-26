@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +66,42 @@ func TestReferenceAudioDurationRejectsAggregateResponseLimit(t *testing.T) {
 	var durationErr *ReferenceAudioDurationError
 	require.ErrorAs(t, err, &durationErr)
 	assert.Equal(t, ReferenceAudioInvalidMedia, durationErr.Kind)
+}
+
+func TestReferenceAudioBudgetReaderAllowsExactLimit(t *testing.T) {
+	var consumed atomic.Int64
+	reader := &referenceAudioBudgetReader{
+		reader:   io.LimitReader(zeroReferenceAudioReader{}, referenceAudioMaxBytes),
+		consumed: &consumed,
+		limit:    referenceAudioMaxBytes,
+	}
+
+	written, err := io.Copy(io.Discard, reader)
+	require.NoError(t, err)
+	assert.Equal(t, referenceAudioMaxBytes, written)
+	assert.Equal(t, referenceAudioMaxBytes, consumed.Load())
+}
+
+func TestReferenceAudioBudgetReaderRejectsLimitPlusOne(t *testing.T) {
+	var consumed atomic.Int64
+	reader := &referenceAudioBudgetReader{
+		reader:   io.LimitReader(zeroReferenceAudioReader{}, referenceAudioMaxBytes+1),
+		consumed: &consumed,
+		limit:    referenceAudioMaxBytes,
+	}
+
+	written, err := io.Copy(io.Discard, reader)
+	assert.ErrorIs(t, err, errReferenceAudioTooLarge)
+	assert.Equal(t, referenceAudioMaxBytes, written)
+}
+
+type zeroReferenceAudioReader struct{}
+
+func (zeroReferenceAudioReader) Read(buffer []byte) (int, error) {
+	for index := range buffer {
+		buffer[index] = 0
+	}
+	return len(buffer), nil
 }
 
 func TestReferenceAudioDurationClassifiesUnavailableAndInvalidMedia(t *testing.T) {

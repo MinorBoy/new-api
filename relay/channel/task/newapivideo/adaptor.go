@@ -313,8 +313,8 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 		return nil, fmt.Errorf("invalid task_id")
 	}
 	pollPath := a.activeProfile().pollPath
-	if !strings.Contains(pollPath, "{task_id}") {
-		return nil, fmt.Errorf("task polling path must contain {task_id}")
+	if strings.Count(pollPath, "{task_id}") != 1 {
+		return nil, fmt.Errorf("task polling path must contain {task_id} exactly once")
 	}
 	pollPath = strings.Replace(pollPath, "{task_id}", url.PathEscape(taskID), 1)
 	requestURL := strings.TrimRight(baseURL, "/") + pollPath

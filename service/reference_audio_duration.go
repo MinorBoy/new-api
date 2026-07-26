@@ -247,11 +247,19 @@ type referenceAudioBudgetReader struct {
 
 func (r *referenceAudioBudgetReader) Read(buffer []byte) (int, error) {
 	remaining := r.limit - r.consumed.Load()
-	if remaining <= 0 {
+	if remaining < 0 {
 		return 0, errReferenceAudioTooLarge
 	}
-	if int64(len(buffer)) > remaining+1 {
-		buffer = buffer[:remaining+1]
+	if remaining == 0 {
+		var probe [1]byte
+		n, err := r.reader.Read(probe[:])
+		if n > 0 {
+			return 0, errReferenceAudioTooLarge
+		}
+		return 0, err
+	}
+	if int64(len(buffer)) > remaining {
+		buffer = buffer[:remaining]
 	}
 	n, err := r.reader.Read(buffer)
 	if n > 0 && r.consumed.Add(int64(n)) > r.limit {

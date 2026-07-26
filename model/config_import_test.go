@@ -162,6 +162,24 @@ func TestConfigImportBindingLineRefIsUniqueWithinBatch(t *testing.T) {
 	}).Error)
 }
 
+func TestConfigImportBindingChannelIsUniqueWithinBatchWhileSkipsRemainAllowed(t *testing.T) {
+	prepareConfigImportDB(t)
+	batch := createConfigImportBatch(t, "payload-sha256-channel-unique")
+	channelID := 41
+	require.NoError(t, DB.Create(&ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "line-one", ChannelID: &channelID,
+	}).Error)
+	require.Error(t, DB.Create(&ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "line-two", ChannelID: &channelID,
+	}).Error)
+	require.NoError(t, DB.Create(&ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "line-three",
+	}).Error)
+	require.NoError(t, DB.Create(&ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "line-four",
+	}).Error)
+}
+
 func TestConfigImportPayloadSHA256IsUnique(t *testing.T) {
 	prepareConfigImportDB(t)
 	createConfigImportBatch(t, "payload-sha256-4")

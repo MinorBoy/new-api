@@ -80,10 +80,11 @@ func UpdateConfigImportBindings(
 				return configImportError("BINDING_LINE_NOT_FOUND", "line_ref %q does not belong to batch %d", input.LineRef, batchID)
 			}
 			if input.Action == types.ConfigImportBindingActionSkip {
-				if err := saveConfigImportBinding(tx, batchID, input, adminID); err != nil {
+				skipStateJSON, err := excludeConfigImportLineDependents(tx, items, input.LineRef, input.Reason)
+				if err != nil {
 					return err
 				}
-				if err := excludeConfigImportLineDependents(tx, items, input.LineRef, input.Reason); err != nil {
+				if err := saveConfigImportBindingWithSkipState(tx, batchID, input, adminID, skipStateJSON); err != nil {
 					return err
 				}
 				continue
@@ -100,6 +101,9 @@ func UpdateConfigImportBindings(
 				return err
 			}
 			if err := validateConfigImportBindingChannel(catalog, line, channel); err != nil {
+				return err
+			}
+			if err := restoreConfigImportLineDependents(tx, batchID, input.LineRef); err != nil {
 				return err
 			}
 			if err := saveConfigImportBinding(tx, batchID, input, adminID); err != nil {
@@ -159,6 +163,17 @@ type configImportBindingCatalog struct {
 	channels map[string]types.ConfigImportChannel
 	lines    map[string]types.ConfigImportChannelLine
 	models   map[string][]string
+}
+
+type configImportSkippedItemState struct {
+	ID              int64  `json:"id"`
+	State           string `json:"state"`
+	ExclusionReason string `json:"exclusion_reason"`
+}
+
+type configImportSkipStateSnapshot struct {
+	Reason string                         `json:"reason"`
+	Items  []configImportSkippedItemState `json:"items"`
 }
 
 func buildConfigImportBindingCatalog(items []model.ConfigImportItem) (*configImportBindingCatalog, error) {
@@ -295,6 +310,16 @@ func saveConfigImportBinding(
 	input dto.ConfigImportBindingInput,
 	adminID int,
 ) error {
+	return saveConfigImportBindingWithSkipState(tx, batchID, input, adminID, "")
+}
+
+func saveConfigImportBindingWithSkipState(
+	tx *gorm.DB,
+	batchID int64,
+	input dto.ConfigImportBindingInput,
+	adminID int,
+	skipStateJSON string,
+) error {
 	var channelID *int
 	confirmedBy := 0
 	var confirmedAt *int64
@@ -310,21 +335,27 @@ func saveConfigImportBinding(
 	var existing model.ConfigImportBinding
 	err := tx.Where("batch_id = ? AND line_ref = ?", batchID, input.LineRef).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return tx.Create(&model.ConfigImportBinding{
+		err := tx.Create(&model.ConfigImportBinding{
 			BatchID: batchID, LineRef: input.LineRef, Action: string(input.Action), ChannelID: channelID,
-			CredentialsConfirmedBy: confirmedBy, CredentialsConfirmedAt: confirmedAt,
+			CredentialsConfirmedBy: confirmedBy, CredentialsConfirmedAt: confirmedAt, SkipStateJSON: skipStateJSON,
 		}).Error
+		return mapConfigImportBindingChannelConflict(err)
 	}
 	if err != nil {
 		return err
 	}
-	return tx.Model(&existing).Updates(map[string]any{
+	if input.Action == types.ConfigImportBindingActionSkip && skipStateJSON == "" {
+		skipStateJSON = existing.SkipStateJSON
+	}
+	err = tx.Model(&existing).Updates(map[string]any{
 		"action":                   string(input.Action),
 		"channel_id":               channelID,
 		"credentials_confirmed_by": confirmedBy,
 		"credentials_confirmed_at": confirmedAt,
+		"skip_state_json":          skipStateJSON,
 		"updated_at":               common.GetTimestamp(),
 	}).Error
+	return mapConfigImportBindingChannelConflict(err)
 }
 
 func excludeConfigImportLineDependents(
@@ -332,7 +363,7 @@ func excludeConfigImportLineDependents(
 	items []model.ConfigImportItem,
 	lineRef string,
 	reason string,
-) error {
+) (string, error) {
 	modelSKURefs := make(map[string]struct{})
 	mappingRefs := make(map[string]struct{})
 	for _, item := range items {
@@ -340,7 +371,7 @@ func excludeConfigImportLineDependents(
 		case "model_skus":
 			var sku types.ConfigImportModelSKU
 			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &sku); err != nil {
-				return fmt.Errorf("decode config import model SKU %q: %w", item.BusinessID, err)
+				return "", fmt.Errorf("decode config import model SKU %q: %w", item.BusinessID, err)
 			}
 			if sku.LineRef == lineRef {
 				modelSKURefs[item.BusinessID] = struct{}{}
@@ -348,7 +379,7 @@ func excludeConfigImportLineDependents(
 		case "model_mappings":
 			var mapping types.ConfigImportModelMapping
 			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
-				return fmt.Errorf("decode config import model mapping %q: %w", item.BusinessID, err)
+				return "", fmt.Errorf("decode config import model mapping %q: %w", item.BusinessID, err)
 			}
 			if mapping.LineRef == lineRef {
 				mappingRefs[item.BusinessID] = struct{}{}
@@ -356,24 +387,79 @@ func excludeConfigImportLineDependents(
 		}
 	}
 
+	snapshot := configImportSkipStateSnapshot{
+		Reason: reason,
+		Items:  make([]configImportSkippedItemState, 0),
+	}
 	excludedIDs := make([]int64, 0)
 	for _, item := range items {
 		excluded, err := configImportItemDependsOnLine(item, lineRef, modelSKURefs, mappingRefs)
 		if err != nil {
-			return err
+			return "", err
 		}
-		if excluded {
+		if excluded && item.State != string(types.ConfigImportItemStateExcluded) {
 			excludedIDs = append(excludedIDs, item.ID)
+			snapshot.Items = append(snapshot.Items, configImportSkippedItemState{
+				ID: item.ID, State: item.State, ExclusionReason: item.ExclusionReason,
+			})
 		}
 	}
 	if len(excludedIDs) == 0 {
-		return nil
+		return "", nil
 	}
-	return tx.Model(&model.ConfigImportItem{}).Where("id IN ?", excludedIDs).Updates(map[string]any{
+	if err := tx.Model(&model.ConfigImportItem{}).Where("id IN ?", excludedIDs).Updates(map[string]any{
 		"state":            string(types.ConfigImportItemStateExcluded),
 		"exclusion_reason": reason,
 		"updated_at":       common.GetTimestamp(),
-	}).Error
+	}).Error; err != nil {
+		return "", err
+	}
+	encoded, err := common.Marshal(snapshot)
+	if err != nil {
+		return "", fmt.Errorf("marshal config import skip state: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func restoreConfigImportLineDependents(tx *gorm.DB, batchID int64, lineRef string) error {
+	var binding model.ConfigImportBinding
+	err := tx.Where("batch_id = ? AND line_ref = ?", batchID, lineRef).First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || binding.Action != string(types.ConfigImportBindingActionSkip) || binding.SkipStateJSON == "" {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var snapshot configImportSkipStateSnapshot
+	if err := common.UnmarshalJsonStr(binding.SkipStateJSON, &snapshot); err != nil {
+		return fmt.Errorf("decode config import skip state for line_ref %q: %w", lineRef, err)
+	}
+	for _, item := range snapshot.Items {
+		if err := tx.Model(&model.ConfigImportItem{}).
+			Where("id = ? AND batch_id = ? AND state = ? AND exclusion_reason = ?", item.ID, batchID,
+				string(types.ConfigImportItemStateExcluded), snapshot.Reason).
+			Updates(map[string]any{
+				"state":            item.State,
+				"exclusion_reason": item.ExclusionReason,
+				"updated_at":       common.GetTimestamp(),
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mapConfigImportBindingChannelConflict(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "idx_config_import_binding_channel") ||
+		strings.Contains(message, "config_import_bindings.batch_id, config_import_bindings.channel_id") ||
+		strings.Contains(message, "config_import_bindings(batch_id,channel_id)") {
+		return configImportError("BINDING_CHANNEL_LINE_CONFLICT", "channel is already bound to another line in this batch")
+	}
+	return err
 }
 
 func configImportItemDependsOnLine(

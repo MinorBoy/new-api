@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type configImportBindingLineFixture struct {
@@ -75,6 +76,52 @@ func TestConfigImportBindingSkipExcludesLineDependents(t *testing.T) {
 		assert.Equal(t, string(types.ConfigImportItemStateExcluded), item.State)
 		assert.Equal(t, "supplier retired", item.ExclusionReason)
 	}
+}
+
+func TestConfigImportBindingBindRestoresItemsSkippedByEarlierDecision(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "line-openai", channelRef: "supplier-openai", channelType: constant.ChannelTypeOpenAI,
+		models: []string{"gpt-test"},
+	})
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-openai", Action: types.ConfigImportBindingActionSkip, Reason: "supplier retired",
+	}})
+	require.NoError(t, err)
+
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI, Name: "Existing supplier", Models: "gpt-test", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-openai", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+	require.NoError(t, err)
+
+	var items []model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Find(&items).Error)
+	for _, item := range items {
+		assert.Equal(t, string(types.ConfigImportItemStateNew), item.State)
+		assert.Empty(t, item.ExclusionReason)
+	}
+}
+
+func TestConfigImportBindingMapsDatabaseChannelUniquenessConflict(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t,
+		configImportBindingLineFixture{lineRef: "line-one", channelRef: "supplier", channelType: constant.ChannelTypeOpenAI, models: []string{"gpt-test"}},
+		configImportBindingLineFixture{lineRef: "line-two", channelRef: "supplier", channelType: constant.ChannelTypeOpenAI, models: []string{"gpt-test"}},
+	)
+	channelID := 17
+	require.NoError(t, model.DB.Transaction(func(tx *gorm.DB) error {
+		return saveConfigImportBinding(tx, batch.ID, dto.ConfigImportBindingInput{
+			LineRef: "line-one", Action: types.ConfigImportBindingActionBind, ChannelID: &channelID,
+		}, 42)
+	}))
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		return saveConfigImportBinding(tx, batch.ID, dto.ConfigImportBindingInput{
+			LineRef: "line-two", Action: types.ConfigImportBindingActionBind, ChannelID: &channelID,
+		}, 42)
+	})
+	require.ErrorContains(t, err, "BINDING_CHANNEL_LINE_CONFLICT")
 }
 
 func TestConfigImportBindingRejectsProviderTypeAndModelMismatches(t *testing.T) {

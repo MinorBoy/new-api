@@ -63,12 +63,13 @@ func (ConfigImportItem) TableName() string {
 // deliberately absent; only their confirmation metadata is retained.
 type ConfigImportBinding struct {
 	ID                     int64  `json:"id" gorm:"primaryKey"`
-	BatchID                int64  `json:"batch_id" gorm:"not null;uniqueIndex:idx_config_import_binding_line,priority:1;index"`
+	BatchID                int64  `json:"batch_id" gorm:"not null;uniqueIndex:idx_config_import_binding_line,priority:1;uniqueIndex:idx_config_import_binding_channel,priority:1;index"`
 	LineRef                string `json:"line_ref" gorm:"type:varchar(191);not null;uniqueIndex:idx_config_import_binding_line,priority:2"`
 	Action                 string `json:"action" gorm:"type:varchar(32)"`
-	ChannelID              *int   `json:"channel_id,omitempty" gorm:"index"`
+	ChannelID              *int   `json:"channel_id,omitempty" gorm:"uniqueIndex:idx_config_import_binding_channel,priority:2;index"`
 	CredentialsConfirmedBy int    `json:"credentials_confirmed_by"`
 	CredentialsConfirmedAt *int64 `json:"credentials_confirmed_at,omitempty"`
+	SkipStateJSON          string `json:"-" gorm:"type:text"`
 	CreatedAt              int64  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt              int64  `json:"updated_at" gorm:"autoUpdateTime"`
 }

@@ -104,6 +104,52 @@ func TestConfigImportBindingBindRestoresItemsSkippedByEarlierDecision(t *testing
 	}
 }
 
+func TestConfigImportBindingKeepsOverlappingDependentExcludedUntilEveryOwnerBinds(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t,
+		configImportBindingLineFixture{lineRef: "line-a", channelRef: "supplier", channelType: constant.ChannelTypeOpenAI, models: []string{"model-a"}},
+		configImportBindingLineFixture{lineRef: "line-b", channelRef: "supplier", channelType: constant.ChannelTypeOpenAI, models: []string{"model-b"}},
+	)
+	persistConfigImportBindingItem(t, batch.ID, "route_blueprints", "route-a-b", types.ConfigImportRouteBlueprint{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "route-a-b"},
+		Targets: []types.ConfigImportRouteTarget{
+			{RouteTargetRef: "target-a", LineRef: "line-a", UpstreamModel: "model-a", SKURef: "line-a-sku-a", CostVariantKey: "default"},
+			{RouteTargetRef: "target-b", LineRef: "line-b", UpstreamModel: "model-b", SKURef: "line-b-sku-a", CostVariantKey: "default"},
+		},
+	})
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip, Reason: "line A unavailable",
+	}})
+	require.NoError(t, err)
+	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-b", Action: types.ConfigImportBindingActionSkip, Reason: "line B unavailable",
+	}})
+	require.NoError(t, err)
+
+	channelA := &model.Channel{Type: constant.ChannelTypeOpenAI, Name: "Supplier A", Models: "model-a", Key: "key-a"}
+	require.NoError(t, model.DB.Create(channelA).Error)
+	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-a", Action: types.ConfigImportBindingActionBind, ChannelID: &channelA.Id,
+	}})
+	require.NoError(t, err)
+
+	var route model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a-b").First(&route).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateExcluded), route.State)
+	assert.Equal(t, "line B unavailable", route.ExclusionReason)
+
+	channelB := &model.Channel{Type: constant.ChannelTypeOpenAI, Name: "Supplier B", Models: "model-b", Key: "key-b"}
+	require.NoError(t, model.DB.Create(channelB).Error)
+	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-b", Action: types.ConfigImportBindingActionBind, ChannelID: &channelB.Id,
+	}})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a-b").First(&route).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateNew), route.State)
+	assert.Empty(t, route.ExclusionReason)
+}
+
 func TestConfigImportBindingMapsDatabaseChannelUniquenessConflict(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t,

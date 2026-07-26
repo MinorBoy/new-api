@@ -80,7 +80,7 @@ func UpdateConfigImportBindings(
 				return configImportError("BINDING_LINE_NOT_FOUND", "line_ref %q does not belong to batch %d", input.LineRef, batchID)
 			}
 			if input.Action == types.ConfigImportBindingActionSkip {
-				skipStateJSON, err := excludeConfigImportLineDependents(tx, items, input.LineRef, input.Reason)
+				skipStateJSON, err := excludeConfigImportLineDependents(tx, batchID, items, input.LineRef, input.Reason)
 				if err != nil {
 					return err
 				}
@@ -103,7 +103,7 @@ func UpdateConfigImportBindings(
 			if err := validateConfigImportBindingChannel(catalog, line, channel); err != nil {
 				return err
 			}
-			if err := restoreConfigImportLineDependents(tx, batchID, input.LineRef); err != nil {
+			if err := reconcileConfigImportLineDependents(tx, batchID, input.LineRef); err != nil {
 				return err
 			}
 			if err := saveConfigImportBinding(tx, batchID, input, adminID); err != nil {
@@ -360,10 +360,16 @@ func saveConfigImportBindingWithSkipState(
 
 func excludeConfigImportLineDependents(
 	tx *gorm.DB,
+	batchID int64,
 	items []model.ConfigImportItem,
 	lineRef string,
 	reason string,
 ) (string, error) {
+	owners, err := configImportActiveSkipOwners(tx, batchID, "")
+	if err != nil {
+		return "", err
+	}
+	managedStates := configImportSkippedItemStatesByID(owners)
 	modelSKURefs := make(map[string]struct{})
 	mappingRefs := make(map[string]struct{})
 	for _, item := range items {
@@ -391,23 +397,31 @@ func excludeConfigImportLineDependents(
 		Reason: reason,
 		Items:  make([]configImportSkippedItemState, 0),
 	}
-	excludedIDs := make([]int64, 0)
+	managedIDs := make([]int64, 0)
 	for _, item := range items {
 		excluded, err := configImportItemDependsOnLine(item, lineRef, modelSKURefs, mappingRefs)
 		if err != nil {
 			return "", err
 		}
-		if excluded && item.State != string(types.ConfigImportItemStateExcluded) {
-			excludedIDs = append(excludedIDs, item.ID)
+		if !excluded {
+			continue
+		}
+		if state, inherited := managedStates[item.ID]; inherited {
+			managedIDs = append(managedIDs, item.ID)
+			snapshot.Items = append(snapshot.Items, state)
+			continue
+		}
+		if item.State != string(types.ConfigImportItemStateExcluded) {
+			managedIDs = append(managedIDs, item.ID)
 			snapshot.Items = append(snapshot.Items, configImportSkippedItemState{
 				ID: item.ID, State: item.State, ExclusionReason: item.ExclusionReason,
 			})
 		}
 	}
-	if len(excludedIDs) == 0 {
+	if len(managedIDs) == 0 {
 		return "", nil
 	}
-	if err := tx.Model(&model.ConfigImportItem{}).Where("id IN ?", excludedIDs).Updates(map[string]any{
+	if err := tx.Model(&model.ConfigImportItem{}).Where("id IN ?", managedIDs).Updates(map[string]any{
 		"state":            string(types.ConfigImportItemStateExcluded),
 		"exclusion_reason": reason,
 		"updated_at":       common.GetTimestamp(),
@@ -421,7 +435,7 @@ func excludeConfigImportLineDependents(
 	return string(encoded), nil
 }
 
-func restoreConfigImportLineDependents(tx *gorm.DB, batchID int64, lineRef string) error {
+func reconcileConfigImportLineDependents(tx *gorm.DB, batchID int64, lineRef string) error {
 	var binding model.ConfigImportBinding
 	err := tx.Where("batch_id = ? AND line_ref = ?", batchID, lineRef).First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || binding.Action != string(types.ConfigImportBindingActionSkip) || binding.SkipStateJSON == "" {
@@ -434,7 +448,24 @@ func restoreConfigImportLineDependents(tx *gorm.DB, batchID int64, lineRef strin
 	if err := common.UnmarshalJsonStr(binding.SkipStateJSON, &snapshot); err != nil {
 		return fmt.Errorf("decode config import skip state for line_ref %q: %w", lineRef, err)
 	}
+	owners, err := configImportActiveSkipOwners(tx, batchID, lineRef)
+	if err != nil {
+		return err
+	}
+	managedStates := configImportSkippedItemStatesByID(owners)
 	for _, item := range snapshot.Items {
+		if _, stillSkipped := managedStates[item.ID]; stillSkipped {
+			if err := tx.Model(&model.ConfigImportItem{}).
+				Where("id = ? AND batch_id = ?", item.ID, batchID).
+				Updates(map[string]any{
+					"state":            string(types.ConfigImportItemStateExcluded),
+					"exclusion_reason": configImportSkipReasonForItem(owners, item.ID),
+					"updated_at":       common.GetTimestamp(),
+				}).Error; err != nil {
+				return err
+			}
+			continue
+		}
 		if err := tx.Model(&model.ConfigImportItem{}).
 			Where("id = ? AND batch_id = ? AND state = ? AND exclusion_reason = ?", item.ID, batchID,
 				string(types.ConfigImportItemStateExcluded), snapshot.Reason).
@@ -447,6 +478,55 @@ func restoreConfigImportLineDependents(tx *gorm.DB, batchID int64, lineRef strin
 		}
 	}
 	return nil
+}
+
+type configImportSkipOwner struct {
+	LineRef  string
+	Snapshot configImportSkipStateSnapshot
+}
+
+func configImportActiveSkipOwners(tx *gorm.DB, batchID int64, excludedLineRef string) ([]configImportSkipOwner, error) {
+	var bindings []model.ConfigImportBinding
+	query := tx.Where("batch_id = ? AND action = ? AND skip_state_json <> ?", batchID,
+		string(types.ConfigImportBindingActionSkip), "")
+	if excludedLineRef != "" {
+		query = query.Where("line_ref <> ?", excludedLineRef)
+	}
+	if err := query.Order("line_ref ASC").Find(&bindings).Error; err != nil {
+		return nil, err
+	}
+	owners := make([]configImportSkipOwner, 0, len(bindings))
+	for _, binding := range bindings {
+		var snapshot configImportSkipStateSnapshot
+		if err := common.UnmarshalJsonStr(binding.SkipStateJSON, &snapshot); err != nil {
+			return nil, fmt.Errorf("decode config import skip state for line_ref %q: %w", binding.LineRef, err)
+		}
+		owners = append(owners, configImportSkipOwner{LineRef: binding.LineRef, Snapshot: snapshot})
+	}
+	return owners, nil
+}
+
+func configImportSkippedItemStatesByID(owners []configImportSkipOwner) map[int64]configImportSkippedItemState {
+	states := make(map[int64]configImportSkippedItemState)
+	for _, owner := range owners {
+		for _, item := range owner.Snapshot.Items {
+			if _, found := states[item.ID]; !found {
+				states[item.ID] = item
+			}
+		}
+	}
+	return states
+}
+
+func configImportSkipReasonForItem(owners []configImportSkipOwner, itemID int64) string {
+	for _, owner := range owners {
+		for _, item := range owner.Snapshot.Items {
+			if item.ID == itemID {
+				return owner.Snapshot.Reason
+			}
+		}
+	}
+	return ""
 }
 
 func mapConfigImportBindingChannelConflict(err error) error {

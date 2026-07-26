@@ -27,6 +27,7 @@ import (
 type taskPollingFetchAdaptor struct {
 	taskcommon.BaseBilling
 	mu           sync.Mutex
+	initInfo     *relaycommon.RelayInfo
 	taskIDs      []string
 	fetched      chan string
 	blockTaskID  string
@@ -79,7 +80,20 @@ func (a *sunoFailurePollingAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *re
 	return 0
 }
 
-func (a *taskPollingFetchAdaptor) Init(_ *relaycommon.RelayInfo) {}
+func (a *taskPollingFetchAdaptor) Init(info *relaycommon.RelayInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if info == nil {
+		a.initInfo = nil
+		return
+	}
+	copy := *info
+	if info.ChannelMeta != nil {
+		channelMeta := *info.ChannelMeta
+		copy.ChannelMeta = &channelMeta
+	}
+	a.initInfo = &copy
+}
 
 func (a *taskPollingFetchAdaptor) FetchTask(_ string, _ string, body map[string]any, _ string) (*http.Response, error) {
 	taskID, _ := body["task_id"].(string)
@@ -179,6 +193,20 @@ func (a *taskPollingFetchAdaptor) fetchedTaskIDs() []string {
 	return append([]string(nil), a.taskIDs...)
 }
 
+func (a *taskPollingFetchAdaptor) initializedInfo() *relaycommon.RelayInfo {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.initInfo == nil {
+		return nil
+	}
+	copy := *a.initInfo
+	if a.initInfo.ChannelMeta != nil {
+		channelMeta := *a.initInfo.ChannelMeta
+		copy.ChannelMeta = &channelMeta
+	}
+	return &copy
+}
+
 func seedTaskPollingChannel(t *testing.T, id int, disableSleep bool) {
 	t.Helper()
 	ch := &model.Channel{
@@ -212,6 +240,50 @@ func seedPollingTask(t *testing.T, channelID int, publicID string, upstreamID st
 	}
 	require.NoError(t, model.DB.Create(task).Error)
 	return task
+}
+
+func TestTaskPollingCarriesSecureChannelProfileSettings(t *testing.T) {
+	truncate(t)
+
+	const channelID = 303
+	baseURL := "https://secure.example"
+	secureChannel := &model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeSecure,
+		Name:    "secure_enterprise",
+		Key:     "secure-enterprise-key",
+		Status:  common.ChannelStatusEnabled,
+		BaseURL: &baseURL,
+	}
+	secureChannel.SetOtherSettings(dto.ChannelOtherSettings{
+		SecureVideoGroup: dto.SecureVideoGroupEnterprise,
+	})
+	require.NoError(t, model.DB.Create(secureChannel).Error)
+
+	task := seedPollingTask(t, channelID, "task_public_secure", "task_private_secure")
+	task.Platform = constant.TaskPlatform("66")
+	require.NoError(t, model.DB.Model(task).Update("platform", task.Platform).Error)
+
+	adaptor := &taskPollingFetchAdaptor{}
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	require.NoError(t, updateVideoTasks(
+		context.Background(),
+		constant.TaskPlatform("66"),
+		channelID,
+		[]string{task.GetUpstreamTaskID()},
+		map[string]*model.Task{task.GetUpstreamTaskID(): task},
+	))
+
+	info := adaptor.initializedInfo()
+	require.NotNil(t, info)
+	require.NotNil(t, info.ChannelMeta)
+	assert.Equal(t, constant.ChannelTypeSecure, info.ChannelMeta.ChannelType)
+	assert.Equal(t, baseURL, info.ChannelMeta.ChannelBaseUrl)
+	assert.Equal(t, dto.SecureVideoGroupEnterprise, info.ChannelMeta.ChannelOtherSettings.SecureVideoGroup)
+	assert.Equal(t, "secure-enterprise-key", info.ApiKey)
 }
 
 func runSinglePollingUpdate(t *testing.T, adaptor TaskPollingAdaptor, task *model.Task) error {

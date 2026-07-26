@@ -72,13 +72,27 @@ type ConfigImportDocument struct {
 }
 
 type ConfigImportManifest struct {
-	SourceFile       string                   `json:"source_file"`
-	SourceSHA256     string                   `json:"source_sha256"`
-	PayloadSHA256    string                   `json:"payload_sha256"`
-	GeneratedAt      string                   `json:"generated_at"`
-	ConverterVersion string                   `json:"converter_version"`
-	TemplateMatch    string                   `json:"template_match"`
-	Counts           ConfigImportEntityCounts `json:"counts"`
+	SourceFileName   string                      `json:"source_file_name"`
+	SourceSHA256     string                      `json:"source_sha256"`
+	PayloadSHA256    string                      `json:"payload_sha256"`
+	GeneratedAt      string                      `json:"generated_at"`
+	ConverterVersion string                      `json:"converter_version"`
+	TemplateMatch    string                      `json:"template_match"`
+	Counts           *ConfigImportManifestCounts `json:"counts"`
+}
+
+// ConfigImportManifestCounts uses pointers so an absent count cannot be
+// confused with an explicitly supplied zero.
+type ConfigImportManifestCounts struct {
+	Channels           *int `json:"channels"`
+	ChannelLines       *int `json:"channel_lines"`
+	ModelSKUs          *int `json:"model_skus"`
+	SaleProposals      *int `json:"sale_proposals"`
+	CostRuleDrafts     *int `json:"cost_rule_drafts"`
+	ModelMappings      *int `json:"model_mappings"`
+	RouteBlueprints    *int `json:"route_blueprints"`
+	Sources            *int `json:"sources"`
+	UnresolvedVariants *int `json:"unresolved_variants"`
 }
 
 type ConfigImportEntityCounts struct {
@@ -129,19 +143,30 @@ type ConfigImportChannel struct {
 
 type ConfigImportChannelLine struct {
 	ConfigImportAuthoritativeEntity
-	ChannelRef string  `json:"channel_ref"`
-	LineKey    string  `json:"line_key,omitempty"`
-	BaseURL    string  `json:"base_url,omitempty"`
-	Weight     *string `json:"weight,omitempty"`
-	Enabled    *bool   `json:"enabled,omitempty"`
+	LineRef            string `json:"line_ref"`
+	ChannelRef         string `json:"channel_ref"`
+	DisplayName        string `json:"display_name,omitempty"`
+	ProviderTypeHint   string `json:"provider_type_hint,omitempty"`
+	Region             string `json:"region,omitempty"`
+	Protocol           string `json:"protocol,omitempty"`
+	SupportsRealPerson *bool  `json:"supports_real_person,omitempty"`
+	StatusProposal     string `json:"status_proposal"`
+	Note               string `json:"note,omitempty"`
 }
 
 type ConfigImportModelSKU struct {
 	ConfigImportAuthoritativeEntity
-	ChannelLineRef string   `json:"channel_line_ref"`
-	UpstreamModel  string   `json:"upstream_model,omitempty"`
-	Capabilities   []string `json:"capabilities,omitempty"`
-	Enabled        *bool    `json:"enabled,omitempty"`
+	LineRef            string                       `json:"line_ref"`
+	UpstreamModel      string                       `json:"upstream_model,omitempty"`
+	OutputResolutions  []string                     `json:"output_resolutions,omitempty"`
+	DurationValues     []int                        `json:"duration_values,omitempty"`
+	DurationMin        *int                         `json:"duration_min,omitempty"`
+	DurationMax        *int                         `json:"duration_max,omitempty"`
+	AspectRatios       []string                     `json:"aspect_ratios,omitempty"`
+	InputModes         []string                     `json:"input_modes,omitempty"`
+	ReferenceMinimums  *ConfigImportReferenceBounds `json:"reference_minimums,omitempty"`
+	ReferenceLimits    *ConfigImportReferenceBounds `json:"reference_limits,omitempty"`
+	SupportsRealPerson *bool                        `json:"supports_real_person,omitempty"`
 }
 
 type ConfigImportSaleProposal struct {
@@ -156,43 +181,73 @@ type ConfigImportSaleProposal struct {
 
 type ConfigImportCostRuleDraft struct {
 	ConfigImportAuthoritativeEntity
-	ChannelLineRef       string  `json:"channel_line_ref"`
-	ModelSKURef          string  `json:"model_sku_ref"`
-	CostMode             string  `json:"cost_mode,omitempty"`
-	Currency             string  `json:"currency,omitempty"`
-	UnitPrice            *string `json:"unit_price,omitempty"`
-	PricePerSecond       *string `json:"price_per_second,omitempty"`
-	InputPerMillion      *string `json:"input_per_million,omitempty"`
-	OutputPerMillion     *string `json:"output_per_million,omitempty"`
-	CompletionPerMillion *string `json:"completion_per_million,omitempty"`
-	TotalPerMillion      *string `json:"total_per_million,omitempty"`
-	BillingMultiplier    *string `json:"billing_multiplier,omitempty"`
-	FeeRate              *string `json:"fee_rate,omitempty"`
-	Enabled              *bool   `json:"enabled,omitempty"`
+	LineRef                           string  `json:"line_ref"`
+	UpstreamModel                     string  `json:"upstream_model,omitempty"`
+	CostVariantKey                    string  `json:"cost_variant_key"`
+	RouteTargetRef                    string  `json:"route_target_ref"`
+	Scenario                          string  `json:"scenario,omitempty"`
+	CostMode                          string  `json:"cost_mode,omitempty"`
+	Currency                          string  `json:"currency,omitempty"`
+	UnitPrice                         *string `json:"unit_price,omitempty"`
+	PricePerSecond                    *string `json:"price_per_second,omitempty"`
+	InputPerMillion                   *string `json:"input_per_million,omitempty"`
+	OutputPerMillion                  *string `json:"output_per_million,omitempty"`
+	CompletionPerMillion              *string `json:"completion_per_million,omitempty"`
+	TotalPerMillion                   *string `json:"total_per_million,omitempty"`
+	BillingMultiplier                 *string `json:"billing_multiplier,omitempty"`
+	PurchaseDiscountRatio             *string `json:"purchase_discount_ratio,omitempty"`
+	RechargeExchangeRatio             *string `json:"recharge_exchange_ratio,omitempty"`
+	FeeRate                           *string `json:"fee_rate,omitempty"`
+	CurrencyToUSDRate                 *string `json:"currency_to_usd_rate,omitempty"`
+	NormalizedUSDUnitPrice            *string `json:"normalized_usd_unit_price,omitempty"`
+	NormalizedUSDPricePerSecond       *string `json:"normalized_usd_price_per_second,omitempty"`
+	NormalizedUSDInputPerMillion      *string `json:"normalized_usd_input_per_million,omitempty"`
+	NormalizedUSDOutputPerMillion     *string `json:"normalized_usd_output_per_million,omitempty"`
+	NormalizedUSDCompletionPerMillion *string `json:"normalized_usd_completion_per_million,omitempty"`
+	NormalizedUSDTotalPerMillion      *string `json:"normalized_usd_total_per_million,omitempty"`
 }
 
 type ConfigImportModelMapping struct {
 	ConfigImportAuthoritativeEntity
-	ChannelRef  string `json:"channel_ref"`
-	ModelSKURef string `json:"model_sku_ref"`
-	PublicModel string `json:"public_model,omitempty"`
-	Enabled     *bool  `json:"enabled,omitempty"`
+	CanonicalModel string `json:"canonical_model"`
+	ClientModel    string `json:"client_model"`
+	LineRef        string `json:"line_ref"`
+	UpstreamModel  string `json:"upstream_model"`
+	SKURef         string `json:"sku_ref"`
+}
+
+type ConfigImportReferenceBounds struct {
+	Images *int `json:"images,omitempty"`
+	Videos *int `json:"videos,omitempty"`
+	Audios *int `json:"audios,omitempty"`
 }
 
 type ConfigImportRouteTarget struct {
-	ChannelLineRef string  `json:"channel_line_ref"`
-	ModelSKURef    string  `json:"model_sku_ref"`
-	Priority       *int    `json:"priority,omitempty"`
-	Weight         *string `json:"weight,omitempty"`
-	Enabled        *bool   `json:"enabled,omitempty"`
+	RouteTargetRef     string                       `json:"route_target_ref"`
+	LineRef            string                       `json:"line_ref"`
+	UpstreamModel      string                       `json:"upstream_model"`
+	SKURef             string                       `json:"sku_ref"`
+	CostVariantKey     string                       `json:"cost_variant_key"`
+	OutputResolutions  []string                     `json:"output_resolutions,omitempty"`
+	DurationValues     []int                        `json:"duration_values,omitempty"`
+	DurationMin        *int                         `json:"duration_min,omitempty"`
+	DurationMax        *int                         `json:"duration_max,omitempty"`
+	AspectRatios       []string                     `json:"aspect_ratios,omitempty"`
+	InputModes         []string                     `json:"input_modes,omitempty"`
+	ReferenceMinimums  *ConfigImportReferenceBounds `json:"reference_minimums,omitempty"`
+	ReferenceLimits    *ConfigImportReferenceBounds `json:"reference_limits,omitempty"`
+	SupportsRealPerson *bool                        `json:"supports_real_person,omitempty"`
+	Priority           *int                         `json:"priority,omitempty"`
+	Enabled            *bool                        `json:"enabled"`
 }
 
 type ConfigImportRouteBlueprint struct {
 	ConfigImportAuthoritativeEntity
-	PublicModel string                     `json:"public_model,omitempty"`
-	MergeMode   ConfigImportRouteMergeMode `json:"merge_mode,omitempty"`
-	Targets     []ConfigImportRouteTarget  `json:"targets,omitempty"`
-	Enabled     *bool                      `json:"enabled,omitempty"`
+	CanonicalModel   string                     `json:"canonical_model"`
+	ClientModel      string                     `json:"client_model"`
+	ModelMappingRefs []string                   `json:"model_mapping_refs,omitempty"`
+	MergeMode        ConfigImportRouteMergeMode `json:"merge_mode,omitempty"`
+	Targets          []ConfigImportRouteTarget  `json:"targets"`
 }
 
 type ConfigImportSource struct {
@@ -202,10 +257,10 @@ type ConfigImportSource struct {
 
 type ConfigImportUnresolvedVariant struct {
 	ConfigImportAuthoritativeEntity
-	ChannelRef  string `json:"channel_ref"`
-	ModelSKURef string `json:"model_sku_ref,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	Excluded    *bool  `json:"excluded,omitempty"`
+	LineRef        string `json:"line_ref"`
+	CostVariantKey string `json:"cost_variant_key,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	Excluded       *bool  `json:"excluded,omitempty"`
 }
 
 type ConfigImportSourceIssue struct {

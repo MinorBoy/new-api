@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -19,6 +20,51 @@ func TestConfigImportSchemaAcceptsCanonicalDocument(t *testing.T) {
 	require.Equal(t, "new-api.channel-config-import", document.Kind)
 	require.Equal(t, 1, document.SchemaVersion)
 	require.Len(t, document.Entities.Sources, 1)
+}
+
+func TestConfigImportSchemaRejectsLegacySourceFileField(t *testing.T) {
+	payload := strings.Replace(configImportDocumentJSON(t, map[string]any{}), `"source_file_name"`, `"source_file"`, 1)
+
+	_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	requireCode(t, err, "SCHEMA_JSON")
+}
+
+func TestConfigImportSchemaRequiresManifestCounts(t *testing.T) {
+	payload := configImportDocumentJSON(t, map[string]any{})
+	var document map[string]any
+	require.NoError(t, common.Unmarshal([]byte(payload), &document))
+	delete(document["manifest"].(map[string]any), "counts")
+	encoded, err := common.Marshal(document)
+	require.NoError(t, err)
+
+	_, err = ParseConfigImportDocument(strings.NewReader(string(encoded)))
+
+	requireCode(t, err, "SCHEMA_MANIFEST_COUNTS")
+}
+
+func TestConfigImportSchemaRejectsInvalidManifestCounts(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		count int
+		code  string
+	}{
+		{name: "negative", count: -1, code: "LIMIT_MANIFEST_COUNTS"},
+		{name: "mismatch", count: 2, code: "SCHEMA_MANIFEST_COUNTS"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			payload := configImportDocumentJSON(t, map[string]any{})
+			var document map[string]any
+			require.NoError(t, common.Unmarshal([]byte(payload), &document))
+			document["manifest"].(map[string]any)["counts"].(map[string]any)["channels"] = testCase.count
+			encoded, err := common.Marshal(document)
+			require.NoError(t, err)
+
+			_, err = ParseConfigImportDocument(strings.NewReader(string(encoded)))
+
+			requireCode(t, err, testCase.code)
+		})
+	}
 }
 
 func TestConfigImportSchemaRejectsUnsupportedKind(t *testing.T) {
@@ -254,10 +300,16 @@ func TestConfigImportSchemaRejectsDuplicateBusinessID(t *testing.T) {
 func TestConfigImportSchemaRejectsMissingBusinessReference(t *testing.T) {
 	payload := configImportDocumentJSON(t, map[string]any{
 		"channel_lines": []any{map[string]any{
-			"business_id": "line-one",
-			"entity_hash": strings.Repeat("c", 64),
-			"source_ref":  "source-workbook",
-			"channel_ref": "missing-channel",
+			"business_id":        "line-one",
+			"entity_hash":        strings.Repeat("c", 64),
+			"source_ref":         "source-workbook",
+			"line_ref":           "line-one",
+			"channel_ref":        "missing-channel",
+			"display_name":       "Line one",
+			"provider_type_hint": "openai",
+			"region":             "global",
+			"protocol":           "openai",
+			"status_proposal":    "disabled",
 		}},
 	})
 
@@ -272,8 +324,9 @@ func TestConfigImportSchemaRejectsNegativeDecimalFact(t *testing.T) {
 			"business_id":      "cost-one",
 			"entity_hash":      strings.Repeat("c", 64),
 			"source_ref":       "source-workbook",
-			"channel_line_ref": "missing-line",
-			"model_sku_ref":    "missing-sku",
+			"line_ref":         "missing-line",
+			"cost_variant_key": "default",
+			"route_target_ref": "missing-target",
 			"unit_price":       "-1.00",
 		}},
 	})
@@ -281,6 +334,94 @@ func TestConfigImportSchemaRejectsNegativeDecimalFact(t *testing.T) {
 	_, err := ParseConfigImportDocument(strings.NewReader(payload))
 
 	requireCode(t, err, "SCHEMA_DECIMAL")
+}
+
+func TestConfigImportSchemaAcceptsStructuredV2LineCostAndRoute(t *testing.T) {
+	payload := configImportDocumentJSON(t, map[string]any{
+		"channels": []any{map[string]any{
+			"business_id": "channel-main", "entity_hash": strings.Repeat("c", 64), "source_ref": "source-workbook",
+		}},
+		"channel_lines": []any{map[string]any{
+			"business_id": "line-main", "entity_hash": strings.Repeat("d", 64), "source_ref": "source-workbook",
+			"line_ref": "line-main", "channel_ref": "channel-main", "display_name": "Primary line",
+			"provider_type_hint": "openai", "region": "global", "protocol": "openai", "supports_real_person": true,
+			"status_proposal": "disabled", "note": "account capability",
+		}},
+		"model_skus": []any{map[string]any{
+			"business_id": "sku-video", "entity_hash": strings.Repeat("e", 64), "source_ref": "source-workbook",
+			"line_ref": "line-main", "upstream_model": "video-v2", "output_resolutions": []any{"720p", "1080p"},
+		}},
+		"model_mappings": []any{map[string]any{
+			"business_id": "mapping-video", "entity_hash": strings.Repeat("f", 64), "source_ref": "source-workbook",
+			"canonical_model": "video-v2", "client_model": "video-v2", "line_ref": "line-main",
+			"upstream_model": "video-v2", "sku_ref": "sku-video",
+		}},
+		"route_blueprints": []any{map[string]any{
+			"business_id": "route-video", "entity_hash": strings.Repeat("1", 64), "source_ref": "source-workbook",
+			"canonical_model": "video-v2", "client_model": "video-v2", "model_mapping_refs": []any{"mapping-video"}, "merge_mode": "merge",
+			"targets": []any{map[string]any{
+				"route_target_ref": "target-video", "line_ref": "line-main", "upstream_model": "video-v2", "sku_ref": "sku-video",
+				"cost_variant_key": "standard", "output_resolutions": []any{"720p", "1080p"}, "duration_values": []any{5, 10},
+				"aspect_ratios": []any{"16:9"}, "input_modes": []any{"text_to_video"},
+				"reference_minimums":   map[string]any{"images": 0, "videos": 0, "audios": 0},
+				"reference_limits":     map[string]any{"images": 1, "videos": 1, "audios": 0},
+				"supports_real_person": true, "priority": 10, "enabled": false,
+			}},
+		}},
+		"cost_rule_drafts": []any{map[string]any{
+			"business_id": "cost-video", "entity_hash": strings.Repeat("2", 64), "source_ref": "source-workbook",
+			"line_ref": "line-main", "upstream_model": "video-v2", "cost_variant_key": "standard", "route_target_ref": "target-video",
+			"scenario": "text_to_video", "cost_mode": "per_request", "currency": "CNY", "unit_price": "3.000",
+			"billing_multiplier": "1", "purchase_discount_ratio": "1", "recharge_exchange_ratio": "1", "fee_rate": "0", "currency_to_usd_rate": "0.14",
+			"normalized_usd_unit_price": "0.420",
+		}},
+	})
+
+	document, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	require.NoError(t, err)
+	require.Equal(t, "line-main", document.Entities.ChannelLines[0].LineRef)
+	require.Equal(t, "standard", document.Entities.CostRuleDrafts[0].CostVariantKey)
+	require.Equal(t, "target-video", document.Entities.RouteBlueprints[0].Targets[0].RouteTargetRef)
+}
+
+func TestConfigImportSchemaRejectsChannelLineBaseURL(t *testing.T) {
+	payload := configImportDocumentJSON(t, map[string]any{
+		"channels": []any{map[string]any{
+			"business_id": "channel-main", "entity_hash": strings.Repeat("c", 64), "source_ref": "source-workbook",
+		}},
+		"channel_lines": []any{map[string]any{
+			"business_id": "line-main", "entity_hash": strings.Repeat("d", 64), "source_ref": "source-workbook",
+			"line_ref": "line-main", "channel_ref": "channel-main", "status_proposal": "disabled",
+			"base_url": "https://runtime.example.test",
+		}},
+	})
+
+	_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	requireCode(t, err, "SCHEMA_JSON")
+}
+
+func TestConfigImportSchemaCanonicalHashIgnoresEntityOrder(t *testing.T) {
+	firstPayload := configImportDocumentJSON(t, map[string]any{
+		"channels": []any{
+			map[string]any{"business_id": "channel-b", "entity_hash": strings.Repeat("b", 64), "source_ref": "source-workbook"},
+			map[string]any{"business_id": "channel-a", "entity_hash": strings.Repeat("a", 64), "source_ref": "source-workbook"},
+		},
+	})
+	secondPayload := configImportDocumentJSON(t, map[string]any{
+		"channels": []any{
+			map[string]any{"business_id": "channel-a", "entity_hash": strings.Repeat("a", 64), "source_ref": "source-workbook"},
+			map[string]any{"business_id": "channel-b", "entity_hash": strings.Repeat("b", 64), "source_ref": "source-workbook"},
+		},
+	})
+
+	first, err := ParseConfigImportDocument(strings.NewReader(firstPayload))
+	require.NoError(t, err)
+	second, err := ParseConfigImportDocument(strings.NewReader(secondPayload))
+	require.NoError(t, err)
+
+	require.Equal(t, first.Manifest.PayloadSHA256, second.Manifest.PayloadSHA256)
 }
 
 func TestConfigImportSchemaRejectsCredentialValueUnderAllowedField(t *testing.T) {
@@ -311,7 +452,9 @@ func configImportDocumentJSON(t *testing.T, extraEntities map[string]any) string
 
 func configImportDocumentJSONWithIssues(t *testing.T, extraEntities map[string]any, issues []any) string {
 	entities := mergeConfigImportEntities(extraEntities)
-	canonical := map[string]any{"entities": entities}
+	canonicalEntities := cloneConfigImportEntitiesForHash(t, entities)
+	canonicalizeConfigImportEntitiesForHash(canonicalEntities)
+	canonical := map[string]any{"entities": canonicalEntities}
 	canonicalJSON, err := common.Marshal(canonical)
 	require.NoError(t, err)
 	hash := sha256.Sum256(canonicalJSON)
@@ -321,13 +464,13 @@ func configImportDocumentJSONWithIssues(t *testing.T, extraEntities map[string]a
 		"schema_version":   1,
 		"template_version": "2026.07",
 		"manifest": map[string]any{
-			"source_file":       "channel-cost.xlsx",
+			"source_file_name":  "channel-cost.xlsx",
 			"source_sha256":     strings.Repeat("a", 64),
 			"payload_sha256":    fmt.Sprintf("%x", hash),
 			"generated_at":      "2026-07-27T00:00:00Z",
 			"converter_version": "1.0.0",
 			"template_match":    "exact",
-			"counts":            map[string]any{},
+			"counts":            configImportManifestCounts(entities),
 		},
 		"entities":        entities,
 		"derived_preview": map[string]any{},
@@ -342,6 +485,8 @@ func configImportDocumentJSONForCanonicalEntities(t *testing.T, documentEntities
 	if canonicalEntities == nil {
 		canonicalEntities = documentEntities
 	}
+	canonicalEntities = cloneConfigImportEntitiesForHash(t, canonicalEntities)
+	canonicalizeConfigImportEntitiesForHash(canonicalEntities)
 	canonicalJSON, err := common.Marshal(map[string]any{"entities": canonicalEntities})
 	require.NoError(t, err)
 	hash := sha256.Sum256(canonicalJSON)
@@ -351,13 +496,13 @@ func configImportDocumentJSONForCanonicalEntities(t *testing.T, documentEntities
 		"schema_version":   1,
 		"template_version": "2026.07",
 		"manifest": map[string]any{
-			"source_file":       "channel-cost.xlsx",
+			"source_file_name":  "channel-cost.xlsx",
 			"source_sha256":     strings.Repeat("a", 64),
 			"payload_sha256":    fmt.Sprintf("%x", hash),
 			"generated_at":      "2026-07-27T00:00:00Z",
 			"converter_version": "1.0.0",
 			"template_match":    "exact",
-			"counts":            map[string]any{},
+			"counts":            configImportManifestCounts(documentEntities),
 		},
 		"entities":        documentEntities,
 		"derived_preview": map[string]any{},
@@ -366,6 +511,95 @@ func configImportDocumentJSONForCanonicalEntities(t *testing.T, documentEntities
 	encoded, err := common.Marshal(document)
 	require.NoError(t, err)
 	return string(encoded)
+}
+
+func cloneConfigImportEntitiesForHash(t *testing.T, entities map[string]any) map[string]any {
+	t.Helper()
+	encoded, err := common.Marshal(entities)
+	require.NoError(t, err)
+	var cloned map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &cloned))
+	return cloned
+}
+
+func canonicalizeConfigImportEntitiesForHash(entities map[string]any) {
+	for _, collection := range []string{
+		"channels", "channel_lines", "model_skus", "sale_proposals", "cost_rule_drafts",
+		"model_mappings", "route_blueprints", "sources", "unresolved_variants",
+	} {
+		items, ok := entities[collection].([]any)
+		if !ok {
+			continue
+		}
+		sort.Slice(items, func(left, right int) bool {
+			return items[left].(map[string]any)["business_id"].(string) < items[right].(map[string]any)["business_id"].(string)
+		})
+		if collection == "model_skus" {
+			for _, item := range items {
+				canonicalizeConfigImportConstraintMap(item.(map[string]any))
+			}
+		}
+	}
+	blueprints, ok := entities["route_blueprints"].([]any)
+	if !ok {
+		return
+	}
+	for _, item := range blueprints {
+		blueprint := item.(map[string]any)
+		if references, ok := blueprint["model_mapping_refs"].([]any); ok {
+			sort.Slice(references, func(left, right int) bool { return references[left].(string) < references[right].(string) })
+		}
+		if targets, ok := blueprint["targets"].([]any); ok {
+			sort.Slice(targets, func(left, right int) bool {
+				return targets[left].(map[string]any)["route_target_ref"].(string) < targets[right].(map[string]any)["route_target_ref"].(string)
+			})
+			for _, target := range targets {
+				canonicalizeConfigImportConstraintMap(target.(map[string]any))
+			}
+		}
+	}
+}
+
+func canonicalizeConfigImportConstraintMap(item map[string]any) {
+	for _, field := range []string{"output_resolutions", "aspect_ratios", "input_modes"} {
+		values, ok := item[field].([]any)
+		if !ok {
+			continue
+		}
+		sort.Slice(values, func(left, right int) bool { return values[left].(string) < values[right].(string) })
+	}
+	values, ok := item["duration_values"].([]any)
+	if !ok {
+		return
+	}
+	sort.Slice(values, func(left, right int) bool {
+		return configImportDurationForHash(values[left]) < configImportDurationForHash(values[right])
+	})
+}
+
+func configImportDurationForHash(value any) float64 {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed)
+	case float64:
+		return typed
+	default:
+		return 0
+	}
+}
+
+func configImportManifestCounts(entities map[string]any) map[string]any {
+	return map[string]any{
+		"channels":            len(entities["channels"].([]any)),
+		"channel_lines":       len(entities["channel_lines"].([]any)),
+		"model_skus":          len(entities["model_skus"].([]any)),
+		"sale_proposals":      len(entities["sale_proposals"].([]any)),
+		"cost_rule_drafts":    len(entities["cost_rule_drafts"].([]any)),
+		"model_mappings":      len(entities["model_mappings"].([]any)),
+		"route_blueprints":    len(entities["route_blueprints"].([]any)),
+		"sources":             len(entities["sources"].([]any)),
+		"unresolved_variants": len(entities["unresolved_variants"].([]any)),
+	}
 }
 
 func mergeConfigImportEntities(extra map[string]any) map[string]any {

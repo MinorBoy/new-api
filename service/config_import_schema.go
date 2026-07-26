@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -215,6 +216,9 @@ func validateConfigImportDocument(document *types.ConfigImportDocument) error {
 	if err := validateConfigImportEntities(&document.Entities); err != nil {
 		return err
 	}
+	if err := validateConfigImportManifestCounts(document.Manifest.Counts, document.Entities); err != nil {
+		return err
+	}
 	if err := validateConfigImportIssues(document.Issues, configImportBusinessIDs(document.Entities)); err != nil {
 		return err
 	}
@@ -230,11 +234,11 @@ func validateConfigImportDocument(document *types.ConfigImportDocument) error {
 }
 
 func validateConfigImportManifest(manifest types.ConfigImportManifest) error {
-	if strings.TrimSpace(manifest.SourceFile) == "" {
-		return configImportError("SCHEMA_MANIFEST_SOURCE_FILE", "manifest.source_file is required")
+	if strings.TrimSpace(manifest.SourceFileName) == "" {
+		return configImportError("SCHEMA_MANIFEST_SOURCE_FILE_NAME", "manifest.source_file_name is required")
 	}
-	if strings.ContainsAny(manifest.SourceFile, `/\\`) {
-		return configImportError("SCHEMA_MANIFEST_SOURCE_FILE", "manifest.source_file must not include a path")
+	if strings.ContainsAny(manifest.SourceFileName, `/\\`) {
+		return configImportError("SCHEMA_MANIFEST_SOURCE_FILE_NAME", "manifest.source_file_name must not include a path")
 	}
 	if !configImportHashPattern.MatchString(manifest.SourceSHA256) {
 		return configImportError("SCHEMA_SOURCE_HASH", "manifest.source_sha256 must be a lowercase SHA-256 hex digest")
@@ -250,6 +254,49 @@ func validateConfigImportManifest(manifest types.ConfigImportManifest) error {
 	}
 	if _, err := time.Parse(time.RFC3339, manifest.GeneratedAt); err != nil {
 		return configImportError("SCHEMA_MANIFEST_GENERATED", "manifest.generated_at must be RFC3339: %v", err)
+	}
+	if manifest.Counts == nil {
+		return configImportError("SCHEMA_MANIFEST_COUNTS", "manifest.counts is required")
+	}
+	return nil
+}
+
+func validateConfigImportManifestCounts(counts *types.ConfigImportManifestCounts, entities types.ConfigImportEntities) error {
+	actual := types.ConfigImportEntityCounts{
+		Channels:           len(entities.Channels),
+		ChannelLines:       len(entities.ChannelLines),
+		ModelSKUs:          len(entities.ModelSKUs),
+		SaleProposals:      len(entities.SaleProposals),
+		CostRuleDrafts:     len(entities.CostRuleDrafts),
+		ModelMappings:      len(entities.ModelMappings),
+		RouteBlueprints:    len(entities.RouteBlueprints),
+		Sources:            len(entities.Sources),
+		UnresolvedVariants: len(entities.UnresolvedVariants),
+	}
+	for _, count := range []struct {
+		name     string
+		declared *int
+		actual   int
+	}{
+		{"channels", counts.Channels, actual.Channels},
+		{"channel_lines", counts.ChannelLines, actual.ChannelLines},
+		{"model_skus", counts.ModelSKUs, actual.ModelSKUs},
+		{"sale_proposals", counts.SaleProposals, actual.SaleProposals},
+		{"cost_rule_drafts", counts.CostRuleDrafts, actual.CostRuleDrafts},
+		{"model_mappings", counts.ModelMappings, actual.ModelMappings},
+		{"route_blueprints", counts.RouteBlueprints, actual.RouteBlueprints},
+		{"sources", counts.Sources, actual.Sources},
+		{"unresolved_variants", counts.UnresolvedVariants, actual.UnresolvedVariants},
+	} {
+		if count.declared == nil {
+			return configImportError("SCHEMA_MANIFEST_COUNTS", "manifest.counts.%s is required", count.name)
+		}
+		if *count.declared < 0 {
+			return configImportError("LIMIT_MANIFEST_COUNTS", "manifest.counts.%s cannot be negative", count.name)
+		}
+		if *count.declared != count.actual {
+			return configImportError("SCHEMA_MANIFEST_COUNTS", "manifest.counts.%s must equal %d", count.name, count.actual)
+		}
 	}
 	return nil
 }
@@ -300,8 +347,15 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		if err := validateConfigImportAuthoritativeEntity(&line.ConfigImportAuthoritativeEntity, "channel_lines", index, businessIDs); err != nil {
 			return err
 		}
-		if err := validateConfigImportDecimal("channel_lines.weight", line.Weight); err != nil {
-			return err
+		if line.LineRef == "" || line.LineRef != line.BusinessID {
+			return configImportError("SCHEMA_LINE_REF", "channel_lines[%d].line_ref must equal its business_id", index)
+		}
+		if strings.TrimSpace(line.ChannelRef) == "" || strings.TrimSpace(line.DisplayName) == "" ||
+			strings.TrimSpace(line.ProviderTypeHint) == "" || strings.TrimSpace(line.Region) == "" || strings.TrimSpace(line.Protocol) == "" {
+			return configImportError("SCHEMA_CHANNEL_LINE", "channel_lines[%d] requires channel_ref, display_name, provider_type_hint, region, and protocol", index)
+		}
+		if line.StatusProposal != "disabled" {
+			return configImportError("SCHEMA_CHANNEL_LINE_STATUS", "channel_lines[%d].status_proposal must be disabled", index)
 		}
 	}
 	for index := range entities.ModelSKUs {
@@ -330,16 +384,32 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		for field, value := range map[string]*string{
 			"unit_price": draft.UnitPrice, "price_per_second": draft.PricePerSecond, "input_per_million": draft.InputPerMillion,
 			"output_per_million": draft.OutputPerMillion, "completion_per_million": draft.CompletionPerMillion,
-			"total_per_million": draft.TotalPerMillion, "billing_multiplier": draft.BillingMultiplier, "fee_rate": draft.FeeRate,
+			"total_per_million": draft.TotalPerMillion, "billing_multiplier": draft.BillingMultiplier,
+			"purchase_discount_ratio": draft.PurchaseDiscountRatio, "recharge_exchange_ratio": draft.RechargeExchangeRatio,
+			"fee_rate": draft.FeeRate, "currency_to_usd_rate": draft.CurrencyToUSDRate,
+			"normalized_usd_unit_price":             draft.NormalizedUSDUnitPrice,
+			"normalized_usd_price_per_second":       draft.NormalizedUSDPricePerSecond,
+			"normalized_usd_input_per_million":      draft.NormalizedUSDInputPerMillion,
+			"normalized_usd_output_per_million":     draft.NormalizedUSDOutputPerMillion,
+			"normalized_usd_completion_per_million": draft.NormalizedUSDCompletionPerMillion,
+			"normalized_usd_total_per_million":      draft.NormalizedUSDTotalPerMillion,
 		} {
 			if err := validateConfigImportDecimal("cost_rule_drafts."+field, value); err != nil {
 				return err
 			}
 		}
+		if _, err := types.NormalizeCostVariantKey(draft.CostVariantKey); err != nil || draft.CostVariantKey == "" {
+			return configImportError("SCHEMA_COST_VARIANT_KEY", "cost_rule_drafts[%d].cost_variant_key is invalid", index)
+		}
 	}
 	for index := range entities.ModelMappings {
-		if err := validateConfigImportAuthoritativeEntity(&entities.ModelMappings[index].ConfigImportAuthoritativeEntity, "model_mappings", index, businessIDs); err != nil {
+		mapping := &entities.ModelMappings[index]
+		if err := validateConfigImportAuthoritativeEntity(&mapping.ConfigImportAuthoritativeEntity, "model_mappings", index, businessIDs); err != nil {
 			return err
+		}
+		if strings.TrimSpace(mapping.CanonicalModel) == "" || strings.TrimSpace(mapping.ClientModel) == "" ||
+			strings.TrimSpace(mapping.LineRef) == "" || strings.TrimSpace(mapping.UpstreamModel) == "" || strings.TrimSpace(mapping.SKURef) == "" {
+			return configImportError("SCHEMA_MODEL_MAPPING", "model_mappings[%d] requires canonical_model, client_model, line_ref, upstream_model, and sku_ref", index)
 		}
 	}
 	for index := range entities.RouteBlueprints {
@@ -347,12 +417,15 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		if err := validateConfigImportAuthoritativeEntity(&blueprint.ConfigImportAuthoritativeEntity, "route_blueprints", index, businessIDs); err != nil {
 			return err
 		}
+		if strings.TrimSpace(blueprint.CanonicalModel) == "" || strings.TrimSpace(blueprint.ClientModel) == "" {
+			return configImportError("SCHEMA_ROUTE_BLUEPRINT", "route_blueprints[%d] requires canonical_model and client_model", index)
+		}
 		if blueprint.MergeMode != "" && blueprint.MergeMode != types.ConfigImportRouteMergeModeReplace &&
 			blueprint.MergeMode != types.ConfigImportRouteMergeModeAppend && blueprint.MergeMode != types.ConfigImportRouteMergeModeMerge {
 			return configImportError("SCHEMA_ROUTE_MERGE_MODE", "route_blueprints[%d].merge_mode is invalid", index)
 		}
 		for targetIndex := range blueprint.Targets {
-			if err := validateConfigImportDecimal("route_blueprints.targets.weight", blueprint.Targets[targetIndex].Weight); err != nil {
+			if err := validateConfigImportRouteTarget(&blueprint.Targets[targetIndex], index, targetIndex); err != nil {
 				return err
 			}
 		}
@@ -420,7 +493,58 @@ func validateConfigImportDecimal(field string, value *string) error {
 	return nil
 }
 
+func validateConfigImportRouteTarget(target *types.ConfigImportRouteTarget, blueprintIndex int, targetIndex int) error {
+	if strings.TrimSpace(target.RouteTargetRef) == "" || strings.TrimSpace(target.LineRef) == "" ||
+		strings.TrimSpace(target.UpstreamModel) == "" || strings.TrimSpace(target.SKURef) == "" {
+		return configImportError("SCHEMA_ROUTE_TARGET", "route_blueprints[%d].targets[%d] requires route_target_ref, line_ref, upstream_model, and sku_ref", blueprintIndex, targetIndex)
+	}
+	if _, err := types.NormalizeCostVariantKey(target.CostVariantKey); err != nil || target.CostVariantKey == "" {
+		return configImportError("SCHEMA_COST_VARIANT_KEY", "route_blueprints[%d].targets[%d].cost_variant_key is invalid", blueprintIndex, targetIndex)
+	}
+	if target.Enabled == nil || *target.Enabled {
+		return configImportError("SCHEMA_ROUTE_TARGET_ENABLED", "route_blueprints[%d].targets[%d].enabled must be false", blueprintIndex, targetIndex)
+	}
+	if target.DurationMin != nil && *target.DurationMin < 0 || target.DurationMax != nil && *target.DurationMax < 0 {
+		return configImportError("SCHEMA_ROUTE_DURATION", "route_blueprints[%d].targets[%d] duration cannot be negative", blueprintIndex, targetIndex)
+	}
+	if target.DurationMin != nil && target.DurationMax != nil && *target.DurationMin > *target.DurationMax {
+		return configImportError("SCHEMA_ROUTE_DURATION", "route_blueprints[%d].targets[%d] duration_min cannot exceed duration_max", blueprintIndex, targetIndex)
+	}
+	for _, duration := range target.DurationValues {
+		if duration < 0 {
+			return configImportError("SCHEMA_ROUTE_DURATION", "route_blueprints[%d].targets[%d] duration_values cannot be negative", blueprintIndex, targetIndex)
+		}
+	}
+	for _, bounds := range []*types.ConfigImportReferenceBounds{target.ReferenceMinimums, target.ReferenceLimits} {
+		if bounds == nil {
+			continue
+		}
+		for _, value := range []*int{bounds.Images, bounds.Videos, bounds.Audios} {
+			if value != nil && *value < 0 {
+				return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference bounds cannot be negative", blueprintIndex, targetIndex)
+			}
+		}
+	}
+	return nil
+}
+
 func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, sourceIDs map[string]struct{}, businessIDs map[string]string) error {
+	routeTargets := make(map[string]*types.ConfigImportRouteTarget)
+	linesByRef := make(map[string]*types.ConfigImportChannelLine, len(entities.ChannelLines))
+	for index := range entities.ChannelLines {
+		line := &entities.ChannelLines[index]
+		linesByRef[line.LineRef] = line
+	}
+	for blueprintIndex := range entities.RouteBlueprints {
+		for targetIndex := range entities.RouteBlueprints[blueprintIndex].Targets {
+			target := &entities.RouteBlueprints[blueprintIndex].Targets[targetIndex]
+			if _, exists := routeTargets[target.RouteTargetRef]; exists {
+				return configImportError("DUPLICATE_ROUTE_TARGET_REF", "route_target_ref %q is duplicated", target.RouteTargetRef)
+			}
+			routeTargets[target.RouteTargetRef] = target
+		}
+	}
+
 	for index := range entities.Channels {
 		if err := requireConfigImportSourceReference("channels", index, entities.Channels[index].SourceRef, sourceIDs); err != nil {
 			return err
@@ -429,6 +553,9 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 	for index := range entities.ChannelLines {
 		line := entities.ChannelLines[index]
 		if err := requireConfigImportSourceReference("channel_lines", index, line.SourceRef, sourceIDs); err != nil {
+			return err
+		}
+		if err := requireConfigImportReference("channel_lines", index, "line_ref", line.LineRef, businessIDs, "channel_lines"); err != nil {
 			return err
 		}
 		if err := requireConfigImportReference("channel_lines", index, "channel_ref", line.ChannelRef, businessIDs, "channels"); err != nil {
@@ -440,7 +567,7 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportSourceReference("model_skus", index, modelSKU.SourceRef, sourceIDs); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("model_skus", index, "channel_line_ref", modelSKU.ChannelLineRef, businessIDs, "channel_lines"); err != nil {
+		if err := requireConfigImportReference("model_skus", index, "line_ref", modelSKU.LineRef, businessIDs, "channel_lines"); err != nil {
 			return err
 		}
 	}
@@ -458,11 +585,18 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportSourceReference("cost_rule_drafts", index, draft.SourceRef, sourceIDs); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("cost_rule_drafts", index, "channel_line_ref", draft.ChannelLineRef, businessIDs, "channel_lines"); err != nil {
+		if err := requireConfigImportReference("cost_rule_drafts", index, "line_ref", draft.LineRef, businessIDs, "channel_lines"); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("cost_rule_drafts", index, "model_sku_ref", draft.ModelSKURef, businessIDs, "model_skus"); err != nil {
-			return err
+		target, exists := routeTargets[draft.RouteTargetRef]
+		if !exists {
+			return configImportError("REFERENCE_NOT_FOUND", "cost_rule_drafts[%d].route_target_ref %q does not exist", index, draft.RouteTargetRef)
+		}
+		if target.LineRef != draft.LineRef || target.CostVariantKey != draft.CostVariantKey {
+			return configImportError("ROUTING_COST_VARIANT_MISMATCH", "cost_rule_drafts[%d] does not match route_target_ref %q", index, draft.RouteTargetRef)
+		}
+		if draft.UpstreamModel != "" && target.UpstreamModel != draft.UpstreamModel {
+			return configImportError("ROUTING_COST_VARIANT_MISMATCH", "cost_rule_drafts[%d].upstream_model does not match route_target_ref %q", index, draft.RouteTargetRef)
 		}
 	}
 	for index := range entities.ModelMappings {
@@ -470,10 +604,10 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportSourceReference("model_mappings", index, mapping.SourceRef, sourceIDs); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("model_mappings", index, "channel_ref", mapping.ChannelRef, businessIDs, "channels"); err != nil {
+		if err := requireConfigImportReference("model_mappings", index, "line_ref", mapping.LineRef, businessIDs, "channel_lines"); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("model_mappings", index, "model_sku_ref", mapping.ModelSKURef, businessIDs, "model_skus"); err != nil {
+		if err := requireConfigImportReference("model_mappings", index, "sku_ref", mapping.SKURef, businessIDs, "model_skus"); err != nil {
 			return err
 		}
 	}
@@ -482,13 +616,22 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportSourceReference("route_blueprints", index, blueprint.SourceRef, sourceIDs); err != nil {
 			return err
 		}
-		for targetIndex := range blueprint.Targets {
-			target := blueprint.Targets[targetIndex]
-			if err := requireConfigImportReference("route_blueprints", index, "targets.channel_line_ref", target.ChannelLineRef, businessIDs, "channel_lines"); err != nil {
+		for _, mappingRef := range blueprint.ModelMappingRefs {
+			if err := requireConfigImportReference("route_blueprints", index, "model_mapping_refs", mappingRef, businessIDs, "model_mappings"); err != nil {
 				return err
 			}
-			if err := requireConfigImportReference("route_blueprints", index, "targets.model_sku_ref", target.ModelSKURef, businessIDs, "model_skus"); err != nil {
+		}
+		for targetIndex := range blueprint.Targets {
+			target := blueprint.Targets[targetIndex]
+			if err := requireConfigImportReference("route_blueprints", index, "targets.line_ref", target.LineRef, businessIDs, "channel_lines"); err != nil {
 				return err
+			}
+			if err := requireConfigImportReference("route_blueprints", index, "targets.sku_ref", target.SKURef, businessIDs, "model_skus"); err != nil {
+				return err
+			}
+			line := linesByRef[target.LineRef]
+			if line.SupportsRealPerson != nil && target.SupportsRealPerson != nil && *line.SupportsRealPerson != *target.SupportsRealPerson {
+				return configImportError("ROUTING_REAL_PERSON_MISMATCH", "route_blueprints[%d].targets[%d].supports_real_person conflicts with line_ref %q", index, targetIndex, target.LineRef)
 			}
 		}
 	}
@@ -497,13 +640,8 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportSourceReference("unresolved_variants", index, variant.SourceRef, sourceIDs); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("unresolved_variants", index, "channel_ref", variant.ChannelRef, businessIDs, "channels"); err != nil {
+		if err := requireConfigImportReference("unresolved_variants", index, "line_ref", variant.LineRef, businessIDs, "channel_lines"); err != nil {
 			return err
-		}
-		if variant.ModelSKURef != "" {
-			if err := requireConfigImportReference("unresolved_variants", index, "model_sku_ref", variant.ModelSKURef, businessIDs, "model_skus"); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -586,14 +724,90 @@ func configImportPayloadSHA256(entities types.ConfigImportEntities) (string, err
 	if err != nil {
 		return "", err
 	}
-	var canonicalEntities map[string]any
+	var canonicalEntities types.ConfigImportEntities
 	if err := common.Unmarshal(entitiesJSON, &canonicalEntities); err != nil {
 		return "", err
 	}
-	payload, err := common.Marshal(map[string]any{"entities": canonicalEntities})
+	canonicalizeConfigImportEntities(&canonicalEntities)
+	canonicalEntitiesJSON, err := common.Marshal(canonicalEntities)
+	if err != nil {
+		return "", err
+	}
+	var canonicalEntityMap map[string]any
+	if err := common.Unmarshal(canonicalEntitiesJSON, &canonicalEntityMap); err != nil {
+		return "", err
+	}
+	payload, err := common.Marshal(map[string]any{"entities": canonicalEntityMap})
 	if err != nil {
 		return "", err
 	}
 	digest := sha256.Sum256(payload)
 	return fmt.Sprintf("%x", digest), nil
+}
+
+func canonicalizeConfigImportEntities(entities *types.ConfigImportEntities) {
+	sort.Slice(entities.Channels, func(left, right int) bool {
+		return entities.Channels[left].BusinessID < entities.Channels[right].BusinessID
+	})
+	sort.Slice(entities.ChannelLines, func(left, right int) bool {
+		return entities.ChannelLines[left].BusinessID < entities.ChannelLines[right].BusinessID
+	})
+	sort.Slice(entities.ModelSKUs, func(left, right int) bool {
+		return entities.ModelSKUs[left].BusinessID < entities.ModelSKUs[right].BusinessID
+	})
+	sort.Slice(entities.SaleProposals, func(left, right int) bool {
+		return entities.SaleProposals[left].BusinessID < entities.SaleProposals[right].BusinessID
+	})
+	sort.Slice(entities.CostRuleDrafts, func(left, right int) bool {
+		return entities.CostRuleDrafts[left].BusinessID < entities.CostRuleDrafts[right].BusinessID
+	})
+	sort.Slice(entities.ModelMappings, func(left, right int) bool {
+		return entities.ModelMappings[left].BusinessID < entities.ModelMappings[right].BusinessID
+	})
+	sort.Slice(entities.RouteBlueprints, func(left, right int) bool {
+		return entities.RouteBlueprints[left].BusinessID < entities.RouteBlueprints[right].BusinessID
+	})
+	sort.Slice(entities.Sources, func(left, right int) bool {
+		return entities.Sources[left].BusinessID < entities.Sources[right].BusinessID
+	})
+	sort.Slice(entities.UnresolvedVariants, func(left, right int) bool {
+		return entities.UnresolvedVariants[left].BusinessID < entities.UnresolvedVariants[right].BusinessID
+	})
+
+	for index := range entities.ModelSKUs {
+		canonicalizeConfigImportStrings(entities.ModelSKUs[index].OutputResolutions)
+		canonicalizeConfigImportInts(entities.ModelSKUs[index].DurationValues)
+		canonicalizeConfigImportStrings(entities.ModelSKUs[index].AspectRatios)
+		canonicalizeConfigImportStrings(entities.ModelSKUs[index].InputModes)
+	}
+	for index := range entities.RouteBlueprints {
+		blueprint := &entities.RouteBlueprints[index]
+		canonicalizeConfigImportStrings(blueprint.ModelMappingRefs)
+		sort.Slice(blueprint.Targets, func(left, right int) bool {
+			leftTarget := blueprint.Targets[left]
+			rightTarget := blueprint.Targets[right]
+			if leftTarget.RouteTargetRef != rightTarget.RouteTargetRef {
+				return leftTarget.RouteTargetRef < rightTarget.RouteTargetRef
+			}
+			if leftTarget.LineRef != rightTarget.LineRef {
+				return leftTarget.LineRef < rightTarget.LineRef
+			}
+			return leftTarget.SKURef < rightTarget.SKURef
+		})
+		for targetIndex := range blueprint.Targets {
+			target := &blueprint.Targets[targetIndex]
+			canonicalizeConfigImportStrings(target.OutputResolutions)
+			canonicalizeConfigImportInts(target.DurationValues)
+			canonicalizeConfigImportStrings(target.AspectRatios)
+			canonicalizeConfigImportStrings(target.InputModes)
+		}
+	}
+}
+
+func canonicalizeConfigImportStrings(values []string) {
+	sort.Strings(values)
+}
+
+func canonicalizeConfigImportInts(values []int) {
+	sort.Ints(values)
 }

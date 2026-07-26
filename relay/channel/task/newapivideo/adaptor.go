@@ -10,16 +10,17 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
-
-var ModelList = []string{}
 
 const ChannelName = "NewAPIVideo"
 
@@ -27,6 +28,7 @@ type TaskAdaptor struct {
 	taskcommon.BaseBilling
 	apiKey  string
 	baseURL string
+	profile protocolProfile
 }
 
 func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
@@ -80,9 +82,57 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return service.TaskErrorWrapperLocal(err, "invalid_json", http.StatusBadRequest)
 	}
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		return validateARKRequest(c, info, body)
+		return validateARKRequest(c, info, body, a.activeProfile())
 	}
 	return validateOpenAIRequest(c, info, body)
+}
+
+// ValidateBillingRequest runs after model mapping and before pricing/pre-consume.
+// Lucen uses it for mapped-resolution validation and for resolving an omitted Ark
+// duration from capability-routing facts, so provider constraints cannot be bypassed
+// by a client alias or discovered only while building the upstream body.
+func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+	profile := a.activeProfile()
+	if profile.channelName != ChannelNameLucen {
+		return nil
+	}
+	state, err := getRequestState(c)
+	if err != nil || state.ARK == nil {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+	}
+	if !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+		}
+		if err := validateMappedResolution(state.ARK.Resolution, upstreamModel); err != nil {
+			requestErr := &arkRequestError{Code: "InvalidParameter.resolution", Message: err.Error()}
+			return service.TaskErrorWrapperLocal(requestErr, requestErr.Code, http.StatusBadRequest)
+		}
+	}
+	if state.Seconds == nil && profile.useRoutingDurationDefault {
+		if duration := routingDurationSeconds(c); duration > 0 {
+			value := decimal.NewFromInt(int64(duration))
+			state.Seconds = &value
+			c.Set(requestStateContextKey, state)
+			taskRequest, requestErr := relaycommon.GetTaskRequest(c)
+			if requestErr == nil {
+				taskRequest.Duration = duration
+				relaycommon.StoreTaskRequest(c, info, constant.TaskActionGenerate, taskRequest)
+			}
+		}
+	}
+	return nil
+}
+
+func routingDurationSeconds(c *gin.Context) int {
+	if facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts); ok && facts.DurationSeconds > 0 {
+		return facts.DurationSeconds
+	}
+	if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok && input.DurationSeconds != nil && *input.DurationSeconds > 0 {
+		return *input.DurationSeconds
+	}
+	return 0
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
@@ -107,7 +157,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	var body []byte
 	var err error
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
-		body, err = buildARKRequestBody(c, info)
+		body, err = buildARKRequestBody(c, info, a.activeProfile())
 	} else {
 		body, err = buildOpenAIRequestBody(c, modelName)
 	}
@@ -132,10 +182,6 @@ func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.Rel
 	}
 	return int(value.IntPart()), nil
 }
-
-func (a *TaskAdaptor) GetModelList() []string { return ModelList }
-
-func (a *TaskAdaptor) GetChannelName() string { return ChannelName }
 
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
 	if resp == nil || resp.Body == nil {

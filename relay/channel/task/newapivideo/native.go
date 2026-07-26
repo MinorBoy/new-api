@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -34,7 +33,8 @@ func (e *arkRequestError) Error() string {
 	return e.Code + ": " + e.Message
 }
 
-func parseARKRequest(body []byte) (arkRequest, error) {
+func parseARKRequest(body []byte, profiles ...protocolProfile) (arkRequest, error) {
+	profile := selectProtocolProfile(profiles)
 	if common.GetJsonType(body) != "object" {
 		return arkRequest{}, &arkRequestError{Code: "InvalidParameter", Message: "request body must be a JSON object"}
 	}
@@ -43,7 +43,7 @@ func parseARKRequest(body []byte) (arkRequest, error) {
 		return arkRequest{}, &arkRequestError{Code: "InvalidParameter", Message: "request body contains invalid parameters"}
 	}
 	for field := range fields {
-		if _, accepted := acceptedARKFields[field]; !accepted {
+		if _, accepted := acceptedARKFields[field]; !accepted && !profile.ignoreUnsupportedOptionalARKFields {
 			return arkRequest{}, &arkRequestError{Code: "InvalidParameter." + field, Message: "field is not supported by this channel"}
 		}
 	}
@@ -52,18 +52,19 @@ func parseARKRequest(body []byte) (arkRequest, error) {
 	if err := common.Unmarshal(body, &request); err != nil {
 		return arkRequest{}, &arkRequestError{Code: "InvalidParameter", Message: "request body contains invalid parameters"}
 	}
-	if err := validateARKSemantics(request); err != nil {
+	if err := validateARKSemantics(request, profile); err != nil {
 		return arkRequest{}, err
 	}
 	return request, nil
 }
 
-func validateARKRequest(c *gin.Context, info *relaycommon.RelayInfo, body []byte) *dto.TaskError {
+func validateARKRequest(c *gin.Context, info *relaycommon.RelayInfo, body []byte, profiles ...protocolProfile) *dto.TaskError {
 	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("ARK task requests must use application/json"), "InvalidParameter", http.StatusUnsupportedMediaType)
 	}
-	request, err := parseARKRequest(body)
+	profile := selectProtocolProfile(profiles)
+	request, err := parseARKRequest(body, profile)
 	if err != nil {
 		var requestErr *arkRequestError
 		if errors.As(err, &requestErr) {
@@ -87,7 +88,7 @@ func validateARKRequest(c *gin.Context, info *relaycommon.RelayInfo, body []byte
 	return nil
 }
 
-func buildARKRequestBody(c *gin.Context, info *relaycommon.RelayInfo) ([]byte, error) {
+func buildARKRequestBody(c *gin.Context, info *relaycommon.RelayInfo, profiles ...protocolProfile) ([]byte, error) {
 	state, err := getRequestState(c)
 	if err != nil {
 		return nil, err
@@ -106,6 +107,7 @@ func buildARKRequestBody(c *gin.Context, info *relaycommon.RelayInfo) ([]byte, e
 		*state.ARK,
 		upstreamModel,
 		common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode),
+		selectProtocolProfile(profiles),
 	)
 	if err != nil {
 		return nil, err
@@ -113,8 +115,9 @@ func buildARKRequestBody(c *gin.Context, info *relaycommon.RelayInfo) ([]byte, e
 	return marshalUpstreamRequest(request)
 }
 
-func arkToUpstream(request arkRequest, upstreamModel string, resolutionPrevalidated bool) (upstreamRequest, error) {
-	if err := validateARKSemantics(request); err != nil {
+func arkToUpstream(request arkRequest, upstreamModel string, resolutionPrevalidated bool, profiles ...protocolProfile) (upstreamRequest, error) {
+	profile := selectProtocolProfile(profiles)
+	if err := validateARKSemantics(request, profile); err != nil {
 		return upstreamRequest{}, err
 	}
 	if !resolutionPrevalidated {
@@ -171,7 +174,7 @@ func arkToUpstream(request arkRequest, upstreamModel string, resolutionPrevalida
 	return result, nil
 }
 
-func validateARKSemantics(request arkRequest) error {
+func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if strings.TrimSpace(request.Model) == "" {
 		return &arkRequestError{Code: "MissingParameter.model", Message: "model is required"}
 	}
@@ -181,14 +184,16 @@ func validateARKSemantics(request arkRequest) error {
 	if request.Duration != nil && (*request.Duration <= 0 || *request.Duration > relaycommon.MaxTaskDurationSeconds) {
 		return &arkRequestError{Code: "InvalidParameter.duration", Message: fmt.Sprintf("duration must be between 1 and %d", relaycommon.MaxTaskDurationSeconds)}
 	}
-	if request.ServiceTier != nil && *request.ServiceTier != "default" {
-		return &arkRequestError{Code: "InvalidParameter.service_tier", Message: "only service_tier=default is supported"}
-	}
-	if request.Draft != nil && *request.Draft {
-		return &arkRequestError{Code: "InvalidParameter.draft", Message: "draft is not supported by this upstream"}
-	}
-	if request.Tools != nil && len(*request.Tools) != 0 {
-		return &arkRequestError{Code: "InvalidParameter.tools", Message: "tools are not supported by this upstream"}
+	if !profile.ignoreUnsupportedOptionalARKFields {
+		if request.ServiceTier != nil && *request.ServiceTier != "default" {
+			return &arkRequestError{Code: "InvalidParameter.service_tier", Message: "only service_tier=default is supported"}
+		}
+		if request.Draft != nil && *request.Draft {
+			return &arkRequestError{Code: "InvalidParameter.draft", Message: "draft is not supported by this upstream"}
+		}
+		if request.Tools != nil && len(*request.Tools) != 0 {
+			return &arkRequestError{Code: "InvalidParameter.tools", Message: "tools are not supported by this upstream"}
+		}
 	}
 
 	textCount, imageCount, videoCount, audioCount := 0, 0, 0, 0
@@ -203,7 +208,7 @@ func validateARKSemantics(request arkRequest) error {
 			}
 		case "image_url":
 			imageCount++
-			if item.ImageURL == nil || !validMediaURL(item.ImageURL.URL) || item.VideoURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" {
+			if item.ImageURL == nil || !validMediaURL(item.ImageURL.URL, profile) || item.VideoURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "image_url.url must be a valid HTTP URL"}
 			}
 			switch strings.TrimSpace(item.Role) {
@@ -222,12 +227,12 @@ func validateARKSemantics(request arkRequest) error {
 			}
 		case "video_url":
 			videoCount++
-			if item.VideoURL == nil || !validMediaURL(item.VideoURL.URL) || item.ImageURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || strings.TrimSpace(item.Role) != "reference_video" {
+			if item.VideoURL == nil || !validMediaURL(item.VideoURL.URL, profile) || item.ImageURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || strings.TrimSpace(item.Role) != "reference_video" {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "video content requires a valid URL and reference_video role"}
 			}
 		case "audio_url":
 			audioCount++
-			if item.AudioURL == nil || !validMediaURL(item.AudioURL.URL) || item.ImageURL != nil || item.VideoURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || strings.TrimSpace(item.Role) != "reference_audio" {
+			if item.AudioURL == nil || !validMediaURL(item.AudioURL.URL, profile) || item.ImageURL != nil || item.VideoURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || strings.TrimSpace(item.Role) != "reference_audio" {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "audio content requires a valid URL and reference_audio role"}
 			}
 		case "draft_task":
@@ -292,12 +297,12 @@ func hasReferenceAudio(content []arkContent) bool {
 	return false
 }
 
-func validMediaURL(value string) bool {
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
-	if err != nil || parsed.Host == "" {
+func validMediaURL(value string, profile protocolProfile) bool {
+	media, err := relaycommon.ParseTaskMediaURL(value)
+	if err != nil {
 		return false
 	}
-	return parsed.Scheme == "http" || parsed.Scheme == "https"
+	return media.FetchableHTTP() || profile.allowEmbeddedMedia
 }
 
 func marshalUpstreamRequest(request upstreamRequest) ([]byte, error) {

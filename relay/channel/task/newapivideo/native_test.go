@@ -167,3 +167,56 @@ func TestARKCapabilityRoutingStripsExtensionAndUsesPrevalidatedResolution(t *tes
 	assert.JSONEq(t, `{"model":"lec-feituo-seedance-2-0-my-upscaled-1080p","prompt":"text"}`, string(encoded))
 	assert.NotContains(t, string(encoded), `"routing"`)
 }
+
+func TestLucenTaskAdaptorProfile(t *testing.T) {
+	adaptor := NewLucenTaskAdaptor()
+	assert.Equal(t, "Lucen", adaptor.GetChannelName())
+	assert.Equal(t, []string{
+		"seedance-480p-5s", "seedance-480p-10s", "seedance-480p-15s",
+		"seedance-720p-5s", "seedance-720p-10s", "seedance-720p-15s",
+		"seedance-1080p-5s", "seedance-1080p-10s", "seedance-1080p-15s",
+		"seedance-480p-token", "seedance-720p-token", "seedance-1080p-token",
+	}, adaptor.GetModelList())
+}
+
+func TestLucenARKProfileIgnoresOptionalFieldsAndPreservesMedia(t *testing.T) {
+	body := []byte(`{
+		"model":"client-model",
+		"content":[
+			{"type":"text","text":"text"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"asset://video-reference-1"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"data:audio/wav;base64,UklGRg=="}}
+		],
+		"duration":10,
+		"generate_audio":true,
+		"watermark":false,
+		"callback_url":"https://client.example/callback",
+		"return_last_frame":true,
+		"priority":7,
+		"execution_expires_after":3600,
+		"service_tier":"flex",
+		"draft":true,
+		"tools":[{"type":"web_search"}]
+	}`)
+
+	request, err := parseARKRequest(body, lucenProtocolProfile())
+	require.NoError(t, err)
+	converted, err := arkToUpstream(request, "seedance-720p-token", false, lucenProtocolProfile())
+	require.NoError(t, err)
+	encoded, err := marshalUpstreamRequest(converted)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"model":"seedance-720p-token","prompt":"text","content":[
+			{"type":"text","text":"text"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"asset://video-reference-1"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"data:audio/wav;base64,UklGRg=="}}
+		],"generateAudio":true,"seconds":"10","watermark":false
+	}`, string(encoded))
+}
+
+func TestGenericARKProfileRejectsEmbeddedMedia(t *testing.T) {
+	_, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}}]}`), genericProtocolProfile())
+	require.Error(t, err)
+}

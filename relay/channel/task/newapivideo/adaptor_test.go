@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -191,4 +193,32 @@ func TestTaskAdaptorRejectsDurationOnlyForDurationEstimator(t *testing.T) {
 func TestTaskAdaptorIsTaskOnly(t *testing.T) {
 	assert.Empty(t, (&TaskAdaptor{}).GetModelList())
 	assert.Equal(t, ChannelName, (&TaskAdaptor{}).GetChannelName())
+}
+
+func TestLucenValidateBillingRequestRejectsMappedResolutionBeforeBuild(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client","content":[{"type":"text","text":"text"}],"resolution":"720p","duration":10}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-1080p-10s"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor := NewLucenTaskAdaptor()
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	validationErr := adaptor.ValidateBillingRequest(c, info)
+	require.NotNil(t, validationErr)
+	assert.Equal(t, "InvalidParameter.resolution", validationErr.Code)
+}
+
+func TestLucenUsesRoutingDurationForOmittedDurationBilling(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client","content":[{"type":"text","text":"text"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-720p-10s"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	common.SetContextKey(c, constant.ContextKeyRoutingFacts, modelrouting.Facts{DurationSeconds: 10})
+	adaptor := NewLucenTaskAdaptor()
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	require.Nil(t, adaptor.ValidateBillingRequest(c, info))
+	seconds, taskErr := adaptor.EstimateDurationSeconds(c, info)
+	require.Nil(t, taskErr)
+	assert.Equal(t, 10, seconds)
 }

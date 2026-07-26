@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -358,11 +359,15 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 		upstreamModel    string
 		durationSeconds  int
 		arkOfficialRoute bool
+		settings         dto.ChannelOtherSettings
 	}{
 		{name: "NewAPIVideo", channelType: constant.ChannelTypeNewAPIVideo, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
 		{name: "Lucen", channelType: constant.ChannelTypeLucen, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
 		{name: "MegaByAI", channelType: constant.ChannelTypeMegaByAI, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "videos-mini", durationSeconds: 8, arkOfficialRoute: true},
 		{name: "Paipu", channelType: constant.ChannelTypePaipu, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "lec-seedance-2-0", durationSeconds: 8, arkOfficialRoute: true},
+		{name: "Secure discount", channelType: constant.ChannelTypeSecure, body: `{"model":"client-video","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8,"ratio":"16:9","resolution":"720p"}`, upstreamModel: "video-2.0-pro", durationSeconds: 8, arkOfficialRoute: true, settings: dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount}},
+		{name: "Secure overseas", channelType: constant.ChannelTypeSecure, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`, upstreamModel: "video-2.0-fast", durationSeconds: 8, arkOfficialRoute: true, settings: dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupOverseas}},
+		{name: "Secure enterprise", channelType: constant.ChannelTypeSecure, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`, upstreamModel: "video-2.0-pro", durationSeconds: 8, arkOfficialRoute: true, settings: dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupEnterprise}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -395,6 +400,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 			if tt.arkOfficialRoute {
 				c.Set(common.KeySeedanceOfficialAPI, true)
 				c.Set("model_mapping", `{"client-video":"`+tt.upstreamModel+`"}`)
+				common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, tt.settings)
 			}
 			info.RequestId = "task-cost-validated-duration"
 			info.RequestURLPath = "/v1/video/generations"

@@ -1,15 +1,29 @@
 package newapivideo
 
+import relaycommon "github.com/QuantumNous/new-api/relay/common"
+
 const ChannelNameLucen = "Lucen"
 
 const ChannelNameMegaByAI = "MegaByAI"
+
+const ChannelNameCangyuan = "Cangyuan"
 
 type videoRequestDialect string
 
 const (
 	videoRequestDialectNewAPIGenerations   videoRequestDialect = "newapi_generations"
 	videoRequestDialectMegaReferenceArrays videoRequestDialect = "mega_reference_arrays"
+	videoRequestDialectTextJSON            videoRequestDialect = "text_json"
 )
+
+type textRequestProfile struct {
+	ratioField                string
+	minimumDuration           int
+	maximumDuration           int
+	allowedRatios             []string
+	allowedResolutions        []string
+	rejectExplicitServiceTier bool
+}
 
 type protocolProfile struct {
 	channelName                        string
@@ -25,6 +39,7 @@ type protocolProfile struct {
 	contentType                        string
 	requestDialect                     videoRequestDialect
 	defaultDurationSeconds             int
+	textRequest                        *textRequestProfile
 }
 
 func genericProtocolProfile() protocolProfile {
@@ -76,6 +91,23 @@ func megaByAIProtocolProfile() protocolProfile {
 	}
 }
 
+func cangyuanProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:    ChannelNameCangyuan,
+		modelList:      []string{"seedance-2.0-720p"},
+		submitPath:     "/v1/videos",
+		pollPath:       "/v1/videos/{task_id}",
+		contentType:    "application/json",
+		requestDialect: videoRequestDialectTextJSON,
+		textRequest: &textRequestProfile{
+			ratioField:                "aspect_ratio",
+			minimumDuration:           1,
+			maximumDuration:           relaycommon.MaxTaskDurationSeconds,
+			rejectExplicitServiceTier: true,
+		},
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -98,6 +130,10 @@ func NewLucenTaskAdaptor() *TaskAdaptor {
 
 func NewMegaByAITaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: megaByAIProtocolProfile()}
+}
+
+func NewCangyuanTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: cangyuanProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

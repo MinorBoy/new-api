@@ -107,6 +107,7 @@ export function getChannelTypeIcon(type: number): string {
     61: 'Jimeng', // CLMM Mall
     62: 'NewAPI', // Lucen
     63: 'NewAPI', // MegaByAI
+    64: 'NewAPI', // Cangyuan
 
     // Tools & Platforms
     37: 'Dify', // Dify

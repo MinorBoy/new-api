@@ -224,9 +224,22 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Supported upstream models: videos-standard, videos-fast, videos-mini',
     },
   },
+  64: {
+    id: 64,
+    name: CHANNEL_TYPES[64],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://ai.cangyuansuanli.cn',
+    supportedModels: ['seedance-2.0-720p'],
+    hints: {
+      baseUrl: 'Default: https://ai.cangyuansuanli.cn',
+      key: 'Enter the raw API key issued by Cangyuan',
+      models:
+        'The documented initial model is seedance-2.0-720p; administrators may add verified models manually',
+    },
+  },
 }
 
-const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63, 64])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)

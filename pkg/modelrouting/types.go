@@ -8,6 +8,15 @@ const (
 
 var CanonicalModels = []string{Seedance20, Seedance20Fast, Seedance20Mini}
 
+type InputMode string
+
+const (
+	InputModeText            InputMode = "text"
+	InputModeFirstFrame      InputMode = "first_frame"
+	InputModeFirstLastFrames InputMode = "first_last_frames"
+	InputModeOmniReference   InputMode = "omni_reference"
+)
+
 type Defaults struct {
 	OutputResolution string `json:"output_resolution"`
 	DurationSeconds  int    `json:"duration_seconds"`
@@ -16,6 +25,7 @@ type Defaults struct {
 
 type FactsInput struct {
 	CanonicalModel    string
+	InputMode         InputMode
 	OutputResolution  *string
 	DurationSeconds   *int
 	AspectRatio       *string
@@ -35,6 +45,7 @@ type FactsInput struct {
 type Facts struct {
 	GroupName         string          `json:"group_name"`
 	CanonicalModel    string          `json:"canonical_model"`
+	InputMode         InputMode       `json:"input_mode"`
 	OutputResolution  string          `json:"output_resolution"`
 	DurationSeconds   int             `json:"duration_seconds"`
 	AspectRatio       string          `json:"aspect_ratio"`
@@ -58,6 +69,8 @@ type Constraints struct {
 	OutputResolutions  []string           `json:"output_resolutions"`
 	Durations          DurationConstraint `json:"durations"`
 	AspectRatios       []string           `json:"aspect_ratios,omitempty"`
+	InputModes         []InputMode        `json:"input_modes,omitempty"`
+	ReferenceMinimums  ReferenceLimits    `json:"reference_minimums,omitempty"`
 	ReferenceLimits    ReferenceLimits    `json:"reference_limits"`
 	SupportsRealPerson *bool              `json:"supports_real_person"`
 }
@@ -89,6 +102,7 @@ const (
 	MismatchResolution      MismatchReason = "resolution"
 	MismatchDuration        MismatchReason = "duration"
 	MismatchAspectRatio     MismatchReason = "aspect_ratio"
+	MismatchInputMode       MismatchReason = "input_mode"
 	MismatchReferenceImages MismatchReason = "reference_images"
 	MismatchReferenceVideos MismatchReason = "reference_videos"
 	MismatchReferenceAudios MismatchReason = "reference_audios"

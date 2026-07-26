@@ -14,6 +14,7 @@ const (
 	ValidationInvalidOutputResolution      ValidationCode = "invalid_output_resolution"
 	ValidationInvalidDuration              ValidationCode = "invalid_duration"
 	ValidationInvalidAspectRatio           ValidationCode = "invalid_aspect_ratio"
+	ValidationInvalidInputMode             ValidationCode = "invalid_input_mode"
 	ValidationInvalidReferenceLimit        ValidationCode = "invalid_reference_limit"
 	ValidationInvalidMinimumExpectedMargin ValidationCode = "invalid_minimum_expected_margin"
 	ValidationDefaultRouteUnavailable      ValidationCode = "default_route_unavailable"
@@ -33,6 +34,7 @@ func (e *ValidationError) Error() string {
 
 var allowedResolutions = []string{"480p", "720p", "1080p", "4k"}
 var allowedRatios = []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"}
+var allowedInputModes = []InputMode{InputModeText, InputModeFirstFrame, InputModeFirstLastFrames, InputModeOmniReference}
 
 func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 	if !containsString(CanonicalModels, policy.CanonicalModel) {
@@ -69,22 +71,28 @@ func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 		return nil
 	}
 
-	facts, err := ResolveFacts(policy.GroupName, FactsInput{CanonicalModel: policy.CanonicalModel}, policy.Defaults)
-	if err != nil {
-		return &ValidationError{
-			Code:    ValidationDefaultRouteUnavailable,
-			Field:   "defaults",
-			Message: err.Error(),
+	for _, targets := range policy.TargetsByChannel {
+		for _, target := range targets {
+			if !target.Enabled {
+				continue
+			}
+			for _, input := range representativeFactsInputs(target.Constraints) {
+				input.CanonicalModel = policy.CanonicalModel
+				facts, err := ResolveFacts(policy.GroupName, input, policy.Defaults)
+				if err != nil {
+					continue
+				}
+				if len(Evaluate(policy, facts).CompatibleByChannel) > 0 {
+					return nil
+				}
+			}
 		}
 	}
-	if len(Evaluate(policy, facts).CompatibleByChannel) == 0 {
-		return &ValidationError{
-			Code:    ValidationDefaultRouteUnavailable,
-			Field:   "defaults",
-			Message: "no enabled target matches the policy defaults",
-		}
+	return &ValidationError{
+		Code:    ValidationDefaultRouteUnavailable,
+		Field:   "defaults",
+		Message: "no enabled target matches the policy defaults",
 	}
-	return nil
 }
 
 func validateConstraints(constraints Constraints, maxDuration int) error {
@@ -105,11 +113,72 @@ func validateConstraints(constraints Constraints, maxDuration int) error {
 			return newValidationError(ValidationInvalidAspectRatio, "targets.constraints.aspect_ratios", "aspect ratio is invalid")
 		}
 	}
+	for _, mode := range constraints.InputModes {
+		if !containsInputMode(allowedInputModes, mode) {
+			return newValidationError(ValidationInvalidInputMode, "targets.constraints.input_modes", "input mode is invalid")
+		}
+	}
 	limits := constraints.ReferenceLimits
 	if limits.Images < 0 || limits.Images > 9 || limits.Videos < 0 || limits.Videos > 3 || limits.Audios < 0 || limits.Audios > 3 {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_limits", "reference limits are invalid")
 	}
+	minimums := constraints.ReferenceMinimums
+	if minimums.Images < 0 || minimums.Images > limits.Images ||
+		minimums.Videos < 0 || minimums.Videos > limits.Videos ||
+		minimums.Audios < 0 || minimums.Audios > limits.Audios {
+		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_minimums", "reference minimums are invalid")
+	}
+	if len(representativeFactsInputs(constraints)) == 0 {
+		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_minimums", "reference minimums cannot produce a supported input mode")
+	}
 	return nil
+}
+
+func representativeFactsInputs(constraints Constraints) []FactsInput {
+	modes := constraints.InputModes
+	if len(modes) == 0 {
+		modes = []InputMode{InputModeText, InputModeFirstFrame, InputModeFirstLastFrames, InputModeOmniReference}
+	}
+	inputs := make([]FactsInput, 0, len(modes))
+	for _, mode := range modes {
+		refs := constraints.ReferenceMinimums
+		switch mode {
+		case InputModeText:
+			if refs.Images > 0 || refs.Videos > 0 || refs.Audios > 0 {
+				continue
+			}
+			refs = ReferenceLimits{}
+		case InputModeFirstFrame:
+			if refs.Images > 1 || refs.Videos > 0 || refs.Audios > 0 {
+				continue
+			}
+			refs.Images = 1
+		case InputModeFirstLastFrames:
+			if refs.Images > 2 || refs.Videos > 0 || refs.Audios > 0 {
+				continue
+			}
+			refs.Images = 2
+		case InputModeOmniReference:
+			if refs.Images+refs.Videos+refs.Audios == 0 {
+				refs.Images = 1
+			}
+			if refs.Audios > 0 && refs.Images+refs.Videos == 0 {
+				refs.Images = 1
+			}
+		default:
+			continue
+		}
+		if refs.Images > constraints.ReferenceLimits.Images || refs.Videos > constraints.ReferenceLimits.Videos || refs.Audios > constraints.ReferenceLimits.Audios {
+			continue
+		}
+		inputs = append(inputs, FactsInput{
+			InputMode:       mode,
+			ReferenceImages: refs.Images,
+			ReferenceVideos: refs.Videos,
+			ReferenceAudios: refs.Audios,
+		})
+	}
+	return inputs
 }
 
 func validateDurationConstraint(constraint DurationConstraint, maxDuration int) error {
@@ -162,7 +231,31 @@ func validateOverlaps(policy PolicySnapshot) error {
 func constraintsOverlap(a, b Constraints) bool {
 	return stringSetsOverlap(a.OutputResolutions, b.OutputResolutions, false) &&
 		durationsOverlap(a.Durations, b.Durations) &&
-		stringSetsOverlap(a.AspectRatios, b.AspectRatios, true)
+		stringSetsOverlap(a.AspectRatios, b.AspectRatios, true) &&
+		inputModeSetsOverlap(a.InputModes, b.InputModes) &&
+		referenceRangesOverlap(a.ReferenceMinimums, a.ReferenceLimits, b.ReferenceMinimums, b.ReferenceLimits)
+}
+
+func inputModeSetsOverlap(a, b []InputMode) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	for _, left := range a {
+		if containsInputMode(b, left) {
+			return true
+		}
+	}
+	return false
+}
+
+func referenceRangesOverlap(aMinimums, aMaximums, bMinimums, bMaximums ReferenceLimits) bool {
+	return integerRangesOverlap(aMinimums.Images, aMaximums.Images, bMinimums.Images, bMaximums.Images) &&
+		integerRangesOverlap(aMinimums.Videos, aMaximums.Videos, bMinimums.Videos, bMaximums.Videos) &&
+		integerRangesOverlap(aMinimums.Audios, aMaximums.Audios, bMinimums.Audios, bMaximums.Audios)
+}
+
+func integerRangesOverlap(aMin, aMax, bMin, bMax int) bool {
+	return aMin <= bMax && bMin <= aMax
 }
 
 func stringSetsOverlap(a, b []string, emptyMeansAny bool) bool {

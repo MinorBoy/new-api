@@ -53,6 +53,34 @@ func TestExtractSeedanceRoutingInputExplicitFacts(t *testing.T) {
 	assert.JSONEq(t, body, string(stored))
 }
 
+func TestExtractSeedanceRoutingInputModes(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []string
+		want  modelrouting.InputMode
+	}{
+		{name: "text", want: modelrouting.InputModeText},
+		{name: "first frame", items: []string{`{"type":"image_url","role":"first_frame","image_url":{"url":"https://x/first.png"}}`}, want: modelrouting.InputModeFirstFrame},
+		{name: "first and last frames", items: []string{`{"type":"image_url","role":"first_frame","image_url":{"url":"https://x/first.png"}}`, `{"type":"image_url","role":"last_frame","image_url":{"url":"https://x/last.png"}}`}, want: modelrouting.InputModeFirstLastFrames},
+		{name: "reference image", items: []string{`{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.png"}}`}, want: modelrouting.InputModeOmniReference},
+		{name: "reference video", items: []string{`{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/ref.mp4"}}`}, want: modelrouting.InputModeOmniReference},
+		{name: "reference audio", items: []string{`{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/ref.png"}}`, `{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/ref.wav"}}`}, want: modelrouting.InputModeOmniReference},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := append([]string{`{"type":"text","text":"video"}`}, tt.items...)
+			c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", routingContentBody(items), true)
+
+			input, routeErr := extractSeedanceRoutingInput(c, modelrouting.Seedance20)
+
+			require.Nil(t, routeErr)
+			require.NotNil(t, input)
+			assert.Equal(t, tt.want, input.InputMode)
+		})
+	}
+}
+
 func TestExtractSeedanceRoutingInputPreservesOmittedValuesAndSmartDuration(t *testing.T) {
 	omitted := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", `{
 		"model":"doubao-seedance-2-0-260128",

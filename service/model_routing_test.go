@@ -49,6 +49,27 @@ func TestSelectCapabilityChannelPublishesTargetDecision(t *testing.T) {
 	assert.Equal(t, "1080p", facts.OutputResolution)
 }
 
+func TestRoutingPolicyNormalizesInputModesAndReferenceMinimums(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	request := capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "provider-720p", "720p")
+	request.Defaults.DurationSeconds = 8
+	request.Targets[0].Constraints.InputModes = []modelrouting.InputMode{
+		" omni_reference ", "FIRST_FRAME", "omni_reference",
+	}
+	request.Targets[0].Constraints.ReferenceMinimums.Images = 1
+
+	saved, err := service.SaveRoutingPolicy(0, request)
+
+	require.NoError(t, err)
+	require.Len(t, saved.Targets, 1)
+	assert.Equal(t, []modelrouting.InputMode{
+		modelrouting.InputModeFirstFrame,
+		modelrouting.InputModeOmniReference,
+	}, saved.Targets[0].Constraints.InputModes)
+	assert.Equal(t, modelrouting.ReferenceLimits{Images: 1}, saved.Targets[0].Constraints.ReferenceMinimums)
+}
+
 func TestSelectCapabilityChannelPreservesLegacyWithoutPolicy(t *testing.T) {
 	prepareCapabilitySelectionTest(t)
 	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)

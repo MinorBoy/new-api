@@ -186,6 +186,28 @@ func TestValidatePolicyRejectsInvalidContracts(t *testing.T) {
 			expected: modelrouting.ValidationInvalidReferenceLimit,
 		},
 		{
+			name: "unknown input mode",
+			mutate: func(policy *modelrouting.PolicySnapshot) {
+				policy.TargetsByChannel[11][0].Constraints.InputModes = []modelrouting.InputMode{"unknown"}
+			},
+			expected: modelrouting.ValidationInvalidInputMode,
+		},
+		{
+			name: "negative reference minimum",
+			mutate: func(policy *modelrouting.PolicySnapshot) {
+				policy.TargetsByChannel[11][0].Constraints.ReferenceMinimums.Images = -1
+			},
+			expected: modelrouting.ValidationInvalidReferenceLimit,
+		},
+		{
+			name: "reference minimum exceeds maximum",
+			mutate: func(policy *modelrouting.PolicySnapshot) {
+				policy.TargetsByChannel[11][0].Constraints.ReferenceMinimums.Images = 3
+				policy.TargetsByChannel[11][0].Constraints.ReferenceLimits.Images = 2
+			},
+			expected: modelrouting.ValidationInvalidReferenceLimit,
+		},
+		{
 			name: "enabled policy defaults are unsupported",
 			mutate: func(policy *modelrouting.PolicySnapshot) {
 				policy.Defaults.OutputResolution = "1080p"
@@ -257,6 +279,56 @@ func TestValidatePolicyTreatsReferenceAndRealPersonCapabilitiesAsOverlapping(t *
 	var validationErr *modelrouting.ValidationError
 	require.ErrorAs(t, err, &validationErr)
 	assert.Equal(t, modelrouting.ValidationTargetOverlap, validationErr.Code)
+}
+
+func TestValidatePolicyInputModesAndReferenceRangesControlOverlap(t *testing.T) {
+	t.Run("disjoint input modes", func(t *testing.T) {
+		policy := validPolicySnapshot()
+		text := validTarget(21, 11, 50, []string{"720p"}, modelrouting.DurationConstraint{Values: []int{10}}, nil)
+		text.Constraints.InputModes = []modelrouting.InputMode{modelrouting.InputModeText}
+		text.Constraints.ReferenceLimits = modelrouting.ReferenceLimits{}
+		frames := validTarget(22, 11, 50, []string{"720p"}, modelrouting.DurationConstraint{Values: []int{10}}, nil)
+		frames.Constraints.InputModes = []modelrouting.InputMode{modelrouting.InputModeFirstLastFrames}
+		frames.Constraints.ReferenceMinimums.Images = 2
+		frames.Constraints.ReferenceLimits = modelrouting.ReferenceLimits{Images: 2}
+		policy.TargetsByChannel[11] = []modelrouting.Target{text, frames}
+
+		require.NoError(t, modelrouting.ValidatePolicy(policy, relaycommon.MaxTaskDurationSeconds))
+	})
+
+	t.Run("disjoint reference ranges", func(t *testing.T) {
+		policy := validPolicySnapshot()
+		withImage := validTarget(21, 11, 50, []string{"720p"}, modelrouting.DurationConstraint{Values: []int{10}}, nil)
+		withImage.Constraints.ReferenceMinimums.Images = 1
+		withoutImage := validTarget(22, 11, 50, []string{"720p"}, modelrouting.DurationConstraint{Values: []int{10}}, nil)
+		withoutImage.Constraints.ReferenceLimits = modelrouting.ReferenceLimits{}
+		policy.TargetsByChannel[11] = []modelrouting.Target{withImage, withoutImage}
+
+		require.NoError(t, modelrouting.ValidatePolicy(policy, relaycommon.MaxTaskDurationSeconds))
+	})
+}
+
+func TestValidatePolicyUsesInputModeReferenceMinimumRepresentatives(t *testing.T) {
+	discount := validPolicySnapshot()
+	target := &discount.TargetsByChannel[11][0]
+	target.Constraints.InputModes = []modelrouting.InputMode{
+		modelrouting.InputModeFirstFrame,
+		modelrouting.InputModeOmniReference,
+	}
+	target.Constraints.ReferenceMinimums.Images = 1
+	discount.Defaults.DurationSeconds = 8
+
+	require.NoError(t, modelrouting.ValidatePolicy(discount, relaycommon.MaxTaskDurationSeconds))
+
+	unreachable := validPolicySnapshot()
+	target = &unreachable.TargetsByChannel[11][0]
+	target.Constraints.InputModes = []modelrouting.InputMode{modelrouting.InputModeFirstLastFrames}
+	target.Constraints.ReferenceLimits.Images = 1
+	err := modelrouting.ValidatePolicy(unreachable, relaycommon.MaxTaskDurationSeconds)
+	var validationErr *modelrouting.ValidationError
+	require.ErrorAs(t, err, &validationErr)
+	assert.Equal(t, modelrouting.ValidationInvalidReferenceLimit, validationErr.Code)
+	assert.Equal(t, "targets.constraints.reference_minimums", validationErr.Field)
 }
 
 func validPolicySnapshot() modelrouting.PolicySnapshot {

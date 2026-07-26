@@ -251,8 +251,29 @@ func normalizeRoutingPolicyWriteRequest(request *RoutingPolicyWriteRequest) {
 		target.UpstreamModel = strings.TrimSpace(target.UpstreamModel)
 		target.Constraints.OutputResolutions = normalizedStrings(target.Constraints.OutputResolutions)
 		target.Constraints.AspectRatios = normalizedStrings(target.Constraints.AspectRatios)
+		target.Constraints.InputModes = normalizedInputModes(target.Constraints.InputModes)
 		target.Constraints.Durations.Values = normalizedInts(target.Constraints.Durations.Values)
 	}
+}
+
+func normalizedInputModes(values []modelrouting.InputMode) []modelrouting.InputMode {
+	seen := make(map[modelrouting.InputMode]struct{}, len(values))
+	normalized := make([]modelrouting.InputMode, 0, len(values))
+	for _, value := range values {
+		value = modelrouting.InputMode(strings.ToLower(strings.TrimSpace(string(value))))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i] < normalized[j]
+	})
+	return normalized
 }
 
 func normalizedStrings(values []string) []string {

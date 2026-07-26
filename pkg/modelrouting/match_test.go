@@ -37,6 +37,69 @@ func TestResolveFactsPrefersExplicitValues(t *testing.T) {
 	assert.True(t, facts.RequireRealPerson)
 }
 
+func TestResolveFactsDefaultsZeroReferenceInputModeToText(t *testing.T) {
+	facts, err := modelrouting.ResolveFacts("group", modelrouting.FactsInput{
+		CanonicalModel: modelrouting.Seedance20,
+	}, modelrouting.Defaults{
+		OutputResolution: "720p",
+		DurationSeconds:  8,
+		AspectRatio:      "16:9",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, modelrouting.InputModeText, facts.InputMode)
+}
+
+func TestMatchInputModesAndReferenceMinimums(t *testing.T) {
+	discount := modelrouting.Constraints{
+		OutputResolutions: []string{"720p", "1080p", "4k"},
+		Durations: modelrouting.DurationConstraint{
+			Min: intPtr(4), Max: intPtr(15),
+		},
+		AspectRatios:      []string{"16:9", "9:16"},
+		InputModes:        []modelrouting.InputMode{modelrouting.InputModeFirstFrame, modelrouting.InputModeOmniReference},
+		ReferenceMinimums: modelrouting.ReferenceLimits{Images: 1},
+		ReferenceLimits:   modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+	}
+	base := modelrouting.Facts{
+		OutputResolution: "720p",
+		DurationSeconds:  8,
+		AspectRatio:      "16:9",
+	}
+
+	text := base
+	text.InputMode = modelrouting.InputModeText
+	assert.Equal(t, []modelrouting.MismatchReason{
+		modelrouting.MismatchInputMode,
+		modelrouting.MismatchReferenceImages,
+	}, modelrouting.Match(discount, text))
+
+	videoOnly := base
+	videoOnly.InputMode = modelrouting.InputModeOmniReference
+	videoOnly.References.Videos = 1
+	assert.Equal(t, []modelrouting.MismatchReason{
+		modelrouting.MismatchReferenceImages,
+	}, modelrouting.Match(discount, videoOnly))
+
+	image := base
+	image.InputMode = modelrouting.InputModeFirstFrame
+	image.References.Images = 1
+	assert.Empty(t, modelrouting.Match(discount, image))
+
+	legacy := discount
+	legacy.InputModes = nil
+	legacy.ReferenceMinimums = modelrouting.ReferenceLimits{}
+	legacyFacts := []modelrouting.Facts{base, base, base}
+	legacyFacts[0].InputMode = modelrouting.InputModeText
+	legacyFacts[1].InputMode = modelrouting.InputModeFirstLastFrames
+	legacyFacts[1].References.Images = 2
+	legacyFacts[2].InputMode = modelrouting.InputModeOmniReference
+	legacyFacts[2].References = modelrouting.ReferenceLimits{Images: 2, Videos: 1, Audios: 1}
+	for _, facts := range legacyFacts {
+		assert.Empty(t, modelrouting.Match(legacy, facts))
+	}
+}
+
 func TestEvaluateTargetsUsesConfiguredOutputResolution(t *testing.T) {
 	supportsRealPerson := true
 	snapshot := modelrouting.PolicySnapshot{

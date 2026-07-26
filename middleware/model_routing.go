@@ -113,6 +113,16 @@ func parseSeedanceRoutingFields(body []byte, canonicalModel string) (modelroutin
 	input.ReferenceImages = contentFacts.images
 	input.ReferenceVideos = contentFacts.videos
 	input.ReferenceAudios = contentFacts.audios
+	switch {
+	case contentFacts.images == 0 && contentFacts.videos == 0 && contentFacts.audios == 0:
+		input.InputMode = modelrouting.InputModeText
+	case contentFacts.lastFrames > 0:
+		input.InputMode = modelrouting.InputModeFirstLastFrames
+	case contentFacts.firstFrames > 0:
+		input.InputMode = modelrouting.InputModeFirstFrame
+	default:
+		input.InputMode = modelrouting.InputModeOmniReference
+	}
 	// Reference video URLs stay in request memory only: they carry signed query
 	// parameters and are never copied onto Facts/Audit/diagnostics/logs. The slice is
 	// nil when there are no reference videos so downstream profit routing can skip the

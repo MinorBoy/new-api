@@ -7,6 +7,10 @@ import (
 )
 
 func ResolveFacts(group string, input FactsInput, defaults Defaults) (Facts, error) {
+	inputMode := InputMode(strings.ToLower(strings.TrimSpace(string(input.InputMode))))
+	if inputMode == "" && input.ReferenceImages == 0 && input.ReferenceVideos == 0 && input.ReferenceAudios == 0 {
+		inputMode = InputModeText
+	}
 	resolution := defaults.OutputResolution
 	if input.OutputResolution != nil {
 		resolution = *input.OutputResolution
@@ -23,6 +27,7 @@ func ResolveFacts(group string, input FactsInput, defaults Defaults) (Facts, err
 	facts := Facts{
 		GroupName:         strings.TrimSpace(group),
 		CanonicalModel:    strings.TrimSpace(input.CanonicalModel),
+		InputMode:         inputMode,
 		OutputResolution:  strings.ToLower(strings.TrimSpace(resolution)),
 		DurationSeconds:   duration,
 		AspectRatio:       strings.ToLower(strings.TrimSpace(ratio)),
@@ -68,7 +73,7 @@ func Evaluate(snapshot PolicySnapshot, facts Facts) Evaluation {
 }
 
 func Match(constraints Constraints, facts Facts) []MismatchReason {
-	reasons := make([]MismatchReason, 0, 7)
+	reasons := make([]MismatchReason, 0, 8)
 	if !containsString(constraints.OutputResolutions, facts.OutputResolution) {
 		reasons = append(reasons, MismatchResolution)
 	}
@@ -78,19 +83,31 @@ func Match(constraints Constraints, facts Facts) []MismatchReason {
 	if len(constraints.AspectRatios) > 0 && !containsString(constraints.AspectRatios, facts.AspectRatio) {
 		reasons = append(reasons, MismatchAspectRatio)
 	}
-	if facts.References.Images > constraints.ReferenceLimits.Images {
+	if len(constraints.InputModes) > 0 && !containsInputMode(constraints.InputModes, facts.InputMode) {
+		reasons = append(reasons, MismatchInputMode)
+	}
+	if facts.References.Images < constraints.ReferenceMinimums.Images || facts.References.Images > constraints.ReferenceLimits.Images {
 		reasons = append(reasons, MismatchReferenceImages)
 	}
-	if facts.References.Videos > constraints.ReferenceLimits.Videos {
+	if facts.References.Videos < constraints.ReferenceMinimums.Videos || facts.References.Videos > constraints.ReferenceLimits.Videos {
 		reasons = append(reasons, MismatchReferenceVideos)
 	}
-	if facts.References.Audios > constraints.ReferenceLimits.Audios {
+	if facts.References.Audios < constraints.ReferenceMinimums.Audios || facts.References.Audios > constraints.ReferenceLimits.Audios {
 		reasons = append(reasons, MismatchReferenceAudios)
 	}
 	if facts.RequireRealPerson && (constraints.SupportsRealPerson == nil || !*constraints.SupportsRealPerson) {
 		reasons = append(reasons, MismatchRealPerson)
 	}
 	return reasons
+}
+
+func containsInputMode(values []InputMode, expected InputMode) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func containsString(values []string, expected string) bool {

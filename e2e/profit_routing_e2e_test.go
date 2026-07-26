@@ -179,6 +179,88 @@ func seedProfitRoutingTokenRuleE2E(t *testing.T, channelID int, modelName, price
 	})
 }
 
+func TestLucenProfitRoutingChoosesEligibleFixedOrTokenChannelE2E(t *testing.T) {
+	tests := []struct {
+		name            string
+		fixedCost       string
+		tokenPerMillion string
+		wantChannelID   int
+		wantModel       string
+	}{
+		{name: "token eligible", fixedCost: "2", tokenPerMillion: "1", wantChannelID: capabilityChannelB, wantModel: "seedance-720p-token"},
+		{name: "fixed eligible", fixedCost: "0.1", tokenPerMillion: "10", wantChannelID: capabilityChannelA, wantModel: "seedance-720p-10s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupStrictProfitRoutingE2E(t, func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
+				return 1_000_000_000, "1000000000", nil
+			})
+			require.NoError(t, model.DB.Model(&model.Channel{}).
+				Where("id IN ?", []int{capabilityChannelA, capabilityChannelB}).
+				Update("type", constant.ChannelTypeLucen).Error)
+
+			request := capabilityPolicyRequest(modelrouting.Seedance20, []service.RouteTargetWriteRequest{
+				capabilityTarget(capabilityChannelA, "seedance-720p-10s", 100, []string{"720p"}, discreteDuration(10), []string{"16:9"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false),
+				capabilityTarget(capabilityChannelB, "seedance-720p-token", 90, []string{"720p"}, discreteDuration(10), []string{"16:9"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false),
+			})
+			_, err := service.SaveRoutingPolicy(env.standardPolicy, request)
+			require.NoError(t, err)
+
+			fixedPrice := tt.fixedCost
+			seedProfitRoutingRuleE2E(t, capabilityChannelA, "seedance-720p-10s", types.CostModePerRequest, types.CostRuleConfigV1{
+				Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+				RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+				UnitPrice: &fixedPrice, ChargeEvent: types.CostChargeSubmitAccepted,
+			})
+			tokenPrice := tt.tokenPerMillion
+			seedProfitRoutingRuleE2E(t, capabilityChannelB, "seedance-720p-token", types.CostModePerToken, types.CostRuleConfigV1{
+				Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+				RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+				TotalPerMillion: &tokenPrice, TokenMode: types.CostTokenModeTotal,
+				MeterSource: types.CostMeterUpstreamUsage, ChargeEvent: types.CostChargeTaskSucceeded,
+			})
+
+			body := capabilityRequestBody(t, modelrouting.Seedance20, "720p", 10, "16:9", modelrouting.ReferenceLimits{}, false)
+			status, response := performProfitRoutingRequest(t, env.engine, "Bearer e2e", "", body)
+			require.Equal(t, http.StatusOK, status, string(response))
+			assertCapabilityPublicBody(t, response)
+			assert.NotContains(t, string(response), tt.wantModel)
+			assert.NotContains(t, string(response), "channel_id")
+
+			selectedA := env.channelA.snapshot()
+			selectedB := env.channelB.snapshot()
+			var selected []mockArkRequest
+			if tt.wantChannelID == capabilityChannelA {
+				require.Len(t, selectedA, 1)
+				assert.Empty(t, selectedB)
+				selected = selectedA
+			} else {
+				require.Len(t, selectedB, 1)
+				assert.Empty(t, selectedA)
+				selected = selectedB
+			}
+			assert.Equal(t, http.MethodPost, selected[0].Method)
+			assert.Equal(t, "/v1/video/generations", selected[0].Path)
+			var upstream map[string]any
+			require.NoError(t, common.Unmarshal(selected[0].Body, &upstream))
+			assert.Equal(t, tt.wantModel, upstream["model"])
+
+			var task model.Task
+			require.NoError(t, model.DB.Order("id DESC").First(&task).Error)
+			assert.Equal(t, tt.wantChannelID, task.ChannelId)
+			require.NotNil(t, task.PrivateData.Routing)
+			assert.Equal(t, tt.wantModel, task.PrivateData.Routing.UpstreamModel)
+
+			beforeA, beforeB := len(selectedA), len(selectedB)
+			mismatchBody := capabilityRequestBody(t, modelrouting.Seedance20, "720p", 5, "16:9", modelrouting.ReferenceLimits{}, false)
+			status, response = performProfitRoutingRequest(t, env.engine, "Bearer e2e", "", mismatchBody)
+			require.Equal(t, http.StatusBadRequest, status, string(response))
+			assert.Len(t, env.channelA.snapshot(), beforeA)
+			assert.Len(t, env.channelB.snapshot(), beforeB)
+		})
+	}
+}
+
 func replaceProfitRoutingRequestPriceE2E(t *testing.T, channelID int, modelName, price string) {
 	t.Helper()
 	configValue, err := service.NormalizeCostRuleConfig(types.CostModePerRequest, types.CostRuleConfigV1{

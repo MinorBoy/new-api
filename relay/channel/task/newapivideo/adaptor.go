@@ -195,7 +195,7 @@ func validateMegaByAIMedia(ctx context.Context, request arkRequest) *dto.TaskErr
 // by a client alias or discovered only while building the upstream body.
 func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	profile := a.activeProfile()
-	if profile.channelName != ChannelNameLucen {
+	if profile.channelName != ChannelNameLucen && (profile.textRequest == nil || !profile.textRequest.enforceModelResolutionSuffix) {
 		return nil
 	}
 	state, err := getRequestState(c)
@@ -210,9 +210,19 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		if info != nil {
 			upstreamModel = info.UpstreamModelName
 		}
-		if err := validateMappedResolution(state.ARK.Resolution, upstreamModel); err != nil {
-			requestErr := &arkRequestError{Code: "InvalidParameter.resolution", Message: err.Error()}
-			return service.TaskErrorWrapperLocal(requestErr, requestErr.Code, http.StatusBadRequest)
+		var validationErr error
+		if profile.textRequest != nil && profile.textRequest.enforceModelResolutionSuffix {
+			validationErr = validateTextVideoRequest(*state.ARK, *profile.textRequest, upstreamModel)
+		} else {
+			validationErr = validateMappedResolution(state.ARK.Resolution, upstreamModel)
+		}
+		if validationErr != nil {
+			code := "InvalidParameter.resolution"
+			var requestErr *arkRequestError
+			if errors.As(validationErr, &requestErr) {
+				code = requestErr.Code
+			}
+			return service.TaskErrorWrapperLocal(validationErr, code, http.StatusBadRequest)
 		}
 	}
 	if state.Seconds == nil && profile.useRoutingDurationDefault {

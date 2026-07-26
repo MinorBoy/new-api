@@ -16,7 +16,7 @@ type textVideoRequest struct {
 	Resolution  string `json:"resolution,omitempty"`
 }
 
-func validateTextVideoRequest(request arkRequest, profile textRequestProfile) error {
+func validateTextVideoRequest(request arkRequest, profile textRequestProfile, upstreamModels ...string) error {
 	if strings.TrimSpace(request.Model) == "" {
 		return &arkRequestError{Code: "MissingParameter.model", Message: "model is required"}
 	}
@@ -71,11 +71,25 @@ func validateTextVideoRequest(request arkRequest, profile textRequestProfile) er
 			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "resolution is not supported by this channel"}
 		}
 	}
+	if profile.enforceModelResolutionSuffix && request.Resolution != "" && len(upstreamModels) > 0 && upstreamModels[0] != "" {
+		requiredResolution := ""
+		switch {
+		case strings.HasSuffix(upstreamModels[0], "-1080p"):
+			requiredResolution = "1080p"
+		case strings.HasSuffix(upstreamModels[0], "-720p"):
+			requiredResolution = "720p"
+		case strings.HasSuffix(upstreamModels[0], "-480p"):
+			requiredResolution = "480p"
+		}
+		if requiredResolution != "" && request.Resolution != requiredResolution {
+			return &arkRequestError{Code: "InvalidParameter.resolution", Message: fmt.Sprintf("model %s requires resolution %s", upstreamModels[0], requiredResolution)}
+		}
+	}
 	return nil
 }
 
 func buildTextVideoRequest(request arkRequest, upstreamModel string, profile textRequestProfile) ([]byte, error) {
-	if err := validateTextVideoRequest(request, profile); err != nil {
+	if err := validateTextVideoRequest(request, profile, upstreamModel); err != nil {
 		return nil, err
 	}
 

@@ -8,6 +8,8 @@ const ChannelNameMegaByAI = "MegaByAI"
 
 const ChannelNameCangyuan = "Cangyuan"
 
+const ChannelNamePaipu = "Paipu"
+
 type videoRequestDialect string
 
 const (
@@ -17,12 +19,13 @@ const (
 )
 
 type textRequestProfile struct {
-	ratioField                string
-	minimumDuration           int
-	maximumDuration           int
-	allowedRatios             []string
-	allowedResolutions        []string
-	rejectExplicitServiceTier bool
+	ratioField                   string
+	minimumDuration              int
+	maximumDuration              int
+	allowedRatios                []string
+	allowedResolutions           []string
+	rejectExplicitServiceTier    bool
+	enforceModelResolutionSuffix bool
 }
 
 type protocolProfile struct {
@@ -108,6 +111,50 @@ func cangyuanProtocolProfile() protocolProfile {
 	}
 }
 
+var paipuModels = []string{
+	"lec-sz-seedance-2-0-480p",
+	"lec-gongteng-seedance-2-0-720p",
+	"lec-gongteng-seedance-2-0-fast-720p",
+	"lec-gongteng-seedance-2-0-1080p",
+	"lec-seedance-2-0",
+	"lec-feituo-seedance-2-0-hn-fast-720p",
+	"lec-feituo-seedance-2-0-hn-720p",
+	"lec-feituo-seedance-2-0-xh-fast-933-720p",
+	"lec-feituo-seedance-2-0-xh-pro-933-720p",
+	"lec-feituo-seedance-2-0-ld-cvk-2",
+	"lec-feituo-seedance-2-0-limited-720p",
+	"lec-feituo-seedance-2-0-my-fast-upscaled-1080p",
+	"lec-feituo-seedance-2-0-my-upscaled-1080p",
+	"lec-seedance-videos-standard",
+	"lec-seedance-videos-face-standard",
+	"lec-seedance-videos-face-fast",
+	"lec-seedance-videos-stable",
+	"lec-seedance-videos-stable-fast",
+	"lec-seedance-videos-stable-mini",
+	"lec-seedance-videos-stable-720p",
+	"lec-seedance-videos-fast-720p",
+	"lec-seedance-videos-mini-720p",
+	"lec-seedance-videos-fast",
+	"lec-seedance-videos-mini",
+}
+
+func paipuProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:    ChannelNamePaipu,
+		modelList:      append([]string(nil), paipuModels...),
+		submitPath:     "/v1/videos",
+		pollPath:       "/v1/videos/{task_id}",
+		contentType:    "application/json",
+		requestDialect: videoRequestDialectTextJSON,
+		textRequest: &textRequestProfile{
+			ratioField:                   "ratio",
+			minimumDuration:              1,
+			maximumDuration:              relaycommon.MaxTaskDurationSeconds,
+			enforceModelResolutionSuffix: true,
+		},
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -134,6 +181,10 @@ func NewMegaByAITaskAdaptor() *TaskAdaptor {
 
 func NewCangyuanTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: cangyuanProtocolProfile()}
+}
+
+func NewPaipuTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: paipuProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

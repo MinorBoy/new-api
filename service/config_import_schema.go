@@ -35,6 +35,7 @@ var (
 		regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`),
 		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
 		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`),
+		regexp.MustCompile(`(?:^|[^A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?:$|[^A-Za-z0-9_-])`),
 	}
 )
 

@@ -95,6 +95,48 @@ func TestConfigImportUploadBlocksSourceFailure(t *testing.T) {
 	assert.Equal(t, "open", batch.Issues[0].ResolutionStatus)
 }
 
+func TestConfigImportUploadRejectsGoogleCredentialInDisplayNameBeforePersistence(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	googleCredential := "AIza" + strings.Repeat("A", 35)
+	payload := configImportDocumentJSON(t, map[string]any{
+		"channels": []any{map[string]any{
+			"business_id":  "channel-one",
+			"entity_hash":  strings.Repeat("c", 64),
+			"source_ref":   "source-workbook",
+			"display_name": googleCredential,
+		}},
+	})
+
+	_, created, err := CreateConfigImportBatch(context.Background(), 42, bytes.NewReader([]byte(payload)))
+
+	requireCode(t, err, "SECURITY_CREDENTIAL_VALUE")
+	assert.False(t, created)
+	assertConfigImportPersistenceEmpty(t)
+}
+
+func TestConfigImportUploadRejectsGoogleCredentialInAuditNoteBeforePersistence(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	googleCredential := "AIza" + strings.Repeat("A", 35)
+	payload := configImportDocumentJSON(t, map[string]any{
+		"sources": []any{map[string]any{
+			"business_id":     "source-workbook",
+			"entity_hash":     strings.Repeat("b", 64),
+			"source_ref":      "source-workbook",
+			"sheet":           "Channels",
+			"row":             4,
+			"raw_business_id": "source-workbook",
+			"audit_note":      googleCredential,
+			"url":             "https://example.test/template.xlsx",
+		}},
+	})
+
+	_, created, err := CreateConfigImportBatch(context.Background(), 42, bytes.NewReader([]byte(payload)))
+
+	requireCode(t, err, "SECURITY_CREDENTIAL_VALUE")
+	assert.False(t, created)
+	assertConfigImportPersistenceEmpty(t)
+}
+
 func TestConfigImportUploadIsIdempotentByPayloadHash(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	payload := configImportDocumentJSON(t, map[string]any{})
@@ -233,4 +275,17 @@ func TestConfigImportAllowedActionsAreStatusBounded(t *testing.T) {
 	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublishing, nil))
 	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil))
 	assert.Equal(t, []string{"validate"}, configImportAllowedActions(types.ConfigImportBatchStatusPublishFailed, nil))
+}
+
+func assertConfigImportPersistenceEmpty(t *testing.T) {
+	t.Helper()
+	for _, table := range []any{
+		&model.ConfigImportBatch{},
+		&model.ConfigImportItem{},
+		&model.ConfigImportIssue{},
+	} {
+		var count int64
+		require.NoError(t, model.DB.Model(table).Count(&count).Error)
+		assert.Zero(t, count)
+	}
 }

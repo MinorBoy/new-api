@@ -56,7 +56,6 @@ type ConfigImportRouteMergeMode string
 
 const (
 	ConfigImportRouteMergeModeReplace ConfigImportRouteMergeMode = "replace"
-	ConfigImportRouteMergeModeAppend  ConfigImportRouteMergeMode = "append"
 	ConfigImportRouteMergeModeMerge   ConfigImportRouteMergeMode = "merge"
 	ConfigImportRouteMergeModeSkip    ConfigImportRouteMergeMode = "skip"
 )

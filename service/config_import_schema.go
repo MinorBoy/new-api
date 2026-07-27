@@ -468,7 +468,7 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 			return configImportError("SCHEMA_ROUTE_BLUEPRINT", "route_blueprints[%d] requires canonical_model and client_model", index)
 		}
 		if blueprint.MergeMode != "" && blueprint.MergeMode != types.ConfigImportRouteMergeModeReplace &&
-			blueprint.MergeMode != types.ConfigImportRouteMergeModeAppend && blueprint.MergeMode != types.ConfigImportRouteMergeModeMerge && blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
+			blueprint.MergeMode != types.ConfigImportRouteMergeModeMerge && blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
 			return configImportError("SCHEMA_ROUTE_MERGE_MODE", "route_blueprints[%d].merge_mode is invalid", index)
 		}
 		for targetIndex := range blueprint.Targets {
@@ -684,6 +684,9 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		target, exists := routeTargets[draft.RouteTargetRef]
 		if !exists {
 			return configImportError("REFERENCE_NOT_FOUND", "cost_rule_drafts[%d].route_target_ref %q does not exist", index, draft.RouteTargetRef)
+		}
+		if strings.TrimSpace(draft.UpstreamModel) == "" {
+			return configImportError("SCHEMA_COST_UPSTREAM_MODEL", "cost_rule_drafts[%d].upstream_model is required", index)
 		}
 		if target.LineRef != draft.LineRef || target.CostVariantKey != draft.CostVariantKey {
 			return configImportError("ROUTING_COST_VARIANT_MISMATCH", "cost_rule_drafts[%d] does not match route_target_ref %q", index, draft.RouteTargetRef)

@@ -336,6 +336,28 @@ func TestConfigImportSchemaRejectsNegativeDecimalFact(t *testing.T) {
 	requireCode(t, err, "SCHEMA_DECIMAL")
 }
 
+func TestConfigImportSchemaRejectsCostDraftWithoutUpstreamModel(t *testing.T) {
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+	entities["cost_rule_drafts"] = []any{map[string]any{
+		"business_id": "cost-one", "entity_hash": strings.Repeat("2", 64), "source_ref": "source-workbook",
+		"line_ref": "line-one", "cost_variant_key": "default", "route_target_ref": "target-one",
+	}}
+
+	_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+	requireCode(t, err, "SCHEMA_COST_UPSTREAM_MODEL")
+}
+
+func TestConfigImportSchemaRejectsUnsupportedRouteAppendMode(t *testing.T) {
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+	blueprint := entities["route_blueprints"].([]any)[0].(map[string]any)
+	blueprint["merge_mode"] = "append"
+
+	_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+	requireCode(t, err, "SCHEMA_ROUTE_MERGE_MODE")
+}
+
 func TestConfigImportSchemaRejectsNonCanonicalCostVariantKeys(t *testing.T) {
 	for _, testCase := range []struct {
 		name  string

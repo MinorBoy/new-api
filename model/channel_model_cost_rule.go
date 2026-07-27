@@ -35,6 +35,16 @@ type ChannelModelCostRule struct {
 }
 
 func CreateCostRuleDraft(rule *ChannelModelCostRule) error {
+	return CreateCostRuleDraftWithTx(DB, rule)
+}
+
+// CreateCostRuleDraftWithTx writes a normalized draft using the caller's
+// transaction. It intentionally performs no cache refresh because a draft is
+// inactive until an explicit activation step.
+func CreateCostRuleDraftWithTx(tx *gorm.DB, rule *ChannelModelCostRule) error {
+	if tx == nil {
+		return errors.New("cost rule transaction is required")
+	}
 	if rule == nil {
 		return errors.New("cost rule is required")
 	}
@@ -56,7 +66,7 @@ func CreateCostRuleDraft(rule *ChannelModelCostRule) error {
 	if rule.UpdatedAt == 0 {
 		rule.UpdatedAt = now
 	}
-	return DB.Create(rule).Error
+	return tx.Create(rule).Error
 }
 
 func ActivateChannelModelCostRule(id int64, adminID int, now int64, validate func(*ChannelModelCostRule) error) (*ChannelModelCostRule, error) {

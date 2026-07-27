@@ -135,6 +135,18 @@ func TestConfigImportPricingStagesTokenPricesAsVersionedExpression(t *testing.T)
 	assert.Equal(t, map[string]string{"canonical-model": recomputed.BillingExpr}, patches["billing_setting.billing_expr"])
 }
 
+func TestConfigImportPricingRejectsConflictingPricingModes(t *testing.T) {
+	proposal := types.ConfigImportSaleProposal{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sale-conflict"},
+		ModelSKURef:                     "sku-a",
+		BillingExpr:                     `v1:tier("base", p * 1)`,
+		DurationPrice:                   &types.DurationPriceProposal{Price: "1", Unit: types.DurationUnitSecond, RoundingStepSeconds: 1},
+	}
+
+	_, _, err := recomputeConfigImportSaleProposal(proposal, "0")
+	requireCode(t, err, "PRICING_MODE_CONFLICT")
+}
+
 func TestConfigImportStageRejectsInvalidDurationUnit(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
@@ -157,6 +169,37 @@ func TestConfigImportStageRejectsInvalidDurationUnit(t *testing.T) {
 	require.NoError(t, model.DB.First(&saleItem, saleItem.ID).Error)
 	assert.Equal(t, string(types.ConfigImportItemStateConflict), saleItem.State)
 	assert.Contains(t, saleItem.ConflictReason, "PRICING_DURATION_INVALID")
+}
+
+func TestConfigImportStageBlocksUnrepresentableGroupScope(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Ability{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{ChannelId: channel.Id, Group: "vip", Model: "sku-a", Enabled: true}).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var saleItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "sale_proposals").First(&saleItem).Error)
+	var proposal types.ConfigImportSaleProposal
+	require.NoError(t, common.UnmarshalJsonStr(saleItem.CanonicalJSON, &proposal))
+	proposal.SelectedGroups = []string{"default"}
+	proposal.GroupPrices = map[string]string{"default": "1"}
+	encoded, err := common.Marshal(proposal)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).Where("id = ?", saleItem.ID).Update("canonical_json", string(encoded)).Error)
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusStaged, detail.Status)
+	var groupScopeIssue *dto.ConfigImportIssueDetail
+	for index := range detail.Issues {
+		if detail.Issues[index].Code == "PRICING_GROUP_SCOPE_UNREPRESENTABLE" {
+			groupScopeIssue = &detail.Issues[index]
+			break
+		}
+	}
+	require.NotNil(t, groupScopeIssue)
 }
 
 func TestConfigImportStagePersistsNegativeMarginWarningGate(t *testing.T) {

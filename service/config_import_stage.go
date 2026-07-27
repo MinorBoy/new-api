@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DecodeConfigImportBindingRequest only accepts the credential-free binding
@@ -805,7 +806,11 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 	}
 	if db.Migrator().HasTable(&model.Ability{}) {
 		var abilities []model.Ability
-		if err := db.Order("channel_id ASC, model ASC, group ASC").Find(&abilities).Error; err != nil {
+		if err := db.Clauses(clause.OrderBy{Columns: []clause.OrderByColumn{
+			{Column: clause.Column{Name: "channel_id"}},
+			{Column: clause.Column{Name: "model"}},
+			{Column: clause.Column{Name: "group"}},
+		}}).Find(&abilities).Error; err != nil {
 			return nil, err
 		}
 		for _, ability := range abilities {
@@ -1292,7 +1297,11 @@ func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]
 					continue
 				}
 			}
-			if scopeIssue := validateConfigImportPricingGroupScope(recomputed); scopeIssue != nil {
+			canonicalModel := canonicalModelsBySKU[recomputed.ModelSKURef]
+			if canonicalModel == "" {
+				canonicalModel = recomputed.ModelSKURef
+			}
+			if scopeIssue := validateConfigImportPricingGroupScope(db, canonicalModel, recomputed); scopeIssue != nil {
 				issues = append(issues, configImportStageIssue{Code: scopeIssue.Code, Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: scopeIssue.Message})
 			}
 			optionPatches, err := configImportSaleOptionPatches(recomputed, canonicalModelsBySKU[recomputed.ModelSKURef])
@@ -1467,36 +1476,73 @@ func configImportCostBySKU(items []model.ConfigImportItem) (map[string]string, e
 	return bySKU, nil
 }
 
-func validateConfigImportPricingGroupScope(proposal types.ConfigImportSaleProposal) *configImportStageIssue {
-	if len(proposal.GroupPrices) < 2 {
-		return nil
-	}
+func validateConfigImportPricingGroupScope(db *gorm.DB, canonicalModel string, proposal types.ConfigImportSaleProposal) *configImportStageIssue {
 	groups := proposal.SelectedGroups
 	if len(groups) == 0 {
 		groups = []string{"default"}
 	}
+	selected := make(map[string]struct{}, len(groups))
 	base := decimal.Zero
 	baseSet := false
-	for _, group := range groups {
-		price, ok := proposal.GroupPrices[group]
-		if !ok {
-			continue
+	if len(proposal.GroupPrices) > 0 {
+		for _, group := range groups {
+			selected[group] = struct{}{}
+			price, ok := proposal.GroupPrices[group]
+			if !ok {
+				return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: fmt.Sprintf("selected group %q has no price", group)}
+			}
+			parsed, err := decimal.NewFromString(price)
+			if err != nil {
+				return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "group price is not a decimal"}
+			}
+			ratio := decimal.NewFromFloat(ratio_setting.GetGroupRatio(group))
+			if ratio.IsZero() {
+				return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "group ratio cannot represent a positive group price"}
+			}
+			if !baseSet {
+				base = parsed.Div(ratio)
+				baseSet = true
+				continue
+			}
+			if !parsed.Equal(base.Mul(ratio)) {
+				return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "selected group prices cannot be represented by one supported base price"}
+			}
 		}
-		parsed, err := decimal.NewFromString(price)
-		if err != nil {
-			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "group price is not a decimal"}
+	} else {
+		for _, group := range groups {
+			selected[group] = struct{}{}
 		}
-		ratio := decimal.NewFromFloat(ratio_setting.GetGroupRatio(group))
-		if ratio.IsZero() {
-			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "group ratio cannot represent a positive group price"}
-		}
-		if !baseSet {
-			base = parsed.Div(ratio)
+		for _, candidate := range []*string{proposal.UnitPrice, proposal.PricePerUnit} {
+			if candidate == nil {
+				continue
+			}
+			parsed, err := decimal.NewFromString(*candidate)
+			if err != nil {
+				return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "base price is not a decimal"}
+			}
+			base = parsed
 			baseSet = true
-			continue
+			break
 		}
-		if !parsed.Equal(base.Mul(ratio)) {
-			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "selected group prices cannot be represented by one supported base price"}
+	}
+	if db == nil || strings.TrimSpace(canonicalModel) == "" || !db.Migrator().HasTable(&model.Ability{}) {
+		return nil
+	}
+	var abilities []model.Ability
+	if err := db.Where("model = ? AND enabled = ?", canonicalModel, true).Find(&abilities).Error; err != nil {
+		return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "cannot verify existing group access"}
+	}
+	unselectedGroups := make([]string, 0, len(abilities))
+	for _, ability := range abilities {
+		if _, found := selected[ability.Group]; !found {
+			unselectedGroups = append(unselectedGroups, ability.Group)
+		}
+	}
+	sort.Strings(unselectedGroups)
+	for _, group := range unselectedGroups {
+		currentPrice, found := ratio_setting.GetModelPrice(canonicalModel, false)
+		if !found || !baseSet || !base.Equal(decimal.NewFromFloat(currentPrice)) {
+			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: fmt.Sprintf("unselected group %q would receive a changed global price", group)}
 		}
 	}
 	return nil
@@ -1526,6 +1572,19 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 		}
 		proposal.DurationPrice.Price = price.String()
 	}
+	hasExpression := strings.TrimSpace(proposal.BillingExpr) != ""
+	hasDuration := proposal.DurationPrice != nil
+	hasToken := proposal.InputPerMillion != nil || proposal.OutputPerMillion != nil || proposal.CompletionPerMillion != nil || proposal.TotalPerMillion != nil
+	hasFixedPrice := proposal.UnitPrice != nil || proposal.PricePerUnit != nil
+	modeCount := 0
+	for _, present := range []bool{hasExpression, hasDuration, hasToken, hasFixedPrice} {
+		if present {
+			modeCount++
+		}
+	}
+	if modeCount > 1 {
+		return proposal, nil, configImportError("PRICING_MODE_CONFLICT", "sale proposal contains more than one pricing mode")
+	}
 	if proposal.UnitPrice != nil || proposal.PricePerUnit != nil {
 		cost, err := decimal.NewFromString(strings.TrimSpace(costUSD))
 		if err != nil {
@@ -1539,7 +1598,7 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 			issues = append(issues, model.ConfigImportIssue{Severity: string(types.ConfigImportIssueSeverityWarning), Code: "PRICING_NEGATIVE_MARGIN", BusinessID: proposal.BusinessID, Message: "sale price is below recomputed cost", ResolutionStatus: "open"})
 		}
 	}
-	if proposal.BillingExpr == "" {
+	if !hasExpression {
 		tokenExpr, err := configImportTokenPricingExpression(proposal)
 		if err != nil {
 			return proposal, nil, err
@@ -1548,16 +1607,16 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 			proposal.BillingExpr = tokenExpr
 		}
 	}
+	expectedMode := billing_setting.BillingModeRatio
 	if proposal.BillingExpr != "" {
-		proposal.BillingMode = billing_setting.BillingModeTieredExpr
+		expectedMode = billing_setting.BillingModeTieredExpr
+	} else if proposal.DurationPrice != nil {
+		expectedMode = billing_setting.BillingModePerDuration
 	}
-	if proposal.BillingMode == "" {
-		if proposal.DurationPrice != nil {
-			proposal.BillingMode = billing_setting.BillingModePerDuration
-		} else {
-			proposal.BillingMode = billing_setting.BillingModeRatio
-		}
+	if proposal.BillingMode != "" && proposal.BillingMode != expectedMode {
+		return proposal, nil, configImportError("PRICING_MODE_CONFLICT", "billing_mode %q does not match sale pricing inputs", proposal.BillingMode)
 	}
+	proposal.BillingMode = expectedMode
 	if len(proposal.SelectedGroups) == 0 {
 		proposal.SelectedGroups = []string{"default"}
 	}

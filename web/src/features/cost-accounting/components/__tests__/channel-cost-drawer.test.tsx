@@ -426,7 +426,7 @@ test('task-only channels default new rules to task completion', async () => {
   const mounted = await mount(
     <CostRuleDrawer
       open
-      channel={{ ...channel, type: 59, name: 'Dimensio' }}
+      channel={{ ...channel, type: 61, name: 'Dimensio' }}
       billableModel='vendor-task-model'
       originModel='client-task-model'
       rule={null}

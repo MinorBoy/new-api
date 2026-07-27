@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
@@ -321,7 +322,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	if err := common.Unmarshal(task.Data, &response); err != nil {
 		return nil, errors.Wrap(err, "unmarshal dimensio task data failed")
 	}
-	video := dto.NewOpenAIVideo()
+	video := relaydto.NewOpenAIVideo()
 	video.ID, video.TaskID, video.Model = task.TaskID, task.TaskID, task.Properties.OriginModelName
 	video.Status, video.CreatedAt, video.CompletedAt = task.Status.ToVideoStatus(), task.CreatedAt, task.UpdatedAt
 	if response.CreatedAt != 0 {
@@ -344,7 +345,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 		if message == "" {
 			message = "task not found or expired"
 		}
-		video.Error = &dto.OpenAIVideoError{Code: code, Message: message}
+		video.Error = &relaydto.OpenAIVideoError{Code: code, Message: message}
 	}
 	return common.Marshal(video)
 }

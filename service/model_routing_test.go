@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/videometa"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -135,7 +136,7 @@ func TestCostRoutingKnownChannelRequiresStrictCoverage(t *testing.T) {
 	assert.False(t, compatible)
 	var selectionErr *service.ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
-	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, relaytypes.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
 }
 
 func TestCostRoutingKnownCapabilityUsesTargetModelForCoverage(t *testing.T) {
@@ -177,7 +178,7 @@ func TestCostRoutingKnownCapabilityDoesNotFallbackToDefaultCostVariant(t *testin
 	assert.False(t, compatible)
 	var selectionErr *service.ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
-	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, relaytypes.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
 	assert.Equal(t, "720p", common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingCostVariant))
 }
 
@@ -259,7 +260,7 @@ func TestProfitRoutingRejectsInvalidInputVideo(t *testing.T) {
 	assert.Nil(t, channel)
 	var selectionErr *service.ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
-	assert.Equal(t, types.ErrorCodeInvalidRequest, selectionErr.Code)
+	assert.Equal(t, relaytypes.ErrorCodeInvalidRequest, selectionErr.Code)
 	assert.Equal(t, http.StatusBadRequest, selectionErr.StatusCode)
 	assert.Equal(t, "input video is not supported", selectionErr.Err.Error())
 	assert.NotContains(t, selectionErr.Err.Error(), "assets.example")
@@ -304,7 +305,7 @@ func TestProfitRoutingRejectsInvalidInputVideoForEveryCostMode(t *testing.T) {
 			assert.Nil(t, channel)
 			var selectionErr *service.ChannelSelectionError
 			require.ErrorAs(t, err, &selectionErr)
-			assert.Equal(t, types.ErrorCodeInvalidRequest, selectionErr.Code)
+			assert.Equal(t, relaytypes.ErrorCodeInvalidRequest, selectionErr.Code)
 			assert.Equal(t, http.StatusBadRequest, selectionErr.StatusCode)
 			assert.Equal(t, "input video is not supported", selectionErr.Err.Error())
 			assert.NotContains(t, selectionErr.Err.Error(), "assets.example")
@@ -383,7 +384,7 @@ func TestProfitRoutingReturns503WhenEveryCandidateIsBelowMargin(t *testing.T) {
 	assert.Nil(t, channel)
 	var selectionErr *service.ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
-	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, relaytypes.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
 	assert.Equal(t, http.StatusServiceUnavailable, selectionErr.StatusCode)
 	assert.Equal(t, "compatible channels are unavailable", selectionErr.Err.Error())
 	assert.NotContains(t, selectionErr.Err.Error(), "100")
@@ -436,7 +437,7 @@ func TestProfitRoutingKnownChannelRejectsBelowMarginForSpecificAndAffinitySelect
 	assert.False(t, compatible)
 	var selectionErr *service.ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
-	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, relaytypes.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
 	assert.Equal(t, http.StatusServiceUnavailable, selectionErr.StatusCode)
 }
 
@@ -585,13 +586,13 @@ func TestSelectCapabilityChannelClassifiesNoMatchAndUnavailable(t *testing.T) {
 		duration       int
 		disableAbility bool
 		excludeChannel bool
-		wantCode       types.ErrorCode
+		wantCode       relaytypes.ErrorCode
 		wantStatus     int
 	}{
-		{name: "unsupported resolution", resolution: "4k", duration: 10, wantCode: types.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
-		{name: "smart duration", resolution: "1080p", duration: -1, wantCode: types.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
-		{name: "compatible channel disabled", resolution: "1080p", duration: 10, disableAbility: true, wantCode: types.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
-		{name: "compatible channel excluded", resolution: "1080p", duration: 10, excludeChannel: true, wantCode: types.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "unsupported resolution", resolution: "4k", duration: 10, wantCode: relaytypes.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
+		{name: "smart duration", resolution: "1080p", duration: -1, wantCode: relaytypes.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
+		{name: "compatible channel disabled", resolution: "1080p", duration: 10, disableAbility: true, wantCode: relaytypes.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "compatible channel excluded", resolution: "1080p", duration: 10, excludeChannel: true, wantCode: relaytypes.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
 	}
 
 	for _, tt := range tests {
@@ -655,11 +656,11 @@ func TestAutoGroupCapabilityAggregatesRoutingErrors(t *testing.T) {
 	tests := []struct {
 		name               string
 		disableSecondRoute bool
-		wantCode           types.ErrorCode
+		wantCode           relaytypes.ErrorCode
 		wantStatus         int
 	}{
-		{name: "all policies have no match", wantCode: types.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
-		{name: "a compatible route is unavailable", disableSecondRoute: true, wantCode: types.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "all policies have no match", wantCode: relaytypes.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
+		{name: "a compatible route is unavailable", disableSecondRoute: true, wantCode: relaytypes.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
 	}
 
 	for _, tt := range tests {
@@ -749,7 +750,7 @@ func TestValidateKnownChannelForRoutingRechecksCompatibilityAndAvailability(t *t
 	assert.False(t, compatible)
 	var selectionErr *service.ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
-	assert.Equal(t, types.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
+	assert.Equal(t, relaytypes.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
 }
 
 func prepareCapabilitySelectionTest(t *testing.T) {

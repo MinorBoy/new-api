@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -21,7 +22,7 @@ import (
 var routingPolicySnapshotLookup = model.GetRoutingPolicySnapshot
 
 type ChannelSelectionError struct {
-	Code        types.ErrorCode
+	Code        relaytypes.ErrorCode
 	StatusCode  int
 	Err         error
 	Diagnostics []modelrouting.Audit
@@ -48,21 +49,21 @@ func evaluateGroupRouting(group, modelName string, input *modelrouting.FactsInpu
 	}
 	if !snapshot.Enabled || snapshot.ID <= 0 || snapshot.GroupName != group || snapshot.CanonicalModel != modelName || snapshot.TargetsByChannel == nil {
 		return groupRoutingResult{}, &ChannelSelectionError{
-			Code: types.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError,
+			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError,
 			Err: errors.New("routing policy cache is invalid"),
 		}
 	}
 	facts, err := modelrouting.ResolveFacts(group, *input, snapshot.Defaults)
 	if err != nil {
 		return groupRoutingResult{}, &ChannelSelectionError{
-			Code: types.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
+			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
 		}
 	}
 	evaluation := modelrouting.Evaluate(snapshot, facts)
 	result := groupRoutingResult{Capability: true, Snapshot: snapshot, Facts: facts, Evaluation: evaluation}
 	if len(evaluation.CompatibleByChannel) == 0 {
 		return result, &ChannelSelectionError{
-			Code: types.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+			Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
 			Err: errors.New("no compatible route supports this request"),
 			Diagnostics: []modelrouting.Audit{{
 				PolicyID: snapshot.ID, Facts: facts, MismatchCounts: evaluation.MismatchCounts,
@@ -116,7 +117,7 @@ func applyProfitFilter(param *RetryParam, group string, result groupRoutingResul
 
 	if filterResult.InvalidMedia {
 		return filter, &ChannelSelectionError{
-			Code:       types.ErrorCodeInvalidRequest,
+			Code:       relaytypes.ErrorCodeInvalidRequest,
 			StatusCode: http.StatusBadRequest,
 			Err:        errors.New("input video is not supported"),
 		}
@@ -361,7 +362,7 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 	}, rules)
 	if filterResult.InvalidMedia {
 		return false, &ChannelSelectionError{
-			Code:       types.ErrorCodeInvalidRequest,
+			Code:       relaytypes.ErrorCodeInvalidRequest,
 			StatusCode: http.StatusBadRequest,
 			Err:        errors.New("input video is not supported"),
 		}
@@ -395,7 +396,7 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 	channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, priorityRetry, param.RequestPath, filter)
 	if err != nil {
 		return nil, result, &ChannelSelectionError{
-			Code: types.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
+			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
 		}
 	}
 	if channel == nil {
@@ -403,7 +404,7 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 			return nil, result, nil
 		}
 		return nil, result, &ChannelSelectionError{
-			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("compatible channels are unavailable"),
 			Diagnostics: []modelrouting.Audit{{
 				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
@@ -414,7 +415,7 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 		target, ok := result.Evaluation.CompatibleByChannel[channel.Id]
 		if !ok {
 			return nil, result, &ChannelSelectionError{
-				Code: types.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError,
+				Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError,
 				Err: errors.New("selected channel has no routing target"),
 			}
 		}
@@ -434,12 +435,12 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	if _, excluded := param.ExcludedChannelIDs[channelID]; excluded {
 		if !result.Capability {
 			return false, &ChannelSelectionError{
-				Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+				Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 				Err: errors.New("channel is unavailable"),
 			}
 		}
 		return false, &ChannelSelectionError{
-			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("compatible channel is unavailable"),
 			Diagnostics: []modelrouting.Audit{{
 				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
@@ -448,7 +449,7 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	}
 	if result.Capability && !model.IsChannelEnabledForGroupModel(group, param.ModelName, channelID) {
 		return false, &ChannelSelectionError{
-			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("compatible channel is unavailable"),
 			Diagnostics: []modelrouting.Audit{{
 				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
@@ -468,7 +469,7 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	channel, err := model.GetChannelById(channelID, false)
 	if err != nil {
 		return false, &ChannelSelectionError{
-			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("channel is unavailable"),
 		}
 	}
@@ -483,7 +484,7 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	if !profitEligible {
 		param.ExcludeChannel(channelID)
 		selectionErr := &ChannelSelectionError{
-			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("channel is unavailable"),
 		}
 		if result.Capability {
@@ -498,7 +499,7 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 	if coverageErr != nil || !covered {
 		param.ExcludeChannel(channelID)
 		selectionErr := &ChannelSelectionError{
-			Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("channel is unavailable"),
 		}
 		if result.Capability {
@@ -650,7 +651,7 @@ func RecordRoutingSelectionFailure(c *gin.Context, canonicalModel string, select
 		return
 	}
 	other := map[string]interface{}{
-		"error_type":  string(types.ErrorTypeNewAPIError),
+		"error_type":  string(relaytypes.ErrorTypeNewAPIError),
 		"error_code":  selectionErr.Code,
 		"status_code": selectionErr.StatusCode,
 	}

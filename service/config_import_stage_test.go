@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,11 +60,11 @@ func TestConfigImportBindingUsesMappingModelsForGlobalSKU(t *testing.T) {
 	})
 	persistConfigImportBindingItem(t, batch.ID, "model_mappings", "mapping-openai", types.ConfigImportModelMapping{
 		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-openai"},
-		CanonicalModel:                 "gpt-test",
-		ClientModel:                    "gpt-test",
-		LineRef:                        "line-openai",
-		UpstreamModel:                  "gpt-test",
-		SKURef:                         "sku-global",
+		CanonicalModel:                  "gpt-test",
+		ClientModel:                     "gpt-test",
+		LineRef:                         "line-openai",
+		UpstreamModel:                   "gpt-test",
+		SKURef:                          "sku-global",
 	})
 	channel := &model.Channel{
 		Type: constant.ChannelTypeOpenAI, Name: "Existing OpenAI supplier", Models: "gpt-test",
@@ -289,7 +290,7 @@ func TestConfigImportBindingSeparatesSecureLineGroups(t *testing.T) {
 		configImportBindingLineFixture{lineRef: "secure-overseas", channelRef: "secure", channelType: constant.ChannelTypeSecure, models: []string{"video-2.0-pro"}},
 	)
 	channel := &model.Channel{Type: constant.ChannelTypeSecure, Name: "Secure discount", Models: "video-2.0-pro", Key: "key"}
-	channel.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupDiscount})
+	channel.SetOtherSettings(relaydto.ChannelOtherSettings{SecureVideoGroup: relaydto.SecureVideoGroupDiscount})
 	require.NoError(t, model.DB.Create(channel).Error)
 
 	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
@@ -302,7 +303,7 @@ func TestConfigImportBindingSeparatesSecureLineGroups(t *testing.T) {
 	require.ErrorContains(t, err, "BINDING_CHANNEL_LINE_CONFLICT")
 
 	wrongGroup := &model.Channel{Type: constant.ChannelTypeSecure, Name: "Secure wrong group", Models: "video-2.0-pro", Key: "key"}
-	wrongGroup.SetOtherSettings(dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupEnterprise})
+	wrongGroup.SetOtherSettings(relaydto.ChannelOtherSettings{SecureVideoGroup: relaydto.SecureVideoGroupEnterprise})
 	require.NoError(t, model.DB.Create(wrongGroup).Error)
 	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
 		LineRef: "secure-overseas", Action: types.ConfigImportBindingActionBind, ChannelID: &wrongGroup.Id,
@@ -395,11 +396,11 @@ func createConfigImportBindingBatch(t *testing.T, lines ...configImportBindingLi
 			})
 			persistConfigImportBindingItem(t, batch.ID, "model_mappings", fixture.lineRef+"-mapping-"+string(rune('a'+index)), types.ConfigImportModelMapping{
 				ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: fixture.lineRef + "-mapping-" + string(rune('a'+index))},
-				CanonicalModel:                 upstreamModel,
-				ClientModel:                    upstreamModel,
-				LineRef:                        fixture.lineRef,
-				UpstreamModel:                  upstreamModel,
-				SKURef:                         skuRef,
+				CanonicalModel:                  upstreamModel,
+				ClientModel:                     upstreamModel,
+				LineRef:                         fixture.lineRef,
+				UpstreamModel:                   upstreamModel,
+				SKURef:                          skuRef,
 			})
 		}
 	}

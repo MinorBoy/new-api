@@ -10,8 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
@@ -65,7 +65,7 @@ func previewUserBillingQuotaForUser(userId int, input dto.CostPreviewRequest) (f
 		}
 		meta := input.TokenMeta
 		if meta == nil {
-			meta = &types.TokenCountMeta{}
+			meta = &relaytypes.TokenCountMeta{}
 		}
 		if _, err = ModelPriceHelper(previewContext, info, promptTokens, meta); err != nil {
 			return 0, "", err

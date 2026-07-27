@@ -3,8 +3,8 @@ package newapivideo
 import (
 	"fmt"
 
-	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
 const ChannelNameLucen = "Lucen"

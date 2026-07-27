@@ -10,8 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -207,16 +207,16 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			channel, _, err = selectChannelForGroup(param, autoGroup, priorityRetry)
 			if err != nil {
 				var selectionErr *ChannelSelectionError
-				if !errors.As(err, &selectionErr) || selectionErr.Code == types.ErrorCodeRoutingPolicyError {
+				if !errors.As(err, &selectionErr) || selectionErr.Code == relaytypes.ErrorCodeRoutingPolicyError {
 					return nil, autoGroup, err
 				}
-				if selectionErr.Code == types.ErrorCodeInvalidRequest {
+				if selectionErr.Code == relaytypes.ErrorCodeInvalidRequest {
 					return nil, autoGroup, err
 				}
 				for _, diagnostic := range selectionErr.Diagnostics {
 					diagnostics = append(diagnostics, diagnostic)
 				}
-				if selectionErr.Code == types.ErrorCodeCompatibleChannelUnavailable {
+				if selectionErr.Code == relaytypes.ErrorCodeCompatibleChannelUnavailable {
 					sawCompatibleUnavailable = true
 				} else {
 					sawCapabilityNoMatch = true
@@ -261,13 +261,13 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		if channel == nil {
 			if sawCompatibleUnavailable {
 				return nil, selectGroup, &ChannelSelectionError{
-					Code: types.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+					Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 					Err: errors.New("compatible channels are unavailable"), Diagnostics: diagnostics,
 				}
 			}
 			if sawCapabilityNoMatch {
 				return nil, selectGroup, &ChannelSelectionError{
-					Code: types.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+					Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
 					Err: errors.New("no compatible route supports this request"), Diagnostics: diagnostics,
 				}
 			}

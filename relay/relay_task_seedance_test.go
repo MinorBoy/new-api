@@ -15,12 +15,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -545,7 +545,7 @@ func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)
 	task := model.Task{
-		TaskID: "task_public", Platform: constant.TaskPlatform("59"), UserId: 7,
+		TaskID: "task_public", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)), UserId: 7,
 		Status: model.TaskStatusSuccess, SubmitTime: 111, UpdatedAt: 222,
 		Properties:  model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
 		PrivateData: model.TaskPrivateData{UpstreamTaskID: "dim-upstream"},
@@ -570,7 +570,7 @@ func TestDimensioTaskFetchPreservesProviderTimestampsAndErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)
 	task := model.Task{
-		TaskID: "task_failed", Platform: constant.TaskPlatform("59"), UserId: 7,
+		TaskID: "task_failed", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)), UserId: 7,
 		Status: model.TaskStatusFailure, SubmitTime: 111, UpdatedAt: 222,
 		Properties: model.Properties{OriginModelName: "alias"},
 		Data:       json.RawMessage(`{"task_id":"dim-upstream","status":"failed","error":"审核不通过","error_code":"2043","created_at":333,"updated_at":444}`),
@@ -602,14 +602,14 @@ func TestDimensioTaskFetchPreservesProviderTimestampsAndErrors(t *testing.T) {
 }
 
 func TestDimensioTaskAdaptorIsTaskOnly(t *testing.T) {
-	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("59")))
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio))))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeDimensio)
 	require.False(t, success)
 }
 
 func TestNewAPIVideoTaskAdaptorIsTaskOnly(t *testing.T) {
-	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("60")))
-	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("62")))
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo))))
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeLucen))))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeNewAPIVideo)
 	require.False(t, success)
 	_, success = common.ChannelType2APIType(constant.ChannelTypeLucen)

@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -91,7 +92,7 @@ func TestCostPreviewUserBillingQuotaSupportsTextDurationAndExpressionModes(t *te
 			input: dto.CostPreviewRequest{
 				OriginModel: "preview-text", UserGroup: "preview-group",
 				RelayMode: relayconstant.RelayModeChatCompletions,
-				Usage:     &dto.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+				Usage:     &relaydto.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
 			},
 			wantQuota: 200_000,
 		},
@@ -109,7 +110,7 @@ func TestCostPreviewUserBillingQuotaSupportsTextDurationAndExpressionModes(t *te
 			input: dto.CostPreviewRequest{
 				OriginModel: "preview-tiered", UserGroup: "preview-group",
 				RelayMode: relayconstant.RelayModeChatCompletions,
-				Usage:     &dto.Usage{PromptTokens: 1_000, CompletionTokens: 100, TotalTokens: 1_100},
+				Usage:     &relaydto.Usage{PromptTokens: 1_000, CompletionTokens: 100, TotalTokens: 1_100},
 			},
 			wantQuota: 3_000,
 		},

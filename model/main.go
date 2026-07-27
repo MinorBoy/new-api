@@ -1,10 +1,12 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -329,6 +331,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := migrateSecondaryChannelTypeIDs(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -430,6 +435,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migrateSecondaryChannelTypeIDs(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -447,6 +455,51 @@ func migrateDBFast() error {
 	}
 	common.SysLog("database migrated")
 	return nil
+}
+
+const secondaryChannelTypeMigrationMarker = "migration.secondary_channel_type_ids_20260727"
+
+// migrateSecondaryChannelTypeIDs moves the secondary branch channel types out
+// of the range that origin/main now reserves for Sub2API and New API. Channel
+// rows and persisted task platforms must move together so polling continues to
+// select the original provider after the merge.
+func migrateSecondaryChannelTypeIDs() error {
+	if DB == nil {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var marker Option
+		err := tx.Where("key = ?", secondaryChannelTypeMigrationMarker).First(&marker).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		for _, migration := range []struct{ from, to int }{
+			{66, constant.ChannelTypeSecure},
+			{65, constant.ChannelTypePaipu},
+			{64, constant.ChannelTypeCangyuan},
+			{63, constant.ChannelTypeMegaByAI},
+			{62, constant.ChannelTypeLucen},
+			{61, constant.ChannelTypeClmmMall},
+			{60, constant.ChannelTypeNewAPIVideo},
+			{59, constant.ChannelTypeDimensio},
+		} {
+			if err := tx.Model(&Channel{}).Where("type = ?", migration.from).Update("type", migration.to).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&Task{}).
+				Where("platform = ?", strconv.Itoa(migration.from)).
+				Update("platform", strconv.Itoa(migration.to)).Error; err != nil {
+				return err
+			}
+		}
+
+		return tx.Create(&Option{Key: secondaryChannelTypeMigrationMarker, Value: "complete"}).Error
+	})
 }
 
 func migrateLOGDB() error {

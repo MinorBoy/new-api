@@ -56,15 +56,17 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeAdvancedCustom = 58
-	ChannelTypeDimensio       = 59 // dimensio 视频生成(ARK v3 协议翻译网关)
-	ChannelTypeNewAPIVideo    = 60 // new-api /v1/video/generations task protocol
-	ChannelTypeClmmMall       = 61 // CLMM Mall 视频生成(ARK v3 协议翻译网关)
-	ChannelTypeLucen          = 62 // Lucen Seedance task protocol
-	ChannelTypeMegaByAI       = 63 // MegaByAI Seedance task protocol
-	ChannelTypeCangyuan       = 64 // Cangyuan Seedance task protocol
-	ChannelTypePaipu          = 65 // Paipu Seedance task protocol
-	ChannelTypeSecure         = 66 // Secure grouped Seedance task protocol
-	ChannelTypeDummy          = 67 // this one is only for count, do not add any channel after this
+	ChannelTypeSub2API        = 59
+	ChannelTypeNewAPI         = 60
+	ChannelTypeDimensio       = 61 // Dimensio video generation ARK v3 protocol gateway
+	ChannelTypeNewAPIVideo    = 62 // new-api /v1/video/generations task protocol
+	ChannelTypeClmmMall       = 63 // CLMM Mall video generation ARK v3 protocol gateway
+	ChannelTypeLucen          = 64 // Lucen Seedance task protocol
+	ChannelTypeMegaByAI       = 65 // MegaByAI Seedance task protocol
+	ChannelTypeCangyuan       = 66 // Cangyuan Seedance task protocol
+	ChannelTypePaipu          = 67 // Paipu Seedance task protocol
+	ChannelTypeSecure         = 68 // Secure grouped Seedance task protocol
+	ChannelTypeDummy          = 69 // this one is only for count, do not add any channel after this
 
 )
 
@@ -128,14 +130,16 @@ var ChannelBaseURLs = []string{
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
 	"",                                          //58
-	"https://jimeng.dimensio.cn",                //59 Dimensio
-	"",                                          //60 NewAPIVideo
-	"https://clmm-mall.top",                     //61 CLMM Mall
-	"https://lucen.asia",                        //62 Lucen
-	"https://newapi.megabyai.cc",                //63 MegaByAI
-	"https://ai.cangyuansuanli.cn",              //64 Cangyuan
-	"https://api.paipu.net",                     //65 Paipu
-	"https://token.secure-skill.com",            //66 Secure
+	"",                                          //59
+	"",                                          //60
+	"https://jimeng.dimensio.cn",                //61 Dimensio
+	"",                                          //62 NewAPIVideo
+	"https://clmm-mall.top",                     //63 CLMM Mall
+	"https://lucen.asia",                        //64 Lucen
+	"https://newapi.megabyai.cc",                //65 MegaByAI
+	"https://ai.cangyuansuanli.cn",              //66 Cangyuan
+	"https://api.paipu.net",                     //67 Paipu
+	"https://token.secure-skill.com",            //68 Secure
 }
 
 var ChannelTypeNames = map[int]string{
@@ -194,6 +198,8 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeAdvancedCustom: "Advanced Custom",
+	ChannelTypeSub2API:        "Sub2API",
+	ChannelTypeNewAPI:         "New API",
 	ChannelTypeDimensio:       "Dimensio",
 	ChannelTypeNewAPIVideo:    "NewAPIVideo",
 	ChannelTypeClmmMall:       "CLMM Mall",

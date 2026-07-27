@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -81,7 +81,7 @@ func TestPreviewFinalUserQuotaUsesTextSettlement(t *testing.T) {
 			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
 		},
 	}
-	usage := &dto.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150}
+	usage := &relaydto.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150}
 
 	quota, err := PreviewFinalUserQuota(ctx, info, UserBillingPreviewInput{Usage: usage})
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestPreviewFinalUserQuotaUsesFrozenBillingExpression(t *testing.T) {
 			ExprVersion:  1,
 		},
 	}
-	usage := &dto.Usage{PromptTokens: 1_000, CompletionTokens: 100, TotalTokens: 1_100}
+	usage := &relaydto.Usage{PromptTokens: 1_000, CompletionTokens: 100, TotalTokens: 1_100}
 
 	quota, err := PreviewFinalUserQuota(ctx, info, UserBillingPreviewInput{Usage: usage})
 	require.NoError(t, err)

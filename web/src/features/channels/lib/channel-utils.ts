@@ -52,6 +52,8 @@ export function getChannelTypeIcon(type: number): string {
     7: 'OpenAI', // OhMyGPT
     8: 'OpenAI', // Custom
     58: 'NewAPI', // Advanced Custom
+    59: 'Sub2API', // Sub2API
+    60: 'NewAPI', // New API
     3: 'Azure', // Azure
 
     // Anthropic
@@ -102,14 +104,14 @@ export function getChannelTypeIcon(type: number): string {
     55: 'OpenAI', // Sora
     54: 'Doubao', // DoubaoVideo
     56: 'Replicate', // Replicate
-    59: 'Dimensio', // Dimensio
-    60: 'NewAPI', // NewAPIVideo
-    61: 'Jimeng', // CLMM Mall
-    62: 'NewAPI', // Lucen
-    63: 'NewAPI', // MegaByAI
-    64: 'NewAPI', // Cangyuan
-    65: 'NewAPI', // Paipu
-    66: 'NewAPI', // Secure
+    61: 'Dimensio', // Dimensio
+    62: 'NewAPI', // NewAPIVideo
+    63: 'Jimeng', // CLMM Mall
+    64: 'NewAPI', // Lucen
+    65: 'NewAPI', // MegaByAI
+    66: 'NewAPI', // Cangyuan
+    67: 'NewAPI', // Paipu
+    68: 'NewAPI', // Secure
 
     // Tools & Platforms
     37: 'Dify', // Dify
@@ -622,6 +624,13 @@ export type TagRow = Channel & {
  */
 export function isTagAggregateRow(row: Channel | TagRow): row is TagRow {
   return Array.isArray((row as TagRow).children)
+}
+
+export function getChannelTableRowId(row: Channel | TagRow): string {
+  if (isTagAggregateRow(row)) {
+    return `tag:${row.tag || ''}`
+  }
+  return `channel:${row.id}`
 }
 
 export function getRoutingTargetCount(row: Channel | TagRow): number {

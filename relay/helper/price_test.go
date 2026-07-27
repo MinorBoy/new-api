@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -92,7 +93,7 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 		},
 	}
 
-	priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{
+	priceData, err := ModelPriceHelper(ctx, info, 1000, &relaytypes.TokenCountMeta{
 		BillingRatios: map[string]float64{"n": 3},
 	})
 	require.NoError(t, err)
@@ -174,7 +175,7 @@ func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
 				},
 			}
 
-			priceData, err := ModelPriceHelper(ctx, info, promptTokens, &types.TokenCountMeta{MaxTokens: tc.maxTokens})
+			priceData, err := ModelPriceHelper(ctx, info, promptTokens, &relaytypes.TokenCountMeta{MaxTokens: tc.maxTokens})
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, priceData.QuotaToPreConsume)
 		})
@@ -212,7 +213,7 @@ func TestModelPriceHelperTieredRejectsPreConsumeOverflow(t *testing.T) {
 		},
 	}
 
-	_, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+	_, err := ModelPriceHelper(ctx, info, 1000, &relaytypes.TokenCountMeta{})
 
 	var clamp *common.QuotaClamp
 	require.ErrorAs(t, err, &clamp)
@@ -271,7 +272,7 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 				UserGroup:       "default",
 				UsingGroup:      "default",
 			}
-			meta := &types.TokenCountMeta{
+			meta := &relaytypes.TokenCountMeta{
 				ImagePriceRatio: 3,
 				BillingRatios:   map[string]float64{"n": 3},
 			}
@@ -295,7 +296,7 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 			UsingGroup:      "default",
 		}
 	}
-	meta := &types.TokenCountMeta{BillingRatios: map[string]float64{"n": 3}}
+	meta := &relaytypes.TokenCountMeta{BillingRatios: map[string]float64{"n": 3}}
 
 	ctx, info := newInfo("fractional-image-price")
 	priceData, err := ModelPriceHelper(ctx, info, 0, meta)

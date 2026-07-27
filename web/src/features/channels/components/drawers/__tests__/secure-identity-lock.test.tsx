@@ -116,8 +116,8 @@ await i18n.init({
 })
 
 const secureChannel: Channel = {
-  id: 66,
-  type: 66,
+  id: 68,
+  type: 68,
   key: '',
   status: 1,
   name: 'Secure discount',

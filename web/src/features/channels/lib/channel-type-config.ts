@@ -147,6 +147,26 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   59: {
     id: 59,
     name: CHANNEL_TYPES[59],
+    icon: 'Sub2API',
+    hints: {
+      baseUrl: 'Sub2API gateway base URL',
+      key: 'Sub2API API Key',
+      models: 'Models fetched from upstream /v1/models',
+    },
+  },
+  60: {
+    id: 60,
+    name: CHANNEL_TYPES[60],
+    icon: 'NewAPI',
+    hints: {
+      baseUrl: 'Base URL is required for this channel type',
+      key: 'Enter API key for this channel',
+      models: 'Models',
+    },
+  },
+  61: {
+    id: 61,
+    name: CHANNEL_TYPES[61],
     icon: 'Dimensio',
     defaultBaseUrl: 'https://jimeng.dimensio.cn',
     supportedModels: [
@@ -161,9 +181,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Supported upstream models: jimeng-video-seedance-2.0-fast-vip, jimeng-video-seedance-2.0-mini, jimeng-video-seedance-2.0-vip',
     },
   },
-  60: {
-    id: 60,
-    name: CHANNEL_TYPES[60],
+  62: {
+    id: 62,
+    name: CHANNEL_TYPES[62],
     icon: 'NewAPI',
     supportedModels: [],
     hints: {
@@ -172,9 +192,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Add client model names and map them to upstream video models',
     },
   },
-  61: {
-    id: 61,
-    name: CHANNEL_TYPES[61],
+  63: {
+    id: 63,
+    name: CHANNEL_TYPES[63],
     icon: 'Jimeng',
     defaultBaseUrl: 'https://clmm-mall.top',
     supportedModels: [],
@@ -185,9 +205,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Use client-visible Ark model names and map them to complete CLMM Mall model names.',
     },
   },
-  62: {
-    id: 62,
-    name: CHANNEL_TYPES[62],
+  64: {
+    id: 64,
+    name: CHANNEL_TYPES[64],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://lucen.asia',
     supportedModels: [
@@ -211,9 +231,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         "Select Lucen models matching this channel's fixed-duration or token-billing API key",
     },
   },
-  63: {
-    id: 63,
-    name: CHANNEL_TYPES[63],
+  65: {
+    id: 65,
+    name: CHANNEL_TYPES[65],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://newapi.megabyai.cc',
     supportedModels: ['videos-standard', 'videos-fast', 'videos-mini'],
@@ -224,9 +244,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Supported upstream models: videos-standard, videos-fast, videos-mini',
     },
   },
-  64: {
-    id: 64,
-    name: CHANNEL_TYPES[64],
+  66: {
+    id: 66,
+    name: CHANNEL_TYPES[66],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://ai.cangyuansuanli.cn',
     supportedModels: ['seedance-2.0-720p'],
@@ -237,9 +257,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'The documented initial model is seedance-2.0-720p; administrators may add verified models manually',
     },
   },
-  65: {
-    id: 65,
-    name: CHANNEL_TYPES[65],
+  67: {
+    id: 67,
+    name: CHANNEL_TYPES[67],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://api.paipu.net',
     supportedModels: [
@@ -274,9 +294,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Select from the 24 documented Paipu /v1/videos models',
     },
   },
-  66: {
-    id: 66,
-    name: CHANNEL_TYPES[66],
+  68: {
+    id: 68,
+    name: CHANNEL_TYPES[68],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://token.secure-skill.com',
     supportedModels: ['video-2.0-fast', 'video-2.0-mini', 'video-2.0-pro'],
@@ -288,7 +308,7 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   },
 }
 
-const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([59, 61, 62, 63, 64, 65, 66])
+const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([61, 63, 64, 65, 66, 67, 68])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([
   ...Object.values(CHANNEL_TYPE_CONFIGS)

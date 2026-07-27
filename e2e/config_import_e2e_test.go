@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
@@ -159,14 +160,14 @@ func bindFixtureLinesToDisabledChannels(t *testing.T, document *types.ConfigImpo
 		sort.Strings(models)
 		require.NotEmpty(t, models)
 
-		settings := dto.ChannelOtherSettings{}
+		settings := relaydto.ChannelOtherSettings{}
 		switch line.LineRef {
 		case "secure-discount":
-			settings.SecureVideoGroup = dto.SecureVideoGroupDiscount
+			settings.SecureVideoGroup = relaydto.SecureVideoGroupDiscount
 		case "secure-overseas":
-			settings.SecureVideoGroup = dto.SecureVideoGroupOverseas
+			settings.SecureVideoGroup = relaydto.SecureVideoGroupOverseas
 		case "secure-enterprise":
-			settings.SecureVideoGroup = dto.SecureVideoGroupEnterprise
+			settings.SecureVideoGroup = relaydto.SecureVideoGroupEnterprise
 		}
 		settingsJSON, err := common.Marshal(settings)
 		require.NoError(t, err)

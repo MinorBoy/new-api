@@ -12,10 +12,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -49,7 +50,7 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		return nil, ErrCostIdentityUnconfirmed
 	}
 	if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
-		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+		return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
 	}
 
 	billingSource := strings.TrimSpace(info.BillingSource)
@@ -86,7 +87,7 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 	if err != nil {
 		var coverageErr *service.CostCoverageError
 		if errors.As(err, &coverageErr) {
-			return nil, types.NewError(err, types.ErrorCodeDoRequestFailed)
+			return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
 		}
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 	return response, requestErr
 }
 
-func (a *costAccountingAdaptor) DoResponse(c *gin.Context, response *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
+func (a *costAccountingAdaptor) DoResponse(c *gin.Context, response *http.Response, info *relaycommon.RelayInfo) (any, *relaytypes.NewAPIError) {
 	result, apiErr := a.Adaptor.DoResponse(c, response, info)
 	if info == nil || info.CostAttempt == nil {
 		return result, apiErr

@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 )
@@ -142,7 +143,7 @@ func parseTaskProjection(body []byte) (*parsedTask, error) {
 }
 
 func parseDetailedTask(envelope detailedEnvelope) (*parsedTask, error) {
-	if envelope.Code == nil || *envelope.Code != dto.TaskSuccessCode || envelope.Data == nil {
+	if envelope.Code == nil || *envelope.Code != taskdto.TaskSuccessCode || envelope.Data == nil {
 		code := ""
 		if envelope.Code != nil {
 			code = *envelope.Code

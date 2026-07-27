@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,9 +15,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -431,7 +432,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 
 				var task model.Task
 				require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
-				assert.Equal(t, constant.TaskPlatform("59"), task.Platform)
+				assert.Equal(t, constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)), task.Platform)
 				assert.Equal(t, "dim-upstream", task.PrivateData.UpstreamTaskID)
 				require.NotNil(t, task.PrivateData.BillingContext)
 				assert.Equal(t, modelCase.upstreamModel, task.PrivateData.BillingContext.UpstreamModelName)

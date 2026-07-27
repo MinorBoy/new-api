@@ -15,7 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -89,7 +89,8 @@ func sweepTimedOutTasks(ctx context.Context) {
 		task.FinishTime = now
 		if isLegacy {
 			task.FailReason = legacyReason
-			// 旧系统任务明确不退款，随终态 CAS 一并清掉 quota，避免被后续对账误判。
+			// 旧系统任务明确不退款，随终态 CAS 一并清掉 quota，
+			// 避免留下可再次退款的计费状态。
 			task.Quota = 0
 		} else {
 			task.FailReason = reason
@@ -119,9 +120,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 	}
 }
 
-// sweepUnrefundedFailedTasks 重试已落 FAILURE 终态但仍保留 quota 的欠退款任务。
-// 先等待一个短暂宽限期，让终态 CAS 的胜出者完成主路径即时退款，避免正常
-// 轮询与对账同时处理刚失败的任务。
+// sweepUnrefundedFailedTasks retries failed tasks that still carry a quota
+// marker after their terminal transition. A short grace period avoids racing
+// the normal polling path that performs the immediate refund.
 func sweepUnrefundedFailedTasks(ctx context.Context) {
 	updatedBefore := time.Now().Add(-refundReconciliationGracePeriod).Unix()
 	tasks := model.GetUnrefundedFailedTasks(updatedBefore, refundReconciliationLimit)
@@ -141,8 +142,6 @@ func sweepUnrefundedFailedTasks(ctx context.Context) {
 			continue
 		}
 
-		// 对账先清 marker 再退款，确保并发 sweep 只有一个实际退款者。若进程在
-		// claim 后、退款前崩溃，会偏向漏退而不是双退，需由人工账务对账兜底。
 		if RefundTaskQuota(ctx, task, task.FailReason) {
 			continue
 		}
@@ -321,7 +320,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		common.SysLog(fmt.Sprintf("Get Suno Task parse body error: %v", err))
 		return err
 	}
-	var responseItems dto.TaskResponse[[]dto.SunoDataResponse]
+	var responseItems taskdto.TaskResponse[[]taskdto.SunoDataResponse]
 	err = common.Unmarshal(responseBody, &responseItems)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("Get Suno Task parse body error2: %v, body: %s", err, string(responseBody)))
@@ -389,7 +388,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 }
 
 // taskNeedsUpdate 检查 Suno 任务是否需要更新
-func taskNeedsUpdate(oldTask *model.Task, newTask dto.SunoDataResponse) bool {
+func taskNeedsUpdate(oldTask *model.Task, newTask taskdto.SunoDataResponse) bool {
 	if oldTask.SubmitTime != newTask.SubmitTime {
 		return true
 	}
@@ -591,7 +590,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			if parseErr == nil {
 				parseErr = fmt.Errorf("upstream returned empty task status")
 			}
-			var wrapper dto.TaskResponse[taskPollingResponseData]
+			var wrapper taskdto.TaskResponse[taskPollingResponseData]
 			if wrapperErr := common.Unmarshal(responseBody, &wrapper); wrapperErr != nil || !wrapper.IsSuccess() {
 				return fmt.Errorf("parseTaskResult failed for task %s: %s", task.TaskID, sanitizeTaskPollingText(parseErr.Error(), privateTaskID))
 			}

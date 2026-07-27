@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -274,16 +275,16 @@ func validateConfigImportBindingChannel(
 }
 
 func validateConfigImportLineCapability(line types.ConfigImportChannelLine, channel *model.Channel) error {
-	secureGroups := map[string]dto.SecureVideoGroup{
-		"secure-discount":   dto.SecureVideoGroupDiscount,
-		"secure-overseas":   dto.SecureVideoGroupOverseas,
-		"secure-enterprise": dto.SecureVideoGroupEnterprise,
+	secureGroups := map[string]relaydto.SecureVideoGroup{
+		"secure-discount":   relaydto.SecureVideoGroupDiscount,
+		"secure-overseas":   relaydto.SecureVideoGroupOverseas,
+		"secure-enterprise": relaydto.SecureVideoGroupEnterprise,
 	}
 	if expectedGroup, secureLine := secureGroups[line.LineRef]; secureLine {
 		if channel.Type != constant.ChannelTypeSecure {
 			return configImportError("BINDING_LINE_CAPABILITY", "line_ref %q requires a Secure channel", line.LineRef)
 		}
-		settings := dto.ChannelOtherSettings{}
+		settings := relaydto.ChannelOtherSettings{}
 		if channel.OtherSettings != "" {
 			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
 				return configImportError("BINDING_LINE_CAPABILITY", "channel %d has invalid Secure settings", channel.Id)

@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -134,7 +135,7 @@ func TestRecordRoutingSelectionFailureUsesProfitAdminDiagnostics(t *testing.T) {
 	})
 
 	RecordRoutingSelectionFailure(c, modelrouting.Seedance20, &ChannelSelectionError{
-		Code:       types.ErrorCodeCompatibleChannelUnavailable,
+		Code:       relaytypes.ErrorCodeCompatibleChannelUnavailable,
 		StatusCode: 503,
 		Err:        errors.New("compatible channel is unavailable"),
 		Diagnostics: []modelrouting.Audit{{

@@ -10,8 +10,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
@@ -50,7 +51,7 @@ type seedanceContentFacts struct {
 	hasDraftTask        bool
 }
 
-func (a *TaskAdaptor) validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+func (a *TaskAdaptor) validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
 	if !strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "application/json") {
 		return nativeTaskError("native ARK task requests must use application/json", "InvalidParameter")
 	}
@@ -419,6 +420,6 @@ func seedanceModelFamily(modelName string) string {
 	}
 }
 
-func nativeTaskError(message, code string) *dto.TaskError {
+func nativeTaskError(message, code string) *taskdto.TaskError {
 	return service.TaskErrorWrapperLocal(fmt.Errorf("%s", message), code, 400)
 }

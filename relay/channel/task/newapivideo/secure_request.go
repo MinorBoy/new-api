@@ -11,7 +11,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 )
 
@@ -171,7 +172,7 @@ func validateSecureRequest(request arkRequest, profile secureRequestProfile, ups
 	return nil
 }
 
-func validateSecureOverseasReferenceVideos(ctx context.Context, request arkRequest) *dto.TaskError {
+func validateSecureOverseasReferenceVideos(ctx context.Context, request arkRequest) *taskdto.TaskError {
 	media := collectSecureMedia(request)
 	if len(media.videos) == 0 {
 		return nil

@@ -82,13 +82,13 @@ export type BuildImportDocumentInput = {
 const V1_CHANNEL_TYPES: Record<string, number> = {
   'CH-4STOKEN': 1,
   'CH-8YES': 1,
-  'CH-CANGYUANSUANLI': 64,
-  'CH-CLMM': 61,
-  'CH-DIMENSIO': 59,
-  'CH-LUCEN': 62,
-  'CH-MEGABYAI': 63,
-  'CH-PAIPU': 65,
-  'CH-SECURE': 66,
+  'CH-CANGYUANSUANLI': 66,
+  'CH-CLMM': 63,
+  'CH-DIMENSIO': 61,
+  'CH-LUCEN': 64,
+  'CH-MEGABYAI': 65,
+  'CH-PAIPU': 67,
+  'CH-SECURE': 68,
 }
 
 function cellText(cell: CellSnapshot | undefined): string {

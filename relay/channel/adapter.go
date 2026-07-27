@@ -4,10 +4,12 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,22 +34,22 @@ type Adaptor interface {
 }
 
 type CostAccountingAdaptor interface {
-	CostCapabilities(info *relaycommon.RelayInfo) types.CostCapabilities
+	CostCapabilities(info *relaycommon.RelayInfo) hosttypes.CostCapabilities
 	ConfirmCostIdentity(info *relaycommon.RelayInfo, finalRequestBody []byte) error
-	NormalizeCostMeter(info *relaycommon.RelayInfo, usage any) (types.CostMeter, error)
-	ClassifyCostOutcome(info *relaycommon.RelayInfo, response *http.Response, requestErr error) types.CostOutcome
+	NormalizeCostMeter(info *relaycommon.RelayInfo, usage any) (hosttypes.CostMeter, error)
+	ClassifyCostOutcome(info *relaycommon.RelayInfo, response *http.Response, requestErr error) hosttypes.CostOutcome
 }
 
 type TaskCostAccountingAdaptor interface {
-	CostCapabilities(info *relaycommon.RelayInfo) types.CostCapabilities
+	CostCapabilities(info *relaycommon.RelayInfo) hosttypes.CostCapabilities
 	ConfirmTaskCostIdentity(info *relaycommon.RelayInfo) error
-	NormalizeTaskCostMeter(task *model.Task, result *relaycommon.TaskInfo) (types.CostMeter, error)
+	NormalizeTaskCostMeter(task *model.Task, result *relaycommon.TaskInfo) (hosttypes.CostMeter, error)
 }
 
 type TaskAdaptor interface {
 	Init(info *relaycommon.RelayInfo)
 
-	ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError
+	ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError
 
 	// ── Billing ──────────────────────────────────────────────────────
 
@@ -80,7 +82,7 @@ type TaskAdaptor interface {
 	BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error)
 
 	DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error)
-	DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, err *dto.TaskError)
+	DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, err *taskdto.TaskError)
 
 	GetModelList() []string
 	GetChannelName() string
@@ -94,13 +96,13 @@ type TaskAdaptor interface {
 // TaskBillingRequestValidator allows a task adaptor to validate pricing
 // dimensions after channel model mapping has resolved the upstream model.
 type TaskBillingRequestValidator interface {
-	ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError
+	ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError
 }
 
 // TaskDurationEstimator is implemented by task adaptors that can provide a
 // validated requested duration for central per-duration billing.
 type TaskDurationEstimator interface {
-	EstimateDurationSeconds(c *gin.Context, info *relaycommon.RelayInfo) (int, *dto.TaskError)
+	EstimateDurationSeconds(c *gin.Context, info *relaycommon.RelayInfo) (int, *taskdto.TaskError)
 }
 
 type OpenAIVideoConverter interface {
@@ -112,5 +114,5 @@ type ArkVideoTaskConverter interface {
 }
 
 type TaskErrorParser interface {
-	ParseTaskError(body []byte, statusCode int) *dto.TaskError
+	ParseTaskError(body []byte, statusCode int) *taskdto.TaskError
 }

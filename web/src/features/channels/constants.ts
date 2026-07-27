@@ -21,6 +21,8 @@ For commercial licensing, please contact support@quantumnous.com
 // All label/name values are i18n keys; use t(value) when displaying.
 // ============================================================================
 
+export const CHANNEL_TYPE_NEW_API = 60
+
 export const CHANNEL_TYPES = {
   0: 'Unknown',
   1: 'OpenAI',
@@ -77,20 +79,22 @@ export const CHANNEL_TYPES = {
   56: 'Replicate',
   57: 'ChatGPT Subscription (Codex)',
   58: 'Advanced Custom',
-  59: 'Dimensio',
-  60: 'NewAPIVideo',
-  61: 'CLMM Mall',
-  62: 'Lucen',
-  63: 'MegaByAI',
-  64: 'Cangyuan',
-  65: 'Paipu',
-  66: 'Secure',
+  59: 'Sub2API',
+  60: 'New API',
+  61: 'Dimensio',
+  62: 'NewAPIVideo',
+  63: 'CLMM Mall',
+  64: 'Lucen',
+  65: 'MegaByAI',
+  66: 'Cangyuan',
+  67: 'Paipu',
+  68: 'Secure',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
-  1, 14, 33, 24, 43, 3, 41, 48, 58, 42, 34, 20, 4, 40, 27, 25, 17, 26, 15, 46,
-  23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 22, 21, 44, 2, 5, 36,
-  50, 51, 52, 53, 54, 55, 56, 59, 60, 61, 62, 63, 64, 65, 66,
+  1, 14, 33, 24, 43, 3, 41, 48, 60, 58, 42, 34, 20, 4, 40, 27, 25, 17, 26, 15,
+  46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22, 21, 44, 2,
+  5, 36, 50, 51, 52, 53, 54, 55, 56, 61, 62, 63, 64, 65, 66, 67, 68,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
@@ -388,43 +392,46 @@ export const FIELD_DESCRIPTIONS = {
 
 export const MODEL_FETCHABLE_TYPES = new Set([
   1, 4, 14, 17, 20, 23, 24, 25, 26, 27, 31, 34, 35, 40, 42, 43, 47, 48, 57, 58,
+  59, 60,
 ])
 
 export const GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES = new Set([
-  2, 5, 36, 50, 51, 52, 54, 59, 60, 61, 62, 63, 64, 65, 66,
+  2, 5, 36, 50, 51, 52, 54, 61, 62, 63, 64, 65, 66, 67, 68,
 ])
 
-export const TASK_ONLY_CHANNEL_TYPES = new Set([59, 60, 61, 62, 63, 64, 65, 66])
+export const TASK_ONLY_CHANNEL_TYPES = new Set([61, 62, 63, 64, 65, 66, 67, 68])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   15: 'Format: APIKey|SecretKey',
   18: 'Format: APPID|APISecret|APIKey',
   22: 'Format: APIKey-AppId, e.g., fastgpt-0sp2gtvfdgyi4k30jwlgwf1i-64f335d84283f05518e9e041',
-  23: 'Format: AppId|SecretId|SecretKey',
+  23: 'Format: TokenHub API Key, or legacy AppId|SecretId|SecretKey',
   33: 'Format: Ak|Sk|Region',
   50: 'Format: AccessKey|SecretKey (or just ApiKey if upstream is New API)',
   51: 'Format: Access Key ID|Secret Access Key',
   57: 'Paste Codex OAuth JSON credential (access_token / refresh_token / account_id)',
-  59: 'Enter the raw API key issued by Dimensio',
-  60: 'Enter the upstream NewAPI video API key',
-  61: 'Enter the raw API key issued by CLMM Mall',
-  62: 'Enter the API key issued by Lucen',
-  63: 'Enter the raw API key issued by MegaByAI',
-  64: 'Enter the raw API key issued by Cangyuan',
-  65: 'Enter the raw API key issued by Paipu',
-  66: 'Enter the API key issued for the selected Secure video group',
+  59: 'Enter API key for this channel',
+  60: 'Enter API key for this channel',
+  61: 'Enter the raw API key issued by Dimensio',
+  62: 'Enter the upstream NewAPI video API key',
+  63: 'Enter the raw API key issued by CLMM Mall',
+  64: 'Enter the API key issued by Lucen',
+  65: 'Enter the raw API key issued by MegaByAI',
+  66: 'Enter the raw API key issued by Cangyuan',
+  67: 'Enter the raw API key issued by Paipu',
+  68: 'Enter the API key issued for the selected Secure video group',
 }
 
 export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
   3: 'For channels added after May 10, 2025, no need to remove "." from model names during deployment',
   8: 'If connecting to upstream One API or New API relay projects, use OpenAI type instead unless you know what you are doing',
   37: 'Dify channels only support chatflow and agent, and agent does not support images',
-  59: 'Dimensio is task-only. Call it through the ARK /api/v3 task API.',
-  60: 'NewAPIVideo is task-only. Call it through /v1/video/generations or the ARK /api/v3 task API.',
-  61: 'CLMM Mall is task-only. Call it through the Ark /api/v3 task API.',
-  62: 'Lucen is task-only. Create separate channels for the fixed-duration key and token-billing key.',
-  63: 'MegaByAI is task-only. Call it through the Ark /api/v3 task API.',
-  64: 'Cangyuan is task-only. Call it through the Ark /api/v3 task API.',
-  65: 'Paipu is task-only. Enable it only after real upstream contract acceptance.',
-  66: 'Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.',
+  61: 'Dimensio is task-only. Call it through the ARK /api/v3 task API.',
+  62: 'NewAPIVideo is task-only. Call it through /v1/video/generations or the ARK /api/v3 task API.',
+  63: 'CLMM Mall is task-only. Call it through the Ark /api/v3 task API.',
+  64: 'Lucen is task-only. Create separate channels for the fixed-duration key and token-billing key.',
+  65: 'MegaByAI is task-only. Call it through the Ark /api/v3 task API.',
+  66: 'Cangyuan is task-only. Call it through the Ark /api/v3 task API.',
+  67: 'Paipu is task-only. Enable it only after real upstream contract acceptance.',
+  68: 'Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.',
 }

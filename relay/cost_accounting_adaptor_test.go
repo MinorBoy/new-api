@@ -12,10 +12,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
@@ -243,7 +244,7 @@ func TestStrictCostAdaptorRejectsSnapshotChangedBeforePrepare(t *testing.T) {
 }
 
 func TestPerRequestProtocolErrorDoesNotConfirmCost(t *testing.T) {
-	fake := &costTransportAdaptor{responseErr: types.NewError(errors.New("invalid upstream response"), types.ErrorCodeBadResponse)}
+	fake := &costTransportAdaptor{responseErr: relaytypes.NewError(errors.New("invalid upstream response"), relaytypes.ErrorCodeBadResponse)}
 	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-cost-protocol-error", fake)
 
 	response, err := wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{}`)))
@@ -358,10 +359,10 @@ type costTransportAdaptor struct {
 	channel.Adaptor
 	called      bool
 	onRequest   func(info *relaycommon.RelayInfo)
-	responseErr *types.NewAPIError
+	responseErr *relaytypes.NewAPIError
 }
 
-func (a *costTransportAdaptor) DoResponse(_ *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (any, *types.NewAPIError) {
+func (a *costTransportAdaptor) DoResponse(_ *gin.Context, _ *http.Response, _ *relaycommon.RelayInfo) (any, *relaytypes.NewAPIError) {
 	return nil, a.responseErr
 }
 

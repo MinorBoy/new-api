@@ -13,11 +13,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -29,7 +30,7 @@ const ChannelName = "NewAPIVideo"
 const megaByAIMediaValidationContextKey = "newapi_video_megabyai_media_validation"
 
 type megaByAIMediaValidation struct {
-	taskErr *dto.TaskError
+	taskErr *taskdto.TaskError
 }
 
 type TaskAdaptor struct {
@@ -96,7 +97,7 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	}
 }
 
-func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
 	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("new-api video requests must use application/json"), "unsupported_media_type", http.StatusUnsupportedMediaType)
@@ -191,7 +192,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return validateOpenAIRequest(c, info, body)
 }
 
-func validateMegaByAIMedia(ctx context.Context, request arkRequest) *dto.TaskError {
+func validateMegaByAIMedia(ctx context.Context, request arkRequest) *taskdto.TaskError {
 	videoURLs := make([]string, 0, 3)
 	audioURLs := make([]string, 0, 3)
 	for _, item := range request.Content {
@@ -235,7 +236,7 @@ func validateMegaByAIMedia(ctx context.Context, request arkRequest) *dto.TaskErr
 // Lucen uses it for mapped-resolution validation and for resolving an omitted Ark
 // duration from capability-routing facts, so provider constraints cannot be bypassed
 // by a client alias or discovered only while building the upstream body.
-func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
 	if a.profileErr != nil {
 		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
 	}
@@ -414,7 +415,7 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 	return channel.DoTaskApiRequest(a, c, info, body)
 }
 
-func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.RelayInfo) (int, *dto.TaskError) {
+func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.RelayInfo) (int, *taskdto.TaskError) {
 	state, err := getRequestState(c)
 	if err != nil {
 		return 0, service.TaskErrorWrapperLocal(err, "invalid_duration", http.StatusBadRequest)
@@ -426,7 +427,7 @@ func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.Rel
 	return int(value.IntPart()), nil
 }
 
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
+func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *taskdto.TaskError) {
 	if resp == nil || resp.Body == nil {
 		return "", nil, service.TaskErrorWrapperLocal(fmt.Errorf("upstream response is empty"), "invalid_response", http.StatusBadGateway)
 	}
@@ -500,7 +501,7 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
-func (a *TaskAdaptor) ParseTaskError(body []byte, statusCode int) *dto.TaskError {
+func (a *TaskAdaptor) ParseTaskError(body []byte, statusCode int) *taskdto.TaskError {
 	var response upstreamErrorEnvelope
 	if err := common.Unmarshal(body, &response); err != nil {
 		return service.TaskErrorWrapper(fmt.Errorf("upstream returned invalid response"), "fail_to_fetch_task", statusCode)

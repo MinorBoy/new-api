@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -82,7 +83,7 @@ func TestCostRoutingAllUncoveredReturnsGenericError(t *testing.T) {
 	channel, apiErr := getChannel(c, costRoutingRelayInfo(), costRoutingRetryParam(c))
 	assert.Nil(t, channel)
 	require.NotNil(t, apiErr)
-	assert.Equal(t, types.ErrorCodeGetChannelFailed, apiErr.GetErrorCode())
+	assert.Equal(t, relaytypes.ErrorCodeGetChannelFailed, apiErr.GetErrorCode())
 
 	message := strings.ToLower(apiErr.Error())
 	for _, forbidden := range []string{"supplier-secret-model", "cost", "price", "rule"} {

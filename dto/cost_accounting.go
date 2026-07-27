@@ -2,6 +2,8 @@ package dto
 
 import (
 	"github.com/QuantumNous/new-api/constant"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/types"
 )
 
@@ -59,8 +61,8 @@ type CostPreviewRequest struct {
 	UserGroup              string                      `json:"user_group" binding:"required"`
 	RelayMode              int                         `json:"relay_mode" binding:"required"`
 	RequestPath            string                      `json:"request_path,omitempty"`
-	Usage                  *Usage                      `json:"usage,omitempty"`
-	TokenMeta              *types.TokenCountMeta       `json:"token_meta,omitempty"`
+	Usage                  *relaydto.Usage             `json:"usage,omitempty"`
+	TokenMeta              *relaytypes.TokenCountMeta  `json:"token_meta,omitempty"`
 	DurationSeconds        *int                        `json:"duration_seconds,omitempty"`
 	ExpressionRequestInput *CostExpressionRequestInput `json:"expression_request_input,omitempty"`
 	CostMode               types.CostMode              `json:"cost_mode" binding:"required"`

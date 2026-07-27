@@ -1380,29 +1380,29 @@ git commit -m "feat: parse channel workbook templates"
 - Create: `web/src/channel-config-converter/__tests__/conflicts.test.ts`
 - Create: `web/src/channel-config-converter/__tests__/hash.test.ts`
 
-- [ ] **Step 1: Write failing deterministic normalization tests**
+- [x] **Step 1: Write failing deterministic normalization tests**
 
 Test whitespace/case/enums, Decimal canonicalization, stable entity order, stable business IDs, entity hashes, payload hash exclusion of filename/generated time/issues/preview, source URL query/fragment removal, credential field/value detection, formula preview mismatch, and two byte-different workbooks with identical authoritative entities producing the same payload hash.
 
-- [ ] **Step 2: Run focused tests and confirm failure**
+- [x] **Step 2: Run focused tests and confirm failure**
 
 Run: `cd web && bun test src/channel-config-converter/__tests__/normalize.test.ts src/channel-config-converter/__tests__/conflicts.test.ts src/channel-config-converter/__tests__/hash.test.ts`
 
 Expected: FAIL because normalization and hashing are absent.
 
-- [ ] **Step 3: Implement Decimal-only authoritative arithmetic**
+- [x] **Step 3: Implement Decimal-only authoritative arithmetic**
 
 Parse every money/rate/multiplier with `Decimal`; reject NaN, Infinity, negative prices, non-positive required multipliers, and excess precision. Canonical strings must satisfy `^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`, remove trailing fractional zeros, and normalize negative zero to `0`.
 
-- [ ] **Step 4: Implement conflict grouping and route blueprints**
+- [x] **Step 4: Implement conflict grouping and route blueprints**
 
 Deduplicate identical scenario contracts while retaining every source ID. Build `cost_variant_key` from structured SKU/resolution or confirmed line identity. Emit `COST_VARIANT_AMBIGUOUS` for conditions that still select multiple prices, never select min/max/last. Generate route blueprints with `enabled: false` and line capability constraints.
 
-- [ ] **Step 5: Implement canonical hashes with Web Crypto**
+- [x] **Step 5: Implement canonical hashes with Web Crypto**
 
 Canonicalize each entity excluding `entity_hash`, hash UTF-8 with `crypto.subtle.digest('SHA-256')`, then hash the canonical object containing authoritative entities and source locations only. Sort arrays by stable business ID before hashing.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run: `cd web && bun test src/channel-config-converter/__tests__/normalize.test.ts src/channel-config-converter/__tests__/conflicts.test.ts src/channel-config-converter/__tests__/hash.test.ts`
 

@@ -109,3 +109,24 @@ test('does not allow navigation while the backend is validating or publishing', 
     false
   )
 })
+
+test('does not block a ready batch for an issue excluded by the backend', () => {
+  const result = deriveWizardState(
+    batch({
+      status: 'ready',
+      allowed_actions: ['publish'],
+      issues: [
+        {
+          id: 3,
+          severity: 'warning',
+          code: 'UNSUPPORTED_VARIANT',
+          message: 'This variant was excluded.',
+          resolution_status: 'excluded',
+        },
+      ],
+    })
+  )
+
+  assert.equal(result.canPublish, true)
+  assert.deepEqual(result.blockingCodes, [])
+})

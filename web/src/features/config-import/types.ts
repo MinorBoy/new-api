@@ -131,21 +131,43 @@ export const configImportBindingSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (
-      (value.action === 'create' || value.action === 'bind') &&
-      value.channel_id === undefined
-    ) {
+    if (value.action === 'skip') {
+      if (value.channel_id !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['channel_id'],
+          message: 'Skipped bindings cannot select a channel',
+        })
+      }
+      if (value.credentials_confirmed) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['credentials_confirmed'],
+          message: 'Skipped bindings cannot confirm credentials',
+        })
+      }
+      if (!value.reason?.trim()) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['reason'],
+          message: 'A reason is required when skipping a binding',
+        })
+      }
+      return
+    }
+
+    if (value.channel_id === undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['channel_id'],
         message: 'A channel is required for this binding action',
       })
     }
-    if (value.action === 'skip' && value.reason?.trim() === '') {
+    if (value.reason !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['reason'],
-        message: 'A reason is required when skipping a binding',
+        message: 'Bound channels cannot include a skip reason',
       })
     }
   })
@@ -163,14 +185,14 @@ export const configImportUploadRequestSchema = z.object({
 
 export const configImportBindingsRequestSchema = z
   .object({
-    bindings: z.array(configImportBindingSchema),
+    bindings: z.array(configImportBindingSchema).min(1),
   })
   .strict()
 
 export const configImportResolutionsRequestSchema = z
   .object({
     batch_ref: z.string().optional(),
-    resolutions: z.array(configImportResolutionSchema),
+    resolutions: z.array(configImportResolutionSchema).min(1),
   })
   .strict()
 

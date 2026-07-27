@@ -54,6 +54,7 @@ function openBlockingCodes(batch: ConfigImportBatchDetail): string[] {
         .filter(
           (issue) =>
             issue.resolution_status !== 'resolved' &&
+            issue.resolution_status !== 'excluded' &&
             (issue.severity === 'warning' || issue.severity === 'error')
         )
         .map((issue) => issue.code)

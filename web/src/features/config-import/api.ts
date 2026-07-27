@@ -11,8 +11,12 @@ import { api } from '@/lib/api'
 import {
   configImportBatchDetailResponseSchema,
   configImportBatchPageResponseSchema,
+  configImportBindingsRequestSchema,
   configImportListParamsSchema,
   configImportPublishResponseSchema,
+  configImportResolutionsRequestSchema,
+  configImportStageRequestSchema,
+  configImportUploadRequestSchema,
   type ConfigImportBatchDetail,
   type ConfigImportBatchPage,
   type ConfigImportBindingsRequest,
@@ -30,7 +34,8 @@ function parseDetail(responseData: unknown): ConfigImportBatchDetail {
 export async function uploadConfigImport(
   document: unknown
 ): Promise<ConfigImportBatchDetail> {
-  const response = await api.post(`${CONFIG_IMPORT_PATH}`, { document })
+  const request = configImportUploadRequestSchema.parse({ document })
+  const response = await api.post(`${CONFIG_IMPORT_PATH}`, request)
   return parseDetail(response.data)
 }
 
@@ -53,9 +58,10 @@ export async function saveConfigImportBindings(
   id: number,
   request: ConfigImportBindingsRequest
 ): Promise<ConfigImportBatchDetail> {
+  const payload = configImportBindingsRequestSchema.parse(request)
   const response = await api.put(
     `${CONFIG_IMPORT_PATH}/${id}/bindings`,
-    request
+    payload
   )
   return parseDetail(response.data)
 }
@@ -64,9 +70,10 @@ export async function saveConfigImportResolutions(
   id: number,
   request: ConfigImportResolutionsRequest
 ): Promise<ConfigImportBatchDetail> {
+  const payload = configImportResolutionsRequestSchema.parse(request)
   const response = await api.put(
     `${CONFIG_IMPORT_PATH}/${id}/resolutions`,
-    request
+    payload
   )
   return parseDetail(response.data)
 }
@@ -75,7 +82,8 @@ export async function stageConfigImport(
   id: number,
   request: ConfigImportStageRequest = {}
 ): Promise<ConfigImportBatchDetail> {
-  const response = await api.post(`${CONFIG_IMPORT_PATH}/${id}/stage`, request)
+  const payload = configImportStageRequestSchema.parse(request)
+  const response = await api.post(`${CONFIG_IMPORT_PATH}/${id}/stage`, payload)
   return parseDetail(response.data)
 }
 

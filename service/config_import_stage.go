@@ -2,16 +2,23 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -614,4 +621,1023 @@ func configImportItemDependsOnLine(
 	default:
 		return false, nil
 	}
+}
+
+// DecodeConfigImportResolutionRequest decodes the small, credential-free
+// conflict decision contract used by the import wizard.
+func DecodeConfigImportResolutionRequest(reader io.Reader) (*dto.ConfigImportResolutionRequest, error) {
+	if reader == nil {
+		return nil, configImportError("SCHEMA_RESOLUTION_REQUEST", "resolution request is required")
+	}
+	var request dto.ConfigImportResolutionRequest
+	if err := common.DecodeJsonStrict(reader, &request); err != nil {
+		return nil, configImportError("SCHEMA_RESOLUTION_REQUEST", "invalid resolution request: %v", err)
+	}
+	if err := validateConfigImportResolutionInputs(request.Resolutions); err != nil {
+		return nil, err
+	}
+	return &request, nil
+}
+
+func validateConfigImportResolutionInputs(resolutions []dto.ConfigImportResolutionInput) error {
+	if len(resolutions) == 0 {
+		return configImportError("SCHEMA_RESOLUTION_REQUEST", "resolutions are required")
+	}
+	seen := make(map[string]struct{}, len(resolutions))
+	for index := range resolutions {
+		resolution := &resolutions[index]
+		resolution.ItemBusinessID = strings.TrimSpace(resolution.ItemBusinessID)
+		if resolution.ItemBusinessID == "" {
+			return configImportError("SCHEMA_RESOLUTION_ITEM", "resolutions[%d].item_business_id is required", index)
+		}
+		if _, exists := seen[resolution.ItemBusinessID]; exists {
+			return configImportError("SCHEMA_RESOLUTION_ITEM", "resolutions[%d].item_business_id is duplicated", index)
+		}
+		seen[resolution.ItemBusinessID] = struct{}{}
+		switch resolution.Action {
+		case types.ConfigImportResolutionActionUseImport,
+			types.ConfigImportResolutionActionKeepExisting,
+			types.ConfigImportResolutionActionExclude,
+			types.ConfigImportResolutionActionSplitLine,
+			types.ConfigImportResolutionActionBindVariant:
+		default:
+			return configImportError("SCHEMA_RESOLUTION_ACTION", "resolutions[%d].action is invalid", index)
+		}
+	}
+	return nil
+}
+
+// UpdateConfigImportResolutions persists normalized conflict decisions. The
+// decision is deliberately kept separate from the authoritative item so the
+// original import remains auditable and can be staged repeatedly.
+func UpdateConfigImportResolutions(
+	ctx context.Context,
+	adminID int,
+	batchID int64,
+	resolutions []dto.ConfigImportResolutionInput,
+) (*dto.ConfigImportBatchDetail, error) {
+	if adminID <= 0 {
+		return nil, configImportError("SCHEMA_ADMIN", "admin ID is required")
+	}
+	if batchID <= 0 {
+		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
+	}
+	if err := validateConfigImportResolutionInputs(resolutions); err != nil {
+		return nil, err
+	}
+	resolutions = append([]dto.ConfigImportResolutionInput(nil), resolutions...)
+	sort.Slice(resolutions, func(left, right int) bool {
+		return resolutions[left].ItemBusinessID < resolutions[right].ItemBusinessID
+	})
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch model.ConfigImportBatch
+		if err := tx.Where("id = ?", batchID).First(&batch).Error; err != nil {
+			return err
+		}
+		status := types.ConfigImportBatchStatus(batch.Status)
+		if status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged {
+			return configImportError("RESOLUTION_BATCH_STATUS", "batch %d is not accepting resolutions", batchID)
+		}
+		for _, resolution := range resolutions {
+			var item model.ConfigImportItem
+			if err := tx.Where("batch_id = ? AND business_id = ?", batchID, resolution.ItemBusinessID).First(&item).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return configImportError("RESOLUTION_ITEM_NOT_FOUND", "item %q does not belong to batch %d", resolution.ItemBusinessID, batchID)
+				}
+				return err
+			}
+			decisionJSON, err := common.Marshal(map[string]string{"action": string(resolution.Action)})
+			if err != nil {
+				return err
+			}
+			if err := tx.Create(&model.ConfigImportResolution{
+				BatchID: batchID, ItemBusinessID: resolution.ItemBusinessID, Action: string(resolution.Action),
+				DecisionJSON: string(decisionJSON), CreatedBy: adminID,
+			}).Error; err != nil {
+				return err
+			}
+
+			updates := map[string]any{"updated_at": common.GetTimestamp()}
+			switch resolution.Action {
+			case types.ConfigImportResolutionActionExclude:
+				updates["state"] = string(types.ConfigImportItemStateExcluded)
+				updates["exclusion_reason"] = "excluded by structured resolution"
+				updates["conflict_reason"] = ""
+			case types.ConfigImportResolutionActionKeepExisting:
+				updates["state"] = string(types.ConfigImportItemStateUnchanged)
+				updates["conflict_reason"] = "kept existing configuration"
+				updates["exclusion_reason"] = ""
+			default:
+				updates["state"] = string(types.ConfigImportItemStateChanged)
+				updates["conflict_reason"] = ""
+				updates["exclusion_reason"] = ""
+			}
+			if err := tx.Model(&model.ConfigImportItem{}).Where("id = ?", item.ID).Updates(updates).Error; err != nil {
+				return err
+			}
+			issueState := "resolved"
+			if resolution.Action == types.ConfigImportResolutionActionExclude {
+				issueState = "excluded"
+			}
+			if err := tx.Model(&model.ConfigImportIssue{}).
+				Where("batch_id = ? AND business_id = ? AND severity = ?", batchID, resolution.ItemBusinessID, string(types.ConfigImportIssueSeverityWarning)).
+				Updates(map[string]any{"resolution_status": issueState, "updated_at": common.GetTimestamp()}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return GetConfigImportBatch(ctx, batchID)
+}
+
+// ConfigImportBaseline is a deterministic optimistic-concurrency snapshot.
+// The hash covers only serializable, active configuration state.
+type ConfigImportBaseline struct {
+	Hash            string            `json:"hash"`
+	CostRules       map[string]string `json:"cost_rules"`
+	Options         map[string]string `json:"options"`
+	ModelMappings   map[string]string `json:"model_mappings"`
+	RoutingPolicies map[string]string `json:"routing_policies"`
+}
+
+func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBaseline, error) {
+	_ = batchID
+	if db == nil {
+		return nil, errors.New("config import baseline database is required")
+	}
+	baseline := &ConfigImportBaseline{
+		CostRules:       map[string]string{},
+		Options:         map[string]string{},
+		ModelMappings:   map[string]string{},
+		RoutingPolicies: map[string]string{},
+	}
+	if db.Migrator().HasTable(&model.ChannelModelCostRule{}) {
+		var rules []model.ChannelModelCostRule
+		if err := db.Where("status = ?", types.CostRuleActive).
+			Order("channel_id ASC, billable_upstream_model ASC, cost_variant_key ASC, version ASC, id ASC").Find(&rules).Error; err != nil {
+			return nil, err
+		}
+		for _, rule := range rules {
+			key := fmt.Sprintf("%d|%s|%s|%d", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey, rule.Version)
+			encoded, err := common.Marshal(rule)
+			if err != nil {
+				return nil, err
+			}
+			baseline.CostRules[key] = string(encoded)
+		}
+	}
+	if db.Migrator().HasTable(&model.Option{}) {
+		var options []model.Option
+		if err := db.Order("key ASC").Find(&options).Error; err != nil {
+			return nil, err
+		}
+		for _, option := range options {
+			if configImportBaselineOptionAllowed(option.Key) {
+				baseline.Options[option.Key] = option.Value
+			}
+		}
+	}
+	if db.Migrator().HasTable(&model.Ability{}) {
+		var abilities []model.Ability
+		if err := db.Order("channel_id ASC, model ASC, group ASC").Find(&abilities).Error; err != nil {
+			return nil, err
+		}
+		for _, ability := range abilities {
+			key := fmt.Sprintf("%d|%s|%s", ability.ChannelId, ability.Group, ability.Model)
+			encoded, err := common.Marshal(ability)
+			if err != nil {
+				return nil, err
+			}
+			baseline.ModelMappings[key] = string(encoded)
+		}
+	}
+	if db.Migrator().HasTable(&model.RoutingPolicy{}) {
+		var policies []model.RoutingPolicy
+		if err := db.Order("group_name ASC, model ASC, id ASC").Find(&policies).Error; err != nil {
+			return nil, err
+		}
+		if db.Migrator().HasTable(&model.RouteTarget{}) && len(policies) > 0 {
+			policyIDs := make([]int, 0, len(policies))
+			for _, policy := range policies {
+				policyIDs = append(policyIDs, policy.ID)
+			}
+			var targets []model.RouteTarget
+			if err := db.Where("policy_id IN ?", policyIDs).Order("policy_id ASC, target_priority ASC, id ASC").Find(&targets).Error; err != nil {
+				return nil, err
+			}
+			byPolicy := make(map[int][]model.RouteTarget, len(policies))
+			for _, target := range targets {
+				byPolicy[target.PolicyID] = append(byPolicy[target.PolicyID], target)
+			}
+			for index := range policies {
+				policies[index].Targets = byPolicy[policies[index].ID]
+			}
+		}
+		for _, policy := range policies {
+			encoded, err := common.Marshal(policy)
+			if err != nil {
+				return nil, err
+			}
+			baseline.RoutingPolicies[fmt.Sprintf("%s|%s", policy.GroupName, policy.Model)] = string(encoded)
+		}
+	}
+	encoded, err := common.Marshal(struct {
+		CostRules       map[string]string `json:"cost_rules"`
+		Options         map[string]string `json:"options"`
+		ModelMappings   map[string]string `json:"model_mappings"`
+		RoutingPolicies map[string]string `json:"routing_policies"`
+	}{baseline.CostRules, baseline.Options, baseline.ModelMappings, baseline.RoutingPolicies})
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(encoded)
+	baseline.Hash = fmt.Sprintf("%x", digest)
+	return baseline, nil
+}
+
+// CaptureConfigImportBaseline is the exported form used by publish-time
+// stale checks. It intentionally returns the same deterministic snapshot that
+// staging persisted on the batch.
+func CaptureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBaseline, error) {
+	return captureConfigImportBaseline(db, batchID)
+}
+
+func configImportBaselineOptionAllowed(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	for _, sensitive := range []string{"key", "secret", "token", "password", "cookie", "authorization", "credential"} {
+		if strings.Contains(lower, sensitive) {
+			return false
+		}
+	}
+	switch key {
+	case "ModelPrice", "ModelRatio", "CompletionRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio", "GroupRatio", "GroupGroupRatio", "UserUsableGroups":
+		return true
+	default:
+		return strings.HasPrefix(lower, "billing_setting.")
+	}
+}
+
+type configImportStageIssue struct {
+	Code       string
+	Severity   types.ConfigImportIssueSeverity
+	Message    string
+	BusinessID string
+}
+
+// StageConfigImportBatch materializes only inactive cost drafts. Sale,
+// mapping, and routing entities remain canonical proposals in import items
+// until the publish transaction reviews and applies them.
+func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*dto.ConfigImportBatchDetail, error) {
+	if adminID <= 0 {
+		return nil, configImportError("SCHEMA_ADMIN", "admin ID is required")
+	}
+	if batchID <= 0 {
+		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch model.ConfigImportBatch
+		if err := tx.Where("id = ?", batchID).First(&batch).Error; err != nil {
+			return err
+		}
+		if status := types.ConfigImportBatchStatus(batch.Status); status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged {
+			return configImportError("STAGE_BATCH_STATUS", "batch %d is not ready for staging", batchID)
+		}
+
+		var items []model.ConfigImportItem
+		if err := tx.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		var bindings []model.ConfigImportBinding
+		if tx.Migrator().HasTable(&model.ConfigImportBinding{}) {
+			if err := tx.Where("batch_id = ?", batchID).Order("line_ref ASC").Find(&bindings).Error; err != nil {
+				return err
+			}
+		}
+		lineChannels := make(map[string]int, len(bindings))
+		skippedLines := make(map[string]bool, len(bindings))
+		for _, binding := range bindings {
+			if binding.Action == string(types.ConfigImportBindingActionSkip) {
+				skippedLines[binding.LineRef] = true
+				continue
+			}
+			if binding.ChannelID != nil {
+				lineChannels[binding.LineRef] = *binding.ChannelID
+			}
+		}
+
+		issues := make([]configImportStageIssue, 0)
+		for _, item := range items {
+			if item.EntityType == "channel_lines" && item.State != string(types.ConfigImportItemStateExcluded) {
+				var line types.ConfigImportChannelLine
+				if err := common.UnmarshalJsonStr(item.CanonicalJSON, &line); err != nil {
+					return err
+				}
+				if !skippedLines[line.LineRef] && lineChannels[line.LineRef] <= 0 {
+					issues = append(issues, configImportStageIssue{Code: "CHANNEL_LINE_UNBOUND", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: fmt.Sprintf("line %q is not bound", line.LineRef)})
+				}
+			}
+		}
+		generatedIssues, err := stageConfigImportUnresolvedVariants(tx, items)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, generatedIssues...)
+		generatedIssues, err = stageConfigImportCostRules(tx, items, lineChannels, adminID)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, generatedIssues...)
+		generatedIssues, err = stageConfigImportProposals(tx, items)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, generatedIssues...)
+		if err := persistConfigImportStageIssues(tx, batchID, issues); err != nil {
+			return err
+		}
+		baseline, err := captureConfigImportBaseline(tx, batchID)
+		if err != nil {
+			return err
+		}
+		baselineJSON, err := common.Marshal(baseline)
+		if err != nil {
+			return err
+		}
+
+		var allIssues []model.ConfigImportIssue
+		if err := tx.Where("batch_id = ?", batchID).Find(&allIssues).Error; err != nil {
+			return err
+		}
+		ready := true
+		for _, issue := range allIssues {
+			if issue.Severity == string(types.ConfigImportIssueSeverityError) ||
+				(issue.Severity == string(types.ConfigImportIssueSeverityWarning) && issue.ResolutionStatus != "resolved" && issue.ResolutionStatus != "excluded") {
+				ready = false
+				break
+			}
+		}
+		for _, item := range items {
+			if item.State == string(types.ConfigImportItemStateConflict) {
+				ready = false
+			}
+		}
+		nextStatus := types.ConfigImportBatchStatusStaged
+		if ready {
+			nextStatus = types.ConfigImportBatchStatusReady
+		}
+		return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
+			"status": string(nextStatus), "baseline_json": string(baselineJSON), "updated_at": common.GetTimestamp(),
+		}).Error
+	}); err != nil {
+		return nil, err
+	}
+	return GetConfigImportBatch(ctx, batchID)
+}
+
+// StageConfigImport is retained as a concise alias for API/controller code.
+func StageConfigImport(ctx context.Context, adminID int, batchID int64) (*dto.ConfigImportBatchDetail, error) {
+	return StageConfigImportBatch(ctx, adminID, batchID)
+}
+
+func stageConfigImportUnresolvedVariants(db *gorm.DB, items []model.ConfigImportItem) ([]configImportStageIssue, error) {
+	issues := make([]configImportStageIssue, 0)
+	for index := range items {
+		item := &items[index]
+		if item.EntityType != "unresolved_variants" || item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateChanged) || item.State == string(types.ConfigImportItemStateUnchanged) {
+			continue
+		}
+		var variant types.ConfigImportUnresolvedVariant
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &variant); err != nil {
+			return issues, err
+		}
+		if variant.Excluded != nil && *variant.Excluded {
+			item.State = string(types.ConfigImportItemStateExcluded)
+			item.ExclusionReason = "excluded by import document"
+			if err := persistConfigImportItemState(db, item); err != nil {
+				return issues, err
+			}
+			continue
+		}
+		item.State = string(types.ConfigImportItemStateConflict)
+		item.ConflictReason = "cost variant requires a structured resolution"
+		issues = append(issues, configImportStageIssue{Code: "COST_VARIANT_AMBIGUOUS", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: item.ConflictReason})
+		if err := persistConfigImportItemState(db, item); err != nil {
+			return issues, err
+		}
+	}
+	return issues, nil
+}
+
+func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lineChannels map[string]int, adminID int) ([]configImportStageIssue, error) {
+	issues := make([]configImportStageIssue, 0)
+	sorted := make([]*model.ConfigImportItem, 0)
+	for index := range items {
+		if items[index].EntityType == "cost_rule_drafts" && items[index].State != string(types.ConfigImportItemStateExcluded) {
+			sorted = append(sorted, &items[index])
+		}
+	}
+	sort.Slice(sorted, func(left, right int) bool { return sorted[left].BusinessID < sorted[right].BusinessID })
+	merged := make(map[string]struct {
+		id       int
+		json     string
+		scenario string
+	}, len(sorted))
+	for _, item := range sorted {
+		if item.MaterializedID != nil && *item.MaterializedID > 0 {
+			continue
+		}
+		var draft types.ConfigImportCostRuleDraft
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+			return issues, err
+		}
+		channelID := lineChannels[draft.LineRef]
+		if channelID <= 0 {
+			item.State = string(types.ConfigImportItemStateConflict)
+			item.ConflictReason = "channel line is not bound"
+			issues = append(issues, configImportStageIssue{Code: "CHANNEL_LINE_UNBOUND", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: item.ConflictReason})
+			if err := persistConfigImportItemState(db, item); err != nil {
+				return issues, err
+			}
+			continue
+		}
+		config, err := configImportCostRuleConfig(draft)
+		if err != nil {
+			item.State = string(types.ConfigImportItemStateConflict)
+			item.ConflictReason = err.Error()
+			if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+				return issues, persistErr
+			}
+			continue
+		}
+		normalized, err := NormalizeCostRuleConfig(types.CostMode(draft.CostMode), config)
+		if err != nil {
+			item.State = string(types.ConfigImportItemStateConflict)
+			item.ConflictReason = err.Error()
+			if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+				return issues, persistErr
+			}
+			continue
+		}
+		configJSON, err := common.Marshal(normalized)
+		if err != nil {
+			return issues, err
+		}
+		if configImportCostNormalizationMismatch(draft, normalized) {
+			issues = append(issues, configImportStageIssue{Code: "COST_NORMALIZATION_MISMATCH", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: "provided normalized USD price differs from server recomputation"})
+		}
+		key := fmt.Sprintf("%d|%s|%s", channelID, draft.UpstreamModel, draft.CostVariantKey)
+		if previous, ok := merged[key]; ok {
+			if previous.json == string(configJSON) && isNoVideoWithVideoPair(previous.scenario, draft.Scenario) {
+				item.MaterializedID = &previous.id
+				item.MaterializedType = "cost_rule_draft"
+				item.State = string(types.ConfigImportItemStateUnchanged)
+				if err := persistConfigImportItemState(db, item); err != nil {
+					return issues, err
+				}
+				continue
+			}
+			item.State = string(types.ConfigImportItemStateConflict)
+			item.ConflictReason = "multiple cost contracts share one channel/model/variant key"
+			issues = append(issues, configImportStageIssue{Code: "COST_VARIANT_AMBIGUOUS", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: item.ConflictReason})
+			if err := persistConfigImportItemState(db, item); err != nil {
+				return issues, err
+			}
+			continue
+		}
+		var latest model.ChannelModelCostRule
+		if err := db.Where("channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ?", channelID, draft.UpstreamModel, draft.CostVariantKey).Order("version DESC").First(&latest).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return issues, err
+		}
+		rule := &model.ChannelModelCostRule{
+			ChannelID: channelID, BillableUpstreamModel: strings.TrimSpace(draft.UpstreamModel), CostVariantKey: draft.CostVariantKey,
+			Version: latest.Version + 1, Status: string(types.CostRuleDraft), CostMode: draft.CostMode, SchemaVersion: 1,
+			ConfigJSON: string(configJSON), Source: "config_import", Note: strings.TrimSpace(draft.Scenario), CreatedBy: adminID,
+		}
+		if err := model.CreateCostRuleDraftWithTx(db, rule); err != nil {
+			return issues, err
+		}
+		id := int(rule.ID)
+		item.MaterializedID = &id
+		item.MaterializedType = "cost_rule_draft"
+		item.State = string(types.ConfigImportItemStateChanged)
+		merged[key] = struct {
+			id       int
+			json     string
+			scenario string
+		}{id: id, json: string(configJSON), scenario: draft.Scenario}
+		if err := persistConfigImportItemState(db, item); err != nil {
+			return issues, err
+		}
+	}
+	return issues, nil
+}
+
+func isNoVideoWithVideoPair(left, right string) bool {
+	return (left == "no_video" && right == "with_video") || (left == "with_video" && right == "no_video")
+}
+
+func configImportCostNormalizationMismatch(draft types.ConfigImportCostRuleDraft, normalized types.CostRuleConfigV1) bool {
+	for _, values := range [][2]*string{
+		{draft.NormalizedUSDUnitPrice, normalized.NormalizedUSDPrices.UnitPrice},
+		{draft.NormalizedUSDPricePerSecond, normalized.NormalizedUSDPrices.PricePerSecond},
+		{draft.NormalizedUSDInputPerMillion, normalized.NormalizedUSDPrices.InputPerMillion},
+		{draft.NormalizedUSDOutputPerMillion, normalized.NormalizedUSDPrices.OutputPerMillion},
+		{draft.NormalizedUSDCompletionPerMillion, normalized.NormalizedUSDPrices.CompletionPerMillion},
+		{draft.NormalizedUSDTotalPerMillion, normalized.NormalizedUSDPrices.TotalPerMillion},
+	} {
+		if values[0] == nil {
+			continue
+		}
+		if values[1] == nil {
+			return true
+		}
+		provided, providedErr := decimal.NewFromString(strings.TrimSpace(*values[0]))
+		recomputed, recomputedErr := decimal.NewFromString(strings.TrimSpace(*values[1]))
+		if providedErr != nil || recomputedErr != nil || !provided.Equal(recomputed) {
+			return true
+		}
+	}
+	return false
+}
+
+func persistConfigImportItemState(db *gorm.DB, item *model.ConfigImportItem) error {
+	return db.Model(&model.ConfigImportItem{}).Where("id = ?", item.ID).Updates(map[string]any{
+		"state": item.State, "materialized_type": item.MaterializedType, "materialized_id": item.MaterializedID,
+		"conflict_reason": item.ConflictReason, "exclusion_reason": item.ExclusionReason, "canonical_json": item.CanonicalJSON,
+		"updated_at": common.GetTimestamp(),
+	}).Error
+}
+
+func configImportCostRuleConfig(draft types.ConfigImportCostRuleDraft) (types.CostRuleConfigV1, error) {
+	mode := types.CostMode(strings.TrimSpace(draft.CostMode))
+	if mode == "" {
+		return types.CostRuleConfigV1{}, errors.New("cost mode is required")
+	}
+	config := types.CostRuleConfigV1{
+		Currency: draft.Currency, BillingMultiplier: pointerStringValue(draft.BillingMultiplier),
+		PurchaseDiscountRatio: pointerStringValue(draft.PurchaseDiscountRatio), RechargeExchangeRatio: pointerStringValue(draft.RechargeExchangeRatio),
+		FeeRate: pointerStringValue(draft.FeeRate), CurrencyToUSDRate: pointerStringValue(draft.CurrencyToUSDRate),
+		UnitPrice: draft.UnitPrice, PricePerSecond: draft.PricePerSecond, InputPerMillion: draft.InputPerMillion,
+		OutputPerMillion: draft.OutputPerMillion, CompletionPerMillion: draft.CompletionPerMillion, TotalPerMillion: draft.TotalPerMillion,
+		ZeroCostReason: draft.ZeroCostReason, ChargeEvent: types.CostChargeEvent(draft.ChargeEvent), MeterSource: types.CostMeterSource(draft.MeterSource), TokenMode: types.CostTokenMode(draft.TokenMode),
+	}
+	if mode == types.CostModeFree && config.ZeroCostReason == "" {
+		config.ZeroCostReason = "config_import"
+	}
+	if config.ChargeEvent == "" {
+		if mode == types.CostModePerDuration {
+			config.ChargeEvent = types.CostChargeTaskSucceeded
+		} else {
+			config.ChargeEvent = types.CostChargeResponseSucceeded
+		}
+	}
+	if config.MeterSource == "" {
+		if mode == types.CostModePerDuration {
+			config.MeterSource = types.CostMeterValidatedRequest
+		} else if mode == types.CostModePerToken {
+			config.MeterSource = types.CostMeterUpstreamUsage
+		}
+	}
+	if mode == types.CostModePerToken && config.TokenMode == "" {
+		switch {
+		case config.InputPerMillion != nil || config.OutputPerMillion != nil:
+			config.TokenMode = types.CostTokenModeInputOutput
+		case config.CompletionPerMillion != nil:
+			config.TokenMode = types.CostTokenModeCompletion
+		default:
+			config.TokenMode = types.CostTokenModeTotal
+		}
+	}
+	return config, nil
+}
+
+func pointerStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]configImportStageIssue, error) {
+	issues := make([]configImportStageIssue, 0)
+	costBySKU, err := configImportCostBySKU(items)
+	if err != nil {
+		return issues, err
+	}
+	canonicalModelsBySKU, err := configImportCanonicalModelsBySKU(items)
+	if err != nil {
+		return issues, err
+	}
+	for index := range items {
+		item := &items[index]
+		if item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		switch item.EntityType {
+		case "sale_proposals":
+			var proposal types.ConfigImportSaleProposal
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &proposal); err != nil {
+				return issues, err
+			}
+			cost := costBySKU[proposal.ModelSKURef]
+			if cost == "" {
+				cost = "0"
+			}
+			recomputed, saleIssues, err := recomputeConfigImportSaleProposal(proposal, cost)
+			if err != nil {
+				item.State = string(types.ConfigImportItemStateConflict)
+				item.ConflictReason = err.Error()
+				if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+					return issues, persistErr
+				}
+				continue
+			}
+			for _, issue := range saleIssues {
+				issues = append(issues, configImportStageIssue{Code: issue.Code, Severity: types.ConfigImportIssueSeverity(issue.Severity), BusinessID: item.BusinessID, Message: issue.Message})
+			}
+			if recomputed.BillingExpr != "" {
+				if _, err := billingexpr.CompileFromCache(recomputed.BillingExpr); err != nil {
+					item.State = string(types.ConfigImportItemStateConflict)
+					item.ConflictReason = "PRICING_BILLING_EXPR_INVALID: " + err.Error()
+					if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+						return issues, persistErr
+					}
+					continue
+				}
+				if err := billing_setting.SmokeTestExpr(recomputed.BillingExpr); err != nil {
+					item.State = string(types.ConfigImportItemStateConflict)
+					item.ConflictReason = "PRICING_BILLING_EXPR_INVALID: " + err.Error()
+					if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+						return issues, persistErr
+					}
+					continue
+				}
+			}
+			if recomputed.DurationPrice != nil {
+				if _, err := configImportDurationPrice(*recomputed.DurationPrice); err != nil {
+					item.State = string(types.ConfigImportItemStateConflict)
+					item.ConflictReason = "PRICING_DURATION_INVALID"
+					if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+						return issues, persistErr
+					}
+					continue
+				}
+			}
+			if scopeIssue := validateConfigImportPricingGroupScope(recomputed); scopeIssue != nil {
+				issues = append(issues, configImportStageIssue{Code: scopeIssue.Code, Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: scopeIssue.Message})
+			}
+			optionPatches, err := configImportSaleOptionPatches(recomputed, canonicalModelsBySKU[recomputed.ModelSKURef])
+			if err != nil {
+				item.State = string(types.ConfigImportItemStateConflict)
+				item.ConflictReason = err.Error()
+				if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+					return issues, persistErr
+				}
+				continue
+			}
+			if err := updateConfigImportItemProposal(db, item, configImportStagedSaleProposal{Proposal: recomputed, OptionPatches: optionPatches}, map[string]any{"kind": "sale", "status": "recomputed"}); err != nil {
+				return issues, err
+			}
+		case "model_mappings":
+			if err := updateConfigImportItemProposal(db, item, nil, map[string]any{"kind": "model_mapping", "status": "proposal"}); err != nil {
+				return issues, err
+			}
+		case "route_blueprints":
+			var blueprint types.ConfigImportRouteBlueprint
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+				return issues, err
+			}
+			if blueprint.MergeMode == types.ConfigImportRouteMergeModeSkip {
+				item.State = string(types.ConfigImportItemStateExcluded)
+				item.ExclusionReason = "route merge mode skip"
+				if err := persistConfigImportItemState(db, item); err != nil {
+					return issues, err
+				}
+				continue
+			}
+			if blueprint.MergeMode == "" {
+				blueprint.MergeMode = types.ConfigImportRouteMergeModeMerge
+			}
+			if err := updateConfigImportItemProposal(db, item, blueprint, map[string]any{"kind": "route", "merge_mode": blueprint.MergeMode, "enabled": false}); err != nil {
+				return issues, err
+			}
+		}
+	}
+	return issues, nil
+}
+
+type configImportStagedSaleProposal struct {
+	Proposal      types.ConfigImportSaleProposal `json:"proposal"`
+	OptionPatches map[string]any                 `json:"option_patches"`
+}
+
+func configImportCanonicalModelsBySKU(items []model.ConfigImportItem) (map[string]string, error) {
+	models := make(map[string]string)
+	for _, item := range items {
+		if item.EntityType != "model_mappings" {
+			continue
+		}
+		var mapping types.ConfigImportModelMapping
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
+			return nil, err
+		}
+		if existing, found := models[mapping.SKURef]; !found || mapping.CanonicalModel < existing {
+			models[mapping.SKURef] = mapping.CanonicalModel
+		}
+	}
+	return models, nil
+}
+
+func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, canonicalModel string) (map[string]any, error) {
+	canonicalModel = strings.TrimSpace(canonicalModel)
+	if canonicalModel == "" {
+		canonicalModel = proposal.ModelSKURef
+	}
+	patches := make(map[string]any)
+	if proposal.BillingExpr != "" {
+		patches["billing_setting.billing_mode"] = map[string]string{canonicalModel: billing_setting.BillingModeTieredExpr}
+		patches["billing_setting.billing_expr"] = map[string]string{canonicalModel: proposal.BillingExpr}
+		return patches, nil
+	}
+	if proposal.DurationPrice != nil {
+		durationPrice, err := configImportDurationPrice(*proposal.DurationPrice)
+		if err != nil {
+			return nil, err
+		}
+		patches["billing_setting.billing_mode"] = map[string]string{canonicalModel: billing_setting.BillingModePerDuration}
+		patches["billing_setting.duration_price"] = map[string]types.DurationPrice{canonicalModel: durationPrice}
+		return patches, nil
+	}
+	price := proposal.UnitPrice
+	if price == nil {
+		price = proposal.PricePerUnit
+	}
+	if price == nil {
+		for _, candidate := range []*string{proposal.InputPerMillion, proposal.OutputPerMillion, proposal.CompletionPerMillion, proposal.TotalPerMillion} {
+			if candidate != nil {
+				price = candidate
+				break
+			}
+		}
+	}
+	if price != nil {
+		parsed, err := decimal.NewFromString(*price)
+		if err != nil {
+			return nil, configImportError("PRICING_DECIMAL", "price is not a decimal")
+		}
+		asFloat, _ := parsed.Float64()
+		patches["ModelPrice"] = map[string]float64{canonicalModel: asFloat}
+	}
+	return patches, nil
+}
+
+func configImportDurationPrice(proposal types.DurationPriceProposal) (types.DurationPrice, error) {
+	price, err := decimal.NewFromString(strings.TrimSpace(proposal.Price))
+	if err != nil || price.IsNegative() {
+		return types.DurationPrice{}, configImportError("PRICING_DECIMAL", "duration price is not a non-negative decimal")
+	}
+	asFloat, _ := price.Float64()
+	durationPrice := types.DurationPrice{
+		Price:                  asFloat,
+		Unit:                   strings.TrimSpace(proposal.Unit),
+		RoundingStepSeconds:    proposal.RoundingStepSeconds,
+		MinimumDurationSeconds: proposal.MinimumDurationSeconds,
+	}
+	if err := durationPrice.Validate(relaycommon.MaxTaskDurationSeconds); err != nil {
+		return types.DurationPrice{}, configImportError("PRICING_DURATION_INVALID", "%v", err)
+	}
+	return durationPrice, nil
+}
+
+func configImportCostBySKU(items []model.ConfigImportItem) (map[string]string, error) {
+	byLineModel := make(map[string]string)
+	for _, item := range items {
+		if item.EntityType != "cost_rule_drafts" {
+			continue
+		}
+		var draft types.ConfigImportCostRuleDraft
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+			return nil, err
+		}
+		config, err := configImportCostRuleConfig(draft)
+		if err != nil {
+			continue
+		}
+		normalized, err := NormalizeCostRuleConfig(types.CostMode(draft.CostMode), config)
+		if err != nil {
+			continue
+		}
+		price := normalized.NormalizedUSDPrices.UnitPrice
+		if price == nil {
+			price = normalized.NormalizedUSDPrices.PricePerSecond
+		}
+		if price == nil {
+			price = normalized.NormalizedUSDPrices.TotalPerMillion
+		}
+		if price == nil {
+			price = normalized.NormalizedUSDPrices.CompletionPerMillion
+		}
+		if price == nil {
+			price = normalized.NormalizedUSDPrices.InputPerMillion
+		}
+		if price != nil {
+			byLineModel[draft.LineRef+"|"+draft.UpstreamModel] = *price
+		}
+	}
+	bySKU := make(map[string]string)
+	for _, item := range items {
+		if item.EntityType != "model_skus" {
+			continue
+		}
+		var sku types.ConfigImportModelSKU
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &sku); err != nil {
+			return nil, err
+		}
+		bySKU[sku.BusinessID] = byLineModel[sku.LineRef+"|"+sku.UpstreamModel]
+	}
+	return bySKU, nil
+}
+
+func validateConfigImportPricingGroupScope(proposal types.ConfigImportSaleProposal) *configImportStageIssue {
+	if len(proposal.GroupPrices) < 2 {
+		return nil
+	}
+	groups := proposal.SelectedGroups
+	if len(groups) == 0 {
+		groups = []string{"default"}
+	}
+	base := decimal.Zero
+	baseSet := false
+	for _, group := range groups {
+		price, ok := proposal.GroupPrices[group]
+		if !ok {
+			continue
+		}
+		parsed, err := decimal.NewFromString(price)
+		if err != nil {
+			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "group price is not a decimal"}
+		}
+		ratio := decimal.NewFromFloat(ratio_setting.GetGroupRatio(group))
+		if ratio.IsZero() {
+			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "group ratio cannot represent a positive group price"}
+		}
+		if !baseSet {
+			base = parsed.Div(ratio)
+			baseSet = true
+			continue
+		}
+		if !parsed.Equal(base.Mul(ratio)) {
+			return &configImportStageIssue{Code: "PRICING_GROUP_SCOPE_UNREPRESENTABLE", Message: "selected group prices cannot be represented by one supported base price"}
+		}
+	}
+	return nil
+}
+
+func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, costUSD string) (types.ConfigImportSaleProposal, []model.ConfigImportIssue, error) {
+	issues := make([]model.ConfigImportIssue, 0)
+	for name, value := range map[string]*string{
+		"unit_price": proposal.UnitPrice, "price_per_unit": proposal.PricePerUnit, "margin_ratio": proposal.MarginRatio,
+		"input_per_million": proposal.InputPerMillion, "output_per_million": proposal.OutputPerMillion,
+		"completion_per_million": proposal.CompletionPerMillion, "total_per_million": proposal.TotalPerMillion,
+	} {
+		if value == nil {
+			continue
+		}
+		parsed, err := decimal.NewFromString(strings.TrimSpace(*value))
+		if err != nil || parsed.IsNegative() {
+			return proposal, nil, configImportError("PRICING_DECIMAL", "%s is not a non-negative decimal", name)
+		}
+		normalized := parsed.String()
+		*value = normalized
+	}
+	if proposal.DurationPrice != nil {
+		price, err := decimal.NewFromString(strings.TrimSpace(proposal.DurationPrice.Price))
+		if err != nil || price.IsNegative() {
+			return proposal, nil, configImportError("PRICING_DECIMAL", "duration price is not a non-negative decimal")
+		}
+		proposal.DurationPrice.Price = price.String()
+	}
+	if proposal.UnitPrice != nil || proposal.PricePerUnit != nil {
+		cost, err := decimal.NewFromString(strings.TrimSpace(costUSD))
+		if err != nil {
+			return proposal, nil, configImportError("PRICING_DECIMAL", "cost is not a decimal")
+		}
+		sale := proposal.UnitPrice
+		if sale == nil {
+			sale = proposal.PricePerUnit
+		}
+		if sale != nil && decimal.RequireFromString(*sale).LessThan(cost) {
+			issues = append(issues, model.ConfigImportIssue{Severity: string(types.ConfigImportIssueSeverityWarning), Code: "PRICING_NEGATIVE_MARGIN", BusinessID: proposal.BusinessID, Message: "sale price is below recomputed cost", ResolutionStatus: "open"})
+		}
+	}
+	if proposal.BillingExpr == "" {
+		tokenExpr, err := configImportTokenPricingExpression(proposal)
+		if err != nil {
+			return proposal, nil, err
+		}
+		if tokenExpr != "" {
+			proposal.BillingExpr = tokenExpr
+		}
+	}
+	if proposal.BillingExpr != "" {
+		proposal.BillingMode = billing_setting.BillingModeTieredExpr
+	}
+	if proposal.BillingMode == "" {
+		if proposal.DurationPrice != nil {
+			proposal.BillingMode = billing_setting.BillingModePerDuration
+		} else {
+			proposal.BillingMode = billing_setting.BillingModeRatio
+		}
+	}
+	if len(proposal.SelectedGroups) == 0 {
+		proposal.SelectedGroups = []string{"default"}
+	}
+	return proposal, issues, nil
+}
+
+func configImportTokenPricingExpression(proposal types.ConfigImportSaleProposal) (string, error) {
+	hasInputOutput := proposal.InputPerMillion != nil || proposal.OutputPerMillion != nil
+	hasCompletion := proposal.CompletionPerMillion != nil
+	hasTotal := proposal.TotalPerMillion != nil
+	if !hasInputOutput && !hasCompletion && !hasTotal {
+		return "", nil
+	}
+	if (hasInputOutput && (hasCompletion || hasTotal)) || (hasCompletion && hasTotal) {
+		return "", configImportError("PRICING_TOKEN_MODE_INVALID", "token sale proposal contains multiple price modes")
+	}
+	if hasInputOutput {
+		if proposal.InputPerMillion == nil || proposal.OutputPerMillion == nil {
+			return "", configImportError("PRICING_TOKEN_MODE_INVALID", "input/output token pricing requires both prices")
+		}
+		if proposal.TokenMode != "" && proposal.TokenMode != string(types.CostTokenModeInputOutput) {
+			return "", configImportError("PRICING_TOKEN_MODE_INVALID", "token mode does not match input/output prices")
+		}
+		return fmt.Sprintf(`v1:tier("base", p * %s + c * %s)`, *proposal.InputPerMillion, *proposal.OutputPerMillion), nil
+	}
+	if hasCompletion {
+		if proposal.TokenMode != "" && proposal.TokenMode != string(types.CostTokenModeCompletion) {
+			return "", configImportError("PRICING_TOKEN_MODE_INVALID", "token mode does not match completion price")
+		}
+		return fmt.Sprintf(`v1:tier("base", c * %s)`, *proposal.CompletionPerMillion), nil
+	}
+	if proposal.TokenMode != "" && proposal.TokenMode != string(types.CostTokenModeTotal) {
+		return "", configImportError("PRICING_TOKEN_MODE_INVALID", "token mode does not match total price")
+	}
+	return fmt.Sprintf(`v1:tier("base", (p + c) * %s)`, *proposal.TotalPerMillion), nil
+}
+
+func updateConfigImportItemProposal(db *gorm.DB, item *model.ConfigImportItem, proposal any, diff map[string]any) error {
+	var document map[string]any
+	if err := common.UnmarshalJsonStr(item.CanonicalJSON, &document); err != nil {
+		return err
+	}
+	if proposal != nil {
+		encoded, err := common.Marshal(proposal)
+		if err != nil {
+			return err
+		}
+		var proposalMap map[string]any
+		if err := common.Unmarshal(encoded, &proposalMap); err != nil {
+			return err
+		}
+		document["staged_proposal"] = proposalMap
+	}
+	document["staged_diff"] = diff
+	encoded, err := common.Marshal(document)
+	if err != nil {
+		return err
+	}
+	item.CanonicalJSON = string(encoded)
+	item.State = string(types.ConfigImportItemStateChanged)
+	return db.Model(&model.ConfigImportItem{}).Where("id = ?", item.ID).Updates(map[string]any{
+		"canonical_json": item.CanonicalJSON, "state": item.State, "updated_at": common.GetTimestamp(),
+	}).Error
+}
+
+func persistConfigImportStageIssues(db *gorm.DB, batchID int64, stageIssues []configImportStageIssue) error {
+	for _, issue := range stageIssues {
+		if issue.Code == "" {
+			continue
+		}
+		var count int64
+		if err := db.Model(&model.ConfigImportIssue{}).Where("batch_id = ? AND code = ? AND business_id = ?", batchID, issue.Code, issue.BusinessID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if err := db.Create(&model.ConfigImportIssue{BatchID: batchID, Severity: string(issue.Severity), Code: issue.Code, BusinessID: issue.BusinessID, Message: issue.Message, ResolutionStatus: "open"}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

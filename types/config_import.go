@@ -48,6 +48,8 @@ const (
 	ConfigImportResolutionActionUseImport    ConfigImportResolutionAction = "use_import"
 	ConfigImportResolutionActionKeepExisting ConfigImportResolutionAction = "keep_existing"
 	ConfigImportResolutionActionExclude      ConfigImportResolutionAction = "exclude"
+	ConfigImportResolutionActionSplitLine    ConfigImportResolutionAction = "split_line"
+	ConfigImportResolutionActionBindVariant  ConfigImportResolutionAction = "bind_variant"
 )
 
 type ConfigImportRouteMergeMode string
@@ -56,6 +58,7 @@ const (
 	ConfigImportRouteMergeModeReplace ConfigImportRouteMergeMode = "replace"
 	ConfigImportRouteMergeModeAppend  ConfigImportRouteMergeMode = "append"
 	ConfigImportRouteMergeModeMerge   ConfigImportRouteMergeMode = "merge"
+	ConfigImportRouteMergeModeSkip    ConfigImportRouteMergeMode = "skip"
 )
 
 // ConfigImportDocument is the versioned, credential-free configuration import
@@ -171,12 +174,32 @@ type ConfigImportModelSKU struct {
 
 type ConfigImportSaleProposal struct {
 	ConfigImportAuthoritativeEntity
-	ModelSKURef  string  `json:"model_sku_ref"`
-	Currency     string  `json:"currency,omitempty"`
-	UnitPrice    *string `json:"unit_price,omitempty"`
-	PricePerUnit *string `json:"price_per_unit,omitempty"`
-	MarginRatio  *string `json:"margin_ratio,omitempty"`
-	Enabled      *bool   `json:"enabled,omitempty"`
+	ModelSKURef          string                 `json:"model_sku_ref"`
+	Currency             string                 `json:"currency,omitempty"`
+	UnitPrice            *string                `json:"unit_price,omitempty"`
+	PricePerUnit         *string                `json:"price_per_unit,omitempty"`
+	MarginRatio          *string                `json:"margin_ratio,omitempty"`
+	Enabled              *bool                  `json:"enabled,omitempty"`
+	BillingMode          string                 `json:"billing_mode,omitempty"`
+	BillingExpr          string                 `json:"billing_expr,omitempty"`
+	TokenMode            string                 `json:"token_mode,omitempty"`
+	DurationPrice        *DurationPriceProposal `json:"duration_price,omitempty"`
+	SelectedGroups       []string               `json:"selected_groups,omitempty"`
+	GroupPrices          map[string]string      `json:"group_prices,omitempty"`
+	InputPerMillion      *string                `json:"input_per_million,omitempty"`
+	OutputPerMillion     *string                `json:"output_per_million,omitempty"`
+	CompletionPerMillion *string                `json:"completion_per_million,omitempty"`
+	TotalPerMillion      *string                `json:"total_per_million,omitempty"`
+}
+
+// DurationPriceProposal is kept decimal-safe at the contract boundary. The
+// runtime billing setting uses float64 for compatibility, while staging
+// validates the bounds before converting to that representation.
+type DurationPriceProposal struct {
+	Price                  string `json:"price"`
+	Unit                   string `json:"unit"`
+	RoundingStepSeconds    int    `json:"rounding_step_seconds"`
+	MinimumDurationSeconds int    `json:"minimum_duration_seconds"`
 }
 
 type ConfigImportCostRuleDraft struct {
@@ -205,6 +228,10 @@ type ConfigImportCostRuleDraft struct {
 	NormalizedUSDOutputPerMillion     *string `json:"normalized_usd_output_per_million,omitempty"`
 	NormalizedUSDCompletionPerMillion *string `json:"normalized_usd_completion_per_million,omitempty"`
 	NormalizedUSDTotalPerMillion      *string `json:"normalized_usd_total_per_million,omitempty"`
+	ZeroCostReason                    string  `json:"zero_cost_reason,omitempty"`
+	ChargeEvent                       string  `json:"charge_event,omitempty"`
+	MeterSource                       string  `json:"meter_source,omitempty"`
+	TokenMode                         string  `json:"token_mode,omitempty"`
 }
 
 type ConfigImportModelMapping struct {

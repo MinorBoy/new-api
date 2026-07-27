@@ -405,6 +405,8 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		}
 		for field, value := range map[string]*string{
 			"unit_price": proposal.UnitPrice, "price_per_unit": proposal.PricePerUnit, "margin_ratio": proposal.MarginRatio,
+			"input_per_million": proposal.InputPerMillion, "output_per_million": proposal.OutputPerMillion,
+			"completion_per_million": proposal.CompletionPerMillion, "total_per_million": proposal.TotalPerMillion,
 		} {
 			if err := validateConfigImportDecimal("sale_proposals."+field, value); err != nil {
 				return err
@@ -466,7 +468,7 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 			return configImportError("SCHEMA_ROUTE_BLUEPRINT", "route_blueprints[%d] requires canonical_model and client_model", index)
 		}
 		if blueprint.MergeMode != "" && blueprint.MergeMode != types.ConfigImportRouteMergeModeReplace &&
-			blueprint.MergeMode != types.ConfigImportRouteMergeModeAppend && blueprint.MergeMode != types.ConfigImportRouteMergeModeMerge {
+			blueprint.MergeMode != types.ConfigImportRouteMergeModeAppend && blueprint.MergeMode != types.ConfigImportRouteMergeModeMerge && blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
 			return configImportError("SCHEMA_ROUTE_MERGE_MODE", "route_blueprints[%d].merge_mode is invalid", index)
 		}
 		for targetIndex := range blueprint.Targets {

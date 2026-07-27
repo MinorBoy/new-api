@@ -22,6 +22,7 @@ import {
   ChartNoAxesCombined,
   CreditCard,
   FileText,
+  FileUp,
   FlaskConical,
   Key,
   LayoutDashboard,
@@ -135,6 +136,15 @@ export function useSidebarData(): SidebarData {
             icon: ChartNoAxesCombined,
             requiredPermission: {
               resource: ADMIN_PERMISSION_RESOURCES.COST_ACCOUNTING,
+              action: ADMIN_PERMISSION_ACTIONS.READ,
+            },
+          },
+          {
+            title: t('Config import'),
+            url: '/config-import',
+            icon: FileUp,
+            requiredPermission: {
+              resource: ADMIN_PERMISSION_RESOURCES.CONFIG_IMPORT,
               action: ADMIN_PERMISSION_ACTIONS.READ,
             },
           },

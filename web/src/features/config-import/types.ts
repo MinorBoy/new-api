@@ -118,6 +118,18 @@ export const configImportBatchSummarySchema = z
 export const configImportBatchDetailSchema =
   configImportBatchSummarySchema.extend({
     items: z.array(configImportItemSchema),
+    bindings: z
+      .array(
+        z
+          .object({
+            line_ref: z.string().min(1),
+            action: configImportBindingActionSchema,
+            channel_id: z.number().int().positive().nullish(),
+            credentials_confirmed: z.boolean(),
+          })
+          .strict()
+      )
+      .optional(),
     issues: z.array(configImportIssueSchema),
   })
 
@@ -281,6 +293,19 @@ export const configImportResolutionsRequestSchema = z
   })
   .strict()
 
+export const configImportRouteReviewSchema = z
+  .object({
+    item_business_id: z.string().min(1),
+    merge_mode: configImportRouteMergeModeSchema,
+  })
+  .strict()
+
+export const configImportRouteReviewsRequestSchema = z
+  .object({
+    reviews: z.array(configImportRouteReviewSchema).min(1),
+  })
+  .strict()
+
 export const configImportStageRequestSchema = z
   .object({
     batch_ref: z.string().optional(),
@@ -363,6 +388,9 @@ export type ConfigImportBindingsRequest = z.infer<
 >
 export type ConfigImportResolutionsRequest = z.infer<
   typeof configImportResolutionsRequestSchema
+>
+export type ConfigImportRouteReviewsRequest = z.infer<
+  typeof configImportRouteReviewsRequestSchema
 >
 export type ConfigImportStageRequest = z.infer<
   typeof configImportStageRequestSchema

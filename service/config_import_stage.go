@@ -701,6 +701,103 @@ func validateConfigImportResolutionInputs(resolutions []dto.ConfigImportResoluti
 	return nil
 }
 
+func DecodeConfigImportRouteReviewRequest(reader io.Reader) (*dto.ConfigImportRouteReviewRequest, error) {
+	if reader == nil {
+		return nil, configImportError("SCHEMA_ROUTE_REVIEW_REQUEST", "route review request is required")
+	}
+	var request dto.ConfigImportRouteReviewRequest
+	if err := common.DecodeJsonStrict(reader, &request); err != nil {
+		return nil, configImportError("SCHEMA_ROUTE_REVIEW_REQUEST", "invalid route review request: %v", err)
+	}
+	if len(request.Reviews) == 0 {
+		return nil, configImportError("SCHEMA_ROUTE_REVIEW_REQUEST", "route reviews are required")
+	}
+	seen := make(map[string]struct{}, len(request.Reviews))
+	for index := range request.Reviews {
+		review := &request.Reviews[index]
+		review.ItemBusinessID = strings.TrimSpace(review.ItemBusinessID)
+		if review.ItemBusinessID == "" {
+			return nil, configImportError("SCHEMA_ROUTE_REVIEW_ITEM", "reviews[%d].item_business_id is required", index)
+		}
+		if _, exists := seen[review.ItemBusinessID]; exists {
+			return nil, configImportError("SCHEMA_ROUTE_REVIEW_ITEM", "reviews[%d].item_business_id is duplicated", index)
+		}
+		seen[review.ItemBusinessID] = struct{}{}
+		switch review.MergeMode {
+		case types.ConfigImportRouteMergeModeMerge, types.ConfigImportRouteMergeModeReplace, types.ConfigImportRouteMergeModeSkip:
+		default:
+			return nil, configImportError("SCHEMA_ROUTE_REVIEW_MODE", "reviews[%d].merge_mode is invalid", index)
+		}
+	}
+	return &request, nil
+}
+
+func UpdateConfigImportRouteReviews(ctx context.Context, adminID int, batchID int64, reviews []dto.ConfigImportRouteReviewInput) (*dto.ConfigImportBatchDetail, error) {
+	if adminID <= 0 {
+		return nil, configImportError("SCHEMA_ADMIN", "admin ID is required")
+	}
+	if batchID <= 0 {
+		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
+	}
+	if len(reviews) == 0 {
+		return nil, configImportError("SCHEMA_ROUTE_REVIEW_REQUEST", "route reviews are required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch model.ConfigImportBatch
+		if err := tx.Where("id = ?", batchID).First(&batch).Error; err != nil {
+			return err
+		}
+		status := types.ConfigImportBatchStatus(batch.Status)
+		if status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged && status != types.ConfigImportBatchStatusReady {
+			return configImportError("ROUTE_REVIEW_BATCH_STATUS", "batch %d is not accepting route reviews", batchID)
+		}
+		for _, review := range reviews {
+			var item model.ConfigImportItem
+			if err := tx.Where("batch_id = ? AND business_id = ? AND entity_type = ?", batchID, review.ItemBusinessID, "route_blueprints").First(&item).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return configImportError("ROUTE_REVIEW_ITEM_NOT_FOUND", "route blueprint %q does not belong to batch %d", review.ItemBusinessID, batchID)
+				}
+				return err
+			}
+			var blueprint types.ConfigImportRouteBlueprint
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+				return err
+			}
+			blueprint.MergeMode = review.MergeMode
+			encoded, err := common.Marshal(blueprint)
+			if err != nil {
+				return err
+			}
+			updates := map[string]any{"canonical_json": string(encoded), "updated_at": common.GetTimestamp()}
+			if review.MergeMode == types.ConfigImportRouteMergeModeSkip {
+				updates["state"] = string(types.ConfigImportItemStateExcluded)
+				updates["exclusion_reason"] = "route merge mode skip"
+				updates["conflict_reason"] = ""
+			} else {
+				updates["state"] = string(types.ConfigImportItemStateChanged)
+				updates["exclusion_reason"] = ""
+				updates["conflict_reason"] = ""
+			}
+			if err := tx.Model(&model.ConfigImportItem{}).Where("id = ?", item.ID).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if status == types.ConfigImportBatchStatusReady {
+			return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
+				"status": string(types.ConfigImportBatchStatusStaged), "updated_at": common.GetTimestamp(),
+			}).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return GetConfigImportBatch(ctx, batchID)
+}
+
 type configImportResolutionDecision struct {
 	Action         types.ConfigImportResolutionAction `json:"action"`
 	LineRef        string                             `json:"line_ref,omitempty"`
@@ -709,7 +806,18 @@ type configImportResolutionDecision struct {
 	Reason         string                             `json:"reason,omitempty"`
 }
 
-func validateConfigImportResolutionReferences(tx *gorm.DB, batchID int64, resolution dto.ConfigImportResolutionInput) error {
+func validateConfigImportResolutionReferences(tx *gorm.DB, batchID int64, item model.ConfigImportItem, resolution dto.ConfigImportResolutionInput) error {
+	// Legacy use_import/keep_existing decisions apply to the original proposal
+	// rows as well as unresolved variants. Structured split/bind decisions below
+	// are intentionally restricted to unresolved conflicts.
+	if resolution.Action == types.ConfigImportResolutionActionUseImport ||
+		resolution.Action == types.ConfigImportResolutionActionKeepExisting {
+		return nil
+	}
+	var variant types.ConfigImportUnresolvedVariant
+	if err := common.UnmarshalJsonStr(item.CanonicalJSON, &variant); err != nil {
+		return configImportError("RESOLUTION_ITEM_INVALID", "item %q has invalid unresolved variant data", item.BusinessID)
+	}
 	switch resolution.Action {
 	case types.ConfigImportResolutionActionSplitLine:
 		var binding model.ConfigImportBinding
@@ -723,7 +831,13 @@ func validateConfigImportResolutionReferences(tx *gorm.DB, batchID int64, resolu
 		if binding.Action == string(types.ConfigImportBindingActionSkip) || binding.ChannelID == nil || *binding.ChannelID <= 0 || binding.CredentialsConfirmedAt == nil {
 			return configImportError("RESOLUTION_LINE_UNBOUND", "line_ref %q must be bound before it can split a variant", resolution.LineRef)
 		}
+		if item.EntityType != "unresolved_variants" || item.State != string(types.ConfigImportItemStateConflict) {
+			return configImportError("RESOLUTION_ITEM_STATE", "item %q must be an unresolved conflict", item.BusinessID)
+		}
 	case types.ConfigImportResolutionActionBindVariant:
+		if item.EntityType != "unresolved_variants" {
+			return configImportError("RESOLUTION_ITEM_STATE", "item %q must be an unresolved conflict", item.BusinessID)
+		}
 		var routeItems []model.ConfigImportItem
 		if err := tx.Where("batch_id = ? AND entity_type = ?", batchID, "route_blueprints").Find(&routeItems).Error; err != nil {
 			return err
@@ -734,12 +848,20 @@ func validateConfigImportResolutionReferences(tx *gorm.DB, batchID int64, resolu
 				return fmt.Errorf("decode config import route blueprint %q: %w", routeItem.BusinessID, err)
 			}
 			for _, target := range blueprint.Targets {
-				if target.RouteTargetRef == resolution.RouteTargetRef && target.CostVariantKey == resolution.CostVariantKey {
+				if target.RouteTargetRef == resolution.RouteTargetRef &&
+					(variant.LineRef == "" || target.LineRef == variant.LineRef) &&
+					(variant.UpstreamModel == "" || target.UpstreamModel == variant.UpstreamModel) {
+					if item.State != string(types.ConfigImportItemStateConflict) {
+						return configImportError("RESOLUTION_ITEM_STATE", "item %q must be an unresolved conflict", item.BusinessID)
+					}
 					return nil
 				}
 			}
 		}
-		return configImportError("RESOLUTION_ROUTE_TARGET_NOT_FOUND", "route_target_ref %q does not have cost_variant_key %q", resolution.RouteTargetRef, resolution.CostVariantKey)
+		return configImportError("RESOLUTION_ROUTE_TARGET_NOT_FOUND", "route_target_ref %q is not on unresolved line %q", resolution.RouteTargetRef, variant.LineRef)
+	}
+	if item.State != string(types.ConfigImportItemStateConflict) {
+		return configImportError("RESOLUTION_ITEM_STATE", "item %q must be an unresolved conflict", item.BusinessID)
 	}
 	return nil
 }
@@ -786,7 +908,7 @@ func UpdateConfigImportResolutions(
 				}
 				return err
 			}
-			if err := validateConfigImportResolutionReferences(tx, batchID, resolution); err != nil {
+			if err := validateConfigImportResolutionReferences(tx, batchID, item, resolution); err != nil {
 				return err
 			}
 			decisionJSON, err := common.Marshal(configImportResolutionDecision{
@@ -840,6 +962,206 @@ func UpdateConfigImportResolutions(
 		return nil, err
 	}
 	return GetConfigImportBatch(ctx, batchID)
+}
+
+// applyConfigImportResolutions materializes the selected conflict decisions
+// into the same canonical proposal rows consumed by staging. Keeping this
+// step in the staging transaction makes a decision effective on every retry,
+// while the original unresolved item and the resolution audit row remain
+// available for review.
+func applyConfigImportResolutions(tx *gorm.DB, batchID int64, items []model.ConfigImportItem) error {
+	var stored []model.ConfigImportResolution
+	if err := tx.Where("batch_id = ?", batchID).Order("id ASC").Find(&stored).Error; err != nil {
+		return err
+	}
+	latest := make(map[string]configImportResolutionDecision, len(stored))
+	for _, resolution := range stored {
+		var decision configImportResolutionDecision
+		if err := common.UnmarshalJsonStr(resolution.DecisionJSON, &decision); err != nil {
+			return fmt.Errorf("decode config import resolution %q: %w", resolution.ItemBusinessID, err)
+		}
+		latest[resolution.ItemBusinessID] = decision
+	}
+	for index := range items {
+		item := &items[index]
+		decision, ok := latest[item.BusinessID]
+		if !ok || item.EntityType != "unresolved_variants" {
+			continue
+		}
+		if item.State != string(types.ConfigImportItemStateConflict) && item.State != string(types.ConfigImportItemStateChanged) && item.State != string(types.ConfigImportItemStateExcluded) && item.State != string(types.ConfigImportItemStateUnchanged) {
+			return configImportError("RESOLUTION_ITEM_STATE", "item %q is not a conflict", item.BusinessID)
+		}
+		var variant types.ConfigImportUnresolvedVariant
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &variant); err != nil {
+			return err
+		}
+		originalLine := variant.LineRef
+		switch decision.Action {
+		case types.ConfigImportResolutionActionSplitLine:
+			if err := applyConfigImportSplitLine(tx, items, variant, originalLine, decision.LineRef); err != nil {
+				return err
+			}
+			variant.LineRef = decision.LineRef
+			item.State = string(types.ConfigImportItemStateChanged)
+			item.ConflictReason = ""
+			item.ExclusionReason = ""
+		case types.ConfigImportResolutionActionBindVariant:
+			if err := applyConfigImportVariantBinding(tx, items, variant, decision); err != nil {
+				return err
+			}
+			variant.CostVariantKey = decision.CostVariantKey
+			item.State = string(types.ConfigImportItemStateChanged)
+			item.ConflictReason = ""
+			item.ExclusionReason = ""
+		case types.ConfigImportResolutionActionExclude:
+			item.State = string(types.ConfigImportItemStateExcluded)
+			item.ExclusionReason = decision.Reason
+			item.ConflictReason = ""
+		case types.ConfigImportResolutionActionKeepExisting:
+			item.State = string(types.ConfigImportItemStateUnchanged)
+			item.ExclusionReason = ""
+			item.ConflictReason = "kept existing configuration"
+		case types.ConfigImportResolutionActionUseImport:
+			item.State = string(types.ConfigImportItemStateChanged)
+			item.ConflictReason = ""
+			item.ExclusionReason = ""
+		default:
+			return configImportError("SCHEMA_RESOLUTION_ACTION", "resolution action %q is invalid", decision.Action)
+		}
+		encoded, err := common.Marshal(variant)
+		if err != nil {
+			return err
+		}
+		item.CanonicalJSON = string(encoded)
+		if err := persistConfigImportItemState(tx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func configImportRefSet(refs []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if trimmed := strings.TrimSpace(ref); trimmed != "" {
+			result[trimmed] = struct{}{}
+		}
+	}
+	return result
+}
+
+func applyConfigImportSplitLine(tx *gorm.DB, items []model.ConfigImportItem, variant types.ConfigImportUnresolvedVariant, originalLine, targetLine string) error {
+	if originalLine == "" || targetLine == "" || originalLine == targetLine {
+		return nil
+	}
+	costRefs := configImportRefSet(variant.CostRuleRefs)
+	routeRefs := configImportRefSet(variant.RouteTargetRefs)
+	for index := range items {
+		item := &items[index]
+		switch item.EntityType {
+		case "cost_rule_drafts":
+			var draft types.ConfigImportCostRuleDraft
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+				return err
+			}
+			_, explicit := costRefs[item.BusinessID]
+			matches := explicit || (len(costRefs) == 0 && draft.LineRef == originalLine && (variant.UpstreamModel == "" || draft.UpstreamModel == variant.UpstreamModel) && (variant.CostVariantKey == "" || draft.CostVariantKey == variant.CostVariantKey))
+			if !matches {
+				continue
+			}
+			draft.LineRef = targetLine
+			encoded, err := common.Marshal(draft)
+			if err != nil {
+				return err
+			}
+			item.CanonicalJSON = string(encoded)
+			if err := persistConfigImportItemState(tx, item); err != nil {
+				return err
+			}
+		case "route_blueprints":
+			var blueprint types.ConfigImportRouteBlueprint
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+				return err
+			}
+			changed := false
+			for targetIndex := range blueprint.Targets {
+				target := &blueprint.Targets[targetIndex]
+				_, explicit := routeRefs[target.RouteTargetRef]
+				matches := explicit || (len(routeRefs) == 0 && target.LineRef == originalLine && (variant.UpstreamModel == "" || target.UpstreamModel == variant.UpstreamModel) && (variant.CostVariantKey == "" || target.CostVariantKey == variant.CostVariantKey))
+				if matches {
+					target.LineRef = targetLine
+					changed = true
+				}
+			}
+			if !changed {
+				continue
+			}
+			encoded, err := common.Marshal(blueprint)
+			if err != nil {
+				return err
+			}
+			item.CanonicalJSON = string(encoded)
+			if err := persistConfigImportItemState(tx, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func applyConfigImportVariantBinding(tx *gorm.DB, items []model.ConfigImportItem, variant types.ConfigImportUnresolvedVariant, decision configImportResolutionDecision) error {
+	routeRefs := configImportRefSet(variant.RouteTargetRefs)
+	routeRefs[decision.RouteTargetRef] = struct{}{}
+	costRefs := configImportRefSet(variant.CostRuleRefs)
+	for index := range items {
+		item := &items[index]
+		switch item.EntityType {
+		case "cost_rule_drafts":
+			var draft types.ConfigImportCostRuleDraft
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+				return err
+			}
+			_, explicit := costRefs[item.BusinessID]
+			if !explicit && draft.RouteTargetRef != decision.RouteTargetRef {
+				continue
+			}
+			draft.CostVariantKey = decision.CostVariantKey
+			encoded, err := common.Marshal(draft)
+			if err != nil {
+				return err
+			}
+			item.CanonicalJSON = string(encoded)
+			if err := persistConfigImportItemState(tx, item); err != nil {
+				return err
+			}
+		case "route_blueprints":
+			var blueprint types.ConfigImportRouteBlueprint
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+				return err
+			}
+			changed := false
+			for targetIndex := range blueprint.Targets {
+				target := &blueprint.Targets[targetIndex]
+				if _, ok := routeRefs[target.RouteTargetRef]; !ok {
+					continue
+				}
+				target.CostVariantKey = decision.CostVariantKey
+				changed = true
+			}
+			if !changed {
+				continue
+			}
+			encoded, err := common.Marshal(blueprint)
+			if err != nil {
+				return err
+			}
+			item.CanonicalJSON = string(encoded)
+			if err := persistConfigImportItemState(tx, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ConfigImportBaseline is a deterministic optimistic-concurrency snapshot.
@@ -1004,6 +1326,9 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 
 		var items []model.ConfigImportItem
 		if err := tx.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		if err := applyConfigImportResolutions(tx, batchID, items); err != nil {
 			return err
 		}
 		var bindings []model.ConfigImportBinding

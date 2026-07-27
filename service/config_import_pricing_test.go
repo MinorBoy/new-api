@@ -274,6 +274,48 @@ func TestConfigImportStageResolutionAcceptsStructuredActions(t *testing.T) {
 	assert.Equal(t, "Duplicate supplier quote", excluded.ExclusionReason)
 }
 
+func TestConfigImportStageResolutionAppliesLineAndVariantSelections(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	lineB := &model.Channel{Type: 1, Name: "supplier-b", Models: "vendor-video", Key: "key-b"}
+	require.NoError(t, model.DB.Create(lineB).Error)
+	lineBChannelID := lineB.Id
+	confirmedAt := int64(2)
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "line-b", Action: string(types.ConfigImportBindingActionBind), ChannelID: &lineBChannelID,
+		CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+	}).Error)
+	variant := types.ConfigImportUnresolvedVariant{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "variant-a"},
+		LineRef:                         "line-a", UpstreamModel: "vendor-video", CostVariantKey: "default",
+		CostRuleRefs: []string{"cost-a"}, RouteTargetRefs: []string{"target-a"},
+	}
+	encoded, err := common.Marshal(variant)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{BatchID: batch.ID, EntityType: "unresolved_variants", BusinessID: variant.BusinessID, CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateConflict)}).Error)
+
+	_, err = UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{{
+		ItemBusinessID: variant.BusinessID, Action: types.ConfigImportResolutionActionSplitLine, LineRef: "line-b",
+	}})
+	require.NoError(t, err)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+
+	var draftItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "cost-a").First(&draftItem).Error)
+	var draft types.ConfigImportCostRuleDraft
+	require.NoError(t, common.UnmarshalJsonStr(draftItem.CanonicalJSON, &draft))
+	assert.Equal(t, "line-b", draft.LineRef)
+	var routeItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a").First(&routeItem).Error)
+	var blueprint types.ConfigImportRouteBlueprint
+	require.NoError(t, common.UnmarshalJsonStr(routeItem.CanonicalJSON, &blueprint))
+	assert.Equal(t, "line-b", blueprint.Targets[0].LineRef)
+}
+
 func TestConfigImportResolutionRejectsMissingStructuredFields(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	batch := createConfigImportStageBatch(t, 0, "line-a", "vendor-video")

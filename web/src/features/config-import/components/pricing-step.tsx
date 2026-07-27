@@ -28,6 +28,7 @@ export interface PricingStepProps {
   batch: ConfigImportBatchDetail
   currentValues?: Record<string, string>
   onSelectedGroupsChange?: (groups: string[]) => void
+  onContinue?: () => void
 }
 
 function parseObject(value: string): Record<string, unknown> {
@@ -49,20 +50,69 @@ function pricingRows(
   batch: ConfigImportBatchDetail,
   currentValues: Record<string, string>
 ): PricingRow[] {
-  const recomputed = batch.items
-    .filter((item) => item.entity_type === 'cost_rule_drafts')
-    .map((item) => parseObject(item.canonical_json))
-    .flatMap((item) =>
-      Object.entries(item)
-        .filter(([key]) => key.startsWith('normalized_usd_'))
-        .map(([, value]) => (typeof value === 'string' ? value : ''))
-    )
+  const targetToSKU = new Map<string, string>()
+  for (const item of batch.items) {
+    if (item.entity_type !== 'route_blueprints') continue
+    const blueprint = parseObject(item.canonical_json)
+    if (!Array.isArray(blueprint.targets)) continue
+    for (const target of blueprint.targets) {
+      if (target === null || typeof target !== 'object') continue
+      const values = target as Record<string, unknown>
+      if (
+        typeof values.route_target_ref === 'string' &&
+        typeof values.sku_ref === 'string'
+      ) {
+        targetToSKU.set(values.route_target_ref, values.sku_ref)
+      }
+    }
+  }
+  const recomputedBySKU = new Map<string, Record<string, string>>()
+  const fallbackRecomputed: Record<string, string>[] = []
+  for (const item of batch.items.filter(
+    (item) => item.entity_type === 'cost_rule_drafts'
+  )) {
+    const cost = parseObject(item.canonical_json)
+    const routeTargetRef = cost.route_target_ref
+    const sku =
+      typeof routeTargetRef === 'string' ? targetToSKU.get(routeTargetRef) : ''
+    const values: Record<string, string> = {}
+    for (const [key, value] of Object.entries(cost)) {
+      if (key.startsWith('normalized_usd_') && typeof value === 'string') {
+        values[key] = value
+      }
+    }
+    fallbackRecomputed.push(values)
+    if (!sku) continue
+    recomputedBySKU.set(sku, {
+      ...recomputedBySKU.get(sku),
+      ...values,
+    })
+  }
   return batch.items
     .filter((item) => item.entity_type === 'sale_proposals')
     .flatMap((item) => {
-      const proposal = parseObject(item.canonical_json)
+      const stored = parseObject(item.canonical_json)
+      const staged =
+        stored.staged_proposal !== null &&
+        typeof stored.staged_proposal === 'object'
+          ? (stored.staged_proposal as Record<string, unknown>)
+          : {}
+      const proposalValue =
+        staged.proposal && typeof staged.proposal === 'object'
+          ? staged.proposal
+          : stored
+      const proposal =
+        proposalValue !== null && typeof proposalValue === 'object'
+          ? (proposalValue as Record<string, unknown>)
+          : stored
       const margin =
         typeof proposal.margin_ratio === 'string' ? proposal.margin_ratio : '--'
+      const recomputed = recomputedBySKU.get(
+        typeof proposal.model_sku_ref === 'string' ? proposal.model_sku_ref : ''
+      )
+      const serverValues =
+        recomputed ??
+        (fallbackRecomputed.length === 1 ? fallbackRecomputed[0] : undefined)
       const fields = [
         'unit_price',
         'price_per_unit',
@@ -81,7 +131,14 @@ function pricingRows(
             field,
             current: currentValues[`${item.business_id}:${field}`] ?? '--',
             proposed,
-            recomputed: recomputed[0] ?? '--',
+            recomputed:
+              serverValues?.[
+                `normalized_usd_${
+                  field === 'unit_price' || field === 'price_per_unit'
+                    ? 'unit_price'
+                    : field.replace('_per_million', '_per_million')
+                }`
+              ] ?? '--',
             margin,
             severity:
               batch.issues.find(
@@ -154,13 +211,22 @@ export function PricingStep(props: PricingStepProps) {
       className='space-y-4'
       aria-labelledby='config-import-pricing-title'
     >
-      <div className='border-b pb-3'>
+      <div className='flex items-center justify-between border-b pb-3'>
         <h2
           id='config-import-pricing-title'
           className='text-base font-semibold'
         >
           {t('Pricing review')}
         </h2>
+        {props.onContinue && (
+          <button
+            type='button'
+            className='border-input hover:bg-muted rounded-md border px-3 py-2 text-sm'
+            onClick={props.onContinue}
+          >
+            {t('Continue')}
+          </button>
+        )}
       </div>
       <fieldset className='flex flex-wrap gap-x-4 gap-y-2'>
         <legend className='mb-2 text-sm font-medium'>{t('Groups')}</legend>

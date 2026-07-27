@@ -15,6 +15,7 @@ import {
   configImportListParamsSchema,
   configImportPublishResponseSchema,
   configImportResolutionsRequestSchema,
+  configImportRouteReviewsRequestSchema,
   configImportStageRequestSchema,
   configImportUploadRequestSchema,
   type ConfigImportBatchDetail,
@@ -22,6 +23,7 @@ import {
   type ConfigImportBindingsRequest,
   type ConfigImportListParams,
   type ConfigImportResolutionsRequest,
+  type ConfigImportRouteReviewsRequest,
   type ConfigImportStageRequest,
 } from './types'
 
@@ -73,6 +75,18 @@ export async function saveConfigImportResolutions(
   const payload = configImportResolutionsRequestSchema.parse(request)
   const response = await api.put(
     `${CONFIG_IMPORT_PATH}/${id}/resolutions`,
+    payload
+  )
+  return parseDetail(response.data)
+}
+
+export async function saveConfigImportRouteReviews(
+  id: number,
+  request: ConfigImportRouteReviewsRequest
+): Promise<ConfigImportBatchDetail> {
+  const payload = configImportRouteReviewsRequestSchema.parse(request)
+  const response = await api.put(
+    `${CONFIG_IMPORT_PATH}/${id}/route-reviews`,
     payload
   )
   return parseDetail(response.data)

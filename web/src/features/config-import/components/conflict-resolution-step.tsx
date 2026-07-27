@@ -34,12 +34,14 @@ interface ResolutionDraft {
 interface RouteVariantOption {
   costVariantKey: string
   routeTargetRef: string
+  lineRef: string
 }
 
 export interface ConflictResolutionStepProps {
   batch: ConfigImportBatchDetail
   isSaving?: boolean
   onSave: (request: ConfigImportResolutionsRequest) => Promise<void>
+  onContinue?: () => void
 }
 
 function parseObject(value: string): Record<string, unknown> {
@@ -54,10 +56,31 @@ function parseObject(value: string): Record<string, unknown> {
 }
 
 function lineReferences(batch: ConfigImportBatchDetail): string[] {
+  if (!batch.bindings?.length) {
+    return batch.items
+      .filter((item) => item.entity_type === 'channel_lines')
+      .map((item) => parseObject(item.canonical_json).line_ref)
+      .filter((lineRef): lineRef is string => typeof lineRef === 'string')
+      .sort()
+  }
+  const boundLines = new Set(
+    (batch.bindings ?? [])
+      .filter(
+        (binding) =>
+          binding.action !== 'skip' &&
+          binding.channel_id !== null &&
+          binding.channel_id !== undefined &&
+          binding.credentials_confirmed
+      )
+      .map((binding) => binding.line_ref)
+  )
   return batch.items
     .filter((item) => item.entity_type === 'channel_lines')
     .map((item) => parseObject(item.canonical_json).line_ref)
-    .filter((lineRef): lineRef is string => typeof lineRef === 'string')
+    .filter(
+      (lineRef): lineRef is string =>
+        typeof lineRef === 'string' && boundLines.has(lineRef)
+    )
     .sort()
 }
 
@@ -82,6 +105,7 @@ function routeVariantOptions(
           {
             costVariantKey: values.cost_variant_key,
             routeTargetRef: values.route_target_ref,
+            lineRef: typeof values.line_ref === 'string' ? values.line_ref : '',
           },
         ]
       })
@@ -202,6 +226,11 @@ export function ConflictResolutionStep(props: ConflictResolutionStepProps) {
         >
           {t('Save resolutions')}
         </Button>
+        {props.onContinue && conflicts.length === 0 && (
+          <Button variant='outline' onClick={props.onContinue}>
+            {t('Continue')}
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -226,10 +255,15 @@ export function ConflictResolutionStep(props: ConflictResolutionStepProps) {
             reason: '',
           }
           const evidence = parseObject(item.canonical_json)
+          const itemLineRef =
+            typeof evidence.line_ref === 'string' ? evidence.line_ref : ''
           const matchingRoutes = routeOptions.filter(
             (route) =>
-              !draft.costVariantKey ||
-              route.costVariantKey === draft.costVariantKey
+              (!itemLineRef ||
+                !route.lineRef ||
+                route.lineRef === itemLineRef) &&
+              (!draft.costVariantKey ||
+                route.costVariantKey === draft.costVariantKey)
           )
           return (
             <article
@@ -315,7 +349,14 @@ export function ConflictResolutionStep(props: ConflictResolutionStepProps) {
                       <option value=''>{t('Select cost variant key')}</option>
                       {[
                         ...new Set(
-                          routeOptions.map((route) => route.costVariantKey)
+                          routeOptions
+                            .filter(
+                              (route) =>
+                                !itemLineRef ||
+                                !route.lineRef ||
+                                route.lineRef === itemLineRef
+                            )
+                            .map((route) => route.costVariantKey)
                         ),
                       ].map((key) => (
                         <option key={key} value={key}>

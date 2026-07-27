@@ -238,10 +238,16 @@ func GetConfigImportBatch(ctx context.Context, batchID int64) (*dto.ConfigImport
 		Order("id ASC").Find(&issues).Error; err != nil {
 		return nil, err
 	}
+	var bindings []model.ConfigImportBinding
+	if err := model.DB.WithContext(ctx).Where("batch_id = ?", batch.ID).
+		Order("line_ref ASC, id ASC").Find(&bindings).Error; err != nil {
+		return nil, err
+	}
 
 	detail := &dto.ConfigImportBatchDetail{
 		ConfigImportBatchSummary: summary,
 		Items:                    make([]dto.ConfigImportItemDetail, 0, len(items)),
+		Bindings:                 make([]dto.ConfigImportBindingDetail, 0, len(bindings)),
 		Issues:                   make([]dto.ConfigImportIssueDetail, 0, len(issues)),
 	}
 	for index := range items {
@@ -259,6 +265,15 @@ func GetConfigImportBatch(ctx context.Context, batchID int64) (*dto.ConfigImport
 			MaterializedID:   items[index].MaterializedID,
 			ConflictReason:   items[index].ConflictReason,
 			ExclusionReason:  items[index].ExclusionReason,
+		})
+	}
+	for index := range bindings {
+		binding := bindings[index]
+		detail.Bindings = append(detail.Bindings, dto.ConfigImportBindingDetail{
+			LineRef:              binding.LineRef,
+			Action:               binding.Action,
+			ChannelID:            binding.ChannelID,
+			CredentialsConfirmed: binding.CredentialsConfirmedAt != nil,
 		})
 	}
 	for index := range issues {

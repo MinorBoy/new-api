@@ -16,6 +16,7 @@ import {
   publishConfigImport,
   saveConfigImportBindings,
   saveConfigImportResolutions,
+  saveConfigImportRouteReviews,
   stageConfigImport,
   validateConfigImport,
 } from './api'
@@ -36,6 +37,7 @@ import type {
   ConfigImportBatchDetail,
   ConfigImportBindingsRequest,
   ConfigImportResolutionsRequest,
+  ConfigImportRouteReviewsRequest,
 } from './types'
 
 export interface ConfigImportWizardProps {
@@ -53,6 +55,11 @@ export interface ConfigImportWizardProps {
     id: number,
     request: ConfigImportResolutionsRequest
   ) => Promise<ConfigImportBatchDetail>
+  onSaveRouteReviews?: (
+    id: number,
+    request: ConfigImportRouteReviewsRequest
+  ) => Promise<ConfigImportBatchDetail>
+  currentPricingValues?: Record<string, string>
 }
 
 export function ConfigImportWizard(props: ConfigImportWizardProps) {
@@ -63,6 +70,7 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
   const [error, setError] = useState<string>()
   const [isBusy, setIsBusy] = useState(false)
   const [forcedStep, setForcedStep] = useState<ConfigImportStep>()
+  const [reviewStep, setReviewStep] = useState<ConfigImportStep>()
 
   useEffect(() => {
     if (!props.restoreBatchID) return
@@ -75,13 +83,15 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
 
   const runMutation = async (
     mutation: (id: number) => Promise<ConfigImportBatchDetail>
-  ) => {
-    if (!batch) return
+  ): Promise<ConfigImportBatchDetail | undefined> => {
+    if (!batch) return undefined
     setIsBusy(true)
     setError(undefined)
     try {
       setForcedStep(undefined)
-      setBatch(await mutation(batch.id))
+      const updated = await mutation(batch.id)
+      setBatch(updated)
+      return updated
     } catch (caught) {
       const code =
         caught !== null && typeof caught === 'object' && 'code' in caught
@@ -98,6 +108,7 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
     } finally {
       setIsBusy(false)
     }
+    return undefined
   }
 
   if (!batch) {
@@ -105,7 +116,7 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
   }
 
   const state = deriveWizardState(batch)
-  const step = forcedStep ?? state.step
+  const step = forcedStep ?? reviewStep ?? state.step
 
   return (
     <section className='space-y-5' aria-labelledby='config-import-wizard-title'>
@@ -133,13 +144,19 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           channels={[]}
           onCreateChannel={() => undefined}
           onSave={async (request) => {
-            await runMutation((id) =>
+            const updated = await runMutation((id) =>
               (
                 props.onSaveBindings ??
                 ((batchID, payload) =>
                   saveConfigImportBindings(batchID, payload))
               )(id, request)
             )
+            if (updated) {
+              const staged = await runMutation(
+                props.onStage ?? stageConfigImport
+              )
+              if (staged) setReviewStep('pricing')
+            }
           }}
         />
       )}
@@ -147,19 +164,54 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
         <ConflictResolutionStep
           batch={batch}
           onSave={async (request) => {
-            await runMutation((id) =>
+            const updated = await runMutation((id) =>
               (
                 props.onSaveResolutions ??
                 ((batchID, payload) =>
                   saveConfigImportResolutions(batchID, payload))
               )(id, request)
             )
+            if (updated) {
+              const staged = await runMutation(
+                props.onStage ?? stageConfigImport
+              )
+              if (staged) setReviewStep('pricing')
+            }
           }}
+          onContinue={() => setReviewStep('pricing')}
         />
       )}
-      {step === 'pricing' && <PricingStep batch={batch} />}
+      {step === 'pricing' && (
+        <PricingStep
+          batch={batch}
+          currentValues={props.currentPricingValues}
+          onContinue={() => setReviewStep('routing_diff')}
+        />
+      )}
       {step === 'routing_diff' && (
-        <RoutingDiffStep batch={batch} onReview={() => undefined} />
+        <RoutingDiffStep
+          batch={batch}
+          onReview={async (reviews) => {
+            const updated = await runMutation((id) =>
+              (
+                props.onSaveRouteReviews ??
+                ((batchID, payload) =>
+                  saveConfigImportRouteReviews(batchID, payload))
+              )(id, {
+                reviews: reviews.map(({ business_id, merge_mode }) => ({
+                  item_business_id: business_id,
+                  merge_mode,
+                })),
+              })
+            )
+            if (updated) {
+              const validated = await runMutation(
+                props.onValidate ?? validateConfigImport
+              )
+              if (validated) setReviewStep('publish_review')
+            }
+          }}
+        />
       )}
       {step === 'publish_review' && (
         <PublishReviewStep
@@ -182,8 +234,9 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           batch={batch}
           onValidate={
             batch.status === 'publish_failed'
-              ? async () =>
-                  runMutation(props.onValidate ?? validateConfigImport)
+              ? async () => {
+                  await runMutation(props.onValidate ?? validateConfigImport)
+                }
               : undefined
           }
         />

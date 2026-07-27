@@ -40,7 +40,7 @@ export interface RoutingDiffStepProps {
       business_id: string
       merge_mode: ConfigImportRouteMergeMode
     }>
-  ) => void
+  ) => unknown | Promise<unknown>
 }
 
 function parseObject(value: string): Record<string, unknown> {
@@ -75,6 +75,33 @@ function routeBlueprints(batch: ConfigImportBatchDetail): RouteBlueprint[] {
               : []),
             ...(Array.isArray(value.duration_values)
               ? value.duration_values.map((duration) => `${duration} seconds`)
+              : []),
+            ...(typeof value.duration_min === 'number' ||
+            typeof value.duration_max === 'number'
+              ? [
+                  `duration ${typeof value.duration_min === 'number' ? value.duration_min : '-'}-${typeof value.duration_max === 'number' ? value.duration_max : '-'} seconds`,
+                ]
+              : []),
+            ...(Array.isArray(value.aspect_ratios)
+              ? value.aspect_ratios.map((ratio) => `ratio ${ratio}`)
+              : []),
+            ...(Array.isArray(value.input_modes)
+              ? value.input_modes.map((mode) => `input ${mode}`)
+              : []),
+            ...(value.reference_minimums !== null &&
+            typeof value.reference_minimums === 'object'
+              ? [
+                  `reference minimums ${JSON.stringify(value.reference_minimums)}`,
+                ]
+              : []),
+            ...(value.reference_limits !== null &&
+            typeof value.reference_limits === 'object'
+              ? [`reference limits ${JSON.stringify(value.reference_limits)}`]
+              : []),
+            ...(typeof value.supports_real_person === 'boolean'
+              ? [
+                  `real person ${value.supports_real_person ? 'supported' : 'unsupported'}`,
+                ]
               : []),
           ].filter(
             (constraint): constraint is string => typeof constraint === 'string'
@@ -114,7 +141,7 @@ export function RoutingDiffStep(props: RoutingDiffStepProps) {
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string>()
 
-  const continueReview = () => {
+  const continueReview = async () => {
     const replacement = blueprints.find(
       (blueprint) =>
         modes[blueprint.businessID] === 'replace' &&
@@ -125,7 +152,7 @@ export function RoutingDiffStep(props: RoutingDiffStepProps) {
       return
     }
     setError(undefined)
-    props.onReview(
+    await props.onReview(
       blueprints.map((blueprint) => ({
         business_id: blueprint.businessID,
         merge_mode: modes[blueprint.businessID] ?? blueprint.mergeMode,

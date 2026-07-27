@@ -79,6 +79,15 @@ type ConfigImportResolutionResponse struct {
 	Batch ConfigImportBatchResponse `json:"batch"`
 }
 
+type ConfigImportRouteReviewRequest struct {
+	Reviews []ConfigImportRouteReviewInput `json:"reviews"`
+}
+
+type ConfigImportRouteReviewInput struct {
+	ItemBusinessID string                           `json:"item_business_id"`
+	MergeMode      types.ConfigImportRouteMergeMode `json:"merge_mode"`
+}
+
 type ConfigImportStageResponse struct {
 	Batch ConfigImportBatchResponse `json:"batch"`
 }
@@ -156,8 +165,16 @@ type ConfigImportIssueDetail struct {
 // deliberately omits the raw upload and its derived preview.
 type ConfigImportBatchDetail struct {
 	ConfigImportBatchSummary
-	Items  []ConfigImportItemDetail  `json:"items"`
-	Issues []ConfigImportIssueDetail `json:"issues"`
+	Items    []ConfigImportItemDetail    `json:"items"`
+	Bindings []ConfigImportBindingDetail `json:"bindings"`
+	Issues   []ConfigImportIssueDetail   `json:"issues"`
+}
+
+type ConfigImportBindingDetail struct {
+	LineRef              string `json:"line_ref"`
+	Action               string `json:"action"`
+	ChannelID            *int   `json:"channel_id,omitempty"`
+	CredentialsConfirmed bool   `json:"credentials_confirmed"`
 }
 
 type ConfigImportBatchPage struct {

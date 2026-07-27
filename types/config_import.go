@@ -283,10 +283,13 @@ type ConfigImportSource struct {
 
 type ConfigImportUnresolvedVariant struct {
 	ConfigImportAuthoritativeEntity
-	LineRef        string `json:"line_ref"`
-	CostVariantKey string `json:"cost_variant_key,omitempty"`
-	Reason         string `json:"reason,omitempty"`
-	Excluded       *bool  `json:"excluded,omitempty"`
+	LineRef         string   `json:"line_ref"`
+	UpstreamModel   string   `json:"upstream_model,omitempty"`
+	CostVariantKey  string   `json:"cost_variant_key,omitempty"`
+	CostRuleRefs    []string `json:"cost_rule_refs,omitempty"`
+	RouteTargetRefs []string `json:"route_target_refs,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
+	Excluded        *bool    `json:"excluded,omitempty"`
 }
 
 type ConfigImportSourceIssue struct {

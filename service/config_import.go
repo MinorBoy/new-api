@@ -451,7 +451,15 @@ func configImportIssuesHaveFailure(issues []model.ConfigImportIssue) bool {
 // configImportAllowedActions is the only place that turns lifecycle state and
 // persisted issue gates into administrative commands.
 func configImportAllowedActions(status types.ConfigImportBatchStatus, issues []model.ConfigImportIssue) []string {
-	if status == types.ConfigImportBatchStatusBlocked || status == types.ConfigImportBatchStatusPublished ||
+	if status == types.ConfigImportBatchStatusPublished {
+		for _, issue := range issues {
+			if issue.Code == "CACHE_REFRESH_PENDING" && issue.ResolutionStatus == "open" {
+				return []string{"refresh_cache"}
+			}
+		}
+		return []string{}
+	}
+	if status == types.ConfigImportBatchStatusBlocked ||
 		status == types.ConfigImportBatchStatusPublishing || status == types.ConfigImportBatchStatusValidating {
 		return []string{}
 	}

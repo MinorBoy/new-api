@@ -144,6 +144,19 @@ func PublishConfigImportBatch(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"batch_id": id, "status": "published"})
 }
 
+func RefreshConfigImportBatchCache(c *gin.Context) {
+	id, err := configImportID(c)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	if err := service.RetryConfigImportBatchCache(c, id, c.GetInt("id")); err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"batch_id": id, "status": "published"})
+}
+
 func configImportID(c *gin.Context) (int64, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {

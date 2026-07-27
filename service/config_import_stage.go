@@ -1344,6 +1344,9 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 				skippedLines[binding.LineRef] = true
 				continue
 			}
+			if binding.ChannelID != nil && (binding.CredentialsConfirmedAt == nil || binding.CredentialsConfirmedBy <= 0) {
+				return configImportError("BINDING_CREDENTIALS_UNCONFIRMED", "line %q requires credential confirmation before staging", binding.LineRef)
+			}
 			if binding.ChannelID != nil {
 				lineChannels[binding.LineRef] = *binding.ChannelID
 			}
@@ -1774,8 +1777,9 @@ func configImportCanonicalModelsBySKU(items []model.ConfigImportItem) (map[strin
 		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
 			return nil, err
 		}
-		if existing, found := models[mapping.SKURef]; !found || mapping.CanonicalModel < existing {
-			models[mapping.SKURef] = mapping.CanonicalModel
+		canonicalModel := configImportRuntimeCanonicalModel(mapping.CanonicalModel)
+		if existing, found := models[mapping.SKURef]; !found || canonicalModel < existing {
+			models[mapping.SKURef] = canonicalModel
 		}
 	}
 	return models, nil

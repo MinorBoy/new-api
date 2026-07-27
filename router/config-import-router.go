@@ -27,4 +27,5 @@ var configImportPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/batches/:id/stage", permission: authz.ConfigImportWrite, handler: controller.StageConfigImportBatch},
 	{method: http.MethodPost, path: "/batches/:id/validate", permission: authz.ConfigImportWrite, handler: controller.ValidateConfigImportBatch},
 	{method: http.MethodPost, path: "/batches/:id/publish", permission: authz.ConfigImportPublish, handler: controller.PublishConfigImportBatch},
+	{method: http.MethodPost, path: "/batches/:id/refresh-cache", permission: authz.ConfigImportPublish, handler: controller.RefreshConfigImportBatchCache},
 }

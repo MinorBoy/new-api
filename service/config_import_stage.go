@@ -131,6 +131,11 @@ func validateConfigImportBindingInputs(bindings []dto.ConfigImportBindingInput) 
 		input := &bindings[index]
 		input.LineRef = strings.TrimSpace(input.LineRef)
 		input.Reason = strings.TrimSpace(input.Reason)
+		for _, credentialPattern := range configImportCredentialValuePatterns {
+			if credentialPattern.MatchString(input.Reason) {
+				return configImportError("SECURITY_CREDENTIAL_VALUE", "credential-like value is not allowed in bindings[%d].reason", index)
+			}
+		}
 		if input.LineRef == "" {
 			return configImportError("SCHEMA_BINDING_LINE", "bindings[%d].line_ref is required", index)
 		}

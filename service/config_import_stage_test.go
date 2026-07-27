@@ -312,6 +312,16 @@ func TestConfigImportBindingStrictDecodeRejectsCredentialFields(t *testing.T) {
 	}
 }
 
+func TestConfigImportBindingStrictDecodeRejectsCredentialLikeSkipReason(t *testing.T) {
+	for _, credential := range []string{
+		"sk-abcdefghijklmnopqrstuvwxyz0123456789",
+		"AIza" + strings.Repeat("A", 35),
+	} {
+		_, err := DecodeConfigImportBindingRequest(strings.NewReader(`{"bindings":[{"line_ref":"line-openai","action":"skip","reason":"` + credential + `"}]}`))
+		require.ErrorContains(t, err, "SECURITY_CREDENTIAL_VALUE")
+	}
+}
+
 func prepareConfigImportBindingDB(t *testing.T) {
 	t.Helper()
 	prepareConfigImportServiceDB(t)

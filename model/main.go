@@ -470,7 +470,7 @@ func migrateSecondaryChannelTypeIDs() error {
 
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var marker Option
-		err := tx.Where("key = ?", secondaryChannelTypeMigrationMarker).First(&marker).Error
+		err := tx.Where(&Option{Key: secondaryChannelTypeMigrationMarker}).First(&marker).Error
 		if err == nil {
 			return nil
 		}

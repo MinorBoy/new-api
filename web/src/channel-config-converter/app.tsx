@@ -106,6 +106,7 @@ export default function App(props: AppProps) {
     <div style={{ minHeight: '100vh', background: '#f5f7fa' }}>
       <main
         style={{
+          boxSizing: 'border-box',
           color: '#18212f',
           fontFamily: 'system-ui, sans-serif',
           margin: '0 auto',
@@ -132,6 +133,7 @@ export default function App(props: AppProps) {
                 flexWrap: 'wrap',
                 gap: 4,
                 marginBottom: 20,
+                maxWidth: '100%',
               }}
             >
               {tabs.map((item) => (

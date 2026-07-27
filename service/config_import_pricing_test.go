@@ -39,6 +39,29 @@ func TestConfigImportStagePersistsCostDraftWithoutActivatingConfiguration(t *tes
 	assert.Empty(t, detail.Issues)
 }
 
+func TestConfigImportStageDoesNotMaterializeKeepExistingCostResolution(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "configured-outside-import"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	_, err := UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{{
+		ItemBusinessID: "cost-a", Action: types.ConfigImportResolutionActionKeepExisting,
+	}})
+	require.NoError(t, err)
+
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ?", "config_import").Count(&count).Error)
+	assert.Zero(t, count)
+	var item model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "cost-a").First(&item).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateUnchanged), item.State)
+}
+
 func TestConfigImportStageRollsBackCostDraftsWhenProposalStagingFails(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
@@ -262,6 +285,32 @@ func TestConfigImportStageExcludesRouteBlueprintWithSkipMode(t *testing.T) {
 	assert.Equal(t, string(types.ConfigImportItemStateExcluded), routeItem.State)
 	assert.Equal(t, "route merge mode skip", routeItem.ExclusionReason)
 	assert.NotContains(t, routeItem.CanonicalJSON, "staged_proposal")
+}
+
+func TestConfigImportStageDisablesEveryStagedRouteTarget(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var routeItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "route_blueprints").First(&routeItem).Error)
+	var blueprint types.ConfigImportRouteBlueprint
+	require.NoError(t, common.UnmarshalJsonStr(routeItem.CanonicalJSON, &blueprint))
+	blueprint.Targets[0].Enabled = boolPointer(true)
+	encoded, err := common.Marshal(blueprint)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).Where("id = ?", routeItem.ID).Update("canonical_json", string(encoded)).Error)
+
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.First(&routeItem, routeItem.ID).Error)
+	var staged map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(routeItem.CanonicalJSON, &staged))
+	proposal := staged["staged_proposal"].(map[string]any)
+	targets := proposal["targets"].([]any)
+	assert.Equal(t, false, targets[0].(map[string]any)["enabled"])
 }
 
 func TestConfigImportV1BaselineHashIsDeterministic(t *testing.T) {

@@ -1046,7 +1046,8 @@ func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lin
 	issues := make([]configImportStageIssue, 0)
 	sorted := make([]*model.ConfigImportItem, 0)
 	for index := range items {
-		if items[index].EntityType == "cost_rule_drafts" && items[index].State != string(types.ConfigImportItemStateExcluded) {
+		if items[index].EntityType == "cost_rule_drafts" && items[index].State != string(types.ConfigImportItemStateExcluded) &&
+			items[index].State != string(types.ConfigImportItemStateUnchanged) {
 			sorted = append(sorted, &items[index])
 		}
 	}
@@ -1244,7 +1245,7 @@ func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]
 	}
 	for index := range items {
 		item := &items[index]
-		if item.State == string(types.ConfigImportItemStateExcluded) {
+		if item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
 			continue
 		}
 		switch item.EntityType {
@@ -1335,6 +1336,10 @@ func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]
 			}
 			if blueprint.MergeMode == "" {
 				blueprint.MergeMode = types.ConfigImportRouteMergeModeMerge
+			}
+			disabled := false
+			for targetIndex := range blueprint.Targets {
+				blueprint.Targets[targetIndex].Enabled = &disabled
 			}
 			if err := updateConfigImportItemProposal(db, item, blueprint, map[string]any{"kind": "route", "merge_mode": blueprint.MergeMode, "enabled": false}); err != nil {
 				return issues, err

@@ -18,7 +18,7 @@
     "i18n:sync": "node scripts/sync-i18n.mjs",
     "converter:dev": "rsbuild dev -c rsbuild.converter.config.ts",
     "converter:build": "rsbuild build -c rsbuild.converter.config.ts",
-    "converter:test": "bun test src/channel-config-converter",
+    "converter:test": "bun test --parallel=1 src/channel-config-converter",
     "knip": "knip"
   },
   "dependencies": {

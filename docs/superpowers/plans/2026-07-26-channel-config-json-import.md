@@ -1324,17 +1324,17 @@ git commit -m "feat: scaffold offline channel converter"
 - Create: `web/src/channel-config-converter/__tests__/v2.test.ts`
 - Create: `web/src/channel-config-converter/__fixtures__/invalid/` test workbooks generated in-memory by the tests
 
-- [ ] **Step 1: Write failing adapter tests against exact table contracts**
+- [x] **Step 1: Write failing adapter tests against exact table contracts**
 
 For v1, assert the ten expected sheets and exact row-4 headers, stable-ID extraction, typed Excel values, formulas treated as non-authoritative cache values, missing-sheet/header-change/duplicate-ID/broken-reference errors, and the corrected fixture baseline. For v2, assert explicit `渠道线路` and `路由目标` sheets are consumed without note parsing.
 
-- [ ] **Step 2: Run adapter tests and confirm failure**
+- [x] **Step 2: Run adapter tests and confirm failure**
 
 Run: `cd web && bun test src/channel-config-converter/__tests__/v1.test.ts src/channel-config-converter/__tests__/v2.test.ts`
 
 Expected: FAIL because no adapter exists.
 
-- [ ] **Step 3: Implement the adapter boundary**
+- [x] **Step 3: Implement the adapter boundary**
 
 Use:
 
@@ -1354,11 +1354,11 @@ export interface SourceLocation {
 
 `workbook.ts` converts ExcelJS cells to typed snapshots and retains formula plus cached result separately. Adapters output extracted business rows and source locations only; they do not compute new-api database IDs or canonical hashes.
 
-- [ ] **Step 4: Encode v1 compatibility rules as data mappings**
+- [x] **Step 4: Encode v1 compatibility rules as data mappings**
 
 Implement known structural rules for SKU/resolution variants, Secure line groups (`secure-discount`, `secure-overseas`, `secure-enterprise`), MegaByAI fast account groups, scenario deduplication, and Secure unsupported 480p exclusions. These mappings use channel code, upstream model, stable cost/mapping IDs, structured SKU/capability fields, and group contracts. They must not use workbook filename, physical row number, or fixed price replacement.
 
-- [ ] **Step 5: Verify exact corrected-fixture counts and commit**
+- [x] **Step 5: Verify exact corrected-fixture counts and commit**
 
 Run: `cd web && bun test src/channel-config-converter/__tests__/v1.test.ts src/channel-config-converter/__tests__/v2.test.ts`
 

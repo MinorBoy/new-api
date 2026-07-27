@@ -16,149 +16,186 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  preflightWorkbook,
-  WorkbookPreflightError,
-  type WorkbookPreflightResult,
-} from './security'
+import { V1WorkbookAdapter } from './adapters/v1'
+import { V2WorkbookAdapter } from './adapters/v2'
+import { ConverterHeader } from './components/converter-header'
+import { DownloadActions } from './components/download-actions'
+import { EntityTable } from './components/entity-table'
+import { FileDropzone } from './components/file-dropzone'
+import { IssueView } from './components/issue-view'
+import { JsonView } from './components/json-view'
+import { SummaryView } from './components/summary-view'
+import { buildImportDocument, type ImportDocumentResult } from './document'
+import { WorkbookContractError } from './schema'
+import { preflightWorkbook, WorkbookPreflightError } from './security'
+import { loadWorkbookSnapshot } from './workbook'
 
 type ConversionState =
   | { status: 'idle' }
   | { status: 'checking'; fileName: string }
-  | { status: 'ready'; fileName: string; result: WorkbookPreflightResult }
+  | { status: 'ready'; fileName: string; result: WorkbookConversion }
   | { status: 'error'; fileName: string; message: string }
 
-const panelStyle = {
-  width: 'min(100% - 32px, 960px)',
-  margin: '0 auto',
-  padding: '48px 0 64px',
-  fontFamily: 'system-ui, sans-serif',
-  color: '#18212f',
-} as const
+const tabs = [
+  'Overview',
+  'Channels and lines',
+  'Model SKUs',
+  'Sale pricing',
+  'Channel costs',
+  'Model mappings and routing',
+  'Issues',
+  'JSON',
+] as const
 
-export default function App() {
+type Tab = (typeof tabs)[number]
+
+export type WorkbookConversion = ImportDocumentResult
+
+export interface AppProps {
+  convertFile?: (file: File) => Promise<WorkbookConversion>
+}
+
+async function convertWorkbook(file: File): Promise<WorkbookConversion> {
+  await preflightWorkbook(file)
+  const snapshot = await loadWorkbookSnapshot(await file.arrayBuffer())
+  const adapters = [new V2WorkbookAdapter(), new V1WorkbookAdapter()]
+  const adapter = adapters.find(
+    (candidate) => candidate.matches(snapshot).matched
+  )
+  if (!adapter) {
+    throw new WorkbookContractError(
+      'UNSUPPORTED_TEMPLATE',
+      'No supported workbook template matched.'
+    )
+  }
+  return buildImportDocument({
+    extracted: adapter.extract(snapshot),
+    sourceBytes: new Uint8Array(await file.arrayBuffer()),
+    sourceFileName: file.name,
+  })
+}
+
+export default function App(props: AppProps) {
   const { t } = useTranslation()
   const [state, setState] = useState<ConversionState>({ status: 'idle' })
+  const [tab, setTab] = useState<Tab>('Overview')
 
-  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     setState({ status: 'checking', fileName: file.name })
     try {
-      const result = await preflightWorkbook(file)
+      const result = await (props.convertFile ?? convertWorkbook)(file)
       setState({ status: 'ready', fileName: file.name, result })
+      setTab('Overview')
     } catch (error: unknown) {
-      const message =
-        error instanceof WorkbookPreflightError
-          ? t(`converter.errors.${error.code}`)
-          : t('converter.errors.UNKNOWN')
+      let message = t('converter.errors.UNKNOWN')
+      if (error instanceof WorkbookPreflightError) {
+        message = t(`converter.errors.${error.code}`)
+      } else if (error instanceof WorkbookContractError) {
+        message = t('The workbook does not match a supported template.')
+      }
       setState({ status: 'error', fileName: file.name, message })
     }
   }
 
   return (
     <div style={{ minHeight: '100vh', background: '#f5f7fa' }}>
-      <main style={panelStyle}>
-        <header style={{ marginBottom: 32 }}>
-          <p style={{ margin: '0 0 8px', color: '#526173', fontSize: 13 }}>
-            {t('Channel configuration')}
-          </p>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 'clamp(28px, 5vw, 48px)',
-              lineHeight: 1.1,
-            }}
+      <main
+        style={{
+          color: '#18212f',
+          fontFamily: 'system-ui, sans-serif',
+          margin: '0 auto',
+          padding: '40px 16px 64px',
+          width: 'min(100%, 1180px)',
+        }}
+      >
+        <ConverterHeader />
+        <FileDropzone
+          error={state.status === 'error' ? state.message : undefined}
+          fileName={state.status === 'idle' ? undefined : state.fileName}
+          isChecking={state.status === 'checking'}
+          onFileChange={handleFileChange}
+        />
+        {state.status === 'ready' && (
+          <section
+            aria-label={t('Conversion preview')}
+            style={{ borderTop: '1px solid #d7dee8', paddingTop: 20 }}
           >
-            {t('Offline workbook converter')}
-          </h1>
-        </header>
-
-        <section
-          aria-labelledby='workbook-upload-title'
-          style={{
-            border: '1px solid #d8dee8',
-            background: '#fff',
-            padding: 24,
-            borderRadius: 8,
-          }}
-        >
-          <h2
-            id='workbook-upload-title'
-            style={{ margin: '0 0 16px', fontSize: 20 }}
-          >
-            {t('Workbook')}
-          </h2>
-          <label
-            htmlFor='workbook-file'
-            style={{ display: 'block', fontWeight: 600 }}
-          >
-            {t('Select an .xlsx file')}
-          </label>
-          <input
-            id='workbook-file'
-            type='file'
-            accept='.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            onChange={handleFileChange}
-            style={{ display: 'block', marginTop: 12, maxWidth: '100%' }}
-          />
-
-          {state.status === 'checking' && (
-            <p role='status' style={{ margin: '20px 0 0' }}>
-              {t('Checking {{fileName}}', { fileName: state.fileName })}
-            </p>
-          )}
-
-          {state.status === 'ready' && (
-            <div role='status' style={{ marginTop: 20 }}>
-              <p style={{ margin: '0 0 12px', fontWeight: 600 }}>
-                {state.fileName}
-              </p>
-              <dl
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                  gap: 12,
-                  margin: 0,
-                }}
-              >
-                <div>
-                  <dt style={{ color: '#526173', fontSize: 13 }}>
-                    {t('Worksheets')}
-                  </dt>
-                  <dd style={{ margin: '4px 0 0', fontSize: 22 }}>
-                    {state.result.sheetCount}
-                  </dd>
-                </div>
-                <div>
-                  <dt style={{ color: '#526173', fontSize: 13 }}>
-                    {t('Rows')}
-                  </dt>
-                  <dd style={{ margin: '4px 0 0', fontSize: 22 }}>
-                    {state.result.rowCount}
-                  </dd>
-                </div>
-                <div>
-                  <dt style={{ color: '#526173', fontSize: 13 }}>
-                    {t('Entities')}
-                  </dt>
-                  <dd style={{ margin: '4px 0 0', fontSize: 22 }}>
-                    {state.result.entityCount}
-                  </dd>
-                </div>
-              </dl>
+            <div
+              role='tablist'
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 4,
+                marginBottom: 20,
+              }}
+            >
+              {tabs.map((item) => (
+                <button
+                  aria-selected={tab === item}
+                  key={item}
+                  onClick={() => setTab(item)}
+                  role='tab'
+                  type='button'
+                >
+                  {t(item)}
+                </button>
+              ))}
             </div>
-          )}
-
-          {state.status === 'error' && (
-            <p role='alert' style={{ margin: '20px 0 0', color: '#b42318' }}>
-              {state.message}
-            </p>
-          )}
-        </section>
+            {tab === 'Overview' && (
+              <SummaryView document={state.result.document} />
+            )}
+            {tab === 'Channels and lines' && (
+              <EntityTable
+                entities={[
+                  ...state.result.document.entities.channels,
+                  ...state.result.document.entities.channel_lines,
+                ]}
+                title='Channels and lines'
+              />
+            )}
+            {tab === 'Model SKUs' && (
+              <EntityTable
+                entities={state.result.document.entities.model_skus}
+                title='Model SKUs'
+              />
+            )}
+            {tab === 'Sale pricing' && (
+              <EntityTable
+                entities={state.result.document.entities.sale_proposals}
+                title='Sale pricing'
+              />
+            )}
+            {tab === 'Channel costs' && (
+              <EntityTable
+                entities={state.result.document.entities.cost_rule_drafts}
+                title='Channel costs'
+              />
+            )}
+            {tab === 'Model mappings and routing' && (
+              <EntityTable
+                entities={[
+                  ...state.result.document.entities.model_mappings,
+                  ...state.result.document.entities.route_blueprints,
+                ]}
+                title='Model mappings and routing'
+              />
+            )}
+            {tab === 'Issues' && (
+              <IssueView issues={state.result.document.issues} />
+            )}
+            {tab === 'JSON' && <JsonView document={state.result.document} />}
+            <DownloadActions
+              document={state.result.document}
+              formalDownloadDisabled={state.result.hasFailures}
+              onClear={() => setState({ status: 'idle' })}
+            />
+          </section>
+        )}
       </main>
     </div>
   )

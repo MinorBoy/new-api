@@ -435,7 +435,10 @@ test('task-only channels default new rules to task completion', async () => {
     />
   )
   try {
-    assert.match(browserWindow.document.body.textContent ?? '', /Task succeeded/)
+    assert.match(
+      browserWindow.document.body.textContent ?? '',
+      /Task succeeded/
+    )
   } finally {
     await unmount(mounted)
   }

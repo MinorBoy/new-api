@@ -60,20 +60,10 @@ export async function hashPayload(
             candidate !== null &&
             !Array.isArray(candidate)
         )
-        .map(withoutEntityHash)
         .sort((left, right) =>
           String(left.business_id).localeCompare(String(right.business_id))
         )
     }
   }
-  return sha256({
-    ...(typeof payload.kind === 'string' ? { kind: payload.kind } : {}),
-    ...(typeof payload.schema_version === 'number'
-      ? { schema_version: payload.schema_version }
-      : {}),
-    ...(typeof payload.template_version === 'string'
-      ? { template_version: payload.template_version }
-      : {}),
-    entities: normalizedEntities,
-  })
+  return sha256({ entities: normalizedEntities })
 }

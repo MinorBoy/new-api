@@ -49,6 +49,35 @@ func TestConfigImportBindingBindsExistingMatchingChannel(t *testing.T) {
 	assert.Nil(t, binding.CredentialsConfirmedAt)
 }
 
+func TestConfigImportBindingUsesMappingModelsForGlobalSKU(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "line-openai", channelRef: "supplier-openai", channelType: constant.ChannelTypeOpenAI,
+	})
+	persistConfigImportBindingItem(t, batch.ID, "model_skus", "sku-global", types.ConfigImportModelSKU{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sku-global"},
+	})
+	persistConfigImportBindingItem(t, batch.ID, "model_mappings", "mapping-openai", types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-openai"},
+		CanonicalModel:                 "gpt-test",
+		ClientModel:                    "gpt-test",
+		LineRef:                        "line-openai",
+		UpstreamModel:                  "gpt-test",
+		SKURef:                         "sku-global",
+	})
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI, Name: "Existing OpenAI supplier", Models: "gpt-test",
+		Group: "default", Key: "existing-key", Status: common.ChannelStatusEnabled,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-openai", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+
+	require.NoError(t, err)
+}
+
 func TestConfigImportBindingSkipExcludesLineDependents(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
@@ -69,7 +98,7 @@ func TestConfigImportBindingSkipExcludesLineDependents(t *testing.T) {
 	var items []model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Order("entity_type ASC").Find(&items).Error)
 	for _, item := range items {
-		if item.EntityType == "channels" {
+		if item.EntityType == "channels" || item.EntityType == "model_skus" {
 			assert.Equal(t, string(types.ConfigImportItemStateNew), item.State)
 			continue
 		}
@@ -360,9 +389,17 @@ func createConfigImportBindingBatch(t *testing.T, lines ...configImportBindingLi
 			SupportsRealPerson: fixture.supportsRealPerson,
 		})
 		for index, upstreamModel := range fixture.models {
-			persistConfigImportBindingItem(t, batch.ID, "model_skus", fixture.lineRef+"-sku-"+string(rune('a'+index)), types.ConfigImportModelSKU{
-				ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: fixture.lineRef + "-sku-" + string(rune('a'+index))},
-				LineRef:                         fixture.lineRef, UpstreamModel: upstreamModel,
+			skuRef := fixture.lineRef + "-sku-" + string(rune('a'+index))
+			persistConfigImportBindingItem(t, batch.ID, "model_skus", skuRef, types.ConfigImportModelSKU{
+				ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: skuRef},
+			})
+			persistConfigImportBindingItem(t, batch.ID, "model_mappings", fixture.lineRef+"-mapping-"+string(rune('a'+index)), types.ConfigImportModelMapping{
+				ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: fixture.lineRef + "-mapping-" + string(rune('a'+index))},
+				CanonicalModel:                 upstreamModel,
+				ClientModel:                    upstreamModel,
+				LineRef:                        fixture.lineRef,
+				UpstreamModel:                  upstreamModel,
+				SKURef:                         skuRef,
 			})
 		}
 	}

@@ -20,7 +20,6 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // DecodeConfigImportBindingRequest only accepts the credential-free binding
@@ -214,13 +213,13 @@ func buildConfigImportBindingCatalog(items []model.ConfigImportItem) (*configImp
 				return nil, fmt.Errorf("decode config import line %q: %w", item.BusinessID, err)
 			}
 			catalog.lines[line.LineRef] = line
-		case "model_skus":
-			var sku types.ConfigImportModelSKU
-			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &sku); err != nil {
-				return nil, fmt.Errorf("decode config import model SKU %q: %w", item.BusinessID, err)
+		case "model_mappings":
+			var mapping types.ConfigImportModelMapping
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
+				return nil, fmt.Errorf("decode config import model mapping %q: %w", item.BusinessID, err)
 			}
-			if modelName := strings.TrimSpace(sku.UpstreamModel); modelName != "" {
-				catalog.models[sku.LineRef] = append(catalog.models[sku.LineRef], modelName)
+			if modelName := strings.TrimSpace(mapping.UpstreamModel); modelName != "" {
+				catalog.models[mapping.LineRef] = append(catalog.models[mapping.LineRef], modelName)
 			}
 		}
 	}
@@ -387,18 +386,9 @@ func excludeConfigImportLineDependents(
 		return "", err
 	}
 	managedStates := configImportSkippedItemStatesByID(owners)
-	modelSKURefs := make(map[string]struct{})
 	mappingRefs := make(map[string]struct{})
 	for _, item := range items {
 		switch item.EntityType {
-		case "model_skus":
-			var sku types.ConfigImportModelSKU
-			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &sku); err != nil {
-				return "", fmt.Errorf("decode config import model SKU %q: %w", item.BusinessID, err)
-			}
-			if sku.LineRef == lineRef {
-				modelSKURefs[item.BusinessID] = struct{}{}
-			}
 		case "model_mappings":
 			var mapping types.ConfigImportModelMapping
 			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
@@ -416,7 +406,7 @@ func excludeConfigImportLineDependents(
 	}
 	managedIDs := make([]int64, 0)
 	for _, item := range items {
-		excluded, err := configImportItemDependsOnLine(item, lineRef, modelSKURefs, mappingRefs)
+		excluded, err := configImportItemDependsOnLine(item, lineRef, mappingRefs)
 		if err != nil {
 			return "", err
 		}
@@ -562,7 +552,6 @@ func mapConfigImportBindingChannelConflict(err error) error {
 func configImportItemDependsOnLine(
 	item model.ConfigImportItem,
 	lineRef string,
-	modelSKURefs map[string]struct{},
 	mappingRefs map[string]struct{},
 ) (bool, error) {
 	switch item.EntityType {
@@ -572,19 +561,6 @@ func configImportItemDependsOnLine(
 			return false, fmt.Errorf("decode config import line %q: %w", item.BusinessID, err)
 		}
 		return line.LineRef == lineRef, nil
-	case "model_skus":
-		var sku types.ConfigImportModelSKU
-		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &sku); err != nil {
-			return false, fmt.Errorf("decode config import model SKU %q: %w", item.BusinessID, err)
-		}
-		return sku.LineRef == lineRef, nil
-	case "sale_proposals":
-		var proposal types.ConfigImportSaleProposal
-		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &proposal); err != nil {
-			return false, fmt.Errorf("decode config import sale proposal %q: %w", item.BusinessID, err)
-		}
-		_, found := modelSKURefs[proposal.ModelSKURef]
-		return found, nil
 	case "cost_rule_drafts":
 		var draft types.ConfigImportCostRuleDraft
 		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
@@ -1165,7 +1141,7 @@ func applyConfigImportVariantBinding(tx *gorm.DB, items []model.ConfigImportItem
 }
 
 // ConfigImportBaseline is a deterministic optimistic-concurrency snapshot.
-// The hash covers only serializable, active configuration state.
+// The hash covers only active configuration that this batch will publish.
 type ConfigImportBaseline struct {
 	Hash            string            `json:"hash"`
 	CostRules       map[string]string `json:"cost_rules"`
@@ -1174,10 +1150,94 @@ type ConfigImportBaseline struct {
 	RoutingPolicies map[string]string `json:"routing_policies"`
 }
 
+type configImportBaselineScope struct {
+	costRules       map[string]struct{}
+	optionFields    map[string]map[string]struct{}
+	modelMappings   map[int]map[string]struct{}
+	routingPolicies map[string]struct{}
+}
+
+type configImportBaselineFieldValue struct {
+	Exists bool `json:"exists"`
+	Value  any  `json:"value,omitempty"`
+}
+
+func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImportBaselineScope, error) {
+	scope := &configImportBaselineScope{
+		costRules:       make(map[string]struct{}),
+		optionFields:    make(map[string]map[string]struct{}),
+		modelMappings:   make(map[int]map[string]struct{}),
+		routingPolicies: make(map[string]struct{}),
+	}
+	var items []model.ConfigImportItem
+	if err := db.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	lineChannels, err := configImportPublishedLineChannels(db, items)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+			continue
+		}
+		switch item.EntityType {
+		case "cost_rule_drafts":
+			var draft types.ConfigImportCostRuleDraft
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+				return nil, err
+			}
+			if channelID := lineChannels[draft.LineRef]; channelID > 0 {
+				scope.costRules[fmt.Sprintf("%d|%s|%s", channelID, draft.UpstreamModel, draft.CostVariantKey)] = struct{}{}
+			}
+		case "sale_proposals":
+			var stored struct {
+				StagedProposal struct {
+					OptionPatches map[string]map[string]any `json:"option_patches"`
+				} `json:"staged_proposal"`
+			}
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &stored); err != nil {
+				return nil, err
+			}
+			for optionKey, modelValues := range stored.StagedProposal.OptionPatches {
+				if scope.optionFields[optionKey] == nil {
+					scope.optionFields[optionKey] = make(map[string]struct{})
+				}
+				for modelName := range modelValues {
+					scope.optionFields[optionKey][modelName] = struct{}{}
+				}
+			}
+		case "model_mappings":
+			var mapping types.ConfigImportModelMapping
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
+				return nil, err
+			}
+			if channelID := lineChannels[mapping.LineRef]; channelID > 0 {
+				if scope.modelMappings[channelID] == nil {
+					scope.modelMappings[channelID] = make(map[string]struct{})
+				}
+				scope.modelMappings[channelID][configImportRuntimeCanonicalModel(mapping.ClientModel)] = struct{}{}
+			}
+		case "route_blueprints":
+			var blueprint types.ConfigImportRouteBlueprint
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+				return nil, err
+			}
+			if blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
+				scope.routingPolicies[fmt.Sprintf("default|%s", configImportRuntimeCanonicalModel(blueprint.CanonicalModel))] = struct{}{}
+			}
+		}
+	}
+	return scope, nil
+}
+
 func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBaseline, error) {
-	_ = batchID
 	if db == nil {
 		return nil, errors.New("config import baseline database is required")
+	}
+	scope, err := configImportBaselineScopeForBatch(db, batchID)
+	if err != nil {
+		return nil, err
 	}
 	baseline := &ConfigImportBaseline{
 		CostRules:       map[string]string{},
@@ -1192,7 +1252,11 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 			return nil, err
 		}
 		for _, rule := range rules {
-			key := fmt.Sprintf("%d|%s|%s|%d", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey, rule.Version)
+			businessKey := fmt.Sprintf("%d|%s|%s", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey)
+			if _, included := scope.costRules[businessKey]; !included {
+				continue
+			}
+			key := fmt.Sprintf("%s|%d", businessKey, rule.Version)
 			encoded, err := common.Marshal(rule)
 			if err != nil {
 				return nil, err
@@ -1200,38 +1264,85 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 			baseline.CostRules[key] = string(encoded)
 		}
 	}
-	if db.Migrator().HasTable(&model.Option{}) {
+	if db.Migrator().HasTable(&model.Option{}) && len(scope.optionFields) > 0 {
 		var options []model.Option
-		if err := db.Order("key ASC").Find(&options).Error; err != nil {
+		optionKeys := make([]string, 0, len(scope.optionFields))
+		for key := range scope.optionFields {
+			optionKeys = append(optionKeys, key)
+		}
+		sort.Strings(optionKeys)
+		if err := db.Where("key IN ?", optionKeys).Order("key ASC").Find(&options).Error; err != nil {
 			return nil, err
 		}
+		byKey := make(map[string]model.Option, len(options))
 		for _, option := range options {
-			if configImportBaselineOptionAllowed(option.Key) {
-				baseline.Options[option.Key] = option.Value
+			byKey[option.Key] = option
+		}
+		for _, optionKey := range optionKeys {
+			values := make(map[string]any)
+			if option, found := byKey[optionKey]; found && strings.TrimSpace(option.Value) != "" {
+				if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+					return nil, configImportError("BASELINE_OPTION_JSON", "option %q is not a JSON object", optionKey)
+				}
+			}
+			modelNames := make([]string, 0, len(scope.optionFields[optionKey]))
+			for modelName := range scope.optionFields[optionKey] {
+				modelNames = append(modelNames, modelName)
+			}
+			sort.Strings(modelNames)
+			for _, modelName := range modelNames {
+				value, exists := values[modelName]
+				encoded, err := common.Marshal(configImportBaselineFieldValue{Exists: exists, Value: value})
+				if err != nil {
+					return nil, err
+				}
+				baseline.Options[fmt.Sprintf("%s|%s", optionKey, modelName)] = string(encoded)
 			}
 		}
 	}
-	if db.Migrator().HasTable(&model.Ability{}) {
-		var abilities []model.Ability
-		if err := db.Clauses(clause.OrderBy{Columns: []clause.OrderByColumn{
-			{Column: clause.Column{Name: "channel_id"}},
-			{Column: clause.Column{Name: "model"}},
-			{Column: clause.Column{Name: "group"}},
-		}}).Find(&abilities).Error; err != nil {
+	if db.Migrator().HasTable(&model.Channel{}) && len(scope.modelMappings) > 0 {
+		channelIDs := make([]int, 0, len(scope.modelMappings))
+		for channelID := range scope.modelMappings {
+			channelIDs = append(channelIDs, channelID)
+		}
+		sort.Ints(channelIDs)
+		var channels []model.Channel
+		if err := db.Where("id IN ?", channelIDs).Order("id ASC").Find(&channels).Error; err != nil {
 			return nil, err
 		}
-		for _, ability := range abilities {
-			key := fmt.Sprintf("%d|%s|%s", ability.ChannelId, ability.Group, ability.Model)
-			encoded, err := common.Marshal(ability)
-			if err != nil {
-				return nil, err
+		for _, channel := range channels {
+			mapping := make(map[string]string)
+			if raw := strings.TrimSpace(channel.GetModelMapping()); raw != "" {
+				if err := common.UnmarshalJsonStr(raw, &mapping); err != nil {
+					return nil, configImportError("BASELINE_MODEL_MAPPING_JSON", "channel %d has invalid model mapping", channel.Id)
+				}
 			}
-			baseline.ModelMappings[key] = string(encoded)
+			modelNames := make([]string, 0, len(scope.modelMappings[channel.Id]))
+			for modelName := range scope.modelMappings[channel.Id] {
+				modelNames = append(modelNames, modelName)
+			}
+			sort.Strings(modelNames)
+			for _, modelName := range modelNames {
+				value, exists := mapping[modelName]
+				encoded, err := common.Marshal(configImportBaselineFieldValue{Exists: exists, Value: value})
+				if err != nil {
+					return nil, err
+				}
+				baseline.ModelMappings[fmt.Sprintf("%d|%s", channel.Id, modelName)] = string(encoded)
+			}
 		}
 	}
-	if db.Migrator().HasTable(&model.RoutingPolicy{}) {
+	if db.Migrator().HasTable(&model.RoutingPolicy{}) && len(scope.routingPolicies) > 0 {
+		models := make([]string, 0, len(scope.routingPolicies))
+		for key := range scope.routingPolicies {
+			_, modelName, found := strings.Cut(key, "|")
+			if found {
+				models = append(models, modelName)
+			}
+		}
+		sort.Strings(models)
 		var policies []model.RoutingPolicy
-		if err := db.Order("group_name ASC, model ASC, id ASC").Find(&policies).Error; err != nil {
+		if err := db.Where("group_name = ? AND model IN ?", "default", models).Order("group_name ASC, model ASC, id ASC").Find(&policies).Error; err != nil {
 			return nil, err
 		}
 		if db.Migrator().HasTable(&model.RouteTarget{}) && len(policies) > 0 {
@@ -1252,11 +1363,15 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 			}
 		}
 		for _, policy := range policies {
+			key := fmt.Sprintf("%s|%s", policy.GroupName, policy.Model)
+			if _, included := scope.routingPolicies[key]; !included {
+				continue
+			}
 			encoded, err := common.Marshal(policy)
 			if err != nil {
 				return nil, err
 			}
-			baseline.RoutingPolicies[fmt.Sprintf("%s|%s", policy.GroupName, policy.Model)] = string(encoded)
+			baseline.RoutingPolicies[key] = string(encoded)
 		}
 	}
 	encoded, err := common.Marshal(struct {
@@ -1278,21 +1393,6 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 // staging persisted on the batch.
 func CaptureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBaseline, error) {
 	return captureConfigImportBaseline(db, batchID)
-}
-
-func configImportBaselineOptionAllowed(key string) bool {
-	lower := strings.ToLower(strings.TrimSpace(key))
-	for _, sensitive := range []string{"key", "secret", "token", "password", "cookie", "authorization", "credential"} {
-		if strings.Contains(lower, sensitive) {
-			return false
-		}
-	}
-	switch key {
-	case "ModelPrice", "ModelRatio", "CompletionRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio", "GroupRatio", "GroupGroupRatio", "UserUsableGroups":
-		return true
-	default:
-		return strings.HasPrefix(lower, "billing_setting.")
-	}
 }
 
 type configImportStageIssue struct {
@@ -2032,7 +2132,12 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 	} else if proposal.DurationPrice != nil {
 		expectedMode = billing_setting.BillingModePerDuration
 	}
-	if proposal.BillingMode != "" && proposal.BillingMode != expectedMode {
+	// Legacy V1 sale rows use the source metering term "per_token". The
+	// runtime represents the same token pricing as a compiled tier expression.
+	// Keep rejecting every other disagreement between authoritative inputs and
+	// runtime mode so incompatible price configurations cannot be staged.
+	legacyTokenMode := hasToken && proposal.BillingMode == string(types.CostModePerToken)
+	if proposal.BillingMode != "" && proposal.BillingMode != expectedMode && !legacyTokenMode {
 		return proposal, nil, configImportError("PRICING_MODE_CONFLICT", "billing_mode %q does not match sale pricing inputs", proposal.BillingMode)
 	}
 	proposal.BillingMode = expectedMode

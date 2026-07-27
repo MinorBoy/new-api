@@ -95,7 +95,9 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
   )
 
   return useMutation({
-    mutationFn: async (data: ChannelFormValues): Promise<ChannelMutationSuccess> => {
+    mutationFn: async (
+      data: ChannelFormValues
+    ): Promise<ChannelMutationSuccess> => {
       if (props.isEditing && props.currentRow) {
         const payload = transformFormDataToUpdatePayload(
           data,

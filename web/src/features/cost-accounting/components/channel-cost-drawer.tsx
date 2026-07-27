@@ -51,6 +51,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
 import {
   Sheet,
   SheetClose,
@@ -60,7 +61,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -282,9 +282,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   )
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [costVariantFilter, setCostVariantFilter] = useState('')
-  const [historyTarget, setHistoryTarget] = useState<HistoryState | null>(
-    null
-  )
+  const [historyTarget, setHistoryTarget] = useState<HistoryState | null>(null)
   const [confirmation, setConfirmation] =
     useState<LifecycleConfirmation | null>(null)
 

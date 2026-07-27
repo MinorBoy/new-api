@@ -32,6 +32,7 @@ describe('model routing data contract', () => {
           channel_name: 'A1',
           name: 'A1 720p',
           upstream_model: 'provider-720p',
+          cost_variant_key: 'default',
           target_priority: 100,
           minimum_expected_margin_bps: null,
           enabled: true,

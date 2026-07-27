@@ -69,8 +69,8 @@ import {
 } from '@/components/ui/sheet'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
-import type { Channel } from '../../channels/types'
 import { TASK_ONLY_CHANNEL_TYPES } from '../../channels/constants'
+import type { Channel } from '../../channels/types'
 import {
   costAccountingQueryKeys,
   createCostRule,

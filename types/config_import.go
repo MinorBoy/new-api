@@ -158,7 +158,10 @@ type ConfigImportChannelLine struct {
 
 type ConfigImportModelSKU struct {
 	ConfigImportAuthoritativeEntity
-	LineRef            string                       `json:"line_ref"`
+	// LineRef is retained only to read legacy import documents. Structured v2
+	// SKU records describe global model specifications; mappings and targets
+	// own the channel-line and upstream-model relationship.
+	LineRef            string                       `json:"line_ref,omitempty"`
 	UpstreamModel      string                       `json:"upstream_model,omitempty"`
 	OutputResolutions  []string                     `json:"output_resolutions,omitempty"`
 	DurationValues     []int                        `json:"duration_values,omitempty"`

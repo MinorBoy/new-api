@@ -418,6 +418,55 @@ func TestConfigImportV1BaselineHashIsDeterministic(t *testing.T) {
 	assert.NotEmpty(t, first.Hash)
 }
 
+func TestConfigImportBaselineTracksOnlyPublishedPricingMappingsAndRoutes(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Option{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	modelMapping := `{"canonical-video":"vendor-video","unrelated-model":"unrelated-upstream"}`
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key", ModelMapping: &modelMapping}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "vendor-video", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Option{Key: "ModelPrice", Value: `{"canonical-video":1,"unrelated-model":2}`}).Error)
+	relevantPolicy := &model.RoutingPolicy{GroupName: "default", Model: "canonical-video"}
+	unrelatedPolicy := &model.RoutingPolicy{GroupName: "default", Model: "unrelated-model"}
+	require.NoError(t, model.DB.Create(relevantPolicy).Error)
+	require.NoError(t, model.DB.Create(unrelatedPolicy).Error)
+
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-a"},
+		CanonicalModel:                  "canonical-video",
+		ClientModel:                     "canonical-video",
+		LineRef:                         "line-a",
+		UpstreamModel:                   "vendor-video",
+		SKURef:                          "sku-a",
+	}
+	mappingJSON, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+		CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	first, err := captureConfigImportBaseline(model.DB, batch.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "ModelPrice").Update("value", `{"canonical-video":1,"unrelated-model":3}`).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("model_mapping", `{"canonical-video":"vendor-video","unrelated-model":"changed"}`).Error)
+	require.NoError(t, model.DB.Model(&model.RoutingPolicy{}).Where("id = ?", unrelatedPolicy.ID).Update("enabled", true).Error)
+	second, err := captureConfigImportBaseline(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, first.Hash, second.Hash)
+
+	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "ModelPrice").Update("value", `{"canonical-video":4,"unrelated-model":3}`).Error)
+	third, err := captureConfigImportBaseline(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, second.Hash, third.Hash)
+}
+
 func createConfigImportStageBatch(t *testing.T, channelID int, lineRef, upstreamModel string) model.ConfigImportBatch {
 	t.Helper()
 	summary, err := common.Marshal(configImportBatchSummaryStorage{ItemCounts: types.ConfigImportEntityCounts{CostRuleDrafts: 1}})

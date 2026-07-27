@@ -309,6 +309,8 @@ v1 适配器只识别当前模板版本的固定表头和列语义。
 
 待处理键为 `CH-MEGABYAI / videos-standard`。
 
+该键的 17 条 v1 成本与映射记录没有可验证的线路身份，因此不得进入 `cost_rule_drafts`、`model_mappings` 或 `route_blueprints` 等可发布候选。转换器只保留一个同名 `unresolved_variants` 记录，作为管理员补充线路、拆分变体或排除报价的唯一入口。
+
 v1 备注可以显示给管理员辅助判断，但转换器和服务端不得把备注解析结果当作发布依据。
 
 ### 9.3 Secure 分组映射

@@ -89,3 +89,35 @@ test('payload hashing ignores source bytes, generated metadata, issues, and prev
 
   assert.equal(await hashPayload(first), await hashPayload(second))
 })
+
+test('payload hashing follows the import contract by retaining entity hashes and excluding document metadata', async () => {
+  const entity = {
+    business_id: 'SOURCE-A',
+    entity_hash: 'a'.repeat(64),
+    source_ref: 'SOURCE-A',
+  }
+  const first = {
+    kind: 'new-api.channel-config-import',
+    schema_version: 1,
+    template_version: '1',
+    entities: { sources: [entity] },
+  }
+  const changedEntityHash = {
+    ...first,
+    entities: {
+      sources: [{ ...entity, entity_hash: 'b'.repeat(64) }],
+    },
+  }
+  const changedMetadata = {
+    ...first,
+    kind: 'different-kind',
+    schema_version: 99,
+    template_version: 'future',
+  }
+
+  assert.notEqual(
+    await hashPayload(first),
+    await hashPayload(changedEntityHash)
+  )
+  assert.equal(await hashPayload(first), await hashPayload(changedMetadata))
+})

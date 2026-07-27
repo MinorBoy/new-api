@@ -619,14 +619,9 @@ func validateConfigImportRouteTarget(target *types.ConfigImportRouteTarget, blue
 func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, sourceIDs map[string]struct{}, businessIDs map[string]string) error {
 	routeTargets := make(map[string]*types.ConfigImportRouteTarget)
 	linesByRef := make(map[string]*types.ConfigImportChannelLine, len(entities.ChannelLines))
-	skusByRef := make(map[string]*types.ConfigImportModelSKU, len(entities.ModelSKUs))
 	for index := range entities.ChannelLines {
 		line := &entities.ChannelLines[index]
 		linesByRef[line.LineRef] = line
-	}
-	for index := range entities.ModelSKUs {
-		modelSKU := &entities.ModelSKUs[index]
-		skusByRef[modelSKU.BusinessID] = modelSKU
 	}
 	for blueprintIndex := range entities.RouteBlueprints {
 		for targetIndex := range entities.RouteBlueprints[blueprintIndex].Targets {
@@ -658,9 +653,6 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 	for index := range entities.ModelSKUs {
 		modelSKU := entities.ModelSKUs[index]
 		if err := requireConfigImportSourceReference("model_skus", index, modelSKU.SourceRef, sourceIDs); err != nil {
-			return err
-		}
-		if err := requireConfigImportReference("model_skus", index, "line_ref", modelSKU.LineRef, businessIDs, "channel_lines"); err != nil {
 			return err
 		}
 	}
@@ -706,10 +698,6 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportReference("model_mappings", index, "sku_ref", mapping.SKURef, businessIDs, "model_skus"); err != nil {
 			return err
 		}
-		modelSKU := skusByRef[mapping.SKURef]
-		if mapping.LineRef != modelSKU.LineRef || (modelSKU.UpstreamModel != "" && mapping.UpstreamModel != modelSKU.UpstreamModel) {
-			return configImportError("ROUTING_REFERENCE_TUPLE", "model_mappings[%d] does not match sku_ref %q", index, mapping.SKURef)
-		}
 	}
 	for index := range entities.RouteBlueprints {
 		blueprint := entities.RouteBlueprints[index]
@@ -730,10 +718,6 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 				return err
 			}
 			line := linesByRef[target.LineRef]
-			modelSKU := skusByRef[target.SKURef]
-			if target.LineRef != modelSKU.LineRef || (modelSKU.UpstreamModel != "" && target.UpstreamModel != modelSKU.UpstreamModel) {
-				return configImportError("ROUTING_REFERENCE_TUPLE", "route_blueprints[%d].targets[%d] does not match sku_ref %q", index, targetIndex, target.SKURef)
-			}
 			if line.SupportsRealPerson != nil && (target.SupportsRealPerson == nil || *line.SupportsRealPerson != *target.SupportsRealPerson) {
 				return configImportError("ROUTING_REAL_PERSON_MISMATCH", "route_blueprints[%d].targets[%d].supports_real_person conflicts with line_ref %q", index, targetIndex, target.LineRef)
 			}
@@ -744,8 +728,10 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 		if err := requireConfigImportSourceReference("unresolved_variants", index, variant.SourceRef, sourceIDs); err != nil {
 			return err
 		}
-		if err := requireConfigImportReference("unresolved_variants", index, "line_ref", variant.LineRef, businessIDs, "channel_lines"); err != nil {
-			return err
+		if variant.LineRef != "" {
+			if err := requireConfigImportReference("unresolved_variants", index, "line_ref", variant.LineRef, businessIDs, "channel_lines"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

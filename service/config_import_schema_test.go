@@ -417,7 +417,7 @@ func TestConfigImportSchemaRejectsConflictingRouteTargetRealPersonConstraint(t *
 	requireCode(t, err, "ROUTING_REAL_PERSON_MISMATCH")
 }
 
-func TestConfigImportSchemaRejectsReferenceTupleMismatch(t *testing.T) {
+func TestConfigImportSchemaAcceptsGlobalSKUAcrossDifferentLineMappings(t *testing.T) {
 	for _, testCase := range []struct {
 		name         string
 		targetLine   string
@@ -432,11 +432,14 @@ func TestConfigImportSchemaRejectsReferenceTupleMismatch(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			entities := configImportReferenceTupleEntities(testCase.targetLine, testCase.targetModel, testCase.mappingLine, testCase.mappingModel, nil, nil)
+			sku := entities["model_skus"].([]any)[0].(map[string]any)
+			delete(sku, "line_ref")
+			delete(sku, "upstream_model")
 			payload := configImportDocumentJSON(t, entities)
 
 			_, err := ParseConfigImportDocument(strings.NewReader(payload))
 
-			requireCode(t, err, "ROUTING_REFERENCE_TUPLE")
+			require.NoError(t, err)
 		})
 	}
 }
@@ -501,6 +504,30 @@ func TestConfigImportSchemaAcceptsStructuredV2LineCostAndRoute(t *testing.T) {
 	require.Equal(t, "line-main", document.Entities.ChannelLines[0].LineRef)
 	require.Equal(t, "standard", document.Entities.CostRuleDrafts[0].CostVariantKey)
 	require.Equal(t, "target-video", document.Entities.RouteBlueprints[0].Targets[0].RouteTargetRef)
+}
+
+func TestConfigImportSchemaAcceptsGlobalModelSKUReferencedByALineMapping(t *testing.T) {
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+	sku := entities["model_skus"].([]any)[0].(map[string]any)
+	delete(sku, "line_ref")
+	delete(sku, "upstream_model")
+
+	_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+	require.NoError(t, err)
+}
+
+func TestConfigImportSchemaAcceptsUnresolvedVariantWithoutVerifiedLine(t *testing.T) {
+	payload := configImportDocumentJSON(t, map[string]any{
+		"unresolved_variants": []any{map[string]any{
+			"business_id": "supplier/model", "entity_hash": strings.Repeat("d", 64), "source_ref": "source-workbook",
+			"line_ref": "", "upstream_model": "model", "reason": "line identity is not verified",
+		}},
+	})
+
+	_, err := ParseConfigImportDocument(strings.NewReader(payload))
+
+	require.NoError(t, err)
 }
 
 func TestConfigImportSchemaRejectsChannelLineBaseURL(t *testing.T) {

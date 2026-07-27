@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import {
   TextReader,
   TextWriter,
@@ -239,7 +257,13 @@ export const V2_HEADERS = {
     'cost_variant_key',
     'route_target_ref',
     'currency',
+    'currency_to_usd_rate',
+    'billing_multiplier',
+    'purchase_discount_ratio',
+    'recharge_exchange_ratio',
+    'fee_rate',
     'native_unit_price',
+    'normalized_usd_unit_price',
     'status_proposal',
     'source_ref',
     'note',
@@ -248,6 +272,7 @@ export const V2_HEADERS = {
     'route_target_ref',
     'canonical_model',
     'client_model',
+    'merge_mode',
     'line_ref',
     'upstream_model',
     'sku_ref',
@@ -313,6 +338,12 @@ function snapshotCell(cell: ExcelJS.Cell): CellSnapshot {
 
 function normalizeArtifactToolXml(fileName: string, value: string): string {
   const normalized = value.replaceAll('<x:', '<').replaceAll('</x:', '</')
+  if (fileName.startsWith('xl/worksheets/_rels/')) {
+    return normalized.replaceAll(
+      /<Relationship\b(?=[^>]*Type="[^"]*\/(?:comments|threadedComment)")[^>]*\/>/gi,
+      ''
+    )
+  }
   if (!fileName.startsWith('xl/worksheets/')) {
     return normalized
   }
@@ -336,7 +367,13 @@ async function prepareForExcelJs(input: Uint8Array): Promise<Uint8Array> {
 
   try {
     for (const entry of await reader.getEntries()) {
-      if (entry.directory || entry.filename.startsWith('xl/tables/')) {
+      if (
+        entry.directory ||
+        entry.filename.startsWith('xl/tables/') ||
+        entry.filename.startsWith('xl/comments') ||
+        entry.filename.startsWith('xl/threadedcomments/') ||
+        entry.filename.startsWith('xl/persons/')
+      ) {
         continue
       }
       if (entry.filename.endsWith('.xml') || entry.filename.endsWith('.rels')) {

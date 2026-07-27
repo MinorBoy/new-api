@@ -17,12 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { V2WorkbookAdapter } from '../adapters/v2'
+import { buildImportDocument } from '../document'
 import { WorkbookContractError } from '../schema'
 import type { CellSnapshot, WorkbookSnapshot } from '../types'
-import { V2_HEADERS } from '../workbook'
+import { loadWorkbookSnapshot, V2_HEADERS } from '../workbook'
+
+const v2FixturePath = fileURLToPath(
+  new URL('../__fixtures__/channel-config-v2-golden.xlsx', import.meta.url)
+)
+const v2TemplatePath = fileURLToPath(
+  new URL('../../../../docs/templates/channel-config-v2.xlsx', import.meta.url)
+)
 
 function cell(value: CellSnapshot['value']): CellSnapshot {
   return { value, formula: null, formulaResult: null }
@@ -52,7 +62,7 @@ function createV2Snapshot(): WorkbookSnapshot {
   const records: Record<string, Record<string, CellSnapshot['value']>[]> = {
     渠道: [
       {
-        channel_ref: 'CH-EXAMPLE',
+        channel_ref: 'CH-4STOKEN',
         display_name: 'Example channel',
         currency: 'USD',
         recharge_ratio: 1,
@@ -66,7 +76,7 @@ function createV2Snapshot(): WorkbookSnapshot {
     渠道线路: [
       {
         line_ref: 'example-line',
-        channel_ref: 'CH-EXAMPLE',
+        channel_ref: 'CH-4STOKEN',
         display_name: 'Example line',
         provider_type_hint: 'openai',
         region: 'global',
@@ -111,10 +121,16 @@ function createV2Snapshot(): WorkbookSnapshot {
         sku_ref: 'SKU-EXAMPLE-720',
         scenario: 'no_video',
         cost_mode: 'per_request',
-        cost_variant_key: '720p',
+        cost_variant_key: 'retail-720',
         route_target_ref: 'ROUTE-EXAMPLE',
         currency: 'USD',
+        currency_to_usd_rate: '1',
+        billing_multiplier: '1',
+        purchase_discount_ratio: '1',
+        recharge_exchange_ratio: '1',
+        fee_rate: '0',
         native_unit_price: '3',
+        normalized_usd_unit_price: '3',
         status_proposal: 'disabled',
         source_ref: 'SRC-EXAMPLE',
         note: 'This note cannot select a route.',
@@ -125,10 +141,11 @@ function createV2Snapshot(): WorkbookSnapshot {
         route_target_ref: 'ROUTE-EXAMPLE',
         canonical_model: 'seedance-2.0',
         client_model: 'seedance-2.0',
+        merge_mode: 'merge',
         line_ref: 'example-line',
         upstream_model: 'video-2.0',
         sku_ref: 'SKU-EXAMPLE-720',
-        cost_variant_key: '720p',
+        cost_variant_key: 'retail-720',
         output_resolutions: '720p',
         duration_min: 4,
         duration_max: 15,
@@ -187,7 +204,7 @@ test('v2 adapter consumes explicit channel line and route target columns without
       {
         businessId: 'ROUTE-EXAMPLE',
         lineRef: 'example-line',
-        variant: '720p',
+        variant: 'retail-720',
       },
     ]
   )
@@ -213,4 +230,105 @@ test('v2 adapter rejects a route target with a broken explicit line reference', 
       return true
     }
   )
+})
+
+test('v2 document preserves explicit line, route target, and cost variant fields', async () => {
+  const result = await buildImportDocument({
+    extracted: new V2WorkbookAdapter().extract(createV2Snapshot()),
+    sourceBytes: new Uint8Array([1, 2, 3]),
+    sourceFileName: 'channel-config-v2.xlsx',
+  })
+
+  assert.equal(
+    result.hasFailures,
+    false,
+    JSON.stringify(result.document.issues)
+  )
+  assert.equal(result.hasWarnings, false)
+  assert.deepEqual(
+    result.document.entities.cost_rule_drafts.map((draft) => ({
+      lineRef: draft.line_ref,
+      routeTargetRef: draft.route_target_ref,
+      variant: draft.cost_variant_key,
+    })),
+    [
+      {
+        lineRef: 'example-line',
+        routeTargetRef: 'ROUTE-EXAMPLE',
+        variant: 'retail-720',
+      },
+    ]
+  )
+  assert.deepEqual(
+    result.document.entities.route_blueprints.map((blueprint) => ({
+      businessId: blueprint.business_id,
+      mappings: blueprint.model_mapping_refs,
+      target: blueprint.targets,
+    })),
+    [
+      {
+        businessId: 'route-blueprint/ROUTE-EXAMPLE',
+        mappings: ['MAP-EXAMPLE'],
+        target: [
+          {
+            cost_variant_key: 'retail-720',
+            duration_max: 15,
+            duration_min: 4,
+            enabled: false,
+            line_ref: 'example-line',
+            output_resolutions: ['720p'],
+            priority: 10,
+            route_target_ref: 'ROUTE-EXAMPLE',
+            sku_ref: 'SKU-EXAMPLE-720',
+            supports_real_person: false,
+            upstream_model: 'video-2.0',
+          },
+        ],
+      },
+    ]
+  )
+})
+
+test('generated v2 workbook has explicit disabled routing and no structural conflicts', async () => {
+  const bytes = await fs.readFile(v2FixturePath)
+  const workbook = await loadWorkbookSnapshot(bytes)
+  const adapter = new V2WorkbookAdapter()
+  const extracted = adapter.extract(workbook)
+  const result = await buildImportDocument({
+    extracted,
+    sourceBytes: bytes,
+    sourceFileName: 'channel-config-v2-golden.xlsx',
+  })
+
+  assert.equal(adapter.matches(workbook).matched, true)
+  assert.equal(
+    result.hasFailures,
+    false,
+    JSON.stringify(result.document.issues)
+  )
+  assert.equal(
+    result.hasWarnings,
+    false,
+    JSON.stringify(result.document.issues)
+  )
+  assert.equal(result.document.entities.channels.length, 9)
+  assert.equal(result.document.entities.channel_lines.length, 12)
+  assert.equal(result.document.entities.model_skus.length, 9)
+  assert.equal(result.document.entities.sale_proposals.length, 16)
+  assert.equal(result.document.entities.cost_rule_drafts.length, 104)
+  assert.equal(result.document.entities.model_mappings.length, 104)
+  assert.equal(result.document.entities.route_blueprints.length, 104)
+  assert.equal(result.document.entities.unresolved_variants.length, 0)
+  assert.ok(
+    result.document.entities.route_blueprints.every((blueprint) =>
+      (blueprint.targets as Array<Record<string, unknown>>).every(
+        (target) =>
+          typeof target.line_ref === 'string' &&
+          typeof target.cost_variant_key === 'string' &&
+          typeof target.route_target_ref === 'string' &&
+          target.enabled === false
+      )
+    )
+  )
+  assert.deepEqual(await fs.readFile(v2TemplatePath), bytes)
 })

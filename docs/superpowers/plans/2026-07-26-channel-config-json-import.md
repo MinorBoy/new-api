@@ -709,7 +709,7 @@ git commit -m "feat: bind imported channel lines"
 
 - [ ] **Step 1: Write failing stage and recomputation tests**
 
-Cover server-side Decimal normalization, `no_video/with_video` merge when identical, negative-margin WARN gate, per-request/per-duration/token/expression sale proposals, one unresolved `CH-MEGABYAI / videos-standard` conflict, three Secure lines, two MegaByAI fast lines, excluded Secure 480p entries, route merge/replace/skip, and exact v1 counts `9/12/9/16/121/121/17/16/1`.
+Cover server-side Decimal normalization, `no_video/with_video` merge when identical, negative-margin WARN gate, per-request/per-duration/token/expression sale proposals, one unresolved `CH-MEGABYAI / videos-standard` conflict, three Secure lines, two MegaByAI fast lines, excluded Secure 480p entries, route merge/replace/skip, and exact publishable v1 counts `9/12/9/16/104/104/104/1`. The 17 non-line-identifiable `videos-standard` rows remain excluded from formal candidates and are represented only by that unresolved variant.
 
 - [ ] **Step 2: Run focused staging tests and confirm failure**
 
@@ -1362,7 +1362,7 @@ Implement known structural rules for SKU/resolution variants, Secure line groups
 
 Run: `cd web && bun test src/channel-config-converter/__tests__/v1.test.ts src/channel-config-converter/__tests__/v2.test.ts`
 
-Expected: PASS with 9 channel masters, 12 lines, 9 SKUs, 16 sale proposals, 121 cost candidates, 121 mappings, 17 detected keys, 16 automatic keys, and only `CH-MEGABYAI/videos-standard` unresolved.
+Expected: PASS with 9 channel masters, 12 lines, 9 global SKUs, 16 sale proposals, 104 cost candidates, 104 mappings, 104 route blueprints, and only `CH-MEGABYAI/videos-standard` unresolved. The 17 records without a verified line remain outside formal candidates.
 
 ```bash
 git add web/src/channel-config-converter/types.ts web/src/channel-config-converter/schema.ts web/src/channel-config-converter/workbook.ts web/src/channel-config-converter/adapters web/src/channel-config-converter/__tests__ web/src/channel-config-converter/__fixtures__/invalid
@@ -1426,25 +1426,25 @@ git commit -m "feat: normalize and hash channel imports"
 - Create: `web/src/channel-config-converter/components/download-actions.tsx`
 - Create: `web/src/channel-config-converter/__tests__/app.test.tsx`
 
-- [ ] **Step 1: Write failing UI behavior tests**
+- [x] **Step 1: Write failing UI behavior tests**
 
 Test upload progress, tabs `Overview/Channels and lines/Model SKUs/Sale pricing/Channel costs/Model mappings and routing/Issues/JSON`, source row display, filters, FAIL disabling formal JSON, WARN allowing JSON while marking affected entities non-publishable, issue-report download, and clearing all in-memory data.
 
-- [ ] **Step 2: Run UI tests and confirm failure**
+- [x] **Step 2: Run UI tests and confirm failure**
 
 Run: `cd web && bun test src/channel-config-converter/__tests__/app.test.tsx`
 
 Expected: FAIL because the preview components do not exist.
 
-- [ ] **Step 3: Implement the converter workflow**
+- [x] **Step 3: Implement the converter workflow**
 
 Keep the selected `File`, workbook bytes, parsed data, and JSON only in React memory. Use tabs for entity views, virtualized tables for large lists, severity badges, source sheet/row columns, and a read-only JSON code view. Avoid nested cards and keep compact headings suitable for an operational tool.
 
-- [ ] **Step 4: Implement deterministic downloads**
+- [x] **Step 4: Implement deterministic downloads**
 
 Formal output uses MIME `application/json`, the canonical property/array order, UTF-8, and a terminal newline. FAIL permits only a read-only issue report; WARN permits formal JSON but every affected entity carries a non-publishable state and stable issue reference. Generated filenames may include source name/time but those fields do not affect payload hash.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `cd web && bun test src/channel-config-converter && bun run converter:build && bun run typecheck`
 
@@ -1463,23 +1463,23 @@ git commit -m "feat: add channel converter preview and export"
 - Create: `web/src/channel-config-converter/__fixtures__/channel-config-v2-golden.xlsx`
 - Modify: `web/src/channel-config-converter/__tests__/v2.test.ts`
 
-- [ ] **Step 1: Extend the builder to create v2 from normalized v1 data**
+- [x] **Step 1: Extend the builder to create v2 from normalized v1 data**
 
 Create explicit sheets `渠道线路` and `路由目标`; extend `渠道成本` with `line_ref`, `cost_variant_key`, and `route_target_ref`. Preserve visible source/audit fields, use formulas for derived normalized cost/profit/check cells, and make all input IDs text cells.
 
-- [ ] **Step 2: Apply workbook validation and established visual style**
+- [x] **Step 2: Apply workbook validation and established visual style**
 
 Use dropdown validation for status, cost mode, booleans, route merge mode, and known enums. Match the source workbook's header/freeze/filter/number formats. Add concise cell comments to complex formula headers and keep source URLs as plain text.
 
-- [ ] **Step 3: Inspect, error-scan, and render every v2 sheet**
+- [x] **Step 3: Inspect, error-scan, and render every v2 sheet**
 
 Inspect representative authoritative and formula ranges, scan for formula errors, render all used sheets, and correct clipped headers/columns or unreadable formatting. Export the same verified workbook bytes to the docs template and golden fixture locations.
 
-- [ ] **Step 4: Add v2 golden-contract assertions**
+- [x] **Step 4: Add v2 golden-contract assertions**
 
 Assert v2 parses with zero unresolved structural conflicts, all route targets have explicit line/variant references, every new channel/route proposal is disabled, and two consecutive builder runs have the same canonical hash over inspected authoritative values, formulas, sheet order, and styles.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `cd web && bun run scripts/build-channel-config-fixtures.mjs && bun test src/channel-config-converter/__tests__/v2.test.ts`
 
@@ -1639,7 +1639,7 @@ git commit -m "docs: record config import acceptance"
 ## Completion Criteria
 
 - The original workbook hash is unchanged, and the corrected copy exists separately.
-- Converter output matches `9/12/9/16/121/121/17/16/1` and only `CH-MEGABYAI/videos-standard` remains manual.
+- Converter output matches `9/12/9/16/104/104/104/1`; the 17 non-line-identifiable `videos-standard` records are excluded from publishable entities and retained only as `CH-MEGABYAI/videos-standard` for manual resolution.
 - `videos-fast` creates two disabled MegaByAI lines with independent credential confirmation and correct real-person constraints.
 - Secure creates three disabled lines and excludes unsupported fast/mini 480p records.
 - Existing calls that omit `cost_variant_key` continue to use `default`.

@@ -155,7 +155,13 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
               const staged = await runMutation(
                 props.onStage ?? stageConfigImport
               )
-              if (staged) setReviewStep('pricing')
+              if (staged) {
+                setReviewStep(
+                  staged.items.some((item) => item.state === 'conflict')
+                    ? 'conflict_resolution'
+                    : 'pricing'
+                )
+              }
             }
           }}
         />

@@ -81,20 +81,20 @@ export const CHANNEL_TYPES = {
   58: 'Advanced Custom',
   59: 'Sub2API',
   60: 'New API',
-  61: 'Dimensio',
-  62: 'NewAPIVideo',
-  63: 'CLMM Mall',
-  64: 'Lucen',
-  65: 'MegaByAI',
-  66: 'Cangyuan',
-  67: 'Paipu',
-  68: 'Secure',
+  200: 'Dimensio',
+  201: 'NewAPIVideo',
+  202: 'CLMM Mall',
+  203: 'Lucen',
+  204: 'MegaByAI',
+  205: 'Cangyuan',
+  206: 'Paipu',
+  207: 'Secure',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
   1, 14, 33, 24, 43, 3, 41, 48, 60, 58, 42, 34, 20, 4, 40, 27, 25, 17, 26, 15,
   46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22, 21, 44, 2,
-  5, 36, 50, 51, 52, 53, 54, 55, 56, 61, 62, 63, 64, 65, 66, 67, 68,
+  5, 36, 50, 51, 52, 53, 54, 55, 56, 200, 201, 202, 203, 204, 205, 206, 207,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
@@ -396,10 +396,12 @@ export const MODEL_FETCHABLE_TYPES = new Set([
 ])
 
 export const GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES = new Set([
-  2, 5, 36, 50, 51, 52, 54, 61, 62, 63, 64, 65, 66, 67, 68,
+  2, 5, 36, 50, 51, 52, 54, 200, 201, 202, 203, 204, 205, 206, 207,
 ])
 
-export const TASK_ONLY_CHANNEL_TYPES = new Set([61, 62, 63, 64, 65, 66, 67, 68])
+export const TASK_ONLY_CHANNEL_TYPES = new Set([
+  200, 201, 202, 203, 204, 205, 206, 207,
+])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   15: 'Format: APIKey|SecretKey',
@@ -412,26 +414,26 @@ export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   57: 'Paste Codex OAuth JSON credential (access_token / refresh_token / account_id)',
   59: 'Enter API key for this channel',
   60: 'Enter API key for this channel',
-  61: 'Enter the raw API key issued by Dimensio',
-  62: 'Enter the upstream NewAPI video API key',
-  63: 'Enter the raw API key issued by CLMM Mall',
-  64: 'Enter the API key issued by Lucen',
-  65: 'Enter the raw API key issued by MegaByAI',
-  66: 'Enter the raw API key issued by Cangyuan',
-  67: 'Enter the raw API key issued by Paipu',
-  68: 'Enter the API key issued for the selected Secure video group',
+  200: 'Enter the raw API key issued by Dimensio',
+  201: 'Enter the upstream NewAPI video API key',
+  202: 'Enter the raw API key issued by CLMM Mall',
+  203: 'Enter the API key issued by Lucen',
+  204: 'Enter the raw API key issued by MegaByAI',
+  205: 'Enter the raw API key issued by Cangyuan',
+  206: 'Enter the raw API key issued by Paipu',
+  207: 'Enter the API key issued for the selected Secure video group',
 }
 
 export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
   3: 'For channels added after May 10, 2025, no need to remove "." from model names during deployment',
   8: 'If connecting to upstream One API or New API relay projects, use OpenAI type instead unless you know what you are doing',
   37: 'Dify channels only support chatflow and agent, and agent does not support images',
-  61: 'Dimensio is task-only. Call it through the ARK /api/v3 task API.',
-  62: 'NewAPIVideo is task-only. Call it through /v1/video/generations or the ARK /api/v3 task API.',
-  63: 'CLMM Mall is task-only. Call it through the Ark /api/v3 task API.',
-  64: 'Lucen is task-only. Create separate channels for the fixed-duration key and token-billing key.',
-  65: 'MegaByAI is task-only. Call it through the Ark /api/v3 task API.',
-  66: 'Cangyuan is task-only. Call it through the Ark /api/v3 task API.',
-  67: 'Paipu is task-only. Enable it only after real upstream contract acceptance.',
-  68: 'Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.',
+  200: 'Dimensio is task-only. Call it through the ARK /api/v3 task API.',
+  201: 'NewAPIVideo is task-only. Call it through /v1/video/generations or the ARK /api/v3 task API.',
+  202: 'CLMM Mall is task-only. Call it through the Ark /api/v3 task API.',
+  203: 'Lucen is task-only. Create separate channels for the fixed-duration key and token-billing key.',
+  204: 'MegaByAI is task-only. Call it through the Ark /api/v3 task API.',
+  205: 'Cangyuan is task-only. Call it through the Ark /api/v3 task API.',
+  206: 'Paipu is task-only. Enable it only after real upstream contract acceptance.',
+  207: 'Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.',
 }

@@ -22,6 +22,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { extractWorkbook, V1WorkbookAdapter } from '../adapters/v1'
+import { buildImportDocument } from '../document'
 import { WorkbookContractError } from '../schema'
 import type { WorkbookSnapshot } from '../types'
 import { V1_HEADERS, loadWorkbookSnapshot } from '../workbook'
@@ -129,6 +130,25 @@ test('v1 adapter extracts the corrected fixture baseline and stable line contrac
   assert.ok(mergedScenarioCost)
   assert.equal(mergedScenarioCost.sourceLocations.length, 2)
   assert.equal(mergedScenarioCost.lineRef, 'megabyai-fast-real-person')
+})
+
+test('v1 import document uses the reserved YSR channel type IDs', async () => {
+  const sourceBytes = await fs.readFile(fixturePath)
+  const result = await buildImportDocument({
+    extracted: extractWorkbook(await loadFixture()),
+    sourceBytes,
+    sourceFileName: 'channel-config-v1-corrected.xlsx',
+  })
+  const typesByChannel = new Map(
+    result.document.entities.channels.map((channel) => [
+      channel.business_id,
+      channel['channel_type'],
+    ])
+  )
+
+  assert.equal(typesByChannel.get('CH-DIMENSIO'), 200)
+  assert.equal(typesByChannel.get('CH-MEGABYAI'), 204)
+  assert.equal(typesByChannel.get('CH-SECURE'), 207)
 })
 
 test('v1 adapter preserves the one manual MegaByAI conflict and removes Secure unsupported 480p rows', async () => {

@@ -331,7 +331,7 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
-	if err := migrateSecondaryChannelTypeIDs(); err != nil {
+	if err := migrateChannelTypeIDs(); err != nil {
 		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
@@ -435,7 +435,7 @@ func migrateDBFast() error {
 			return err
 		}
 	}
-	if err := migrateSecondaryChannelTypeIDs(); err != nil {
+	if err := migrateChannelTypeIDs(); err != nil {
 		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
@@ -458,6 +458,14 @@ func migrateDBFast() error {
 }
 
 const secondaryChannelTypeMigrationMarker = "migration.secondary_channel_type_ids_20260727"
+const ysrChannelTypeMigrationMarker = "migration.ysr_channel_type_ids_20260727"
+
+func migrateChannelTypeIDs() error {
+	if err := migrateSecondaryChannelTypeIDs(); err != nil {
+		return err
+	}
+	return migrateYSRChannelTypeIDs()
+}
 
 // migrateSecondaryChannelTypeIDs moves the secondary branch channel types out
 // of the range that origin/main now reserves for Sub2API and New API. Channel
@@ -479,14 +487,14 @@ func migrateSecondaryChannelTypeIDs() error {
 		}
 
 		for _, migration := range []struct{ from, to int }{
-			{66, constant.ChannelTypeSecure},
-			{65, constant.ChannelTypePaipu},
-			{64, constant.ChannelTypeCangyuan},
-			{63, constant.ChannelTypeMegaByAI},
-			{62, constant.ChannelTypeLucen},
-			{61, constant.ChannelTypeClmmMall},
-			{60, constant.ChannelTypeNewAPIVideo},
-			{59, constant.ChannelTypeDimensio},
+			{66, 68},
+			{65, 67},
+			{64, 66},
+			{63, 65},
+			{62, 64},
+			{61, 63},
+			{60, 62},
+			{59, 61},
 		} {
 			if err := tx.Model(&Channel{}).Where("type = ?", migration.from).Update("type", migration.to).Error; err != nil {
 				return err
@@ -499,6 +507,48 @@ func migrateSecondaryChannelTypeIDs() error {
 		}
 
 		return tx.Create(&Option{Key: secondaryChannelTypeMigrationMarker, Value: "complete"}).Error
+	})
+}
+
+// migrateYSRChannelTypeIDs moves YSR-specific channel types into the reserved
+// range. Channel rows and persisted task platforms must move together so
+// polling continues to select the original provider after renumbering.
+func migrateYSRChannelTypeIDs() error {
+	if DB == nil {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var marker Option
+		err := tx.Where(&Option{Key: ysrChannelTypeMigrationMarker}).First(&marker).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		for _, migration := range []struct{ from, to int }{
+			{61, constant.ChannelTypeDimensio},
+			{62, constant.ChannelTypeNewAPIVideo},
+			{63, constant.ChannelTypeClmmMall},
+			{64, constant.ChannelTypeLucen},
+			{65, constant.ChannelTypeMegaByAI},
+			{66, constant.ChannelTypeCangyuan},
+			{67, constant.ChannelTypePaipu},
+			{68, constant.ChannelTypeSecure},
+		} {
+			if err := tx.Model(&Channel{}).Where("type = ?", migration.from).Update("type", migration.to).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&Task{}).
+				Where("platform = ?", strconv.Itoa(migration.from)).
+				Update("platform", strconv.Itoa(migration.to)).Error; err != nil {
+				return err
+			}
+		}
+
+		return tx.Create(&Option{Key: ysrChannelTypeMigrationMarker, Value: "complete"}).Error
 	})
 }
 

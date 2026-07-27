@@ -30,15 +30,15 @@ type AddModeOption = { value: string; label: string }
 
 describe('Secure video group form behavior', () => {
   test('shows the group field only for Secure', () => {
-    assert.equal(secureVideoGroup.shouldShowSecureVideoGroup(68), true)
-    assert.equal(secureVideoGroup.shouldShowSecureVideoGroup(67), false)
+    assert.equal(secureVideoGroup.shouldShowSecureVideoGroup(207), true)
+    assert.equal(secureVideoGroup.shouldShowSecureVideoGroup(206), false)
     assert.equal(secureVideoGroup.shouldShowSecureVideoGroup(1), false)
   })
 
   test('requires a group for Secure', () => {
     const result = channelFormSchema.safeParse({
       ...CHANNEL_FORM_DEFAULT_VALUES,
-      type: 68,
+      type: 207,
       name: 'Secure',
       key: 'secret',
       models: 'video-2.0-pro',
@@ -54,7 +54,7 @@ describe('Secure video group form behavior', () => {
   test('rejects multi-key-to-single mode for Secure', () => {
     const result = channelFormSchema.safeParse({
       ...CHANNEL_FORM_DEFAULT_VALUES,
-      type: 68,
+      type: 207,
       name: 'Secure',
       key: 'key-one\nkey-two',
       models: 'video-2.0-pro',
@@ -86,7 +86,7 @@ describe('Secure video group form behavior', () => {
     assert.equal(typeof filterSecureAddModeOptions, 'function')
     assert.ok(filterSecureAddModeOptions)
     assert.deepEqual(
-      filterSecureAddModeOptions(68, options).map((option) => option.value),
+      filterSecureAddModeOptions(207, options).map((option) => option.value),
       ['single', 'batch']
     )
     assert.equal(filterSecureAddModeOptions(1, options), options)
@@ -101,15 +101,15 @@ describe('Secure video group form behavior', () => {
 
     assert.equal(typeof shouldLockSecureVideoIdentity, 'function')
     assert.ok(shouldLockSecureVideoIdentity)
-    assert.equal(shouldLockSecureVideoIdentity(true, 68), true)
-    assert.equal(shouldLockSecureVideoIdentity(false, 68), false)
-    assert.equal(shouldLockSecureVideoIdentity(true, 67), false)
+    assert.equal(shouldLockSecureVideoIdentity(true, 207), true)
+    assert.equal(shouldLockSecureVideoIdentity(false, 207), false)
+    assert.equal(shouldLockSecureVideoIdentity(true, 206), false)
   })
 
   test('persists the selected group and removes it after changing type', () => {
     const secure = transformFormDataToCreatePayload({
       ...CHANNEL_FORM_DEFAULT_VALUES,
-      type: 68,
+      type: 207,
       name: 'Secure enterprise',
       key: 'secret',
       models: 'video-2.0-pro',

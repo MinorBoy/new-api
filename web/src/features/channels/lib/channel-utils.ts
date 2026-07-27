@@ -104,14 +104,14 @@ export function getChannelTypeIcon(type: number): string {
     55: 'OpenAI', // Sora
     54: 'Doubao', // DoubaoVideo
     56: 'Replicate', // Replicate
-    61: 'Dimensio', // Dimensio
-    62: 'NewAPI', // NewAPIVideo
-    63: 'Jimeng', // CLMM Mall
-    64: 'NewAPI', // Lucen
-    65: 'NewAPI', // MegaByAI
-    66: 'NewAPI', // Cangyuan
-    67: 'NewAPI', // Paipu
-    68: 'NewAPI', // Secure
+    200: 'Dimensio', // Dimensio
+    201: 'NewAPI', // NewAPIVideo
+    202: 'Jimeng', // CLMM Mall
+    203: 'NewAPI', // Lucen
+    204: 'NewAPI', // MegaByAI
+    205: 'NewAPI', // Cangyuan
+    206: 'NewAPI', // Paipu
+    207: 'NewAPI', // Secure
 
     // Tools & Platforms
     37: 'Dify', // Dify

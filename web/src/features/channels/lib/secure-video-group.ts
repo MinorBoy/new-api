@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export const SECURE_CHANNEL_TYPE = 68
+export const SECURE_CHANNEL_TYPE = 207
 
 export const SECURE_VIDEO_GROUP_OPTIONS = [
   { value: 'discount', label: 'Discount Video' },

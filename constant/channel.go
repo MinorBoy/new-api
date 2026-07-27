@@ -58,89 +58,92 @@ const (
 	ChannelTypeAdvancedCustom = 58
 	ChannelTypeSub2API        = 59
 	ChannelTypeNewAPI         = 60
-	ChannelTypeDimensio       = 61 // Dimensio video generation ARK v3 protocol gateway
-	ChannelTypeNewAPIVideo    = 62 // new-api /v1/video/generations task protocol
-	ChannelTypeClmmMall       = 63 // CLMM Mall video generation ARK v3 protocol gateway
-	ChannelTypeLucen          = 64 // Lucen Seedance task protocol
-	ChannelTypeMegaByAI       = 65 // MegaByAI Seedance task protocol
-	ChannelTypeCangyuan       = 66 // Cangyuan Seedance task protocol
-	ChannelTypePaipu          = 67 // Paipu Seedance task protocol
-	ChannelTypeSecure         = 68 // Secure grouped Seedance task protocol
-	ChannelTypeDummy          = 69 // this one is only for count, do not add any channel after this
+	ChannelTypeDimensio       = 200 // Dimensio video generation ARK v3 protocol gateway
+	ChannelTypeNewAPIVideo    = 201 // new-api /v1/video/generations task protocol
+	ChannelTypeClmmMall       = 202 // CLMM Mall video generation ARK v3 protocol gateway
+	ChannelTypeLucen          = 203 // Lucen Seedance task protocol
+	ChannelTypeMegaByAI       = 204 // MegaByAI Seedance task protocol
+	ChannelTypeCangyuan       = 205 // Cangyuan Seedance task protocol
+	ChannelTypePaipu          = 206 // Paipu Seedance task protocol
+	ChannelTypeSecure         = 207 // Secure grouped Seedance task protocol
+	ChannelTypeDummy          = 208 // this one is only for count, do not add any channel after this
 
 )
 
-var ChannelBaseURLs = []string{
-	"",                                    // 0
-	"https://api.openai.com",              // 1
-	"https://oa.api2d.net",                // 2
-	"",                                    // 3
-	"http://localhost:11434",              // 4
-	"https://api.openai-sb.com",           // 5
-	"https://api.openaimax.com",           // 6
-	"https://api.ohmygpt.com",             // 7
-	"",                                    // 8
-	"https://api.caipacity.com",           // 9
-	"https://api.aiproxy.io",              // 10
-	"",                                    // 11
-	"https://api.api2gpt.com",             // 12
-	"https://api.aigc2d.com",              // 13
-	"https://api.anthropic.com",           // 14
-	"https://aip.baidubce.com",            // 15
-	"https://open.bigmodel.cn",            // 16
-	"https://dashscope.aliyuncs.com",      // 17
-	"",                                    // 18
-	"https://api.360.cn",                  // 19
-	"https://openrouter.ai/api",           // 20
-	"https://api.aiproxy.io",              // 21
-	"https://fastgpt.run/api/openapi",     // 22
-	"https://hunyuan.tencentcloudapi.com", //23
-	"https://generativelanguage.googleapis.com", //24
-	"https://api.moonshot.cn",                   //25
-	"https://open.bigmodel.cn",                  //26
-	"https://api.perplexity.ai",                 //27
-	"",                                          //28
-	"",                                          //29
-	"",                                          //30
-	"https://api.lingyiwanwu.com",               //31
-	"",                                          //32
-	"",                                          //33
-	"https://api.cohere.ai",                     //34
-	"https://api.minimax.chat",                  //35
-	"",                                          //36
-	"https://api.dify.ai",                       //37
-	"https://api.jina.ai",                       //38
-	"https://api.cloudflare.com",                //39
-	"https://api.siliconflow.cn",                //40
-	"",                                          //41
-	"https://api.mistral.ai",                    //42
-	"https://api.deepseek.com",                  //43
-	"https://api.moka.ai",                       //44
-	"https://ark.cn-beijing.volces.com",         //45
-	"https://qianfan.baidubce.com",              //46
-	"",                                          //47
-	"https://api.x.ai",                          //48
-	"https://api.coze.cn",                       //49
-	"https://api.klingai.com",                   //50
-	"https://visual.volcengineapi.com",          //51
-	"https://api.vidu.cn",                       //52
-	"https://llm.submodel.ai",                   //53
-	"https://ark.cn-beijing.volces.com",         //54
-	"https://api.openai.com",                    //55
-	"https://api.replicate.com",                 //56
-	"https://chatgpt.com",                       //57
-	"",                                          //58
-	"",                                          //59
-	"",                                          //60
-	"https://jimeng.dimensio.cn",                //61 Dimensio
-	"",                                          //62 NewAPIVideo
-	"https://clmm-mall.top",                     //63 CLMM Mall
-	"https://lucen.asia",                        //64 Lucen
-	"https://newapi.megabyai.cc",                //65 MegaByAI
-	"https://ai.cangyuansuanli.cn",              //66 Cangyuan
-	"https://api.paipu.net",                     //67 Paipu
-	"https://token.secure-skill.com",            //68 Secure
-}
+var ChannelBaseURLs = func() []string {
+	baseURLs := []string{
+		"",                                    // 0
+		"https://api.openai.com",              // 1
+		"https://oa.api2d.net",                // 2
+		"",                                    // 3
+		"http://localhost:11434",              // 4
+		"https://api.openai-sb.com",           // 5
+		"https://api.openaimax.com",           // 6
+		"https://api.ohmygpt.com",             // 7
+		"",                                    // 8
+		"https://api.caipacity.com",           // 9
+		"https://api.aiproxy.io",              // 10
+		"",                                    // 11
+		"https://api.api2gpt.com",             // 12
+		"https://api.aigc2d.com",              // 13
+		"https://api.anthropic.com",           // 14
+		"https://aip.baidubce.com",            // 15
+		"https://open.bigmodel.cn",            // 16
+		"https://dashscope.aliyuncs.com",      // 17
+		"",                                    // 18
+		"https://api.360.cn",                  // 19
+		"https://openrouter.ai/api",           // 20
+		"https://api.aiproxy.io",              // 21
+		"https://fastgpt.run/api/openapi",     // 22
+		"https://hunyuan.tencentcloudapi.com", //23
+		"https://generativelanguage.googleapis.com", //24
+		"https://api.moonshot.cn",                   //25
+		"https://open.bigmodel.cn",                  //26
+		"https://api.perplexity.ai",                 //27
+		"",                                          //28
+		"",                                          //29
+		"",                                          //30
+		"https://api.lingyiwanwu.com",               //31
+		"",                                          //32
+		"",                                          //33
+		"https://api.cohere.ai",                     //34
+		"https://api.minimax.chat",                  //35
+		"",                                          //36
+		"https://api.dify.ai",                       //37
+		"https://api.jina.ai",                       //38
+		"https://api.cloudflare.com",                //39
+		"https://api.siliconflow.cn",                //40
+		"",                                          //41
+		"https://api.mistral.ai",                    //42
+		"https://api.deepseek.com",                  //43
+		"https://api.moka.ai",                       //44
+		"https://ark.cn-beijing.volces.com",         //45
+		"https://qianfan.baidubce.com",              //46
+		"",                                          //47
+		"https://api.x.ai",                          //48
+		"https://api.coze.cn",                       //49
+		"https://api.klingai.com",                   //50
+		"https://visual.volcengineapi.com",          //51
+		"https://api.vidu.cn",                       //52
+		"https://llm.submodel.ai",                   //53
+		"https://ark.cn-beijing.volces.com",         //54
+		"https://api.openai.com",                    //55
+		"https://api.replicate.com",                 //56
+		"https://chatgpt.com",                       //57
+		"",                                          //58
+		"",                                          //59
+		"",                                          //60
+	}
+	baseURLs = append(baseURLs, make([]string, ChannelTypeDummy-len(baseURLs))...)
+	baseURLs[ChannelTypeDimensio] = "https://jimeng.dimensio.cn"
+	baseURLs[ChannelTypeClmmMall] = "https://clmm-mall.top"
+	baseURLs[ChannelTypeLucen] = "https://lucen.asia"
+	baseURLs[ChannelTypeMegaByAI] = "https://newapi.megabyai.cc"
+	baseURLs[ChannelTypeCangyuan] = "https://ai.cangyuansuanli.cn"
+	baseURLs[ChannelTypePaipu] = "https://api.paipu.net"
+	baseURLs[ChannelTypeSecure] = "https://token.secure-skill.com"
+	return baseURLs
+}()
 
 var ChannelTypeNames = map[int]string{
 	ChannelTypeUnknown:        "Unknown",

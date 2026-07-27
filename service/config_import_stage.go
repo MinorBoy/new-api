@@ -1217,7 +1217,7 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 				if scope.modelMappings[channelID] == nil {
 					scope.modelMappings[channelID] = make(map[string]struct{})
 				}
-				scope.modelMappings[channelID][configImportRuntimeCanonicalModel(mapping.ClientModel)] = struct{}{}
+				scope.modelMappings[channelID][configImportRuntimeCanonicalModel(mapping.CanonicalModel)] = struct{}{}
 			}
 		case "route_blueprints":
 			var blueprint types.ConfigImportRouteBlueprint
@@ -1438,29 +1438,42 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 				return err
 			}
 		}
+		issues := make([]configImportStageIssue, 0)
 		lineChannels := make(map[string]int, len(bindings))
 		skippedLines := make(map[string]bool, len(bindings))
+		unconfirmedLines := make(map[string]bool, len(bindings))
+		hasUnconfirmedBinding := false
 		for _, binding := range bindings {
 			if binding.Action == string(types.ConfigImportBindingActionSkip) {
 				skippedLines[binding.LineRef] = true
+			} else if binding.ChannelID != nil && (binding.CredentialsConfirmedAt == nil || binding.CredentialsConfirmedBy <= 0) {
+				message := fmt.Sprintf("line %q requires credential confirmation before staging", binding.LineRef)
+				issues = append(issues, configImportStageIssue{Code: "BINDING_CREDENTIALS_UNCONFIRMED", Severity: types.ConfigImportIssueSeverityError, BusinessID: binding.LineRef, Message: message})
+				unconfirmedLines[binding.LineRef] = true
+				hasUnconfirmedBinding = true
+				if err := tx.Model(&model.ConfigImportIssue{}).
+					Where("batch_id = ? AND code = ? AND business_id = ?", batchID, "BINDING_CREDENTIALS_UNCONFIRMED", binding.LineRef).
+					Updates(map[string]any{"severity": string(types.ConfigImportIssueSeverityError), "message": message, "resolution_status": "open", "updated_at": common.GetTimestamp()}).Error; err != nil {
+					return err
+				}
 				continue
-			}
-			if binding.ChannelID != nil && (binding.CredentialsConfirmedAt == nil || binding.CredentialsConfirmedBy <= 0) {
-				return configImportError("BINDING_CREDENTIALS_UNCONFIRMED", "line %q requires credential confirmation before staging", binding.LineRef)
-			}
-			if binding.ChannelID != nil {
+			} else if binding.ChannelID != nil {
 				lineChannels[binding.LineRef] = *binding.ChannelID
+			}
+			if err := tx.Model(&model.ConfigImportIssue{}).
+				Where("batch_id = ? AND code = ? AND business_id = ? AND resolution_status = ?", batchID, "BINDING_CREDENTIALS_UNCONFIRMED", binding.LineRef, "open").
+				Updates(map[string]any{"resolution_status": "resolved", "updated_at": common.GetTimestamp()}).Error; err != nil {
+				return err
 			}
 		}
 
-		issues := make([]configImportStageIssue, 0)
 		for _, item := range items {
 			if item.EntityType == "channel_lines" && item.State != string(types.ConfigImportItemStateExcluded) {
 				var line types.ConfigImportChannelLine
 				if err := common.UnmarshalJsonStr(item.CanonicalJSON, &line); err != nil {
 					return err
 				}
-				if !skippedLines[line.LineRef] && lineChannels[line.LineRef] <= 0 {
+				if !skippedLines[line.LineRef] && !unconfirmedLines[line.LineRef] && lineChannels[line.LineRef] <= 0 {
 					issues = append(issues, configImportStageIssue{Code: "CHANNEL_LINE_UNBOUND", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: fmt.Sprintf("line %q is not bound", line.LineRef)})
 				}
 			}
@@ -1470,7 +1483,7 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 			return err
 		}
 		issues = append(issues, generatedIssues...)
-		generatedIssues, err = stageConfigImportCostRules(tx, items, lineChannels, adminID)
+		generatedIssues, err = stageConfigImportCostRules(tx, items, lineChannels, unconfirmedLines, adminID)
 		if err != nil {
 			return err
 		}
@@ -1498,8 +1511,10 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 		}
 		ready := true
 		for _, issue := range allIssues {
-			if issue.Severity == string(types.ConfigImportIssueSeverityError) ||
-				(issue.Severity == string(types.ConfigImportIssueSeverityWarning) && issue.ResolutionStatus != "resolved" && issue.ResolutionStatus != "excluded") {
+			if issue.ResolutionStatus == "resolved" || issue.ResolutionStatus == "excluded" {
+				continue
+			}
+			if issue.Severity == string(types.ConfigImportIssueSeverityError) || issue.Severity == string(types.ConfigImportIssueSeverityWarning) {
 				ready = false
 				break
 			}
@@ -1510,7 +1525,9 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 			}
 		}
 		nextStatus := types.ConfigImportBatchStatusStaged
-		if ready {
+		if hasUnconfirmedBinding {
+			nextStatus = types.ConfigImportBatchStatusBinding
+		} else if ready {
 			nextStatus = types.ConfigImportBatchStatusReady
 		}
 		return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
@@ -1556,7 +1573,7 @@ func stageConfigImportUnresolvedVariants(db *gorm.DB, items []model.ConfigImport
 	return issues, nil
 }
 
-func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lineChannels map[string]int, adminID int) ([]configImportStageIssue, error) {
+func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lineChannels map[string]int, unconfirmedLines map[string]bool, adminID int) ([]configImportStageIssue, error) {
 	issues := make([]configImportStageIssue, 0)
 	sorted := make([]*model.ConfigImportItem, 0)
 	for index := range items {
@@ -1581,6 +1598,9 @@ func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lin
 		}
 		channelID := lineChannels[draft.LineRef]
 		if channelID <= 0 {
+			if unconfirmedLines[draft.LineRef] {
+				continue
+			}
 			item.State = string(types.ConfigImportItemStateConflict)
 			item.ConflictReason = "channel line is not bound"
 			issues = append(issues, configImportStageIssue{Code: "CHANNEL_LINE_UNBOUND", Severity: types.ConfigImportIssueSeverityWarning, BusinessID: item.BusinessID, Message: item.ConflictReason})

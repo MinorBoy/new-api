@@ -24,6 +24,7 @@ import { Window } from 'happy-dom'
 import { createInstance } from 'i18next'
 import type { Container, Root } from 'react-dom/client'
 
+import { SECURE_CHANNEL_TYPE } from '../../../lib/secure-video-group'
 import type { Channel } from '../../../types'
 
 const browserWindow = new Window({ url: 'http://localhost/' })
@@ -117,7 +118,7 @@ await i18n.init({
 
 const secureChannel: Channel = {
   id: 68,
-  type: 68,
+  type: SECURE_CHANNEL_TYPE,
   key: '',
   status: 1,
   name: 'Secure discount',

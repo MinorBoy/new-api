@@ -29,14 +29,14 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
 	canonicalModel := "seedance-2.0"
 	runtimeModel := modelrouting.Seedance20
-	mapping := types.ConfigImportModelMapping{ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-a"}, CanonicalModel: canonicalModel, ClientModel: canonicalModel, LineRef: "line-a", UpstreamModel: "vendor-video", SKURef: "sku-a"}
+	mapping := types.ConfigImportModelMapping{ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-a"}, CanonicalModel: canonicalModel, ClientModel: "supplier-video-alias", LineRef: "line-a", UpstreamModel: "vendor-video", SKURef: "sku-a"}
 	encoded, err := common.Marshal(mapping)
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Create(&model.ConfigImportItem{BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID, CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew)}).Error)
 	blueprint := types.ConfigImportRouteBlueprint{
 		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "route-a"},
 		CanonicalModel:                  canonicalModel,
-		ClientModel:                     canonicalModel,
+		ClientModel:                     "supplier-video-alias",
 		MergeMode:                       types.ConfigImportRouteMergeModeMerge,
 		Targets: []types.ConfigImportRouteTarget{{
 			RouteTargetRef:    "target-a",
@@ -57,6 +57,10 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).Where("batch_id = ? AND business_id = ?", batch.ID, blueprint.BusinessID).Update("canonical_json", string(encoded)).Error)
 	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
 	require.NoError(t, err)
+	scope, err := configImportBaselineScopeForBatch(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.Contains(t, scope.modelMappings[channel.Id], runtimeModel)
+	assert.NotContains(t, scope.modelMappings[channel.Id], "supplier-video-alias")
 	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
 
 	var option model.Option
@@ -79,6 +83,9 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).First(&audit).Error)
 	assert.NotEmpty(t, audit.AfterSHA256)
 	assert.NotEqual(t, audit.BeforeSHA256, audit.AfterSHA256)
+	after, err := CaptureConfigImportBaseline(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, after.Hash, audit.AfterSHA256)
 }
 
 func TestPublishConfigImportRoutesMergesReplacesAndSkipsTargets(t *testing.T) {
@@ -227,13 +234,27 @@ func TestStageConfigImportBatchRejectsUnconfirmedChannelBindings(t *testing.T) {
 		Where("batch_id = ? AND line_ref = ?", batch.ID, "line-a").
 		Updates(map[string]any{"credentials_confirmed_by": 0, "credentials_confirmed_at": nil}).Error)
 
-	_, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
-	var schemaErr *ConfigImportSchemaError
-	require.ErrorAs(t, err, &schemaErr)
-	assert.Equal(t, "BINDING_CREDENTIALS_UNCONFIRMED", schemaErr.Code)
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusBinding, detail.Status)
+	var credentialIssue model.ConfigImportIssue
+	require.NoError(t, model.DB.Where("batch_id = ? AND code = ? AND business_id = ?", batch.ID, "BINDING_CREDENTIALS_UNCONFIRMED", "line-a").First(&credentialIssue).Error)
+	assert.Equal(t, string(types.ConfigImportIssueSeverityError), credentialIssue.Severity)
+	assert.Equal(t, "line \"line-a\" requires credential confirmation before staging", credentialIssue.Message)
+	assert.Equal(t, "open", credentialIssue.ResolutionStatus)
 	var savedBatch model.ConfigImportBatch
 	require.NoError(t, model.DB.First(&savedBatch, batch.ID).Error)
 	assert.Equal(t, string(types.ConfigImportBatchStatusBinding), savedBatch.Status)
+
+	confirmedAt := common.GetTimestamp()
+	require.NoError(t, model.DB.Model(&model.ConfigImportBinding{}).
+		Where("batch_id = ? AND line_ref = ?", batch.ID, "line-a").
+		Updates(map[string]any{"credentials_confirmed_by": 42, "credentials_confirmed_at": confirmedAt}).Error)
+	detail, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, detail.Status)
+	require.NoError(t, model.DB.First(&credentialIssue, credentialIssue.ID).Error)
+	assert.Equal(t, "resolved", credentialIssue.ResolutionStatus)
 }
 
 func TestRetryConfigImportBatchCacheDoesNotRepublishConfiguration(t *testing.T) {

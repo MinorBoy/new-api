@@ -429,7 +429,7 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 		if mappingsByChannel[channelID] == nil {
 			mappingsByChannel[channelID] = make(map[string]string)
 		}
-		mappingsByChannel[channelID][configImportRuntimeCanonicalModel(mapping.ClientModel)] = mapping.UpstreamModel
+		mappingsByChannel[channelID][configImportRuntimeCanonicalModel(mapping.CanonicalModel)] = mapping.UpstreamModel
 	}
 	channelIDs := make([]int, 0, len(mappingsByChannel))
 	for channelID := range mappingsByChannel {

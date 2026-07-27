@@ -137,6 +137,7 @@ import {
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
+  CHANNEL_STATUS,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_WARNINGS,
@@ -201,10 +202,12 @@ import {
   ChannelModelsSection,
 } from './sections'
 
-type ChannelMutateDrawerProps = {
+export type ChannelMutateDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: Channel | null
+  initialDisabled?: boolean
+  onCreated?: (channelIDs: number[]) => void
 }
 
 type ModelMappingGuardrail = {
@@ -612,6 +615,8 @@ export function ChannelMutateDrawer({
   open,
   onOpenChange,
   currentRow,
+  initialDisabled = false,
+  onCreated,
 }: ChannelMutateDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -716,7 +721,12 @@ export function ChannelMutateDrawer({
   // Form setup
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
-    defaultValues: CHANNEL_FORM_DEFAULT_VALUES,
+    defaultValues: initialDisabled
+      ? {
+          ...CHANNEL_FORM_DEFAULT_VALUES,
+          status: CHANNEL_STATUS.MANUAL_DISABLED,
+        }
+      : CHANNEL_FORM_DEFAULT_VALUES,
   })
 
   // Watch form values for conditional rendering
@@ -1269,13 +1279,20 @@ export function ChannelMutateDrawer({
       initialStatusCodeMappingRef.current =
         channelData.data.status_code_mapping || ''
     } else if (!isEditing) {
-      form.reset(CHANNEL_FORM_DEFAULT_VALUES)
+      form.reset(
+        initialDisabled
+          ? {
+              ...CHANNEL_FORM_DEFAULT_VALUES,
+              status: CHANNEL_STATUS.MANUAL_DISABLED,
+            }
+          : CHANNEL_FORM_DEFAULT_VALUES
+      )
       setAdvancedSettingsOpen(false)
       initialModelsRef.current = []
       initialModelMappingRef.current = ''
       initialStatusCodeMappingRef.current = ''
     }
-  }, [isEditing, channelData, form])
+  }, [isEditing, channelData, form, initialDisabled])
 
   // Handle type change - set default values for specific types
   useEffect(() => {
@@ -1573,16 +1590,22 @@ export function ChannelMutateDrawer({
   )
 
   // Handle successful submission
-  const handleSuccess = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
-    if (channelId) {
-      queryClient.invalidateQueries({
-        queryKey: channelsQueryKeys.detail(channelId),
-      })
-    }
-    onOpenChange(false)
-    setOpen(null)
-  }, [channelId, queryClient, onOpenChange, setOpen])
+  const handleSuccess = useCallback(
+    (channelIDs?: number[]) => {
+      queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      if (channelId) {
+        queryClient.invalidateQueries({
+          queryKey: channelsQueryKeys.detail(channelId),
+        })
+      }
+      if (!isEditing && channelIDs?.length) {
+        onCreated?.(channelIDs)
+      }
+      onOpenChange(false)
+      setOpen(null)
+    },
+    [channelId, isEditing, onCreated, queryClient, onOpenChange, setOpen]
+  )
 
   // Show missing models confirmation dialog
   const confirmMissingModelMappings = useCallback(
@@ -1870,7 +1893,14 @@ export function ChannelMutateDrawer({
     (v: boolean) => {
       onOpenChange(v)
       if (!v) {
-        form.reset(CHANNEL_FORM_DEFAULT_VALUES)
+        form.reset(
+          initialDisabled
+            ? {
+                ...CHANNEL_FORM_DEFAULT_VALUES,
+                status: CHANNEL_STATUS.MANUAL_DISABLED,
+              }
+            : CHANNEL_FORM_DEFAULT_VALUES
+        )
         advancedNavScrollPendingRef.current = false
         setActiveEditorSectionId(CHANNEL_EDITOR_SECTION_IDS.identity)
         setExpandedEditorNavItemId(undefined)
@@ -1878,7 +1908,7 @@ export function ChannelMutateDrawer({
         setClipboardConnectionInfo(null)
       }
     },
-    [onOpenChange, form]
+    [onOpenChange, form, initialDisabled]
   )
 
   return (

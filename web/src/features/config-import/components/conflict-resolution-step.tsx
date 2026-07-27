@@ -56,7 +56,7 @@ function parseObject(value: string): Record<string, unknown> {
 }
 
 function lineReferences(batch: ConfigImportBatchDetail): string[] {
-  if (!batch.bindings?.length) {
+  if (batch.bindings === undefined) {
     return batch.items
       .filter((item) => item.entity_type === 'channel_lines')
       .map((item) => parseObject(item.canonical_json).line_ref)

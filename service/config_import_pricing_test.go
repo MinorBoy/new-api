@@ -316,6 +316,22 @@ func TestConfigImportStageResolutionAppliesLineAndVariantSelections(t *testing.T
 	assert.Equal(t, "line-b", blueprint.Targets[0].LineRef)
 }
 
+func TestConfigImportRouteReviewPersistsMergeMode(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	batch := createConfigImportStageBatch(t, 17, "line-a", "vendor-video")
+	detail, err := UpdateConfigImportRouteReviews(context.Background(), 42, batch.ID, []dto.ConfigImportRouteReviewInput{{
+		ItemBusinessID: "route-a", MergeMode: types.ConfigImportRouteMergeModeReplace,
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	var item model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a").First(&item).Error)
+	var blueprint types.ConfigImportRouteBlueprint
+	require.NoError(t, common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint))
+	assert.Equal(t, types.ConfigImportRouteMergeModeReplace, blueprint.MergeMode)
+	assert.Equal(t, string(types.ConfigImportItemStateChanged), item.State)
+}
+
 func TestConfigImportResolutionRejectsMissingStructuredFields(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	batch := createConfigImportStageBatch(t, 0, "line-a", "vendor-video")

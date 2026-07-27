@@ -29,6 +29,10 @@ type ConfigImportResolutionRequest struct {
 type ConfigImportResolutionInput struct {
 	ItemBusinessID string                             `json:"item_business_id"`
 	Action         types.ConfigImportResolutionAction `json:"action"`
+	LineRef        string                             `json:"line_ref,omitempty"`
+	CostVariantKey string                             `json:"cost_variant_key,omitempty"`
+	RouteTargetRef string                             `json:"route_target_ref,omitempty"`
+	Reason         string                             `json:"reason,omitempty"`
 }
 
 type ConfigImportStageRequest struct {

@@ -247,20 +247,56 @@ func TestConfigImportStagePersistsNegativeMarginWarningGate(t *testing.T) {
 
 func TestConfigImportStageResolutionAcceptsStructuredActions(t *testing.T) {
 	prepareConfigImportServiceDB(t)
-	batch := createConfigImportStageBatch(t, 0, "line-a", "vendor-video")
+	batch := createConfigImportStageBatch(t, 17, "line-a", "vendor-video")
 	for _, businessID := range []string{"variant-a", "variant-b", "variant-c"} {
 		require.NoError(t, model.DB.Create(&model.ConfigImportItem{BatchID: batch.ID, EntityType: "unresolved_variants", BusinessID: businessID, CanonicalJSON: "{}", State: string(types.ConfigImportItemStateConflict)}).Error)
 	}
 
 	_, err := UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{
-		{ItemBusinessID: "variant-c", Action: "exclude"},
-		{ItemBusinessID: "variant-b", Action: "bind_variant"},
-		{ItemBusinessID: "variant-a", Action: "split_line"},
+		{ItemBusinessID: "variant-c", Action: "exclude", Reason: "Duplicate supplier quote"},
+		{ItemBusinessID: "variant-b", Action: "bind_variant", CostVariantKey: "default", RouteTargetRef: "target-a"},
+		{ItemBusinessID: "variant-a", Action: "split_line", LineRef: "line-a"},
 	})
 	require.NoError(t, err)
 	var resolutions []model.ConfigImportResolution
 	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Order("id ASC").Find(&resolutions).Error)
 	require.Equal(t, []string{"variant-a", "variant-b", "variant-c"}, []string{resolutions[0].ItemBusinessID, resolutions[1].ItemBusinessID, resolutions[2].ItemBusinessID})
+	var splitDecision, bindDecision, excludeDecision map[string]string
+	require.NoError(t, common.UnmarshalJsonStr(resolutions[0].DecisionJSON, &splitDecision))
+	require.NoError(t, common.UnmarshalJsonStr(resolutions[1].DecisionJSON, &bindDecision))
+	require.NoError(t, common.UnmarshalJsonStr(resolutions[2].DecisionJSON, &excludeDecision))
+	assert.Equal(t, map[string]string{"action": "split_line", "line_ref": "line-a"}, splitDecision)
+	assert.Equal(t, map[string]string{"action": "bind_variant", "cost_variant_key": "default", "route_target_ref": "target-a"}, bindDecision)
+	assert.Equal(t, map[string]string{"action": "exclude", "reason": "Duplicate supplier quote"}, excludeDecision)
+
+	var excluded model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "variant-c").First(&excluded).Error)
+	assert.Equal(t, "Duplicate supplier quote", excluded.ExclusionReason)
+}
+
+func TestConfigImportResolutionRejectsMissingStructuredFields(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	batch := createConfigImportStageBatch(t, 0, "line-a", "vendor-video")
+
+	_, err := UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{{
+		ItemBusinessID: "cost-a", Action: types.ConfigImportResolutionActionSplitLine,
+	}})
+	requireCode(t, err, "SCHEMA_RESOLUTION_LINE")
+
+	_, err = UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{{
+		ItemBusinessID: "cost-a", Action: types.ConfigImportResolutionActionBindVariant, CostVariantKey: "default",
+	}})
+	requireCode(t, err, "SCHEMA_RESOLUTION_ROUTE_TARGET")
+
+	_, err = UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{{
+		ItemBusinessID: "cost-a", Action: types.ConfigImportResolutionActionExclude,
+	}})
+	requireCode(t, err, "SCHEMA_RESOLUTION_REASON")
+
+	_, err = UpdateConfigImportResolutions(context.Background(), 42, batch.ID, []dto.ConfigImportResolutionInput{{
+		ItemBusinessID: "cost-a", Action: types.ConfigImportResolutionActionSplitLine, LineRef: "line-a",
+	}})
+	requireCode(t, err, "RESOLUTION_LINE_UNBOUND")
 }
 
 func TestConfigImportStageExcludesRouteBlueprintWithSkipMode(t *testing.T) {
@@ -351,7 +387,11 @@ func createConfigImportStageBatch(t *testing.T, channelID int, lineRef, upstream
 		require.NoError(t, model.DB.Create(item).Error)
 	}
 	if channelID > 0 {
-		require.NoError(t, model.DB.Create(&model.ConfigImportBinding{BatchID: batch.ID, LineRef: lineRef, Action: string(types.ConfigImportBindingActionBind), ChannelID: &channelID}).Error)
+		confirmedAt := int64(1)
+		require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+			BatchID: batch.ID, LineRef: lineRef, Action: string(types.ConfigImportBindingActionBind), ChannelID: &channelID,
+			CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+		}).Error)
 	}
 	return batch
 }

@@ -648,6 +648,9 @@ func validateConfigImportResolutionInputs(resolutions []dto.ConfigImportResoluti
 	for index := range resolutions {
 		resolution := &resolutions[index]
 		resolution.ItemBusinessID = strings.TrimSpace(resolution.ItemBusinessID)
+		resolution.LineRef = strings.TrimSpace(resolution.LineRef)
+		resolution.RouteTargetRef = strings.TrimSpace(resolution.RouteTargetRef)
+		resolution.Reason = strings.TrimSpace(resolution.Reason)
 		if resolution.ItemBusinessID == "" {
 			return configImportError("SCHEMA_RESOLUTION_ITEM", "resolutions[%d].item_business_id is required", index)
 		}
@@ -657,13 +660,86 @@ func validateConfigImportResolutionInputs(resolutions []dto.ConfigImportResoluti
 		seen[resolution.ItemBusinessID] = struct{}{}
 		switch resolution.Action {
 		case types.ConfigImportResolutionActionUseImport,
-			types.ConfigImportResolutionActionKeepExisting,
-			types.ConfigImportResolutionActionExclude,
-			types.ConfigImportResolutionActionSplitLine,
-			types.ConfigImportResolutionActionBindVariant:
+			types.ConfigImportResolutionActionKeepExisting:
+			if resolution.LineRef != "" || resolution.CostVariantKey != "" || resolution.RouteTargetRef != "" || resolution.Reason != "" {
+				return configImportError("SCHEMA_RESOLUTION_FIELDS", "resolutions[%d] has fields that are not valid for %q", index, resolution.Action)
+			}
+		case types.ConfigImportResolutionActionSplitLine:
+			if resolution.LineRef == "" {
+				return configImportError("SCHEMA_RESOLUTION_LINE", "resolutions[%d].line_ref is required for split_line", index)
+			}
+			if resolution.CostVariantKey != "" || resolution.RouteTargetRef != "" || resolution.Reason != "" {
+				return configImportError("SCHEMA_RESOLUTION_FIELDS", "resolutions[%d] has fields that are not valid for split_line", index)
+			}
+		case types.ConfigImportResolutionActionBindVariant:
+			canonicalVariantKey, err := types.NormalizeCostVariantKey(resolution.CostVariantKey)
+			if err != nil || resolution.CostVariantKey == "" || canonicalVariantKey != resolution.CostVariantKey {
+				return configImportError("SCHEMA_RESOLUTION_COST_VARIANT", "resolutions[%d].cost_variant_key is invalid", index)
+			}
+			if resolution.RouteTargetRef == "" {
+				return configImportError("SCHEMA_RESOLUTION_ROUTE_TARGET", "resolutions[%d].route_target_ref is required for bind_variant", index)
+			}
+			if resolution.LineRef != "" || resolution.Reason != "" {
+				return configImportError("SCHEMA_RESOLUTION_FIELDS", "resolutions[%d] has fields that are not valid for bind_variant", index)
+			}
+		case types.ConfigImportResolutionActionExclude:
+			if resolution.Reason == "" {
+				return configImportError("SCHEMA_RESOLUTION_REASON", "resolutions[%d].reason is required for exclude", index)
+			}
+			for _, credentialPattern := range configImportCredentialValuePatterns {
+				if credentialPattern.MatchString(resolution.Reason) {
+					return configImportError("SECURITY_CREDENTIAL_VALUE", "credential-like value is not allowed in resolutions[%d].reason", index)
+				}
+			}
+			if resolution.LineRef != "" || resolution.CostVariantKey != "" || resolution.RouteTargetRef != "" {
+				return configImportError("SCHEMA_RESOLUTION_FIELDS", "resolutions[%d] has fields that are not valid for exclude", index)
+			}
 		default:
 			return configImportError("SCHEMA_RESOLUTION_ACTION", "resolutions[%d].action is invalid", index)
 		}
+	}
+	return nil
+}
+
+type configImportResolutionDecision struct {
+	Action         types.ConfigImportResolutionAction `json:"action"`
+	LineRef        string                             `json:"line_ref,omitempty"`
+	CostVariantKey string                             `json:"cost_variant_key,omitempty"`
+	RouteTargetRef string                             `json:"route_target_ref,omitempty"`
+	Reason         string                             `json:"reason,omitempty"`
+}
+
+func validateConfigImportResolutionReferences(tx *gorm.DB, batchID int64, resolution dto.ConfigImportResolutionInput) error {
+	switch resolution.Action {
+	case types.ConfigImportResolutionActionSplitLine:
+		var binding model.ConfigImportBinding
+		err := tx.Where("batch_id = ? AND line_ref = ?", batchID, resolution.LineRef).First(&binding).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return configImportError("RESOLUTION_LINE_UNBOUND", "line_ref %q must be bound before it can split a variant", resolution.LineRef)
+		}
+		if err != nil {
+			return err
+		}
+		if binding.Action == string(types.ConfigImportBindingActionSkip) || binding.ChannelID == nil || *binding.ChannelID <= 0 || binding.CredentialsConfirmedAt == nil {
+			return configImportError("RESOLUTION_LINE_UNBOUND", "line_ref %q must be bound before it can split a variant", resolution.LineRef)
+		}
+	case types.ConfigImportResolutionActionBindVariant:
+		var routeItems []model.ConfigImportItem
+		if err := tx.Where("batch_id = ? AND entity_type = ?", batchID, "route_blueprints").Find(&routeItems).Error; err != nil {
+			return err
+		}
+		for _, routeItem := range routeItems {
+			var blueprint types.ConfigImportRouteBlueprint
+			if err := common.UnmarshalJsonStr(routeItem.CanonicalJSON, &blueprint); err != nil {
+				return fmt.Errorf("decode config import route blueprint %q: %w", routeItem.BusinessID, err)
+			}
+			for _, target := range blueprint.Targets {
+				if target.RouteTargetRef == resolution.RouteTargetRef && target.CostVariantKey == resolution.CostVariantKey {
+					return nil
+				}
+			}
+		}
+		return configImportError("RESOLUTION_ROUTE_TARGET_NOT_FOUND", "route_target_ref %q does not have cost_variant_key %q", resolution.RouteTargetRef, resolution.CostVariantKey)
 	}
 	return nil
 }
@@ -710,7 +786,16 @@ func UpdateConfigImportResolutions(
 				}
 				return err
 			}
-			decisionJSON, err := common.Marshal(map[string]string{"action": string(resolution.Action)})
+			if err := validateConfigImportResolutionReferences(tx, batchID, resolution); err != nil {
+				return err
+			}
+			decisionJSON, err := common.Marshal(configImportResolutionDecision{
+				Action:         resolution.Action,
+				LineRef:        resolution.LineRef,
+				CostVariantKey: resolution.CostVariantKey,
+				RouteTargetRef: resolution.RouteTargetRef,
+				Reason:         resolution.Reason,
+			})
 			if err != nil {
 				return err
 			}
@@ -725,7 +810,7 @@ func UpdateConfigImportResolutions(
 			switch resolution.Action {
 			case types.ConfigImportResolutionActionExclude:
 				updates["state"] = string(types.ConfigImportItemStateExcluded)
-				updates["exclusion_reason"] = "excluded by structured resolution"
+				updates["exclusion_reason"] = resolution.Reason
 				updates["conflict_reason"] = ""
 			case types.ConfigImportResolutionActionKeepExisting:
 				updates["state"] = string(types.ConfigImportItemStateUnchanged)

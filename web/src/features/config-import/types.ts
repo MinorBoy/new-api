@@ -176,8 +176,93 @@ export const configImportResolutionSchema = z
   .object({
     item_business_id: z.string().min(1),
     action: configImportResolutionActionSchema,
+    line_ref: z.string().min(1).optional(),
+    cost_variant_key: z.string().min(1).optional(),
+    route_target_ref: z.string().min(1).optional(),
+    reason: z.string().min(1).optional(),
   })
   .strict()
+  .superRefine((value, ctx) => {
+    const hasUnexpectedFields =
+      value.line_ref !== undefined ||
+      value.cost_variant_key !== undefined ||
+      value.route_target_ref !== undefined ||
+      value.reason !== undefined
+
+    if (value.action === 'use_import' || value.action === 'keep_existing') {
+      if (hasUnexpectedFields) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'This resolution action does not accept structured fields',
+        })
+      }
+      return
+    }
+
+    if (value.action === 'split_line') {
+      if (!value.line_ref?.trim()) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['line_ref'],
+          message: 'A line reference is required when splitting a line',
+        })
+      }
+      if (
+        value.cost_variant_key !== undefined ||
+        value.route_target_ref !== undefined ||
+        value.reason !== undefined
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Split-line decisions only accept a line reference',
+        })
+      }
+      return
+    }
+
+    if (value.action === 'bind_variant') {
+      if (!value.cost_variant_key?.match(/^[a-z0-9._-]{1,64}$/)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['cost_variant_key'],
+          message: 'A valid cost variant key is required',
+        })
+      }
+      if (!value.route_target_ref?.trim()) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['route_target_ref'],
+          message:
+            'A route target reference is required when binding a variant',
+        })
+      }
+      if (value.line_ref !== undefined || value.reason !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Variant bindings only accept cost and route references',
+        })
+      }
+      return
+    }
+
+    if (!value.reason?.trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reason'],
+        message: 'An exclusion reason is required',
+      })
+    }
+    if (
+      value.line_ref !== undefined ||
+      value.cost_variant_key !== undefined ||
+      value.route_target_ref !== undefined
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Exclusions only accept a reason',
+      })
+    }
+  })
 
 export const configImportUploadRequestSchema = z.object({
   document: z.record(z.string(), z.unknown()),

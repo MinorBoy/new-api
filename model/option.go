@@ -235,22 +235,35 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
-			option := Option{Key: k}
-			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
-				return err
-			}
-			option.Value = v
-			if err := tx.Save(&option).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	err := DB.Transaction(func(tx *gorm.DB) error { return UpdateOptionsWithTx(tx, values) })
 	if err != nil {
 		return err
 	}
+	return RefreshOptions(values)
+}
+
+// UpdateOptionsWithTx writes option rows without updating in-memory settings.
+// It is for composite configuration publications that must defer every cache
+// mutation until their database transaction commits.
+func UpdateOptionsWithTx(tx *gorm.DB, values map[string]string) error {
+	if tx == nil {
+		return gorm.ErrInvalidDB
+	}
+	for k, v := range values {
+		option := Option{Key: k}
+		if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
+			return err
+		}
+		option.Value = v
+		if err := tx.Save(&option).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RefreshOptions applies committed option rows to their in-memory mirrors.
+func RefreshOptions(values map[string]string) error {
 	for k, v := range values {
 		if err := updateOptionMap(k, v); err != nil {
 			return err

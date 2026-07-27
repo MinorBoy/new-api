@@ -70,84 +70,100 @@ func CreateCostRuleDraftWithTx(tx *gorm.DB, rule *ChannelModelCostRule) error {
 }
 
 func ActivateChannelModelCostRule(id int64, adminID int, now int64, validate func(*ChannelModelCostRule) error) (*ChannelModelCostRule, error) {
-	var activated ChannelModelCostRule
+	var activated *ChannelModelCostRule
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		var candidate ChannelModelCostRule
-		if err := tx.Where("id = ?", id).First(&candidate).Error; err != nil {
-			return err
-		}
-
-		var businessRules []ChannelModelCostRule
-		if err := lockForUpdate(tx).
-			Where(
-				"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ?",
-				candidate.ChannelID,
-				candidate.BillableUpstreamModel,
-				candidate.CostVariantKey,
-			).
-			Order("id ASC").
-			Find(&businessRules).Error; err != nil {
-			return err
-		}
-		var draft *ChannelModelCostRule
-		for i := range businessRules {
-			if businessRules[i].ID == id {
-				draft = &businessRules[i]
-				break
-			}
-		}
-		if draft == nil || draft.Status != string(types.CostRuleDraft) {
-			return ErrCostRuleStateConflict
-		}
-		if validate != nil {
-			if err := validate(draft); err != nil {
-				return err
-			}
-		}
-
-		activeRules := make([]ChannelModelCostRule, 0, 1)
-		for _, rule := range businessRules {
-			if rule.Status == string(types.CostRuleActive) {
-				activeRules = append(activeRules, rule)
-			}
-		}
-		if len(activeRules) > 1 {
-			return ErrCostActiveRuleConflict
-		}
-		if len(activeRules) == 1 {
-			result := tx.Model(&ChannelModelCostRule{}).
-				Where("id = ? AND status = ?", activeRules[0].ID, types.CostRuleActive).
-				Updates(map[string]any{
-					"status":       string(types.CostRuleRetired),
-					"effective_to": now,
-					"updated_at":   now,
-				})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return ErrCostRuleStateConflict
-			}
-		}
-
-		result := tx.Model(&ChannelModelCostRule{}).
-			Where("id = ? AND status = ?", draft.ID, types.CostRuleDraft).
-			Updates(map[string]any{
-				"status":         string(types.CostRuleActive),
-				"activated_by":   adminID,
-				"effective_from": now,
-				"effective_to":   nil,
-				"updated_at":     now,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrCostRuleStateConflict
-		}
-		return tx.First(&activated, draft.ID).Error
+		var err error
+		activated, err = ActivateChannelModelCostRuleWithTx(tx, id, adminID, now, validate)
+		return err
 	})
 	if err != nil {
+		return nil, err
+	}
+	return activated, nil
+}
+
+// ActivateChannelModelCostRuleWithTx atomically promotes one draft while the
+// caller owns the surrounding transaction. It intentionally leaves cache
+// refresh to the post-commit publication flow.
+func ActivateChannelModelCostRuleWithTx(tx *gorm.DB, id int64, adminID int, now int64, validate func(*ChannelModelCostRule) error) (*ChannelModelCostRule, error) {
+	if tx == nil {
+		return nil, errors.New("cost rule transaction is required")
+	}
+	var activated ChannelModelCostRule
+	var candidate ChannelModelCostRule
+	if err := tx.Where("id = ?", id).First(&candidate).Error; err != nil {
+		return nil, err
+	}
+
+	var businessRules []ChannelModelCostRule
+	if err := lockForUpdate(tx).
+		Where(
+			"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ?",
+			candidate.ChannelID,
+			candidate.BillableUpstreamModel,
+			candidate.CostVariantKey,
+		).
+		Order("id ASC").
+		Find(&businessRules).Error; err != nil {
+		return nil, err
+	}
+	var draft *ChannelModelCostRule
+	for i := range businessRules {
+		if businessRules[i].ID == id {
+			draft = &businessRules[i]
+			break
+		}
+	}
+	if draft == nil || draft.Status != string(types.CostRuleDraft) {
+		return nil, ErrCostRuleStateConflict
+	}
+	if validate != nil {
+		if err := validate(draft); err != nil {
+			return nil, err
+		}
+	}
+
+	activeRules := make([]ChannelModelCostRule, 0, 1)
+	for _, rule := range businessRules {
+		if rule.Status == string(types.CostRuleActive) {
+			activeRules = append(activeRules, rule)
+		}
+	}
+	if len(activeRules) > 1 {
+		return nil, ErrCostActiveRuleConflict
+	}
+	if len(activeRules) == 1 {
+		result := tx.Model(&ChannelModelCostRule{}).
+			Where("id = ? AND status = ?", activeRules[0].ID, types.CostRuleActive).
+			Updates(map[string]any{
+				"status":       string(types.CostRuleRetired),
+				"effective_to": now,
+				"updated_at":   now,
+			})
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil, ErrCostRuleStateConflict
+		}
+	}
+
+	result := tx.Model(&ChannelModelCostRule{}).
+		Where("id = ? AND status = ?", draft.ID, types.CostRuleDraft).
+		Updates(map[string]any{
+			"status":         string(types.CostRuleActive),
+			"activated_by":   adminID,
+			"effective_from": now,
+			"effective_to":   nil,
+			"updated_at":     now,
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, ErrCostRuleStateConflict
+	}
+	if err := tx.First(&activated, draft.ID).Error; err != nil {
 		return nil, err
 	}
 	return &activated, nil

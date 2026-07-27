@@ -90,6 +90,24 @@ func ListRoutingPolicies(groupName, canonicalModel string, channelID, offset, li
 }
 
 func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (*RoutingPolicy, error) {
+	var saved *RoutingPolicy
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		saved, err = ReplaceRoutingPolicyWithTx(tx, id, policy, targets)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return GetRoutingPolicy(saved.ID)
+}
+
+// ReplaceRoutingPolicyWithTx persists a policy and its targets using the
+// caller's transaction. Cache refresh belongs to the post-commit caller.
+func ReplaceRoutingPolicyWithTx(tx *gorm.DB, id int, policy RoutingPolicy, targets []RouteTarget) (*RoutingPolicy, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("routing policy transaction is required")
+	}
 	snapshot := modelrouting.PolicySnapshot{
 		ID:             id,
 		GroupName:      policy.GroupName,
@@ -124,28 +142,15 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 		return nil, err
 	}
 
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return nil, tx.Error
-	}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			tx.Rollback()
-			panic(recovered)
-		}
-	}()
-
 	policy.Targets = nil
 	if id == 0 {
 		policy.ID = 0
 		if err := tx.Create(&policy).Error; err != nil {
-			tx.Rollback()
 			return nil, err
 		}
 	} else {
 		var existing RoutingPolicy
 		if err := tx.First(&existing, "id = ?", id).Error; err != nil {
-			tx.Rollback()
 			return nil, err
 		}
 		updates := map[string]interface{}{
@@ -157,12 +162,10 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 			"default_ratio":      policy.DefaultRatio,
 		}
 		if err := tx.Model(&existing).Updates(updates).Error; err != nil {
-			tx.Rollback()
 			return nil, err
 		}
 		policy.ID = id
 		if err := tx.Where("policy_id = ?", id).Delete(&RouteTarget{}).Error; err != nil {
-			tx.Rollback()
 			return nil, err
 		}
 	}
@@ -173,7 +176,6 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 		for index := range persistedTargets {
 			normalized, err := types.NormalizeCostVariantKey(persistedTargets[index].CostVariantKey)
 			if err != nil {
-				tx.Rollback()
 				return nil, err
 			}
 			persistedTargets[index].CostVariantKey = normalized
@@ -183,14 +185,11 @@ func ReplaceRoutingPolicy(id int, policy RoutingPolicy, targets []RouteTarget) (
 			persistedTargets[index].UpdatedAt = 0
 		}
 		if err := tx.Create(&persistedTargets).Error; err != nil {
-			tx.Rollback()
 			return nil, err
 		}
+		policy.Targets = persistedTargets
 	}
-	if err := tx.Commit().Error; err != nil {
-		return nil, err
-	}
-	return GetRoutingPolicy(policy.ID)
+	return &policy, nil
 }
 
 func GetRoutingPolicy(id int) (*RoutingPolicy, error) {

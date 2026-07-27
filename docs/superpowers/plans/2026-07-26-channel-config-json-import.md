@@ -1194,7 +1194,7 @@ git commit -m "feat: register config import admin workflow"
 - Generate: `outputs/019f9dbb-4e5d-7933-8531-d38e417ec068/渠道模型成本与利润模板-v1-修正版.xlsx` (acceptance artifact, not committed)
 - Preserve: `outputs/019f9dbb-4e5d-7933-8531-d38e417ec068/渠道模型成本与利润模板-更新.xlsx`
 
-- [ ] **Step 1: Record the source hash before any workbook operation**
+- [x] **Step 1: Record the source hash before any workbook operation**
 
 Run:
 
@@ -1204,13 +1204,13 @@ Get-FileHash 'outputs/019f9dbb-4e5d-7933-8531-d38e417ec068/渠道模型成本与
 
 Expected: capture one SHA-256 value in the builder's generated metadata and verify the same value again after export.
 
-- [ ] **Step 2: Write the deterministic workbook builder with stable-ID lookup**
+- [x] **Step 2: Write the deterministic workbook builder with stable-ID lookup**
 
 Use only the bundled Node runtime and `@oai/artifact-tool`. Load the source workbook, find cost rows by `成本规则ID` values `COST-MEGABYAI-R102-480-REQ`, `COST-MEGABYAI-R103-720-REQ`, `COST-MEGABYAI-R104-480-REQ`, and `COST-MEGABYAI-R105-720-REQ`, and patch authoritative fields. Do not select physical row numbers in code.
 
 Set R102/R103 `原币按次` to numeric `3`/`4` and confirmed真人能力 to true; set R104/R105 to numeric `1.2`/`1.6` and confirmed真人能力 to false. V1 exposes these capability facts in mapping/cost audit notes rather than dedicated columns, so locate the matching cost and mapping business IDs and rebuild their notes from typed correction data. The v1 adapter derives publishable capability from the confirmed MegaByAI line-group contract, never by parsing the note.
 
-- [ ] **Step 3: Restore formulas instead of hardcoding normalized USD**
+- [x] **Step 3: Restore formulas instead of hardcoding normalized USD**
 
 For each corrected cost row, set `原币基础单价` to reference the authoritative per-request cell and set `标准USD单价` to the same row's auditable formula:
 
@@ -1220,13 +1220,13 @@ For each corrected cost row, set `原币基础单价` to reference the authorita
 
 The builder must preserve existing formats, styles, formulas, dates, and all unrelated cells. It exports identical corrected workbook content to `web/src/channel-config-converter/__fixtures__/channel-config-v1-corrected.xlsx` and `outputs/019f9dbb-4e5d-7933-8531-d38e417ec068/渠道模型成本与利润模板-v1-修正版.xlsx`; only the fixture is committed.
 
-- [ ] **Step 4: Inspect, scan, and visually render every sheet**
+- [x] **Step 4: Inspect, scan, and visually render every sheet**
 
 Use `workbook.inspect` to confirm the four IDs, CNY values, capabilities, and formulas. Scan all sheets for `#REF!|#DIV/0!|#VALUE!|#NAME?|#N/A`. Render the used range of each of the ten sheets and inspect every resulting PNG for clipping, blank output, or changed styling.
 
 Expected normalized USD values use the workbook's current `原币兑USD` and other factors; they are formula results, not fixture constants.
 
-- [ ] **Step 5: Assert the source stayed unchanged and write expected counts**
+- [x] **Step 5: Assert the source stayed unchanged and write expected counts**
 
 Run the source hash command again and require byte-for-byte equality. Write:
 
@@ -1245,7 +1245,7 @@ Run the source hash command again and require byte-for-byte equality. Write:
 }
 ```
 
-- [ ] **Step 6: Run the builder twice and commit deterministic outputs**
+- [x] **Step 6: Run the builder twice and commit deterministic outputs**
 
 Run: `cd web && bun run scripts/build-channel-config-fixtures.mjs`
 

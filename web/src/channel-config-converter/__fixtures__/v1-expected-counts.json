@@ -1,0 +1,12 @@
+{
+  "channels": 9,
+  "channel_lines": 12,
+  "model_skus": 9,
+  "sale_proposals": 16,
+  "cost_rule_drafts": 121,
+  "model_mappings": 121,
+  "detected_conflict_keys": 17,
+  "automatic_conflict_keys": 16,
+  "manual_conflict_keys": 1,
+  "manual_conflict_business_id": "CH-MEGABYAI/videos-standard"
+}

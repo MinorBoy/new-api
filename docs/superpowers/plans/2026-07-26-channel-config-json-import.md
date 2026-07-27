@@ -1271,17 +1271,17 @@ git commit -m "test: add corrected channel import fixture"
 - Create: `web/src/channel-config-converter/security.ts`
 - Create: `web/src/channel-config-converter/__tests__/security.test.ts`
 
-- [ ] **Step 1: Add failing security preflight tests**
+- [x] **Step 1: Add failing security preflight tests**
 
 Test rejection of `.xls`, `.xlsm`, OLE signatures, `vbaProject.bin`, external links/connections, files over 10 MiB, decompressed ZIP content over 100 MiB, more than 20 sheets, more than 20,000 rows per sheet, and more than 5,000 entities.
 
-- [ ] **Step 2: Install the planned dependencies**
+- [x] **Step 2: Install the planned dependencies**
 
 Run: `cd web && bun add exceljs @zip.js/zip.js decimal.js json-canonicalize`
 
 Expected: `package.json` and `bun.lock` contain all four production dependencies.
 
-- [ ] **Step 3: Add dedicated build scripts and relative assets**
+- [x] **Step 3: Add dedicated build scripts and relative assets**
 
 Add:
 
@@ -1293,15 +1293,15 @@ Add:
 
 The config emits `dist/channel-config-converter/index.html`, uses `assetPrefix: './'`, bundles every dependency/font locally, and injects CSP including `default-src 'self' blob: data:`, `connect-src 'none'`, `object-src 'none'`, and `base-uri 'none'`.
 
-- [ ] **Step 4: Implement security preflight before ExcelJS parsing**
+- [x] **Step 4: Implement security preflight before ExcelJS parsing**
 
 Use zip.js to inspect entry names and declared/uncompressed sizes before extraction. Reject macro and external-connection entries, enforce size/sheet bounds, and pass the ArrayBuffer to ExcelJS only after preflight. Override `window.fetch`, `XMLHttpRequest`, `WebSocket`, and `EventSource` in development tests to record any attempted network access.
 
-- [ ] **Step 5: Initialize converter-only i18n without persistence**
+- [x] **Step 5: Initialize converter-only i18n without persistence**
 
 Import the shared locale JSON files into a new `i18next.createInstance()`, choose language from `navigator.language`, and do not install the browser language detector. Do not read or write localStorage/IndexedDB.
 
-- [ ] **Step 6: Verify offline build and commit**
+- [x] **Step 6: Verify offline build and commit**
 
 Run: `cd web && bun run converter:test && bun run converter:build`
 

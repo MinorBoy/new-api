@@ -20,6 +20,8 @@ import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 
+import '../styles/index.css'
+
 import App from './app'
 import { converterI18n, converterI18nReady } from './i18n'
 

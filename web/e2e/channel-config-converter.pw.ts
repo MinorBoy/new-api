@@ -35,18 +35,23 @@ test.describe('offline channel configuration converter', () => {
     expect(requestedURLs).toEqual([])
   })
 
-  test('converts the corrected workbook without persistence or network traffic', async ({
+  test('exports a selected secure line locally without persistence or network', async ({
     page,
   }) => {
     await expect(page.getByText('channel_lines', { exact: true })).toBeVisible()
+    await page.getByRole('tab', { name: 'Selection' }).click()
+    await page.getByRole('checkbox', { name: 'secure-enterprise' }).check()
     await expect(
-      page.getByRole('button', { name: 'Download JSON' })
+      page.getByText('Selected lines').locator('xpath=following-sibling::dd')
+    ).toHaveText('1')
+    await expect(
+      page.getByRole('button', { name: 'Export selected JSON' })
     ).toBeEnabled()
     await expect(page.getByRole('tab', { name: 'Issues' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'JSON' })).toBeVisible()
 
     const downloadPromise = page.waitForEvent('download')
-    await page.getByRole('button', { name: 'Download JSON' }).click()
+    await page.getByRole('button', { name: 'Export selected JSON' }).click()
     const download = await downloadPromise
     const downloadPath = await download.path()
     expect(downloadPath).not.toBeNull()
@@ -56,11 +61,25 @@ test.describe('offline channel configuration converter', () => {
       )
     }
     const document = JSON.parse(await readFile(downloadPath, 'utf8')) as {
+      entities: {
+        channel_lines: Array<{ line_ref: string }>
+        route_blueprints: Array<{
+          targets: Array<{ line_ref: string }>
+        }>
+      }
       kind: string
       manifest: { payload_sha256: string }
     }
     expect(document.kind).toBe('new-api.channel-config-import')
     expect(document.manifest.payload_sha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(
+      document.entities.channel_lines.map((line) => line.line_ref)
+    ).toEqual(['secure-enterprise'])
+    expect(
+      document.entities.route_blueprints.every((route) =>
+        route.targets.every((target) => target.line_ref === 'secure-enterprise')
+      )
+    ).toBeTruthy()
 
     const storage = await page.evaluate(async () => ({
       localStorage: window.localStorage.length,
@@ -69,12 +88,16 @@ test.describe('offline channel configuration converter', () => {
         .then((databases) => databases.length),
     }))
     expect(storage).toEqual({ localStorage: 0, indexedDB: 0 })
+
+    await page.reload()
+    await expect(page.getByRole('tab', { name: 'Selection' })).toHaveCount(0)
   })
 
   test('keeps content inside the viewport and all controls accessible', async ({
     page,
   }) => {
     for (const tab of [
+      'Selection',
       'Channels and lines',
       'Model SKUs',
       'Sale pricing',

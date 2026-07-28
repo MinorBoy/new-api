@@ -24,6 +24,7 @@ import { serializeImportDocument, type ConfigImportDocument } from '../document'
 export interface DownloadActionsProps {
   document: ConfigImportDocument
   formalDownloadDisabled: boolean
+  issueDownloadDisabled: boolean
   onClear: () => void
 }
 
@@ -53,9 +54,10 @@ export function DownloadActions(props: DownloadActionsProps) {
         }
         type='button'
       >
-        <Download aria-hidden='true' size={16} /> {t('Download JSON')}
+        <Download aria-hidden='true' size={16} /> {t('Export selected JSON')}
       </button>
       <button
+        disabled={props.issueDownloadDisabled}
         onClick={() =>
           download(
             `${JSON.stringify(props.document.issues, null, 2)}\n`,

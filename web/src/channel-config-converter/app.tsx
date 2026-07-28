@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, type ChangeEvent } from 'react'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { ChannelLineScopeSelector } from './components/channel-line-scope-selector'
 import { ConverterHeader } from './components/converter-header'
 import { DownloadActions } from './components/download-actions'
 import { EntityTable } from './components/entity-table'
@@ -28,6 +29,10 @@ import { JsonView } from './components/json-view'
 import { SummaryView } from './components/summary-view'
 import { convertWorkbook, type WorkbookConversion } from './conversion'
 import { WorkbookContractError } from './schema'
+import {
+  buildScopedImportDocument,
+  type ScopedImportDocumentResult,
+} from './scope'
 import { WorkbookPreflightError } from './security'
 
 type ConversionState =
@@ -38,6 +43,7 @@ type ConversionState =
 
 const tabs = [
   'Overview',
+  'Selection',
   'Channels and lines',
   'Model SKUs',
   'Sale pricing',
@@ -59,6 +65,38 @@ export default function App(props: AppProps) {
   const { t } = useTranslation()
   const [state, setState] = useState<ConversionState>({ status: 'idle' })
   const [tab, setTab] = useState<Tab>('Overview')
+  const [selectedLineRefs, setSelectedLineRefs] = useState<Set<string>>(
+    new Set()
+  )
+  const [scoped, setScoped] = useState<ScopedImportDocumentResult | null>(null)
+  const [isScopePending, setIsScopePending] = useState(false)
+
+  useEffect(() => {
+    if (state.status !== 'ready') {
+      setScoped(null)
+      setIsScopePending(false)
+      return
+    }
+
+    let cancelled = false
+    void buildScopedImportDocument(
+      state.result.document,
+      selectedLineRefs
+    ).then((nextScoped) => {
+      if (!cancelled) {
+        setScoped(nextScoped)
+        setIsScopePending(false)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedLineRefs, state])
+
+  function handleSelectionChange(lineRefs: Set<string>) {
+    setIsScopePending(true)
+    setSelectedLineRefs(lineRefs)
+  }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -66,6 +104,9 @@ export default function App(props: AppProps) {
     setState({ status: 'checking', fileName: file.name })
     try {
       const result = await (props.convertFile ?? convertWorkbook)(file)
+      setScoped(null)
+      setIsScopePending(true)
+      setSelectedLineRefs(new Set())
       setState({ status: 'ready', fileName: file.name, result })
       setTab('Overview')
     } catch (error: unknown) {
@@ -128,6 +169,14 @@ export default function App(props: AppProps) {
             {tab === 'Overview' && (
               <SummaryView document={state.result.document} />
             )}
+            {tab === 'Selection' && scoped && (
+              <ChannelLineScopeSelector
+                groups={scoped.groups}
+                onSelectionChange={handleSelectionChange}
+                selectedLineRefs={selectedLineRefs}
+                summary={scoped}
+              />
+            )}
             {tab === 'Channels and lines' && (
               <EntityTable
                 entities={[
@@ -169,9 +218,15 @@ export default function App(props: AppProps) {
             )}
             {tab === 'JSON' && <JsonView document={state.result.document} />}
             <DownloadActions
-              document={state.result.document}
-              formalDownloadDisabled={state.result.hasFailures}
-              onClear={() => setState({ status: 'idle' })}
+              document={scoped?.document ?? state.result.document}
+              formalDownloadDisabled={isScopePending || !scoped?.canUse}
+              issueDownloadDisabled={isScopePending || scoped === null}
+              onClear={() => {
+                setScoped(null)
+                setIsScopePending(false)
+                setSelectedLineRefs(new Set())
+                setState({ status: 'idle' })
+              }}
             />
           </section>
         )}

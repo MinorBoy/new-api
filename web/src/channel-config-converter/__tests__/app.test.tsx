@@ -247,6 +247,43 @@ test('blocks selected JSON while retaining the issue report for selected failure
   }
 })
 
+test('exports a valid selected scope without unselected line errors', async () => {
+  const result = conversion('error')
+  result.document.entities.channel_lines.push({
+    business_id: 'line-two',
+    channel_ref: 'channel-one',
+    display_name: 'Line two',
+    entity_hash: 'f'.repeat(64),
+    line_ref: 'line-two',
+    row: 5,
+    sheet: 'Lines',
+    source_ref: 'source-one',
+    status_proposal: 'disabled',
+  })
+  result.document.manifest.counts.channel_lines = 2
+  result.document.issues[0].entity_ref = 'line-two'
+
+  const mounted = await mount(result)
+  try {
+    await upload(mounted.container)
+    await act(async () => button(mounted.container, 'Selection').click())
+    const line = mounted.container.querySelector('[aria-label="Line one"]')
+    assert.ok(line instanceof browserWindow.HTMLElement)
+    await act(async () => line.click())
+
+    assert.equal(
+      button(mounted.container, 'Export selected JSON').disabled,
+      false
+    )
+    assert.equal(
+      button(mounted.container, 'Download issue report').disabled,
+      false
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
 test('disables export while rebuilding a changed valid selection', async () => {
   const result = conversion('warning')
   result.document.entities.channel_lines.push({

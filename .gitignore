@@ -27,6 +27,7 @@ plans
 # 例外:保留 docs/superpowers/plans/ 下的实施计划文档(superpowers writing-plans skill 产出)
 !docs/superpowers/
 !docs/superpowers/plans/
+.superpowers/
 
 electron/node_modules
 electron/dist
@@ -62,6 +63,14 @@ examples/
 output/
 temp/
 tmp/
-
+*.xlsx
+*.xls
+*.csv
+*.ndjson
+docs/channel/
+docs/new-channels/
+.understand-anything/
+_codex_sheet_work/
+outputs/
 go.work
 go.work.sum

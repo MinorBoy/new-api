@@ -2,6 +2,17 @@
 .git
 *.md
 .vscode
+.worktrees
+.agents
+.codex
+.claude
+.opencode
+.playwright-cli
+.superpowers
+.zcode
+output
+temp
+tmp
 .gitignore
 Makefile
 docs

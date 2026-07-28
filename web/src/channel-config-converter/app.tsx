@@ -19,8 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { V1WorkbookAdapter } from './adapters/v1'
-import { V2WorkbookAdapter } from './adapters/v2'
 import { ConverterHeader } from './components/converter-header'
 import { DownloadActions } from './components/download-actions'
 import { EntityTable } from './components/entity-table'
@@ -28,10 +26,9 @@ import { FileDropzone } from './components/file-dropzone'
 import { IssueView } from './components/issue-view'
 import { JsonView } from './components/json-view'
 import { SummaryView } from './components/summary-view'
-import { buildImportDocument, type ImportDocumentResult } from './document'
+import { convertWorkbook, type WorkbookConversion } from './conversion'
 import { WorkbookContractError } from './schema'
-import { preflightWorkbook, WorkbookPreflightError } from './security'
-import { loadWorkbookSnapshot } from './workbook'
+import { WorkbookPreflightError } from './security'
 
 type ConversionState =
   | { status: 'idle' }
@@ -52,30 +49,10 @@ const tabs = [
 
 type Tab = (typeof tabs)[number]
 
-export type WorkbookConversion = ImportDocumentResult
+export type { WorkbookConversion } from './conversion'
 
 export interface AppProps {
   convertFile?: (file: File) => Promise<WorkbookConversion>
-}
-
-async function convertWorkbook(file: File): Promise<WorkbookConversion> {
-  await preflightWorkbook(file)
-  const snapshot = await loadWorkbookSnapshot(await file.arrayBuffer())
-  const adapters = [new V2WorkbookAdapter(), new V1WorkbookAdapter()]
-  const adapter = adapters.find(
-    (candidate) => candidate.matches(snapshot).matched
-  )
-  if (!adapter) {
-    throw new WorkbookContractError(
-      'UNSUPPORTED_TEMPLATE',
-      'No supported workbook template matched.'
-    )
-  }
-  return buildImportDocument({
-    extracted: adapter.extract(snapshot),
-    sourceBytes: new Uint8Array(await file.arrayBuffer()),
-    sourceFileName: file.name,
-  })
 }
 
 export default function App(props: AppProps) {

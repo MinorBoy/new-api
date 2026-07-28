@@ -37,7 +37,10 @@ func RefreshPublishedConfig(keys ConfigImportRefreshKeys) error {
 		values := make(map[string]string, len(keys.OptionKeys))
 		for _, key := range keys.OptionKeys {
 			var option model.Option
-			if err := model.DB.Where("key = ?", key).First(&option).Error; err != nil {
+			if err := model.DB.Where(clause.Eq{
+				Column: clause.Column{Name: "key"},
+				Value:  key,
+			}).First(&option).Error; err != nil {
 				return err
 			}
 			values[key] = option.Value
@@ -380,7 +383,10 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 	sort.Strings(keys)
 	for _, key := range keys {
 		var option model.Option
-		err := tx.Where("key = ?", key).First(&option).Error
+		err := tx.Where(clause.Eq{
+			Column: clause.Column{Name: "key"},
+			Value:  key,
+		}).First(&option).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}

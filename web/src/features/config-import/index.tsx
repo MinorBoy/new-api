@@ -6,10 +6,13 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { getChannels } from '@/features/channels/api'
+import { ChannelsProvider } from '@/features/channels/components/channels-provider'
+import { ChannelMutateDrawer } from '@/features/channels/components/drawers/channel-mutate-drawer'
 
 import {
   getConfigImportBatch,
@@ -20,7 +23,10 @@ import {
   stageConfigImport,
   validateConfigImport,
 } from './api'
-import { ChannelBindingStep } from './components/channel-binding-step'
+import {
+  ChannelBindingStep,
+  type ConfigImportChannelCandidate,
+} from './components/channel-binding-step'
 import { ConfigImportStepper } from './components/config-import-stepper'
 import { ConflictResolutionStep } from './components/conflict-resolution-step'
 import { ImportUploadStep } from './components/import-upload-step'
@@ -59,6 +65,7 @@ export interface ConfigImportWizardProps {
     id: number,
     request: ConfigImportRouteReviewsRequest
   ) => Promise<ConfigImportBatchDetail>
+  onLoadChannels?: () => Promise<ConfigImportChannelCandidate[]>
   currentPricingValues?: Record<string, string>
 }
 
@@ -71,6 +78,25 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
   const [isBusy, setIsBusy] = useState(false)
   const [forcedStep, setForcedStep] = useState<ConfigImportStep>()
   const [reviewStep, setReviewStep] = useState<ConfigImportStep>()
+  const [channels, setChannels] = useState<ConfigImportChannelCandidate[]>([])
+  const [createdChannelIDs, setCreatedChannelIDs] = useState<
+    Record<string, number>
+  >({})
+  const [creatingLineRef, setCreatingLineRef] = useState<string>()
+
+  const loadChannels = useCallback(async () => {
+    if (props.onLoadChannels) return props.onLoadChannels()
+
+    const response = await getChannels({ p: 1, page_size: 1000 })
+    if (!response.success) {
+      throw new Error(response.message || 'Unable to load channels')
+    }
+    return (response.data?.items ?? []).map(({ id, name, status }) => ({
+      id,
+      name,
+      status,
+    }))
+  }, [props.onLoadChannels])
 
   useEffect(() => {
     if (!props.restoreBatchID) return
@@ -80,6 +106,31 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
       .catch(() => setError(t('The import batch could not be restored.')))
       .finally(() => setIsBusy(false))
   }, [props, t])
+
+  useEffect(() => {
+    if (!batch) {
+      setChannels([])
+      return
+    }
+
+    let cancelled = false
+    void loadChannels()
+      .then((loaded) => {
+        if (!cancelled) setChannels(loaded)
+      })
+      .catch(() => {
+        if (!cancelled) setError(t('The import action failed.'))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [batch, loadChannels, t])
+
+  useEffect(() => {
+    setCreatedChannelIDs({})
+    setCreatingLineRef(undefined)
+  }, [batch?.id])
 
   const runMutation = async (
     mutation: (id: number) => Promise<ConfigImportBatchDetail>
@@ -139,32 +190,58 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
         <ImportUploadStep disabled={isBusy} onUploaded={setBatch} />
       )}
       {step === 'channel_binding' && (
-        <ChannelBindingStep
-          batch={batch}
-          channels={[]}
-          onCreateChannel={() => undefined}
-          onSave={async (request) => {
-            const updated = await runMutation((id) =>
-              (
-                props.onSaveBindings ??
-                ((batchID, payload) =>
-                  saveConfigImportBindings(batchID, payload))
-              )(id, request)
-            )
-            if (updated) {
-              const staged = await runMutation(
-                props.onStage ?? stageConfigImport
+        <>
+          <ChannelBindingStep
+            batch={batch}
+            channels={channels}
+            createdChannelIDs={createdChannelIDs}
+            onCreateChannel={(lineRef) => setCreatingLineRef(lineRef)}
+            onSave={async (request) => {
+              const updated = await runMutation((id) =>
+                (
+                  props.onSaveBindings ??
+                  ((batchID, payload) =>
+                    saveConfigImportBindings(batchID, payload))
+                )(id, request)
               )
-              if (staged) {
-                setReviewStep(
-                  staged.items.some((item) => item.state === 'conflict')
-                    ? 'conflict_resolution'
-                    : 'pricing'
+              if (updated) {
+                const staged = await runMutation(
+                  props.onStage ?? stageConfigImport
                 )
+                if (staged) {
+                  setReviewStep(
+                    staged.items.some((item) => item.state === 'conflict')
+                      ? 'conflict_resolution'
+                      : 'pricing'
+                  )
+                }
               }
-            }
-          }}
-        />
+            }}
+          />
+          {creatingLineRef && (
+            <ChannelsProvider>
+              <ChannelMutateDrawer
+                open
+                initialDisabled
+                onOpenChange={(open) => {
+                  if (!open) setCreatingLineRef(undefined)
+                }}
+                onCreated={(channelIDs) => {
+                  const channelID = channelIDs[0]
+                  if (!channelID) return
+                  setCreatedChannelIDs((current) => ({
+                    ...current,
+                    [creatingLineRef]: channelID,
+                  }))
+                  setCreatingLineRef(undefined)
+                  void loadChannels()
+                    .then(setChannels)
+                    .catch(() => setError(t('The import action failed.')))
+                }}
+              />
+            </ChannelsProvider>
+          )}
+        </>
       )}
       {step === 'conflict_resolution' && (
         <ConflictResolutionStep

@@ -257,6 +257,32 @@ func TestStageConfigImportBatchRejectsUnconfirmedChannelBindings(t *testing.T) {
 	assert.Equal(t, "resolved", credentialIssue.ResolutionStatus)
 }
 
+func TestStageConfigImportBatchRevalidatesPublishFailedBatch(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	_, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	failedAt := common.GetTimestamp()
+	require.NoError(t, model.DB.Model(&model.ConfigImportBatch{}).Where("id = ?", batch.ID).Updates(map[string]any{
+		"status":          string(types.ConfigImportBatchStatusPublishFailed),
+		"failure_code":    "PUBLISH_FAILED",
+		"failure_message": "configuration publish transaction failed",
+		"failed_at":       failedAt,
+	}).Error)
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, detail.Status)
+	var savedBatch model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&savedBatch, batch.ID).Error)
+	assert.Empty(t, savedBatch.FailureCode)
+	assert.Empty(t, savedBatch.FailureMessage)
+	assert.Nil(t, savedBatch.FailedAt)
+}
+
 func TestRetryConfigImportBatchCacheDoesNotRepublishConfiguration(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	now := common.GetTimestamp()

@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DecodeConfigImportBindingRequest only accepts the credential-free binding
@@ -1272,7 +1273,16 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 			optionKeys = append(optionKeys, key)
 		}
 		sort.Strings(optionKeys)
-		if err := db.Where("key IN ?", optionKeys).Order("key ASC").Find(&options).Error; err != nil {
+		optionValues := make([]interface{}, len(optionKeys))
+		for index, optionKey := range optionKeys {
+			optionValues[index] = optionKey
+		}
+		if err := db.Where(clause.IN{
+			Column: clause.Column{Name: "key"},
+			Values: optionValues,
+		}).Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "key"},
+		}).Find(&options).Error; err != nil {
 			return nil, err
 		}
 		byKey := make(map[string]model.Option, len(options))
@@ -1421,7 +1431,7 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 		if err := tx.Where("id = ?", batchID).First(&batch).Error; err != nil {
 			return err
 		}
-		if status := types.ConfigImportBatchStatus(batch.Status); status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged {
+		if status := types.ConfigImportBatchStatus(batch.Status); status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged && status != types.ConfigImportBatchStatusPublishFailed {
 			return configImportError("STAGE_BATCH_STATUS", "batch %d is not ready for staging", batchID)
 		}
 
@@ -1530,9 +1540,15 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 		} else if ready {
 			nextStatus = types.ConfigImportBatchStatusReady
 		}
-		return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
+		updates := map[string]any{
 			"status": string(nextStatus), "baseline_json": string(baselineJSON), "updated_at": common.GetTimestamp(),
-		}).Error
+		}
+		if types.ConfigImportBatchStatus(batch.Status) == types.ConfigImportBatchStatusPublishFailed {
+			updates["failure_code"] = ""
+			updates["failure_message"] = ""
+			updates["failed_at"] = nil
+		}
+		return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(updates).Error
 	}); err != nil {
 		return nil, err
 	}

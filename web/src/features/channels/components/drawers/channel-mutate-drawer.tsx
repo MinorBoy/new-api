@@ -184,7 +184,6 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
 import type { Channel } from '../../types'
-import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
 import {
@@ -621,7 +620,6 @@ export function ChannelMutateDrawer({
 }: ChannelMutateDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const { setOpen } = useChannels()
   const currentUser = useAuthStore((s) => s.auth.user)
   const canEditSensitive = hasPermission(
     currentUser,
@@ -1603,9 +1601,8 @@ export function ChannelMutateDrawer({
         onCreated?.(channelIDs)
       }
       onOpenChange(false)
-      setOpen(null)
     },
-    [channelId, isEditing, onCreated, queryClient, onOpenChange, setOpen]
+    [channelId, isEditing, onCreated, queryClient, onOpenChange]
   )
 
   // Show missing models confirmation dialog

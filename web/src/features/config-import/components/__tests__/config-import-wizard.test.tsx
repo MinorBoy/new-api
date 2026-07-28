@@ -32,7 +32,10 @@ Object.assign(globalThis as Record<string, unknown>, {
   HTMLElement: browserWindow.HTMLElement,
   HTMLButtonElement: browserWindow.HTMLButtonElement,
   HTMLInputElement: browserWindow.HTMLInputElement,
+  localStorage: browserWindow.localStorage,
+  matchMedia: browserWindow.matchMedia.bind(browserWindow),
   HTMLSelectElement: browserWindow.HTMLSelectElement,
+  sessionStorage: browserWindow.sessionStorage,
   Event: browserWindow.Event,
   MouseEvent: browserWindow.MouseEvent,
   IS_REACT_ACT_ENVIRONMENT: true,
@@ -75,6 +78,25 @@ function batch(
   }
 }
 
+function bindingBatch(): ConfigImportBatchDetail {
+  const currentBatch = batch('binding', ['bind'])
+  currentBatch.items = [
+    {
+      id: 1,
+      entity_type: 'channel_lines',
+      business_id: 'line-1',
+      entity_hash: 'line-1-hash',
+      canonical_json:
+        '{"line_ref":"line-1","display_name":"Imported line"}',
+      state: 'new',
+      source_ref: '渠道!4',
+      source_sheet: '渠道',
+      source_row: 4,
+    },
+  ]
+  return currentBatch
+}
+
 beforeEach(() => browserWindow.document.body.replaceChildren())
 
 async function mount(
@@ -85,6 +107,9 @@ async function mount(
     onStage?: (id: number) => Promise<ConfigImportBatchDetail>
     onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
     onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
+    onLoadChannels?: () => Promise<
+      Array<{ id: number; name: string; status: number }>
+    >
   } = {}
 ) {
   const calls: string[] = []
@@ -113,12 +138,33 @@ async function mount(
             calls.push(`publish:${id}`)
             return options.onPublish?.(id) ?? batch('published', [])
           }}
+          onLoadChannels={options.onLoadChannels}
         />
       </I18nextProvider>
     )
   })
   return { container, root, calls }
 }
+
+test('loads existing channels as binding candidates', async () => {
+  const mounted = await mount({
+    currentBatch: bindingBatch(),
+    onLoadChannels: async () => [
+      { id: 25, name: 'Disabled mock channel', status: 0 },
+    ],
+  })
+  try {
+    await act(async () => undefined)
+    const select = mounted.container.querySelector('select')
+    assert.ok(select instanceof browserWindow.HTMLSelectElement)
+    assert.equal(
+      [...select.options].some((option) => option.value === '25'),
+      true
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
 
 function button(container: HappyHTMLElement, text: string): HTMLButtonElement {
   const value = [...container.querySelectorAll('button')].find(

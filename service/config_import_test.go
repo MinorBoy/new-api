@@ -3,10 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/glebarez/sqlite"
@@ -69,6 +72,18 @@ func TestConfigImportUploadCreatesBindingBatchAndDiscardsPreview(t *testing.T) {
 	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Find(&persistedItems).Error)
 	require.Len(t, persistedItems, 1)
 	assert.NotContains(t, persistedItems[0].CanonicalJSON, "preview-marker")
+}
+
+func TestConfigImportUploadRequestRoundTripPreservesFixtureIntegrity(t *testing.T) {
+	payload, err := os.ReadFile(filepath.Join("..", "e2e", "testdata", "channel-config-v1.json"))
+	require.NoError(t, err)
+
+	var request dto.ConfigImportUploadRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"document":`+string(payload)+`}`), &request))
+	encoded, err := common.Marshal(request.Document)
+	require.NoError(t, err)
+	_, err = ParseConfigImportDocument(bytes.NewReader(encoded))
+	require.NoError(t, err)
 }
 
 func TestConfigImportUploadBlocksSourceFailure(t *testing.T) {

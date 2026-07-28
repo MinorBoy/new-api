@@ -58,3 +58,50 @@ The frontend suite is deliberately serialized because its existing Happy DOM sui
 ## Residual Diagnostic Baseline
 
 `go vet ./...` remains nonzero for pre-existing diagnostics outside this change set, including value-copying `CustomEvent` methods, IPv6 address formatting in `common/email_test.go`, and unreachable placeholders in legacy relay adaptors. The same `CustomEvent`, email-test, and Palm adaptor diagnostics exist in `origin/main`. They are not modified or suppressed by this acceptance work.
+
+## Continuation: Published-Configuration Runtime Check
+
+This continuation used the rebuilt `new-api-acceptance` stack at
+`http://127.0.0.1:3001` with MySQL. It covered the post-publication path that
+cannot be exercised by the credential-free import fixture alone.
+
+### Corrective Action
+
+The first browser publication committed its database transaction, but returned
+an HTTP 500 while refreshing option caches. The MySQL error was caused by an
+unquoted reserved `options.key` column in `RefreshPublishedConfig`. The
+publication transaction remained atomic and the batch was already published;
+the failed cache refresh correctly recorded `CACHE_REFRESH_PENDING`.
+
+`RefreshPublishedConfig` now uses GORM `clause.Eq` for the reserved column. A
+new real-MySQL regression test covers the post-commit cache refresh path. The
+administrator retry endpoint was then invoked for batch `1`; it completed
+without replaying the publication and resolved the pending-cache issue.
+
+### Acceptance Results
+
+| Check | Observed result |
+| --- | --- |
+| Published batch | Batch `1` is `published`; one publish audit has outcome `published`. |
+| Channel bindings | All 12 bindings point to channels `13` through `24` and have credential-confirmation metadata. |
+| Disabled-by-default safety | All 12 imported mock channels remain `status = 2`; all 3 routing policies and all 104 route targets are disabled. |
+| Cost and routing materialization | 104 `config_import` cost rules are active across the 12 bound channels; 3 routing policies and 104 route targets exist. |
+| Cache recovery | The sole `CACHE_REFRESH_PENDING` issue is `resolved` after `POST /api/config-import/batches/1/refresh-cache`. |
+| Mock video request | `POST /v1/video/generations` for `jimeng-video-seedance-2.0-vip` returned HTTP `503` with `model_not_found`: no available channel in `default`. |
+| No execution or charge | The browser task-log page showed zero rows; MySQL also showed zero tasks and zero consumption logs for the acceptance user. |
+
+### Fresh Verification
+
+| Command | Result |
+| --- | --- |
+| `go test ./... -count=1` | Pass |
+| `go test ./service -count=1` | Pass |
+| `TEST_MYSQL_DSN=... go test ./service -run '^(TestCaptureConfigImportBaselineLoadsOptionRowsOnMySQL|TestPublishConfigImportSaleOptionsLoadsOptionRowsOnMySQL|TestRefreshPublishedConfigLoadsOptionRowsOnMySQL)$' -count=1` | Pass |
+| `go test ./e2e -run TestConfigImportV1FixturePublishesDisabledConfigurationE2E -count=1` | Pass |
+| `bun run build` | Pass |
+
+The imported configuration is ready for credential entry and controlled
+enablement. A real video-generation test requires selecting a bound channel,
+entering its real upstream credential, and explicitly enabling that channel
+and its routing policy; those production-affecting actions were intentionally
+not performed in this acceptance environment.

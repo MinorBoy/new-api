@@ -215,3 +215,25 @@ test('global select, clear, local search, and keyboard selection update selectio
     await act(async () => mounted.root.unmount())
   }
 })
+
+test('selects every line in a group after filtering that group', async () => {
+  const mounted = await mount()
+  try {
+    const input = mounted.container.querySelector(
+      'input'
+    ) as BrowserInput | null
+    assert.ok(input instanceof browserWindow.HTMLInputElement)
+    input.value = 'enterprise'
+    await act(async () =>
+      input.dispatchEvent(new browserWindow.Event('input', { bubbles: true }))
+    )
+
+    await click(checkbox(mounted.container, 'Select all lines in Secure'))
+    assert.deepEqual(
+      mounted.selections.at(-1),
+      new Set(['secure-discount', 'secure-enterprise'])
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})

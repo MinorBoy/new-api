@@ -39,6 +39,7 @@ after(() => browserWindow.close())
 
 const i18n = createInstance()
 i18n.init({ lng: 'en', resources: { en: { translation: {} } } })
+const originalCrypto = globalThis.crypto
 
 type BrowserElement = InstanceType<typeof browserWindow.HTMLElement>
 type BrowserButton = InstanceType<typeof browserWindow.HTMLButtonElement>
@@ -147,7 +148,24 @@ function conversion(): WorkbookConversion {
   }
 }
 
-beforeEach(() => browserWindow.document.body.replaceChildren())
+beforeEach(() => {
+  browserWindow.document.body.replaceChildren()
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {
+      subtle: {
+        digest: async () => new ArrayBuffer(32),
+      },
+    },
+  })
+})
+
+after(() => {
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: originalCrypto,
+  })
+})
 
 function button(container: BrowserElement, label: string): BrowserButton {
   const candidate = [...container.querySelectorAll('button')].find(
@@ -171,6 +189,54 @@ async function uploadWorkbook(container: BrowserElement): Promise<void> {
     await Promise.resolve()
   })
 }
+
+test('shows a disabled JSON export command before an Excel workbook is selected', async () => {
+  const container = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(container)
+  const root = createRoot(container as unknown as Container)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ExcelImportStep
+          onUpload={async () => batch}
+          onUploaded={() => undefined}
+        />
+      </I18nextProvider>
+    )
+  })
+
+  try {
+    assert.equal(button(container, 'Export selected JSON').disabled, true)
+  } finally {
+    await act(async () => root.unmount())
+  }
+})
+
+test('keeps the Excel source panel scrollable within the application viewport', async () => {
+  const container = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(container)
+  const root = createRoot(container as unknown as Container)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ImportSourceStep
+          onUpload={async () => batch}
+          onUploaded={() => undefined}
+        />
+      </I18nextProvider>
+    )
+  })
+
+  try {
+    const tabs = container.querySelector('[data-slot="tabs"]')
+    assert.ok(tabs instanceof browserWindow.HTMLElement)
+    assert.equal(tabs.classList.contains('min-h-0'), true)
+    assert.equal(tabs.classList.contains('flex-1'), true)
+    assert.equal(tabs.classList.contains('overflow-auto'), true)
+  } finally {
+    await act(async () => root.unmount())
+  }
+})
 
 test('uploads only the selected converted scope and advances to the binding batch', async () => {
   const uploaded: unknown[] = []

@@ -174,20 +174,20 @@ export function ExcelImportStep(props: ExcelImportStepProps) {
         />
       )}
 
-      {converted && (
-        <div className='flex flex-wrap gap-2'>
-          <Button
-            disabled={commandDisabled}
-            onClick={() => {
-              if (!scoped) return
-              downloadImportDocument(serializeImportDocument(scoped.document))
-            }}
-            type='button'
-            variant='outline'
-          >
-            <Download className='size-4' aria-hidden='true' />
-            {t('Export selected JSON')}
-          </Button>
+      <div className='flex flex-wrap gap-2'>
+        <Button
+          disabled={commandDisabled}
+          onClick={() => {
+            if (!scoped) return
+            downloadImportDocument(serializeImportDocument(scoped.document))
+          }}
+          type='button'
+          variant='outline'
+        >
+          <Download className='size-4' aria-hidden='true' />
+          {t('Export selected JSON')}
+        </Button>
+        {converted && (
           <Button
             disabled={commandDisabled}
             onClick={() => void handleImport()}
@@ -200,8 +200,8 @@ export function ExcelImportStep(props: ExcelImportStepProps) {
             )}
             {t('Import selected configuration')}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   )
 }

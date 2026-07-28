@@ -36,7 +36,10 @@ export function ImportSourceStep(props: ImportSourceStepProps) {
   }
 
   return (
-    <Tabs className='space-y-4' defaultValue='excel'>
+    <Tabs
+      className='min-h-0 flex-1 overflow-auto space-y-4 p-6'
+      defaultValue='excel'
+    >
       <TabsList variant='line'>
         <TabsTrigger disabled={disabled} value='excel'>
           {t('Excel conversion')}

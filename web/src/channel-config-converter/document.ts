@@ -22,13 +22,13 @@ import { hashEntity, hashPayload } from './hash'
 import { canonicalDecimal, normalizeEnum } from './normalize'
 import type { CellSnapshot, ExtractedEntity, ExtractedWorkbook } from './types'
 
-type ImportEntity = Record<string, unknown> & {
+export type ImportEntity = Record<string, unknown> & {
   business_id: string
   entity_hash: string
   source_ref: string
 }
 
-type ImportIssue = {
+export type ImportIssue = {
   code: string
   severity: 'error' | 'info' | 'warning'
   message: string
@@ -37,7 +37,7 @@ type ImportIssue = {
   sheet?: string
 }
 
-type ImportEntities = {
+export type ImportEntities = {
   channel_lines: ImportEntity[]
   channels: ImportEntity[]
   cost_rule_drafts: ImportEntity[]

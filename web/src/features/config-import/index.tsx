@@ -21,6 +21,7 @@ import {
   saveConfigImportResolutions,
   saveConfigImportRouteReviews,
   stageConfigImport,
+  uploadConfigImport,
   validateConfigImport,
 } from './api'
 import {
@@ -29,6 +30,7 @@ import {
 } from './components/channel-binding-step'
 import { ConfigImportStepper } from './components/config-import-stepper'
 import { ConflictResolutionStep } from './components/conflict-resolution-step'
+import { ImportSourceStep } from './components/import-source-step'
 import { ImportUploadStep } from './components/import-upload-step'
 import { PricingStep } from './components/pricing-step'
 import { PublishResultStep } from './components/publish-result-step'
@@ -50,6 +52,7 @@ export interface ConfigImportWizardProps {
   batch?: ConfigImportBatchDetail
   restoreBatchID?: number
   onLoadBatch?: (id: number) => Promise<ConfigImportBatchDetail>
+  onUpload?: (document: unknown) => Promise<ConfigImportBatchDetail>
   onStage?: (id: number) => Promise<ConfigImportBatchDetail>
   onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
   onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
@@ -83,9 +86,10 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
     Record<string, number>
   >({})
   const [creatingLineRef, setCreatingLineRef] = useState<string>()
+  const onLoadChannels = props.onLoadChannels
 
   const loadChannels = useCallback(async () => {
-    if (props.onLoadChannels) return props.onLoadChannels()
+    if (onLoadChannels) return onLoadChannels()
 
     const response = await getChannels({ p: 1, page_size: 1000 })
     if (!response.success) {
@@ -96,7 +100,7 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
       name,
       status,
     }))
-  }, [props.onLoadChannels])
+  }, [onLoadChannels])
 
   useEffect(() => {
     if (!props.restoreBatchID) return
@@ -163,7 +167,13 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
   }
 
   if (!batch) {
-    return <ImportUploadStep disabled={isBusy} onUploaded={setBatch} />
+    return (
+      <ImportSourceStep
+        disabled={isBusy}
+        onUpload={props.onUpload ?? uploadConfigImport}
+        onUploaded={setBatch}
+      />
+    )
   }
 
   const state = deriveWizardState(batch)

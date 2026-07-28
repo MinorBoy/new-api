@@ -6,6 +6,7 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -22,24 +23,39 @@ export interface ImportSourceStepProps {
 
 export function ImportSourceStep(props: ImportSourceStepProps) {
   const { t } = useTranslation()
+  const [isUploading, setIsUploading] = useState(false)
+  const disabled = props.disabled || isUploading
+
+  const handleUpload = async (document: unknown) => {
+    setIsUploading(true)
+    try {
+      return await props.onUpload(document)
+    } finally {
+      setIsUploading(false)
+    }
+  }
 
   return (
     <Tabs className='space-y-4' defaultValue='excel'>
       <TabsList variant='line'>
-        <TabsTrigger value='excel'>{t('Excel conversion')}</TabsTrigger>
-        <TabsTrigger value='json'>{t('JSON import')}</TabsTrigger>
+        <TabsTrigger disabled={disabled} value='excel'>
+          {t('Excel conversion')}
+        </TabsTrigger>
+        <TabsTrigger disabled={disabled} value='json'>
+          {t('JSON import')}
+        </TabsTrigger>
       </TabsList>
       <TabsContent value='excel'>
         <ExcelImportStep
-          disabled={props.disabled}
-          onUpload={props.onUpload}
+          disabled={disabled}
+          onUpload={handleUpload}
           onUploaded={props.onUploaded}
         />
       </TabsContent>
       <TabsContent value='json'>
         <ImportUploadStep
-          disabled={props.disabled}
-          onUpload={props.onUpload}
+          disabled={disabled}
+          onUpload={handleUpload}
           onUploaded={props.onUploaded}
         />
       </TabsContent>

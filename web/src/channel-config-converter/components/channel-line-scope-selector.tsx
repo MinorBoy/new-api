@@ -174,12 +174,17 @@ export function ChannelLineScopeSelector(props: ChannelLineScopeSelectorProps) {
           />
           <div className='divide-y rounded-lg border'>
             {visibleGroups.map((group) => {
-              const selectedCount = group.lines.filter((line) =>
+              const canonicalGroup =
+                props.groups.find(
+                  (candidate) =>
+                    candidate.channel.business_id === group.channel.business_id
+                ) ?? group
+              const selectedCount = canonicalGroup.lines.filter((line) =>
                 props.selectedLineRefs.has(field(line, 'line_ref'))
               ).length
-              const groupChecked = selectedCount === group.lines.length
+              const groupChecked = selectedCount === canonicalGroup.lines.length
               const groupIndeterminate =
-                selectedCount > 0 && selectedCount < group.lines.length
+                selectedCount > 0 && selectedCount < canonicalGroup.lines.length
               const groupName = field(group.channel, 'display_name')
               return (
                 <div
@@ -195,17 +200,17 @@ export function ChannelLineScopeSelector(props: ChannelLineScopeSelectorProps) {
                       disabled={props.disabled}
                       indeterminate={groupIndeterminate}
                       onCheckedChange={(checked) =>
-                        changeGroup(group, checked === true)
+                        changeGroup(canonicalGroup, checked === true)
                       }
                       onKeyDown={(event) =>
                         toggleOnSpace(event, () =>
-                          changeGroup(group, !groupChecked)
+                          changeGroup(canonicalGroup, !groupChecked)
                         )
                       }
                     />
                     <span className='truncate'>{groupName}</span>
                     <span className='text-muted-foreground font-mono text-xs'>
-                      {selectedCount}/{group.lines.length}
+                      {selectedCount}/{canonicalGroup.lines.length}
                     </span>
                   </div>
                   <div className='grid gap-2 pl-6'>

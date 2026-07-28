@@ -62,18 +62,23 @@ export function ExcelImportStep(props: ExcelImportStepProps) {
     }
 
     let cancelled = false
-    void buildScopedImportDocument(converted.document, selectedLineRefs).then(
-      (nextScoped) => {
+    void buildScopedImportDocument(converted.document, selectedLineRefs)
+      .then((nextScoped) => {
         if (!cancelled) {
           setScoped(nextScoped)
           setIsScopePending(false)
         }
-      }
-    )
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsScopePending(false)
+          setError(t('The Excel file could not be converted.'))
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [converted, selectedLineRefs])
+  }, [converted, selectedLineRefs, t])
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
@@ -105,6 +110,7 @@ export function ExcelImportStep(props: ExcelImportStepProps) {
 
   const handleSelectionChange = (lineRefs: Set<string>) => {
     setIsScopePending(true)
+    setError(undefined)
     setSelectedLineRefs(lineRefs)
   }
 

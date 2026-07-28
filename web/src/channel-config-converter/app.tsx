@@ -70,31 +70,38 @@ export default function App(props: AppProps) {
   )
   const [scoped, setScoped] = useState<ScopedImportDocumentResult | null>(null)
   const [isScopePending, setIsScopePending] = useState(false)
+  const [scopeError, setScopeError] = useState<string>()
 
   useEffect(() => {
     if (state.status !== 'ready') {
       setScoped(null)
       setIsScopePending(false)
+      setScopeError(undefined)
       return
     }
 
     let cancelled = false
-    void buildScopedImportDocument(
-      state.result.document,
-      selectedLineRefs
-    ).then((nextScoped) => {
-      if (!cancelled) {
-        setScoped(nextScoped)
-        setIsScopePending(false)
-      }
-    })
+    void buildScopedImportDocument(state.result.document, selectedLineRefs)
+      .then((nextScoped) => {
+        if (!cancelled) {
+          setScoped(nextScoped)
+          setIsScopePending(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsScopePending(false)
+          setScopeError(t('converter.errors.UNKNOWN'))
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [selectedLineRefs, state])
+  }, [selectedLineRefs, state, t])
 
   function handleSelectionChange(lineRefs: Set<string>) {
     setIsScopePending(true)
+    setScopeError(undefined)
     setSelectedLineRefs(lineRefs)
   }
 
@@ -106,6 +113,7 @@ export default function App(props: AppProps) {
       const result = await (props.convertFile ?? convertWorkbook)(file)
       setScoped(null)
       setIsScopePending(true)
+      setScopeError(undefined)
       setSelectedLineRefs(new Set())
       setState({ status: 'ready', fileName: file.name, result })
       setTab('Overview')
@@ -217,6 +225,11 @@ export default function App(props: AppProps) {
               <IssueView issues={state.result.document.issues} />
             )}
             {tab === 'JSON' && <JsonView document={state.result.document} />}
+            {scopeError && (
+              <p className='text-destructive text-sm' role='alert'>
+                {scopeError}
+              </p>
+            )}
             <DownloadActions
               document={scoped?.document ?? state.result.document}
               formalDownloadDisabled={isScopePending || !scoped?.canUse}
@@ -224,6 +237,7 @@ export default function App(props: AppProps) {
               onClear={() => {
                 setScoped(null)
                 setIsScopePending(false)
+                setScopeError(undefined)
                 setSelectedLineRefs(new Set())
                 setState({ status: 'idle' })
               }}

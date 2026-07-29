@@ -225,6 +225,40 @@ func TestConfigImportStageBlocksUnrepresentableGroupScope(t *testing.T) {
 	require.NotNil(t, groupScopeIssue)
 }
 
+func TestConfigImportPricingReviewPersistsSelectedGroupsAndRestagingClearsScopeWarning(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Ability{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	priority := int64(0)
+	weight := uint(1)
+	require.NoError(t, model.DB.Create(&model.Ability{ChannelId: channel.Id, Group: "分组A", Model: "sku-a", Enabled: true, Priority: &priority, Weight: weight}).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ConfigImportBatchStatusStaged, detail.Status)
+
+	updated, err := UpdateConfigImportPricingReview(context.Background(), 42, batch.ID, []string{"default", "分组A"})
+	require.NoError(t, err)
+	require.Equal(t, types.ConfigImportBatchStatusStaged, updated.Status)
+
+	detail, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ConfigImportBatchStatusReady, detail.Status)
+	for _, issue := range detail.Issues {
+		if issue.Code == "PRICING_GROUP_SCOPE_UNREPRESENTABLE" {
+			assert.NotEqual(t, "open", issue.ResolutionStatus)
+		}
+	}
+
+	var item model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "sale_proposals").First(&item).Error)
+	var proposal types.ConfigImportSaleProposal
+	require.NoError(t, common.UnmarshalJsonStr(item.CanonicalJSON, &proposal))
+	assert.Equal(t, []string{"default", "分组A"}, proposal.SelectedGroups)
+}
+
 func TestConfigImportStagePersistsNegativeMarginWarningGate(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))

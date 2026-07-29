@@ -122,3 +122,36 @@ test('selects the default group and displays current, proposed, and server prici
     await act(async () => root.unmount())
   }
 })
+
+test('shows existing groups as selectable and submits the confirmed pricing scope', async () => {
+  const submitted: string[][] = []
+  const container = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(container)
+  const root = createRoot(container as unknown as Container)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <PricingStep
+          batch={batch}
+          availableGroups={['default', 'vip', '分组A']}
+          onContinue={(groups) => submitted.push(groups)}
+        />
+      </I18nextProvider>
+    )
+  })
+  try {
+    const groupA = container.querySelector('[aria-label="分组A"]')
+    assert.ok(groupA instanceof browserWindow.HTMLInputElement)
+    assert.equal(groupA.checked, false)
+    await act(async () => groupA.click())
+
+    const continueButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Continue'
+    )
+    assert.ok(continueButton instanceof browserWindow.HTMLButtonElement)
+    await act(async () => continueButton.click())
+    assert.deepEqual(submitted, [['default', '分组A', 'vip']])
+  } finally {
+    await act(async () => root.unmount())
+  }
+})

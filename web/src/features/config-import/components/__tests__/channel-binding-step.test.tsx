@@ -231,3 +231,101 @@ test('opens channel creation and selects the returned disabled channel ID', asyn
     await act(async () => mounted.root.unmount())
   }
 })
+
+test('selects a newly created channel over an earlier existing-channel draft', async () => {
+  const channels = [
+    { id: 12, name: 'Existing disabled channel', status: 2 },
+    { id: 25, name: 'New disabled channel', status: 2 },
+  ]
+  const mounted = await mount({ channels })
+  try {
+    const select = mounted.container.querySelector('select')
+    assert.ok(select instanceof browserWindow.HTMLSelectElement)
+    select.value = '12'
+    await act(async () =>
+      select.dispatchEvent(new browserWindow.Event('change', { bubbles: true }))
+    )
+
+    await act(async () => {
+      mounted.root.render(
+        <I18nextProvider i18n={i18n}>
+          <ChannelBindingStep
+            batch={batch}
+            channels={channels}
+            createdChannelIDs={{ 'line-1': 25 }}
+            onSave={async (request) => {
+              mounted.saved.push(request)
+            }}
+            onCreateChannel={(lineRef) => mounted.created.push(lineRef)}
+          />
+        </I18nextProvider>
+      )
+    })
+
+    assert.equal(select.value, '25')
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('restores a persisted create binding after the batch is reloaded', async () => {
+  const persistedBatch: ConfigImportBatchDetail = {
+    ...batch,
+    bindings: [
+      {
+        line_ref: 'line-1',
+        action: 'create',
+        channel_id: 25,
+        credentials_confirmed: false,
+      },
+    ],
+  }
+  const saved: ConfigImportBindingsRequest[] = []
+  const container = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(container)
+  const root = createRoot(container as unknown as Container)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ChannelBindingStep
+          batch={persistedBatch}
+          channels={[{ id: 25, name: 'Created disabled channel', status: 2 }]}
+          onSave={async (request) => {
+            saved.push(request)
+          }}
+          onCreateChannel={() => undefined}
+        />
+      </I18nextProvider>
+    )
+  })
+  try {
+    const select = container.querySelector('select')
+    assert.ok(select instanceof browserWindow.HTMLSelectElement)
+    assert.equal(select.value, '25')
+
+    const checkbox = container.querySelector('input[type="checkbox"]')
+    assert.ok(checkbox instanceof browserWindow.HTMLInputElement)
+    await act(async () => checkbox.click())
+
+    const save = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Save bindings'
+    )
+    assert.ok(save instanceof browserWindow.HTMLButtonElement)
+    await act(async () => save.click())
+
+    assert.deepEqual(saved, [
+      {
+        bindings: [
+          {
+            line_ref: 'line-1',
+            action: 'create',
+            channel_id: 25,
+            credentials_confirmed: true,
+          },
+        ],
+      },
+    ])
+  } finally {
+    await act(async () => root.unmount())
+  }
+})

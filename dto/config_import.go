@@ -83,6 +83,10 @@ type ConfigImportRouteReviewRequest struct {
 	Reviews []ConfigImportRouteReviewInput `json:"reviews"`
 }
 
+type ConfigImportPricingReviewRequest struct {
+	SelectedGroups []string `json:"selected_groups"`
+}
+
 type ConfigImportRouteReviewInput struct {
 	ItemBusinessID string                           `json:"item_business_id"`
 	MergeMode      types.ConfigImportRouteMergeMode `json:"merge_mode"`

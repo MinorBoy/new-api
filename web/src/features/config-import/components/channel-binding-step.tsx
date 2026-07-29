@@ -89,17 +89,38 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
       const next = { ...current }
       for (const line of lines) {
         const createdChannelID = props.createdChannelIDs?.[line.lineRef]
-        if (!createdChannelID) continue
+        if (createdChannelID) {
+          next[line.lineRef] = {
+            action: 'create',
+            channelID: createdChannelID,
+            credentialsConfirmed: false,
+            reason: '',
+          }
+          continue
+        }
+
+        if (next[line.lineRef]) continue
+
+        const persisted = props.batch.bindings?.find(
+          (binding) => binding.line_ref === line.lineRef
+        )
+        if (
+          !persisted ||
+          persisted.action === 'skip' ||
+          !persisted.channel_id
+        ) {
+          continue
+        }
         next[line.lineRef] = {
-          action: 'create',
-          channelID: createdChannelID,
-          credentialsConfirmed: false,
+          action: persisted.action as 'bind' | 'create',
+          channelID: persisted.channel_id,
+          credentialsConfirmed: persisted.credentials_confirmed,
           reason: '',
         }
       }
       return next
     })
-  }, [lines, props.createdChannelIDs])
+  }, [lines, props.batch.bindings, props.createdChannelIDs])
 
   const updateDraft = (lineRef: string, update: Partial<BindingDraft>) => {
     setDrafts((current) => {

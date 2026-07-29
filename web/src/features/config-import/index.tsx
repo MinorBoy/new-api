@@ -13,11 +13,13 @@ import { Button } from '@/components/ui/button'
 import { getChannels } from '@/features/channels/api'
 import { ChannelsProvider } from '@/features/channels/components/channels-provider'
 import { ChannelMutateDrawer } from '@/features/channels/components/drawers/channel-mutate-drawer'
+import { listRoutingGroups } from '@/features/model-routing/api'
 
 import {
   getConfigImportBatch,
   publishConfigImport,
   saveConfigImportBindings,
+  saveConfigImportPricingReview,
   saveConfigImportResolutions,
   saveConfigImportRouteReviews,
   stageConfigImport,
@@ -44,6 +46,7 @@ import {
 import type {
   ConfigImportBatchDetail,
   ConfigImportBindingsRequest,
+  ConfigImportPricingReviewRequest,
   ConfigImportResolutionsRequest,
   ConfigImportRouteReviewsRequest,
 } from './types'
@@ -60,6 +63,10 @@ export interface ConfigImportWizardProps {
     id: number,
     request: ConfigImportBindingsRequest
   ) => Promise<ConfigImportBatchDetail>
+  onSavePricingReview?: (
+    id: number,
+    request: ConfigImportPricingReviewRequest
+  ) => Promise<ConfigImportBatchDetail>
   onSaveResolutions?: (
     id: number,
     request: ConfigImportResolutionsRequest
@@ -69,6 +76,7 @@ export interface ConfigImportWizardProps {
     request: ConfigImportRouteReviewsRequest
   ) => Promise<ConfigImportBatchDetail>
   onLoadChannels?: () => Promise<ConfigImportChannelCandidate[]>
+  onLoadPricingGroups?: () => Promise<string[]>
   currentPricingValues?: Record<string, string>
 }
 
@@ -82,11 +90,13 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
   const [forcedStep, setForcedStep] = useState<ConfigImportStep>()
   const [reviewStep, setReviewStep] = useState<ConfigImportStep>()
   const [channels, setChannels] = useState<ConfigImportChannelCandidate[]>([])
+  const [pricingGroups, setPricingGroups] = useState<string[]>(['default'])
   const [createdChannelIDs, setCreatedChannelIDs] = useState<
     Record<string, number>
   >({})
   const [creatingLineRef, setCreatingLineRef] = useState<string>()
   const onLoadChannels = props.onLoadChannels
+  const onLoadPricingGroups = props.onLoadPricingGroups
 
   const loadChannels = useCallback(async () => {
     if (onLoadChannels) return onLoadChannels()
@@ -101,6 +111,12 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
       status,
     }))
   }, [onLoadChannels])
+
+  const loadPricingGroups = useCallback(async () => {
+    if (onLoadPricingGroups) return onLoadPricingGroups()
+    const response = await listRoutingGroups()
+    return response.data
+  }, [onLoadPricingGroups])
 
   useEffect(() => {
     if (!props.restoreBatchID) return
@@ -130,6 +146,26 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
       cancelled = true
     }
   }, [batch, loadChannels, t])
+
+  useEffect(() => {
+    if (!batch) {
+      setPricingGroups(['default'])
+      return
+    }
+
+    let cancelled = false
+    void loadPricingGroups()
+      .then((loaded) => {
+        if (!cancelled) setPricingGroups(loaded)
+      })
+      .catch(() => {
+        if (!cancelled) setError(t('The import action failed.'))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [batch, loadPricingGroups, t])
 
   useEffect(() => {
     setCreatedChannelIDs({})
@@ -238,12 +274,29 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
                 }}
                 onCreated={(channelIDs) => {
                   const channelID = channelIDs[0]
-                  if (!channelID) return
+                  const lineRef = creatingLineRef
+                  if (!channelID || !lineRef) return
                   setCreatedChannelIDs((current) => ({
                     ...current,
-                    [creatingLineRef]: channelID,
+                    [lineRef]: channelID,
                   }))
                   setCreatingLineRef(undefined)
+                  void runMutation((id) =>
+                    (
+                      props.onSaveBindings ??
+                      ((batchID, payload) =>
+                        saveConfigImportBindings(batchID, payload))
+                    )(id, {
+                      bindings: [
+                        {
+                          line_ref: lineRef,
+                          action: 'create',
+                          channel_id: channelID,
+                          credentials_confirmed: false,
+                        },
+                      ],
+                    })
+                  )
                   void loadChannels()
                     .then(setChannels)
                     .catch(() => setError(t('The import action failed.')))
@@ -278,7 +331,22 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
         <PricingStep
           batch={batch}
           currentValues={props.currentPricingValues}
-          onContinue={() => setReviewStep('routing_diff')}
+          availableGroups={pricingGroups}
+          onContinue={async (selectedGroups) => {
+            const updated = await runMutation((id) =>
+              (
+                props.onSavePricingReview ??
+                ((batchID, payload) =>
+                  saveConfigImportPricingReview(batchID, payload))
+              )(id, { selected_groups: selectedGroups })
+            )
+            if (updated) {
+              const staged = await runMutation(
+                props.onStage ?? stageConfigImport
+              )
+              if (staged) setReviewStep('routing_diff')
+            }
+          }}
         />
       )}
       {step === 'routing_diff' && (

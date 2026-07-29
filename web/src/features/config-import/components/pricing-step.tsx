@@ -6,7 +6,7 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ConfigImportBatchDetail, ConfigImportItemDetail } from '../types'
@@ -27,8 +27,9 @@ interface PricingRow {
 export interface PricingStepProps {
   batch: ConfigImportBatchDetail
   currentValues?: Record<string, string>
+  availableGroups?: string[]
   onSelectedGroupsChange?: (groups: string[]) => void
-  onContinue?: () => void
+  onContinue?: (groups: string[]) => unknown | Promise<unknown>
 }
 
 function parseObject(value: string): Record<string, unknown> {
@@ -44,6 +45,21 @@ function parseObject(value: string): Record<string, unknown> {
 
 function source(item: ConfigImportItemDetail): string {
   return `${item.source_sheet}${item.source_row ? `:${item.source_row}` : ''}`
+}
+
+function pricingProposal(stored: Record<string, unknown>) {
+  const staged =
+    stored.staged_proposal !== null &&
+    typeof stored.staged_proposal === 'object'
+      ? (stored.staged_proposal as Record<string, unknown>)
+      : {}
+  const proposalValue =
+    staged.proposal && typeof staged.proposal === 'object'
+      ? staged.proposal
+      : stored
+  return proposalValue !== null && typeof proposalValue === 'object'
+    ? (proposalValue as Record<string, unknown>)
+    : stored
 }
 
 function pricingRows(
@@ -92,19 +108,7 @@ function pricingRows(
     .filter((item) => item.entity_type === 'sale_proposals')
     .flatMap((item) => {
       const stored = parseObject(item.canonical_json)
-      const staged =
-        stored.staged_proposal !== null &&
-        typeof stored.staged_proposal === 'object'
-          ? (stored.staged_proposal as Record<string, unknown>)
-          : {}
-      const proposalValue =
-        staged.proposal && typeof staged.proposal === 'object'
-          ? staged.proposal
-          : stored
-      const proposal =
-        proposalValue !== null && typeof proposalValue === 'object'
-          ? (proposalValue as Record<string, unknown>)
-          : stored
+      const proposal = pricingProposal(stored)
       const margin =
         typeof proposal.margin_ratio === 'string' ? proposal.margin_ratio : '--'
       const recomputed = recomputedBySKU.get(
@@ -151,11 +155,14 @@ function pricingRows(
     })
 }
 
-function pricingGroups(batch: ConfigImportBatchDetail): string[] {
-  const groups = new Set<string>(['default'])
+function pricingGroups(
+  batch: ConfigImportBatchDetail,
+  availableGroups: string[]
+): string[] {
+  const groups = new Set<string>(['default', ...availableGroups])
   for (const item of batch.items) {
     if (item.entity_type !== 'sale_proposals') continue
-    const proposal = parseObject(item.canonical_json)
+    const proposal = pricingProposal(parseObject(item.canonical_json))
     if (Array.isArray(proposal.selected_groups)) {
       for (const group of proposal.selected_groups) {
         if (typeof group === 'string') groups.add(group)
@@ -172,15 +179,36 @@ function pricingGroups(batch: ConfigImportBatchDetail): string[] {
   })
 }
 
+function selectedPricingGroups(batch: ConfigImportBatchDetail): Set<string> {
+  const selected = new Set<string>()
+  for (const item of batch.items) {
+    if (item.entity_type !== 'sale_proposals') continue
+    const proposal = pricingProposal(parseObject(item.canonical_json))
+    if (!Array.isArray(proposal.selected_groups)) continue
+    for (const group of proposal.selected_groups) {
+      if (typeof group === 'string') selected.add(group)
+    }
+  }
+  if (selected.size === 0) selected.add('default')
+  return selected
+}
+
 export function PricingStep(props: PricingStepProps) {
   const { t } = useTranslation()
-  const groups = useMemo(() => pricingGroups(props.batch), [props.batch])
-  const initialGroups = useMemo(() => new Set(groups), [groups])
+  const groups = useMemo(
+    () => pricingGroups(props.batch, props.availableGroups ?? []),
+    [props.availableGroups, props.batch]
+  )
+  const initialGroups = useMemo(
+    () => selectedPricingGroups(props.batch),
+    [props.batch]
+  )
   const [selectedGroups, setSelectedGroups] = useState(initialGroups)
   const rows = useMemo(
     () => pricingRows(props.batch, props.currentValues ?? {}),
     [props.batch, props.currentValues]
   )
+  useEffect(() => setSelectedGroups(new Set(initialGroups)), [initialGroups])
   const columns: DiffTableColumn<PricingRow>[] = [
     { id: 'field', header: t('Field'), cell: (row) => row.field },
     { id: 'current', header: t('Current'), cell: (row) => row.current },
@@ -206,6 +234,11 @@ export function PricingStep(props: PricingStepProps) {
     })
   }
 
+  const continueReview = () => {
+    const values = groups.filter((group) => selectedGroups.has(group))
+    return props.onContinue?.(values)
+  }
+
   return (
     <section
       className='space-y-4'
@@ -222,7 +255,8 @@ export function PricingStep(props: PricingStepProps) {
           <button
             type='button'
             className='border-input hover:bg-muted rounded-md border px-3 py-2 text-sm'
-            onClick={props.onContinue}
+            disabled={selectedGroups.size === 0}
+            onClick={continueReview}
           >
             {t('Continue')}
           </button>

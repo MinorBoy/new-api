@@ -306,6 +306,12 @@ export const configImportRouteReviewsRequestSchema = z
   })
   .strict()
 
+export const configImportPricingReviewRequestSchema = z
+  .object({
+    selected_groups: z.array(z.string().trim().min(1)).min(1),
+  })
+  .strict()
+
 export const configImportStageRequestSchema = z
   .object({
     batch_ref: z.string().optional(),
@@ -391,6 +397,9 @@ export type ConfigImportResolutionsRequest = z.infer<
 >
 export type ConfigImportRouteReviewsRequest = z.infer<
   typeof configImportRouteReviewsRequestSchema
+>
+export type ConfigImportPricingReviewRequest = z.infer<
+  typeof configImportPricingReviewRequestSchema
 >
 export type ConfigImportStageRequest = z.infer<
   typeof configImportStageRequestSchema

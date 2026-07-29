@@ -14,6 +14,7 @@ import {
   configImportBindingsRequestSchema,
   configImportListParamsSchema,
   configImportPublishResponseSchema,
+  configImportPricingReviewRequestSchema,
   configImportResolutionsRequestSchema,
   configImportRouteReviewsRequestSchema,
   configImportStageRequestSchema,
@@ -22,6 +23,7 @@ import {
   type ConfigImportBatchPage,
   type ConfigImportBindingsRequest,
   type ConfigImportListParams,
+  type ConfigImportPricingReviewRequest,
   type ConfigImportResolutionsRequest,
   type ConfigImportRouteReviewsRequest,
   type ConfigImportStageRequest,
@@ -87,6 +89,18 @@ export async function saveConfigImportRouteReviews(
   const payload = configImportRouteReviewsRequestSchema.parse(request)
   const response = await api.put(
     `${CONFIG_IMPORT_PATH}/${id}/route-reviews`,
+    payload
+  )
+  return parseDetail(response.data)
+}
+
+export async function saveConfigImportPricingReview(
+  id: number,
+  request: ConfigImportPricingReviewRequest
+): Promise<ConfigImportBatchDetail> {
+  const payload = configImportPricingReviewRequestSchema.parse(request)
+  const response = await api.put(
+    `${CONFIG_IMPORT_PATH}/${id}/pricing-review`,
     payload
   )
   return parseDetail(response.data)

@@ -107,8 +107,41 @@ func UpdateConfigImportBindings(
 			if err != nil {
 				return err
 			}
+			if input.Action == types.ConfigImportBindingActionBind && configImportShouldRecoverCreatedChannel(batch, line, channel) {
+				input.Action = types.ConfigImportBindingActionCreate
+			}
 			if input.Action == types.ConfigImportBindingActionCreate && channel.Status != common.ChannelStatusManuallyDisabled {
 				return configImportError("BINDING_NEW_CHANNEL_STATUS", "new channel %d must be manually disabled", channel.Id)
+			}
+			if input.Action == types.ConfigImportBindingActionCreate {
+				declaredModels := make(map[string]struct{}, len(channel.GetModels()))
+				for _, modelName := range channel.GetModels() {
+					if modelName = strings.TrimSpace(modelName); modelName != "" {
+						declaredModels[modelName] = struct{}{}
+					}
+				}
+				var missingModels []string
+				for _, modelName := range catalog.models[input.LineRef] {
+					modelName = strings.TrimSpace(modelName)
+					if modelName == "" {
+						continue
+					}
+					if _, found := declaredModels[modelName]; found {
+						continue
+					}
+					declaredModels[modelName] = struct{}{}
+					missingModels = append(missingModels, modelName)
+				}
+				if len(missingModels) > 0 {
+					channel.Models = strings.Trim(strings.TrimSpace(channel.Models), ",")
+					if channel.Models != "" {
+						channel.Models += ","
+					}
+					channel.Models += strings.Join(missingModels, ",")
+					if err := tx.Model(channel).Update("models", channel.Models).Error; err != nil {
+						return err
+					}
+				}
 			}
 			if err := rejectConfigImportChannelLineConflict(tx, batchID, input.LineRef, channel.Id); err != nil {
 				return err
@@ -129,6 +162,16 @@ func UpdateConfigImportBindings(
 		return nil, err
 	}
 	return GetConfigImportBatch(ctx, batchID)
+}
+
+func configImportShouldRecoverCreatedChannel(batch model.ConfigImportBatch, line types.ConfigImportChannelLine, channel *model.Channel) bool {
+	if channel == nil || channel.Status != common.ChannelStatusManuallyDisabled {
+		return false
+	}
+	providerHint := strings.TrimSpace(line.ProviderTypeHint)
+	channelName := strings.TrimSpace(channel.Name)
+	return batch.CreatedAt > 0 && channel.CreatedTime >= batch.CreatedAt && providerHint != "" &&
+		channelName != "" && strings.EqualFold(channelName, providerHint)
 }
 
 func validateConfigImportBindingInputs(bindings []dto.ConfigImportBindingInput) error {
@@ -708,6 +751,109 @@ func DecodeConfigImportRouteReviewRequest(reader io.Reader) (*dto.ConfigImportRo
 		}
 	}
 	return &request, nil
+}
+
+func DecodeConfigImportPricingReviewRequest(reader io.Reader) (*dto.ConfigImportPricingReviewRequest, error) {
+	if reader == nil {
+		return nil, configImportError("SCHEMA_PRICING_REVIEW_REQUEST", "pricing review request is required")
+	}
+	var request dto.ConfigImportPricingReviewRequest
+	if err := common.DecodeJsonStrict(reader, &request); err != nil {
+		return nil, configImportError("SCHEMA_PRICING_REVIEW_REQUEST", "invalid pricing review request: %v", err)
+	}
+	if len(request.SelectedGroups) == 0 {
+		return nil, configImportError("SCHEMA_PRICING_REVIEW_GROUPS", "selected_groups are required")
+	}
+	seen := make(map[string]struct{}, len(request.SelectedGroups))
+	for index := range request.SelectedGroups {
+		group := strings.TrimSpace(request.SelectedGroups[index])
+		if group == "" {
+			return nil, configImportError("SCHEMA_PRICING_REVIEW_GROUP", "selected_groups[%d] is required", index)
+		}
+		if _, exists := seen[group]; exists {
+			return nil, configImportError("SCHEMA_PRICING_REVIEW_GROUP", "selected_groups[%d] is duplicated", index)
+		}
+		seen[group] = struct{}{}
+		request.SelectedGroups[index] = group
+	}
+	return &request, nil
+}
+
+func UpdateConfigImportPricingReview(
+	ctx context.Context,
+	adminID int,
+	batchID int64,
+	selectedGroups []string,
+) (*dto.ConfigImportBatchDetail, error) {
+	if adminID <= 0 {
+		return nil, configImportError("SCHEMA_ADMIN", "admin ID is required")
+	}
+	if batchID <= 0 {
+		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
+	}
+	if len(selectedGroups) == 0 {
+		return nil, configImportError("SCHEMA_PRICING_REVIEW_GROUPS", "selected_groups are required")
+	}
+	groups := make([]string, len(selectedGroups))
+	copy(groups, selectedGroups)
+	seen := make(map[string]struct{}, len(groups))
+	for index := range groups {
+		groups[index] = strings.TrimSpace(groups[index])
+		if groups[index] == "" {
+			return nil, configImportError("SCHEMA_PRICING_REVIEW_GROUP", "selected_groups[%d] is required", index)
+		}
+		if _, exists := seen[groups[index]]; exists {
+			return nil, configImportError("SCHEMA_PRICING_REVIEW_GROUP", "selected_groups[%d] is duplicated", index)
+		}
+		seen[groups[index]] = struct{}{}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch model.ConfigImportBatch
+		if err := tx.Where("id = ?", batchID).First(&batch).Error; err != nil {
+			return err
+		}
+		status := types.ConfigImportBatchStatus(batch.Status)
+		if status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged && status != types.ConfigImportBatchStatusReady {
+			return configImportError("PRICING_REVIEW_BATCH_STATUS", "batch %d is not accepting pricing reviews", batchID)
+		}
+		var items []model.ConfigImportItem
+		if err := tx.Where("batch_id = ? AND entity_type = ?", batchID, "sale_proposals").Order("id ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		for index := range items {
+			item := &items[index]
+			if item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+				continue
+			}
+			var proposal types.ConfigImportSaleProposal
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &proposal); err != nil {
+				return err
+			}
+			proposal.SelectedGroups = append([]string(nil), groups...)
+			encoded, err := common.Marshal(proposal)
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&model.ConfigImportItem{}).Where("id = ?", item.ID).Updates(map[string]any{
+				"canonical_json": string(encoded), "state": string(types.ConfigImportItemStateChanged), "updated_at": common.GetTimestamp(),
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if status == types.ConfigImportBatchStatusReady {
+			return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
+				"status": string(types.ConfigImportBatchStatusStaged), "updated_at": common.GetTimestamp(),
+			}).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return GetConfigImportBatch(ctx, batchID)
 }
 
 func UpdateConfigImportRouteReviews(ctx context.Context, adminID int, batchID int64, reviews []dto.ConfigImportRouteReviewInput) (*dto.ConfigImportBatchDetail, error) {
@@ -1498,6 +1644,11 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 			return err
 		}
 		issues = append(issues, generatedIssues...)
+		if err := tx.Model(&model.ConfigImportIssue{}).
+			Where("batch_id = ? AND code = ? AND resolution_status = ?", batchID, "PRICING_GROUP_SCOPE_UNREPRESENTABLE", "open").
+			Updates(map[string]any{"resolution_status": "resolved", "updated_at": common.GetTimestamp()}).Error; err != nil {
+			return err
+		}
 		generatedIssues, err = stageConfigImportProposals(tx, items)
 		if err != nil {
 			return err
@@ -2253,6 +2404,15 @@ func persistConfigImportStageIssues(db *gorm.DB, batchID int64, stageIssues []co
 			return err
 		}
 		if count > 0 {
+			if issue.Code == "PRICING_GROUP_SCOPE_UNREPRESENTABLE" {
+				if err := db.Model(&model.ConfigImportIssue{}).
+					Where("batch_id = ? AND code = ? AND business_id = ?", batchID, issue.Code, issue.BusinessID).
+					Updates(map[string]any{
+						"severity": string(issue.Severity), "message": issue.Message, "resolution_status": "open", "updated_at": common.GetTimestamp(),
+					}).Error; err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if err := db.Create(&model.ConfigImportIssue{BatchID: batchID, Severity: string(issue.Severity), Code: issue.Code, BusinessID: issue.BusinessID, Message: issue.Message, ResolutionStatus: "open"}).Error; err != nil {

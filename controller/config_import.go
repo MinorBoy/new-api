@@ -113,6 +113,25 @@ func UpdateConfigImportRouteReviews(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+func UpdateConfigImportPricingReview(c *gin.Context) {
+	id, err := configImportID(c)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	request, err := service.DecodeConfigImportPricingReviewRequest(c.Request.Body)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	result, err := service.UpdateConfigImportPricingReview(c, c.GetInt("id"), id, request.SelectedGroups)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
 func StageConfigImportBatch(c *gin.Context) {
 	id, err := configImportID(c)
 	if err != nil {

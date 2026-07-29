@@ -260,75 +260,92 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
 	}
-	if cost_setting.Runtime().Mode == types.CostAccountingStrict {
+	mode := cost_setting.Runtime().Mode
+	if mode != types.CostAccountingDisabled {
 		costAdaptor, ok := adaptor.(channel.TaskCostAccountingAdaptor)
 		if !ok {
-			coverageErr := &service.CostCoverageError{ChannelID: info.ChannelId}
-			return nil, service.TaskErrorWrapperLocal(coverageErr, "cost_coverage_unavailable", http.StatusServiceUnavailable)
-		}
-		if err := costAdaptor.ConfirmTaskCostIdentity(info); err != nil {
-			logger.LogWarn(c, fmt.Sprintf("task cost identity confirmation failed: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
-			coverageErr := &service.CostCoverageError{ChannelID: info.ChannelId}
-			return nil, service.TaskErrorWrapperLocal(coverageErr, "cost_coverage_unavailable", http.StatusServiceUnavailable)
-		}
-		if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
-			return nil, service.TaskErrorWrapperLocal(err, "cost_coverage_unavailable", http.StatusServiceUnavailable)
-		}
-
-		billingSource := strings.TrimSpace(info.BillingSource)
-		if billingSource == "" {
-			billingSource = service.BillingSourceWallet
-		}
-		var requestMeter *types.CostMeter
-		if info.PriceData.RequestedDurationSeconds > 0 {
-			duration := strconv.Itoa(info.PriceData.RequestedDurationSeconds)
-			requestMeter = &types.CostMeter{
-				Source:          types.CostMeterValidatedRequest,
-				DurationSeconds: &duration,
+			if mode == types.CostAccountingStrict {
+				coverageErr := &service.CostCoverageError{ChannelID: info.ChannelId}
+				return nil, service.TaskErrorWrapperLocal(coverageErr, "cost_coverage_unavailable", http.StatusServiceUnavailable)
 			}
-		} else if estimator, ok := adaptor.(channel.TaskDurationEstimator); ok {
-			requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
-			if taskErr == nil && requestedSeconds > 0 && requestedSeconds <= relaycommon.MaxTaskDurationSeconds {
-				duration := strconv.Itoa(requestedSeconds)
-				requestMeter = &types.CostMeter{
-					Source:          types.CostMeterValidatedRequest,
-					DurationSeconds: &duration,
+			logger.LogWarn(c, fmt.Sprintf("skip task cost tracking because no cost contract is available: request_id=%s task_id=%s channel_id=%d", info.RequestId, info.PublicTaskID, info.ChannelId))
+		}
+		if costAdaptor != nil {
+			if err := costAdaptor.ConfirmTaskCostIdentity(info); err != nil {
+				logger.LogWarn(c, fmt.Sprintf("task cost identity confirmation failed: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
+				if mode == types.CostAccountingStrict {
+					coverageErr := &service.CostCoverageError{ChannelID: info.ChannelId}
+					return nil, service.TaskErrorWrapperLocal(coverageErr, "cost_coverage_unavailable", http.StatusServiceUnavailable)
+				}
+			} else {
+				if mode == types.CostAccountingStrict {
+					if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
+						return nil, service.TaskErrorWrapperLocal(err, "cost_coverage_unavailable", http.StatusServiceUnavailable)
+					}
+				}
+
+				billingSource := strings.TrimSpace(info.BillingSource)
+				if billingSource == "" {
+					billingSource = service.BillingSourceWallet
+				}
+				var requestMeter *types.CostMeter
+				if info.PriceData.RequestedDurationSeconds > 0 {
+					duration := strconv.Itoa(info.PriceData.RequestedDurationSeconds)
+					requestMeter = &types.CostMeter{
+						Source:          types.CostMeterValidatedRequest,
+						DurationSeconds: &duration,
+					}
+				} else if estimator, ok := adaptor.(channel.TaskDurationEstimator); ok {
+					requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
+					if taskErr == nil && requestedSeconds > 0 && requestedSeconds <= relaycommon.MaxTaskDurationSeconds {
+						duration := strconv.Itoa(requestedSeconds)
+						requestMeter = &types.CostMeter{
+							Source:          types.CostMeterValidatedRequest,
+							DurationSeconds: &duration,
+						}
+					}
+				}
+				handle, err := service.PrepareCostAttempt(c.Request.Context(), service.PrepareCostAttemptInput{
+					RequestID:                 info.RequestId,
+					TaskID:                    &info.PublicTaskID,
+					UserID:                    info.UserId,
+					TokenID:                   info.TokenId,
+					UserGroup:                 info.UserGroup,
+					UsingGroup:                info.UsingGroup,
+					OriginModelName:           info.OriginModelName,
+					BillingSource:             billingSource,
+					SubscriptionID:            info.SubscriptionId,
+					SubscriptionPlanID:        info.SubscriptionPlanId,
+					QuotaPerUnitSnapshot:      strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
+					ChannelID:                 info.ChannelId,
+					ChannelName:               c.GetString(string(constant.ContextKeyChannelName)),
+					ChannelType:               info.ChannelType,
+					PredictedUpstreamModel:    info.PredictedUpstreamModel,
+					BillableUpstreamModel:     info.BillableUpstreamModel,
+					RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
+					TaskPlatform:              platform,
+					RequestMeter:              requestMeter,
+					CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
+				})
+				if err != nil {
+					if mode == types.CostAccountingStrict {
+						var coverageErr *service.CostCoverageError
+						if errors.As(err, &coverageErr) {
+							return nil, service.TaskErrorWrapperLocal(err, "cost_coverage_unavailable", http.StatusServiceUnavailable)
+						}
+						return nil, service.TaskErrorWrapperLocal(err, "cost_accounting_failed", http.StatusInternalServerError)
+					}
+					logger.LogWarn(c, fmt.Sprintf("skip task cost tracking: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
+				} else if err := service.AuthorizeCostDispatch(c.Request.Context(), handle); err != nil {
+					if mode == types.CostAccountingStrict {
+						return nil, service.TaskErrorWrapperLocal(err, "cost_dispatch_authorization_failed", http.StatusInternalServerError)
+					}
+					logger.LogWarn(c, fmt.Sprintf("skip task cost tracking after attempt preparation: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
+				} else {
+					info.CostRequestID = handle.CostRequestID
+					info.CostAttempt = handle
 				}
 			}
-		}
-		handle, err := service.PrepareCostAttempt(c.Request.Context(), service.PrepareCostAttemptInput{
-			RequestID:                 info.RequestId,
-			TaskID:                    &info.PublicTaskID,
-			UserID:                    info.UserId,
-			TokenID:                   info.TokenId,
-			UserGroup:                 info.UserGroup,
-			UsingGroup:                info.UsingGroup,
-			OriginModelName:           info.OriginModelName,
-			BillingSource:             billingSource,
-			SubscriptionID:            info.SubscriptionId,
-			SubscriptionPlanID:        info.SubscriptionPlanId,
-			QuotaPerUnitSnapshot:      strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64),
-			ChannelID:                 info.ChannelId,
-			ChannelName:               c.GetString(string(constant.ContextKeyChannelName)),
-			ChannelType:               info.ChannelType,
-			PredictedUpstreamModel:    info.PredictedUpstreamModel,
-			BillableUpstreamModel:     info.BillableUpstreamModel,
-			RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
-			TaskPlatform:              platform,
-			RequestMeter:              requestMeter,
-			CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
-		})
-		if err != nil {
-			var coverageErr *service.CostCoverageError
-			if errors.As(err, &coverageErr) {
-				return nil, service.TaskErrorWrapperLocal(err, "cost_coverage_unavailable", http.StatusServiceUnavailable)
-			}
-			return nil, service.TaskErrorWrapperLocal(err, "cost_accounting_failed", http.StatusInternalServerError)
-		}
-		info.CostRequestID = handle.CostRequestID
-		info.CostAttempt = handle
-		if err := service.AuthorizeCostDispatch(c.Request.Context(), handle); err != nil {
-			return nil, service.TaskErrorWrapperLocal(err, "cost_dispatch_authorization_failed", http.StatusInternalServerError)
 		}
 	}
 

@@ -43,14 +43,21 @@ func newCostAccountingAdaptor(adaptor channel.Adaptor, apiType int) *costAccount
 }
 
 func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	if cost_setting.Runtime().Mode != types.CostAccountingStrict {
+	mode := cost_setting.Runtime().Mode
+	if mode == types.CostAccountingDisabled {
 		return a.Adaptor.DoRequest(c, info, requestBody)
 	}
 	if info == nil || strings.TrimSpace(info.BillableUpstreamModel) == "" {
-		return nil, ErrCostIdentityUnconfirmed
+		if mode == types.CostAccountingStrict {
+			return nil, ErrCostIdentityUnconfirmed
+		}
+		logger.LogWarn(c, "skip cost tracking because the final billable upstream model is not confirmed")
+		return a.Adaptor.DoRequest(c, info, requestBody)
 	}
-	if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
-		return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
+	if mode == types.CostAccountingStrict {
+		if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
+			return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
+		}
 	}
 
 	billingSource := strings.TrimSpace(info.BillingSource)
@@ -85,17 +92,25 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
 	})
 	if err != nil {
-		var coverageErr *service.CostCoverageError
-		if errors.As(err, &coverageErr) {
-			return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
+		if mode == types.CostAccountingStrict {
+			var coverageErr *service.CostCoverageError
+			if errors.As(err, &coverageErr) {
+				return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
+			}
+			return nil, err
 		}
-		return nil, err
+		logger.LogWarn(c, fmt.Sprintf("skip cost tracking: request_id=%s channel_id=%d error=%v", info.RequestId, info.ChannelId, err))
+		return a.Adaptor.DoRequest(c, info, requestBody)
+	}
+	if err := service.AuthorizeCostDispatch(requestCtx, handle); err != nil {
+		if mode == types.CostAccountingStrict {
+			return nil, err
+		}
+		logger.LogWarn(c, fmt.Sprintf("skip cost tracking after attempt preparation: request_id=%s channel_id=%d error=%v", info.RequestId, info.ChannelId, err))
+		return a.Adaptor.DoRequest(c, info, requestBody)
 	}
 	info.CostRequestID = handle.CostRequestID
 	info.CostAttempt = handle
-	if err := service.AuthorizeCostDispatch(requestCtx, handle); err != nil {
-		return nil, err
-	}
 
 	response, requestErr := a.Adaptor.DoRequest(c, info, requestBody)
 	var httpResponse *http.Response

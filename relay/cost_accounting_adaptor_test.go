@@ -182,6 +182,39 @@ func TestDisabledCostAdaptorPreservesExistingTransport(t *testing.T) {
 	assert.True(t, fake.called)
 }
 
+func TestTrackingCostAdaptorRecordsCoveredRequest(t *testing.T) {
+	fake := &costTransportAdaptor{}
+	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-tracking-covered", fake)
+	withCostAccountingMode(t, types.CostAccountingTracking)
+
+	response, err := wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{}`)))
+
+	require.NoError(t, err)
+	assert.True(t, fake.called)
+	require.NotNil(t, info.CostAttempt)
+	_, apiErr := wrapped.DoResponse(ctx, response.(*http.Response), info)
+	require.Nil(t, apiErr)
+	assert.Equal(t, string(types.CostAttemptSettled), loadRelayCostAttempt(t, info.CostAttempt.AttemptID).Status)
+}
+
+func TestTrackingCostAdaptorPreservesUncoveredTransport(t *testing.T) {
+	fake := &costTransportAdaptor{}
+	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-tracking-uncovered", fake)
+	withCostAccountingMode(t, types.CostAccountingTracking)
+	require.NoError(t, model.DB.Where("channel_id = ?", info.ChannelId).Delete(&model.ChannelModelCostRule{}).Error)
+	service.InvalidateCostCoverage(info.ChannelId, info.BillableUpstreamModel, "")
+
+	response, err := wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{}`)))
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.True(t, fake.called)
+	assert.Nil(t, info.CostAttempt)
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("request_id = ?", info.RequestId).Count(&requestCount).Error)
+	assert.Zero(t, requestCount)
+}
+
 func TestStrictCostAdaptorPersistsDispatchAuthorizationBeforeTransport(t *testing.T) {
 	statusDuringSend := ""
 	fake := &costTransportAdaptor{onRequest: func(info *relaycommon.RelayInfo) {

@@ -351,6 +351,94 @@ func TestCostTaskSubmitPersistsDispatchAuthorizationBeforeTransport(t *testing.T
 	assert.Equal(t, settled.ID, *request.WinningAttemptID)
 }
 
+func TestTrackingTaskSubmitSettlesCoveredDurationCost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	withCostAccountingMode(t, types.CostAccountingTracking)
+	configureNewAPIVideoFixedPricing(t, "client-video")
+	setupTaskCostSubmitDB(t)
+
+	const (
+		channelID = 700011
+		modelName = "seedance-720p-token"
+	)
+	pricePerSecond := "0.25"
+	seedTaskCostSubmitRule(t, channelID, modelName, types.CostModePerDuration, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		PricePerSecond: &pricePerSecond, ChargeEvent: types.CostChargeSubmitAccepted,
+		MeterSource: types.CostMeterValidatedRequest,
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-tracking-duration","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
+	c.Set(string(constant.ContextKeyChannelId), channelID)
+	c.Set(string(constant.ContextKeyChannelName), "task supplier")
+	info.RequestId = "task-tracking-covered-duration"
+	info.RequestURLPath = "/v1/video/generations"
+
+	result, taskErr := RelayTaskSubmit(c, info)
+
+	require.Nil(t, taskErr)
+	require.NotNil(t, result)
+	require.NotNil(t, info.CostAttempt)
+	attempt := loadRelayCostAttempt(t, info.CostAttempt.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	assert.JSONEq(t, `{"source":"validated_request","duration_seconds":"5"}`, attempt.RequestMeterJSON)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(1_250_000_000), *attempt.CostNanoUSD)
+}
+
+func TestTrackingTaskSubmitPreservesUncoveredTransport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	withCostAccountingMode(t, types.CostAccountingTracking)
+	configureNewAPIVideoFixedPricing(t, "client-video")
+	setupTaskCostSubmitDB(t)
+
+	const channelID = 700012
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id: channelID, Type: constant.ChannelTypeNewAPIVideo, Name: "uncovered supplier", Key: "secret",
+	}).Error)
+	previousLookup := service.CostCapabilityLookup
+	service.CostCapabilityLookup = CostCapabilitiesForRoute
+	t.Cleanup(func() {
+		service.CostCapabilityLookup = previousLookup
+		service.InvalidateCostCoverage(channelID, "seedance-720p-token", "")
+	})
+
+	upstreamCalled := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalled <- struct{}{}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-tracking-uncovered","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
+	c.Set(string(constant.ContextKeyChannelId), channelID)
+	c.Set(string(constant.ContextKeyChannelName), "uncovered supplier")
+	info.RequestId = "task-tracking-uncovered"
+	info.RequestURLPath = "/v1/video/generations"
+
+	result, taskErr := RelayTaskSubmit(c, info)
+
+	require.Nil(t, taskErr)
+	require.NotNil(t, result)
+	select {
+	case <-upstreamCalled:
+	default:
+		t.Fatal("upstream was not called")
+	}
+	assert.Nil(t, info.CostAttempt)
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("request_id = ?", info.RequestId).Count(&requestCount).Error)
+	assert.Zero(t, requestCount)
+}
+
 func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testing.T) {
 	tests := []struct {
 		name             string

@@ -159,6 +159,33 @@ func TestTaskModel2DtoHidesCapabilityRouteFromUsers(t *testing.T) {
 	assert.Equal(t, task.Data, adminDTO.Data)
 }
 
+func TestTaskModel2DtoExposesAuditPayloadsToAdminsOnly(t *testing.T) {
+	task := &model.Task{
+		Platform: constant.TaskPlatform("task-test"),
+		PrivateData: model.TaskPrivateData{
+			UserRequestData:      json.RawMessage(`{"model":"client-model","prompt":"user request"}`),
+			UpstreamResponseData: json.RawMessage(`{"id":"upstream-task","status":"queued"}`),
+			UserResponseData:     json.RawMessage(`{"id":"task-public","status":"queued"}`),
+		},
+	}
+
+	adminPayload, err := common.Marshal(TaskModel2Dto(task, true))
+	require.NoError(t, err)
+	var adminResponse map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(adminPayload, &adminResponse))
+	assert.JSONEq(t, `{"model":"client-model","prompt":"user request"}`, string(adminResponse["user_request_data"]))
+	assert.JSONEq(t, `{"id":"upstream-task","status":"queued"}`, string(adminResponse["upstream_response_data"]))
+	assert.JSONEq(t, `{"id":"task-public","status":"queued"}`, string(adminResponse["user_response_data"]))
+
+	userPayload, err := common.Marshal(TaskModel2Dto(task, false))
+	require.NoError(t, err)
+	var userResponse map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(userPayload, &userResponse))
+	assert.NotContains(t, userResponse, "user_request_data")
+	assert.NotContains(t, userResponse, "upstream_response_data")
+	assert.NotContains(t, userResponse, "user_response_data")
+}
+
 func TestTaskModel2DtoHidesMegaByAIDataWithoutRoutingFromUsers(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task-megabyai-private",

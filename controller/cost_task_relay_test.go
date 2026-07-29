@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -118,6 +120,45 @@ func TestPersistSubmittedTaskMarksOrphanWithoutChangingAcceptedCost(t *testing.T
 	var taskCount int64
 	require.NoError(t, model.DB.Model(&model.Task{}).Count(&taskCount).Error)
 	assert.Zero(t, taskCount)
+}
+
+func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
+	setupControllerTaskCostDB(t)
+
+	requestPayload := []byte(`{"model":"video-model","prompt":"user request"}`)
+	upstreamResponse := []byte(`{"id":"upstream-task","status":"queued"}`)
+	userResponse := []byte(`{"id":"task-public","status":"queued"}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", bytes.NewReader(requestPayload))
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          12,
+		OriginModelName: "video-model",
+		PriceData:       types.PriceData{Quota: 100},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   73,
+			ChannelType: constant.ChannelTypeNewAPIVideo,
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task-public"},
+	}
+	result := &relay.TaskSubmitResult{
+		UpstreamTaskID:   "upstream-task",
+		TaskData:         upstreamResponse,
+		UserResponseData: userResponse,
+		Platform:         constant.TaskPlatform("task-test"),
+		Quota:            100,
+	}
+
+	require.NoError(t, persistSubmittedTask(c, relayInfo, result))
+
+	var task model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task-public").First(&task).Error)
+	persistedPrivateData, err := common.Marshal(task.PrivateData)
+	require.NoError(t, err)
+	var auditPayloads map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(persistedPrivateData, &auditPayloads))
+	assert.JSONEq(t, string(requestPayload), string(auditPayloads["user_request_data"]))
+	assert.JSONEq(t, string(upstreamResponse), string(auditPayloads["upstream_response_data"]))
+	assert.JSONEq(t, string(userResponse), string(auditPayloads["user_response_data"]))
 }
 
 func TestHandleTaskCostCoverageFailureExcludesChannelAndRetries(t *testing.T) {

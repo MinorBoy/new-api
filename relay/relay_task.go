@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,11 +29,51 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	Platform       constant.TaskPlatform
-	Quota          int
+	UpstreamTaskID   string
+	TaskData         []byte
+	UserResponseData json.RawMessage
+	Platform         constant.TaskPlatform
+	Quota            int
 	//PerCallPrice   types.PriceData
+}
+
+const maxTaskUserResponseAuditBytes = 1 << 20
+
+// taskUserResponseAuditWriter copies the normalized task submit response that
+// is already being returned to the client. It preserves the wrapped writer's
+// behavior and keeps the captured data out of the public task record.
+type taskUserResponseAuditWriter struct {
+	gin.ResponseWriter
+	body     bytes.Buffer
+	tooLarge bool
+}
+
+func (w *taskUserResponseAuditWriter) capture(data []byte) {
+	if w.tooLarge {
+		return
+	}
+	if w.body.Len()+len(data) > maxTaskUserResponseAuditBytes {
+		w.tooLarge = true
+		return
+	}
+	_, _ = w.body.Write(data)
+}
+
+func (w *taskUserResponseAuditWriter) Write(data []byte) (int, error) {
+	w.capture(data)
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *taskUserResponseAuditWriter) WriteString(data string) (int, error) {
+	w.capture([]byte(data))
+	return w.ResponseWriter.WriteString(data)
+}
+
+func (w *taskUserResponseAuditWriter) Bytes() json.RawMessage {
+	if w.tooLarge || w.body.Len() == 0 {
+		return nil
+	}
+	return json.RawMessage(bytes.Clone(w.body.Bytes()))
 }
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
@@ -373,11 +414,18 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	ratiosJSON, _ := common.Marshal(otherRatios)
 	c.Header("X-New-Api-Other-Ratios", string(ratiosJSON))
 
-	// 11. 解析响应
+	// 11. 解析响应并截获已经规范化后返回给客户端的任务提交数据。
+	originalWriter := c.Writer
+	responseAuditWriter := &taskUserResponseAuditWriter{ResponseWriter: originalWriter}
+	c.Writer = responseAuditWriter
 	upstreamTaskID, taskData, taskErr := adaptor.DoResponse(c, resp, info)
+	c.Writer = originalWriter
 	if taskErr != nil {
 		markTaskCostDispatchUnknown(c, info, true, "upstream_response_invalid")
 		return nil, taskErr
+	}
+	if responseAuditWriter.tooLarge {
+		logger.LogWarn(c, fmt.Sprintf("skip task user response audit payload because it exceeds %d bytes: request_id=%s task_id=%s", maxTaskUserResponseAuditBytes, info.RequestId, info.PublicTaskID))
 	}
 	settleAcceptedTaskCost(c, info)
 
@@ -393,10 +441,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	return &TaskSubmitResult{
-		UpstreamTaskID: upstreamTaskID,
-		TaskData:       taskData,
-		Platform:       platform,
-		Quota:          finalQuota,
+		UpstreamTaskID:   upstreamTaskID,
+		TaskData:         taskData,
+		UserResponseData: responseAuditWriter.Bytes(),
+		Platform:         platform,
+		Quota:            finalQuota,
 	}, nil
 }
 
@@ -841,7 +890,7 @@ func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 		properties = model.Properties{OriginModelName: task.Properties.OriginModelName}
 		data = nil
 	}
-	return &dto.TaskDto{
+	taskDto := &dto.TaskDto{
 		ID:         task.ID,
 		CreatedAt:  task.CreatedAt,
 		UpdatedAt:  task.UpdatedAt,
@@ -863,4 +912,10 @@ func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 		Username:   task.Username,
 		Data:       data,
 	}
+	if includeAdmin {
+		taskDto.UserRequestData = task.PrivateData.UserRequestData
+		taskDto.UpstreamResponseData = task.PrivateData.UpstreamResponseData
+		taskDto.UserResponseData = task.PrivateData.UserResponseData
+	}
+	return taskDto
 }

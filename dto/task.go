@@ -50,6 +50,11 @@ type TaskDto struct {
 	Properties any             `json:"properties"`
 	Username   string          `json:"username,omitempty"`
 	Data       json.RawMessage `json:"data"`
+	// Populated only for administrators. The raw payloads are retained in the
+	// task's private data and intentionally omitted from user task responses.
+	UserRequestData      json.RawMessage `json:"user_request_data,omitempty"`
+	UpstreamResponseData json.RawMessage `json:"upstream_response_data,omitempty"`
+	UserResponseData     json.RawMessage `json:"user_response_data,omitempty"`
 }
 
 type FetchReq struct {

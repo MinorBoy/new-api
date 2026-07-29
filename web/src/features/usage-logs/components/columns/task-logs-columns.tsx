@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Music } from 'lucide-react'
+import { Eye, Music } from 'lucide-react'
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -36,6 +36,7 @@ import {
   type AudioClip,
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
+import { TaskAuditDataDialog } from '../dialogs/task-audit-data-dialog'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,
@@ -90,6 +91,43 @@ function AudioPreviewCell({ log }: { log: TaskLog }) {
   )
 }
 
+function TaskAuditDataCell({
+  data,
+  title,
+  viewLabel,
+}: {
+  data: unknown
+  title: string
+  viewLabel: string
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  if (data == null || data === '') {
+    return <span className='text-muted-foreground/60 text-xs'>-</span>
+  }
+
+  return (
+    <>
+      <button
+        type='button'
+        className='text-foreground inline-flex max-w-full items-center gap-1 text-xs hover:underline'
+        onClick={() => setOpen(true)}
+        title={t(viewLabel)}
+      >
+        <Eye className='size-3 shrink-0' aria-hidden='true' />
+        <span className='truncate'>{t(viewLabel)}</span>
+      </button>
+      <TaskAuditDataDialog
+        data={data}
+        title={title}
+        open={open}
+        onOpenChange={setOpen}
+      />
+    </>
+  )
+}
+
 export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<TaskLog>[] = [
@@ -120,46 +158,87 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   ]
 
   if (isAdmin) {
-    columns.push(createChannelColumn<TaskLog>({ headerLabel: t('Channel') }), {
-      id: 'user',
-      header: t('User'),
-      accessorFn: (row) => row.username || row.user_id,
-      cell: function UserCell({ row }) {
-        const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
-          useUsageLogsContext()
-        const log = row.original
-        const displayName = log.username || String(log.user_id || '?')
+    columns.push(
+      createChannelColumn<TaskLog>({ headerLabel: t('Channel') }),
+      {
+        id: 'user',
+        header: t('User'),
+        accessorFn: (row) => row.username || row.user_id,
+        cell: function UserCell({ row }) {
+          const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
+            useUsageLogsContext()
+          const log = row.original
+          const displayName = log.username || String(log.user_id || '?')
 
-        return (
-          <button
-            type='button'
-            className='flex items-center gap-1.5 text-left'
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedUserId(log.user_id)
-              setUserInfoDialogOpen(true)
-            }}
-          >
-            <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
-              <AvatarFallback
-                className={cn(
-                  'text-[11px] font-semibold',
-                  !sensitiveVisible && 'bg-muted text-muted-foreground'
-                )}
-                style={
-                  sensitiveVisible ? getUserAvatarStyle(displayName) : undefined
-                }
-              >
-                {sensitiveVisible ? getUserAvatarFallback(displayName) : '•'}
-              </AvatarFallback>
-            </Avatar>
-            <span className='text-muted-foreground truncate text-sm hover:underline'>
-              {sensitiveVisible ? displayName : '••••'}
-            </span>
-          </button>
-        )
+          return (
+            <button
+              type='button'
+              className='flex items-center gap-1.5 text-left'
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedUserId(log.user_id)
+                setUserInfoDialogOpen(true)
+              }}
+            >
+              <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
+                <AvatarFallback
+                  className={cn(
+                    'text-[11px] font-semibold',
+                    !sensitiveVisible && 'bg-muted text-muted-foreground'
+                  )}
+                  style={
+                    sensitiveVisible
+                      ? getUserAvatarStyle(displayName)
+                      : undefined
+                  }
+                >
+                  {sensitiveVisible ? getUserAvatarFallback(displayName) : '•'}
+                </AvatarFallback>
+              </Avatar>
+              <span className='text-muted-foreground truncate text-sm hover:underline'>
+                {sensitiveVisible ? displayName : '••••'}
+              </span>
+            </button>
+          )
+        },
       },
-    })
+      {
+        accessorKey: 'user_request_data',
+        header: t('Request Data'),
+        cell: ({ row }) => (
+          <TaskAuditDataCell
+            data={row.original.user_request_data}
+            title='Request Data'
+            viewLabel='View request data'
+          />
+        ),
+        size: 150,
+      },
+      {
+        accessorKey: 'upstream_response_data',
+        header: t('Upstream Response Data'),
+        cell: ({ row }) => (
+          <TaskAuditDataCell
+            data={row.original.upstream_response_data}
+            title='Upstream Response Data'
+            viewLabel='View upstream response data'
+          />
+        ),
+        size: 180,
+      },
+      {
+        accessorKey: 'user_response_data',
+        header: t('User Response Data'),
+        cell: ({ row }) => (
+          <TaskAuditDataCell
+            data={row.original.user_response_data}
+            title='User Response Data'
+            viewLabel='View user response data'
+          />
+        ),
+        size: 180,
+      }
+    )
   }
 
   columns.push(

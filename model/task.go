@@ -106,7 +106,12 @@ type TaskPrivateData struct {
 	Key            string `json:"key,omitempty"`
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
-	CostRequestID  int64  `json:"cost_request_id,omitempty"`
+	// Admin-only audit payloads captured when the task is submitted. They stay
+	// inside private_data and are never included in user task DTOs.
+	UserRequestData      json.RawMessage `json:"user_request_data,omitempty"`
+	UpstreamResponseData json.RawMessage `json:"upstream_response_data,omitempty"`
+	UserResponseData     json.RawMessage `json:"user_response_data,omitempty"`
+	CostRequestID        int64           `json:"cost_request_id,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -171,7 +176,19 @@ func (p *TaskPrivateData) Scan(val interface{}) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if (p == TaskPrivateData{}) {
+	if p.Key == "" &&
+		p.UpstreamTaskID == "" &&
+		p.ResultURL == "" &&
+		len(p.UserRequestData) == 0 &&
+		len(p.UpstreamResponseData) == 0 &&
+		len(p.UserResponseData) == 0 &&
+		p.CostRequestID == 0 &&
+		p.BillingSource == "" &&
+		p.SubscriptionId == 0 &&
+		p.TokenId == 0 &&
+		p.NodeName == "" &&
+		p.BillingContext == nil &&
+		p.Routing == nil {
 		return nil, nil
 	}
 	return common.Marshal(p)

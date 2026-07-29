@@ -193,6 +193,9 @@ export interface LogOtherData {
   // billing_mode === 'tiered_expr'. expr_b64 is the base64-encoded billing
   // expression and matched_tier is the label of the tier that fired.
   billing_mode?: string
+  duration_price?: number
+  requested_duration_seconds?: number
+  billable_duration_seconds?: number
   expr_b64?: string
   matched_tier?: string
   reasoning_effort?: string
@@ -299,6 +302,10 @@ export interface TaskLog {
   progress?: string
   progress_message_en?: string
   data?: string // JSON string
+  // Administrator-only raw audit payloads for newly submitted tasks.
+  user_request_data?: unknown
+  upstream_response_data?: unknown
+  user_response_data?: unknown
   fail_reason?: string
   status: string // NOT_START, SUBMITTED, IN_PROGRESS, SUCCESS, FAILURE, QUEUED, UNKNOWN
   other?: string

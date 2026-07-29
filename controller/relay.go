@@ -806,6 +806,15 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 	task.Quota = result.Quota
 	task.Data = result.TaskData
 	task.Action = relayInfo.Action
+	if bodyStorage, bodyErr := common.GetBodyStorage(c); bodyErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("skip task request audit payload: request_id=%s task_id=%s error=%v", relayInfo.RequestId, relayInfo.PublicTaskID, bodyErr))
+	} else if requestData, readErr := bodyStorage.Bytes(); readErr != nil {
+		logger.LogWarn(c, fmt.Sprintf("skip task request audit payload: request_id=%s task_id=%s error=%v", relayInfo.RequestId, relayInfo.PublicTaskID, readErr))
+	} else {
+		task.PrivateData.UserRequestData = requestData
+	}
+	task.PrivateData.UpstreamResponseData = result.TaskData
+	task.PrivateData.UserResponseData = result.UserResponseData
 	if err := task.Insert(); err != nil {
 		requestCtx := c.Request.Context()
 		if markerErr := service.MarkOrphanedCostTask(requestCtx, relayInfo.CostRequestID, result.UpstreamTaskID, "orphaned_task_insert_failed"); markerErr != nil {

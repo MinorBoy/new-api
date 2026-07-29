@@ -32,7 +32,7 @@ export interface CostAccountingApiResponse<T> {
   data: T
 }
 
-export type CostAccountingMode = 'disabled' | 'strict'
+export type CostAccountingMode = 'disabled' | 'tracking' | 'strict'
 export type CostMode = 'free' | 'per_request' | 'per_duration' | 'per_token'
 export type CostRuleStatus = 'draft' | 'active' | 'retired'
 export type CostRevenueStatus =

@@ -39,6 +39,8 @@ interface ComboboxInputProps {
   id?: string
   allowCustomValue?: boolean
   openOnFocus?: boolean
+  onCompositionStart?: React.CompositionEventHandler<HTMLInputElement>
+  onCompositionEnd?: React.CompositionEventHandler<HTMLInputElement>
 }
 
 export function ComboboxInput({
@@ -51,6 +53,8 @@ export function ComboboxInput({
   id,
   allowCustomValue = false,
   openOnFocus = true,
+  onCompositionStart,
+  onCompositionEnd,
 }: ComboboxInputProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -193,6 +197,8 @@ export function ComboboxInput({
           pointerFocusRef.current = false
         }}
         onKeyDown={handleKeyDown}
+        onCompositionStart={onCompositionStart}
+        onCompositionEnd={onCompositionEnd}
         className={cn('pr-9', className)}
       />
       <ChevronsUpDown className='pointer-events-none absolute top-1/2 right-3 size-4 shrink-0 -translate-y-1/2 opacity-50' />

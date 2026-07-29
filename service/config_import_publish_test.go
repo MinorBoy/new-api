@@ -23,7 +23,7 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 		common.OptionMap = previousOptionMap
 		common.OptionMapRWMutex.Unlock()
 	})
-	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Option{}, &model.RoutingPolicy{}, &model.RouteTarget{}, &model.ConfigImportPublishAudit{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}, &model.Option{}, &model.RoutingPolicy{}, &model.RouteTarget{}, &model.ConfigImportPublishAudit{}))
 	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
 	require.NoError(t, model.DB.Create(channel).Error)
 	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
@@ -48,8 +48,8 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 			DurationValues:    []int{5},
 			AspectRatios:      []string{"16:9"},
 			InputModes:        []string{"text"},
-			ReferenceMinimums: &types.ConfigImportReferenceBounds{},
-			ReferenceLimits:   &types.ConfigImportReferenceBounds{},
+			ReferenceMinimums: configImportReferenceBounds(0, 0, 0),
+			ReferenceLimits:   configImportReferenceBounds(9, 3, 3),
 		}},
 	}
 	encoded, err = common.Marshal(blueprint)
@@ -73,6 +73,11 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	var savedMapping map[string]string
 	require.NoError(t, common.UnmarshalJsonStr(saved.GetModelMapping(), &savedMapping))
 	assert.Equal(t, "vendor-video", savedMapping[runtimeModel])
+	assert.Contains(t, saved.GetModels(), runtimeModel)
+	candidates, err := model.ListRoutingCandidates("default", runtimeModel)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, channel.Id, candidates[0].ID)
 	var policy model.RoutingPolicy
 	require.NoError(t, model.DB.Where("group_name = ? AND model = ?", "default", runtimeModel).First(&policy).Error)
 	assert.False(t, policy.Enabled)
@@ -86,6 +91,112 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	after, err := CaptureConfigImportBaseline(model.DB, batch.ID)
 	require.NoError(t, err)
 	assert.Equal(t, after.Hash, audit.AfterSHA256)
+}
+
+func TestConfigImportRouteRowsAssignsStablePrioritiesForImplicitTargets(t *testing.T) {
+	blueprint := types.ConfigImportRouteBlueprint{
+		CanonicalModel: modelrouting.Seedance20,
+		Targets: []types.ConfigImportRouteTarget{
+			{RouteTargetRef: "dimensio-4k", LineRef: "line-a", UpstreamModel: "model-4k", SKURef: "sku-4k", CostVariantKey: "default", ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)},
+			{RouteTargetRef: "dimensio-720p", LineRef: "line-a", UpstreamModel: "model-720p", SKURef: "sku-720p", CostVariantKey: "default", ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)},
+			{RouteTargetRef: "other-channel", LineRef: "line-b", UpstreamModel: "model-other", SKURef: "sku-other", CostVariantKey: "default", ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)},
+		},
+	}
+
+	_, targets, err := configImportRouteRows(map[string]int{"line-a": 21, "line-b": 22}, blueprint)
+	require.NoError(t, err)
+	require.Len(t, targets, 3)
+	assert.Equal(t, 1, targets[0].TargetPriority)
+	assert.Equal(t, 0, targets[1].TargetPriority)
+	assert.Equal(t, 0, targets[2].TargetPriority)
+}
+
+func TestConfigImportRouteRowsRejectsMissingReferenceLimits(t *testing.T) {
+	blueprint := types.ConfigImportRouteBlueprint{
+		CanonicalModel: modelrouting.Seedance20,
+		Targets: []types.ConfigImportRouteTarget{{
+			RouteTargetRef: "missing-reference-limits",
+			LineRef:        "line-a",
+			UpstreamModel:  "model-a",
+			SKURef:         "sku-a",
+			CostVariantKey: "default",
+		}},
+	}
+
+	_, _, err := configImportRouteRows(map[string]int{"line-a": 21}, blueprint)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reference limits")
+}
+
+func TestConfigImportRouteRowsPreservesExplicitPriorities(t *testing.T) {
+	explicitPriority := 7
+	blueprint := types.ConfigImportRouteBlueprint{
+		CanonicalModel: modelrouting.Seedance20,
+		Targets: []types.ConfigImportRouteTarget{
+			{RouteTargetRef: "explicit", LineRef: "line-a", UpstreamModel: "model-explicit", SKURef: "sku-explicit", CostVariantKey: "default", Priority: &explicitPriority, ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)},
+			{RouteTargetRef: "implicit", LineRef: "line-a", UpstreamModel: "model-implicit", SKURef: "sku-implicit", CostVariantKey: "default", ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)},
+		},
+	}
+
+	_, targets, err := configImportRouteRows(map[string]int{"line-a": 21}, blueprint)
+	require.NoError(t, err)
+	require.Len(t, targets, 2)
+	assert.Equal(t, explicitPriority, targets[0].TargetPriority)
+	assert.Equal(t, 1, targets[1].TargetPriority)
+}
+
+func TestConfigImportRouteTargetPriorityOverridesCoverSeparateBlueprints(t *testing.T) {
+	routeBlueprints := []configImportPublishRouteBlueprint{
+		{blueprint: types.ConfigImportRouteBlueprint{
+			CanonicalModel: modelrouting.Seedance20,
+			Targets:        []types.ConfigImportRouteTarget{{RouteTargetRef: "blueprint-a", LineRef: "line-a", UpstreamModel: "model-a", SKURef: "sku-a", CostVariantKey: "default", ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)}},
+		}},
+		{blueprint: types.ConfigImportRouteBlueprint{
+			CanonicalModel: modelrouting.Seedance20,
+			Targets:        []types.ConfigImportRouteTarget{{RouteTargetRef: "blueprint-b", LineRef: "line-a", UpstreamModel: "model-b", SKURef: "sku-b", CostVariantKey: "default", ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3)}},
+		}},
+	}
+
+	overrides := configImportRouteTargetPriorityOverrides(map[string]int{"line-a": 21}, routeBlueprints)
+	assert.Equal(t, 1, overrides["blueprint-a"])
+	assert.Equal(t, 0, overrides["blueprint-b"])
+}
+
+func TestPublishConfigImportRoutesAssignsPrioritiesAcrossBlueprints(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	confirmedAt := int64(1)
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: 1, LineRef: "line-a", Action: string(types.ConfigImportBindingActionBind), ChannelID: &channel.Id,
+		CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+	}).Error)
+	newTarget := func(ref, upstream string) types.ConfigImportRouteTarget {
+		return types.ConfigImportRouteTarget{
+			RouteTargetRef: ref, LineRef: "line-a", UpstreamModel: upstream, SKURef: ref, CostVariantKey: "default",
+			OutputResolutions: []string{"720p"}, DurationValues: []int{5}, AspectRatios: []string{"16:9"}, InputModes: []string{"text"},
+			ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3), Enabled: boolPointer(false),
+		}
+	}
+	blueprints := []types.ConfigImportRouteBlueprint{
+		{CanonicalModel: modelrouting.Seedance20, Targets: []types.ConfigImportRouteTarget{newTarget("blueprint-a", "model-a")}},
+		{CanonicalModel: modelrouting.Seedance20, Targets: []types.ConfigImportRouteTarget{newTarget("blueprint-b", "model-b")}},
+	}
+	items := make([]model.ConfigImportItem, 0, len(blueprints))
+	for _, blueprint := range blueprints {
+		encoded, err := common.Marshal(blueprint)
+		require.NoError(t, err)
+		items = append(items, model.ConfigImportItem{BatchID: 1, EntityType: "route_blueprints", BusinessID: blueprint.Targets[0].RouteTargetRef, CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateChanged)})
+	}
+	require.NoError(t, publishConfigImportRoutes(model.DB, items, &ConfigImportRefreshKeys{}))
+
+	policy, err := model.GetRoutingPolicy(1)
+	require.NoError(t, err)
+	require.Len(t, policy.Targets, 2)
+	assert.Equal(t, 1, policy.Targets[0].TargetPriority)
+	assert.Equal(t, 0, policy.Targets[1].TargetPriority)
 }
 
 func TestPublishConfigImportRoutesMergesReplacesAndSkipsTargets(t *testing.T) {
@@ -119,7 +230,7 @@ func TestPublishConfigImportRoutesMergesReplacesAndSkipsTargets(t *testing.T) {
 		Targets: []types.ConfigImportRouteTarget{{
 			RouteTargetRef: "managed", LineRef: "line-a", UpstreamModel: "import-v1", SKURef: "sku-a", CostVariantKey: "default",
 			OutputResolutions: []string{"720p"}, DurationValues: []int{5}, AspectRatios: []string{"16:9"}, InputModes: []string{"text"},
-			ReferenceMinimums: &types.ConfigImportReferenceBounds{}, ReferenceLimits: &types.ConfigImportReferenceBounds{}, Enabled: boolPointer(false),
+			ReferenceMinimums: configImportReferenceBounds(0, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3), Enabled: boolPointer(false),
 		}},
 	}
 	encoded, err := common.Marshal(merge)
@@ -178,6 +289,14 @@ func TestPublishConfigImportRoutesMergesReplacesAndSkipsTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, skipped.Targets, 1)
 	assert.Equal(t, "replacement", skipped.Targets[0].Name)
+}
+
+func configImportReferenceBounds(images, videos, audios int) *types.ConfigImportReferenceBounds {
+	return &types.ConfigImportReferenceBounds{
+		Images: &images,
+		Videos: &videos,
+		Audios: &audios,
+	}
 }
 
 func TestPublishConfigImportBatchRollsBackSaleMappingAndCostWhenRouteFails(t *testing.T) {

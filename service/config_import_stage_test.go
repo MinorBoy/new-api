@@ -302,6 +302,13 @@ func TestConfigImportBindingCreateAddsImportedUpstreamModels(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, model.DB.First(channel, channel.Id).Error)
 	assert.Equal(t, "existing-model,gpt-test", channel.Models)
+	var ability model.Ability
+	require.NoError(t, model.DB.Where(&model.Ability{
+		ChannelId: channel.Id,
+		Group:     "default",
+		Model:     "gpt-test",
+	}).First(&ability).Error)
+	assert.False(t, ability.Enabled)
 }
 
 func TestConfigImportBindingRecoversUnpersistedCreatedChannel(t *testing.T) {

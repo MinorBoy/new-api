@@ -47,6 +47,7 @@ func SeedanceTaskFetch(c *gin.Context) ([]byte, *dto.TaskError) {
 		if err != nil {
 			return nil, service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 		}
+		persistTerminalTaskUserResponse(c, task, body)
 		return body, nil
 	}
 

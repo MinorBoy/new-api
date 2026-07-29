@@ -40,12 +40,20 @@ export {
   isTimingLogType,
   getLogTypeConfig,
   isPerCallBilling,
-  getDefaultTimeRange,
-  buildQueryParams,
   buildBaseParams,
   buildApiParams,
   fetchLogsByCategory,
 } from './utils'
+
+// Query parameter utilities
+export { buildQueryParams } from './query-params'
+
+// Time range utilities
+export {
+  getDefaultTimeRange,
+  getUsageLogTimeRangePreset,
+} from './time-range'
+export type { UsageLogTimeRangePreset } from './time-range'
 
 // Status mapper utilities
 export { createStatusMapper } from './status'

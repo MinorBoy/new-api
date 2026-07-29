@@ -141,6 +141,9 @@ func UpdateConfigImportBindings(
 					if err := tx.Model(channel).Update("models", channel.Models).Error; err != nil {
 						return err
 					}
+					if err := channel.UpdateAbilities(tx); err != nil {
+						return err
+					}
 				}
 			}
 			if err := rejectConfigImportChannelLineConflict(tx, batchID, input.LineRef, channel.Id); err != nil {

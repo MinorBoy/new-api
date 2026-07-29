@@ -46,7 +46,7 @@ for (const key of domGlobals) {
   })
 }
 
-const { act } = await import('react')
+const { act, Fragment } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
@@ -58,6 +58,9 @@ await i18n.use(initReactI18next).init({
   resources: {
     en: {
       translation: {
+        Endpoint: 'Endpoint',
+        Inbound: 'Inbound:',
+        View: 'View',
         'Request Data': 'Request Data',
         'Upstream Response Data': 'Upstream Response Data',
         'User Response Data': 'User Response Data',
@@ -92,9 +95,139 @@ async function getHeaders(isAdmin: boolean): Promise<string[]> {
   await act(async () => root.unmount())
   container.remove()
 
-  return columns.flatMap((column) =>
-    typeof column.header === 'string' ? [column.header] : []
+  return columns.flatMap((column) => {
+    if (typeof column.header === 'string') {
+      return [column.header]
+    }
+    const label = (column.meta as { label?: string } | undefined)?.label
+    return label ? [label] : []
+  })
+}
+
+async function getAuditButtonLabels(): Promise<
+  Array<{ text: string; title: string }>
+> {
+  let columns: ColumnDef<TaskLog>[] = []
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const log: TaskLog = {
+    id: 1,
+    user_id: 1,
+    platform: 'seedance',
+    task_id: 'task_1',
+    action: 'GENERATE',
+    channel_id: 1,
+    submit_time: 1,
+    status: 'SUCCESS',
+    user_request_data: { model: 'seedance' },
+    upstream_response_data: { task_id: 'upstream_1' },
+    user_response_data: { task_id: 'task_1' },
+  }
+
+  function ColumnsProbe() {
+    columns = useTaskLogsColumns(true)
+    return null
+  }
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ColumnsProbe />
+      </I18nextProvider>
+    )
+  })
+
+  const auditCells = columns
+    .filter(
+      (column) =>
+        typeof column.header === 'string' &&
+        [
+          'Request Data',
+          'Upstream Response Data',
+          'User Response Data',
+        ].includes(column.header)
+    )
+    .map((column, index) => {
+      if (typeof column.cell !== 'function') {
+        throw new Error('Task audit data column must render a cell component')
+      }
+      return {
+        id: `audit-${index}`,
+        content: column.cell({ row: { original: log } } as never),
+      }
+    })
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        {auditCells.map((cell) => (
+          <Fragment key={cell.id}>{cell.content}</Fragment>
+        ))}
+      </I18nextProvider>
+    )
+  })
+
+  const labels = [...container.querySelectorAll('button[title]')].map(
+    (button) => ({
+      text: button.textContent?.trim() ?? '',
+      title: button.getAttribute('title') ?? '',
+    })
   )
+
+  await act(async () => root.unmount())
+  container.remove()
+
+  return labels
+}
+
+async function getEndpointCellText(): Promise<string> {
+  let columns: ColumnDef<TaskLog>[] = []
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const log: TaskLog = {
+    id: 1,
+    user_id: 1,
+    platform: 'seedance',
+    task_id: 'task_1',
+    action: 'GENERATE',
+    channel_id: 1,
+    request_path: '/v1/video/generations',
+    submit_time: 1,
+    status: 'SUCCESS',
+  }
+
+  function ColumnsProbe() {
+    columns = useTaskLogsColumns(true)
+    return null
+  }
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ColumnsProbe />
+      </I18nextProvider>
+    )
+  })
+
+  const endpointColumn = columns.find(
+    (column) => 'accessorKey' in column && column.accessorKey === 'request_path'
+  )
+  const content =
+    typeof endpointColumn?.cell === 'function'
+      ? endpointColumn.cell({ row: { original: log } } as never)
+      : null
+
+  await act(async () => {
+    root.render(<I18nextProvider i18n={i18n}>{content}</I18nextProvider>)
+  })
+
+  const text = container.textContent?.trim() ?? ''
+  await act(async () => root.unmount())
+  container.remove()
+
+  return text
 }
 
 describe('task audit columns', () => {
@@ -110,11 +243,41 @@ describe('task audit columns', () => {
     assert.equal(headers.includes('User Response Data'), true)
   })
 
-  test('hides request, upstream response, and user response data columns from regular users', async () => {
+  test('places administrator audit columns after channel and user identity', async () => {
+    const headers = await getHeaders(true)
+
+    assert.deepEqual(headers.slice(0, 7), [
+      'Submit Time',
+      'Channel',
+      'Endpoint',
+      'User',
+      'Request Data',
+      'Upstream Response Data',
+      'User Response Data',
+    ])
+  })
+
+  test('renders the persisted inbound request path next to channel', async () => {
+    const text = await getEndpointCellText()
+
+    assert.equal(text, 'Inbound:/v1/video/generations')
+  })
+
+  test('shows request data but hides upstream and user response data columns from regular users', async () => {
     const headers = await getHeaders(false)
 
-    assert.equal(headers.includes('Request Data'), false)
+    assert.equal(headers.includes('Request Data'), true)
     assert.equal(headers.includes('Upstream Response Data'), false)
     assert.equal(headers.includes('User Response Data'), false)
+  })
+
+  test('uses the compact View label for every task audit data action', async () => {
+    const labels = await getAuditButtonLabels()
+
+    assert.deepEqual(labels, [
+      { text: 'View', title: 'View' },
+      { text: 'View', title: 'View' },
+      { text: 'View', title: 'View' },
+    ])
   })
 })

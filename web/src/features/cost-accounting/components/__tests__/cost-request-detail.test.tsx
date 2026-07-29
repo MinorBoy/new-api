@@ -387,7 +387,7 @@ test('ordinary users and legacy logs never request supplier cost detail', async 
     assert.equal(calls, 0)
     assert.match(
       browserWindow.document.body.textContent ?? '',
-      /Historical cost unavailable/
+      /No supplier cost record/
     )
     assert.doesNotMatch(browserWindow.document.body.textContent ?? '', /\$0/)
   } finally {

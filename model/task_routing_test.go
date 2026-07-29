@@ -35,3 +35,15 @@ func TestInitTaskKeepsCapabilityRoutingPrivate(t *testing.T) {
 	assert.Equal(t, "provider-1080p", task.PrivateData.Routing.UpstreamModel)
 	assert.NotSame(t, routing, task.PrivateData.Routing)
 }
+
+func TestInitTaskStoresSafeInboundRequestPath(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RequestURLPath: "/v1/video/generations?signature=secret&asset=https%3A%2F%2Fassets.example%2Finput.mp4",
+		ChannelMeta:    &relaycommon.ChannelMeta{},
+		TaskRelayInfo:  &relaycommon.TaskRelayInfo{},
+	}
+
+	task := InitTask(constant.TaskPlatform("49"), info)
+
+	assert.Equal(t, "/v1/video/generations", task.Properties.RequestPath)
+}

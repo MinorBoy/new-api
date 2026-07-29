@@ -604,11 +604,11 @@ func validateConfigImportRouteTarget(target *types.ConfigImportRouteTarget, blue
 		}
 	}
 	for _, bounds := range []*types.ConfigImportReferenceBounds{target.ReferenceMinimums, target.ReferenceLimits} {
-		if bounds == nil {
-			continue
+		if bounds == nil || bounds.Images == nil || bounds.Videos == nil || bounds.Audios == nil {
+			return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] requires complete reference minimums and limits", blueprintIndex, targetIndex)
 		}
 		for _, value := range []*int{bounds.Images, bounds.Videos, bounds.Audios} {
-			if value != nil && *value < 0 {
+			if *value < 0 {
 				return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference bounds cannot be negative", blueprintIndex, targetIndex)
 			}
 		}

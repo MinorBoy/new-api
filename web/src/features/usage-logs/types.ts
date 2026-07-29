@@ -297,12 +297,14 @@ export interface TaskLog {
   task_id: string
   action: string // MUSIC, LYRICS, GENERATE, TEXT_GENERATE, etc.
   channel_id: number
+  request_path?: string
   submit_time: number // seconds
   finish_time?: number // seconds
   progress?: string
   progress_message_en?: string
   data?: string // JSON string
-  // Administrator-only raw audit payloads for newly submitted tasks.
+  // UserRequestData is available to the task owner. Other raw payloads are
+  // administrator-only.
   user_request_data?: unknown
   upstream_response_data?: unknown
   user_response_data?: unknown

@@ -91,15 +91,7 @@ function AudioPreviewCell({ log }: { log: TaskLog }) {
   )
 }
 
-function TaskAuditDataCell({
-  data,
-  title,
-  viewLabel,
-}: {
-  data: unknown
-  title: string
-  viewLabel: string
-}) {
+function TaskAuditDataCell({ data, title }: { data: unknown; title: string }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
 
@@ -113,10 +105,10 @@ function TaskAuditDataCell({
         type='button'
         className='text-foreground inline-flex max-w-full items-center gap-1 text-xs hover:underline'
         onClick={() => setOpen(true)}
-        title={t(viewLabel)}
+        title={t('View')}
       >
         <Eye className='size-3 shrink-0' aria-hidden='true' />
-        <span className='truncate'>{t(viewLabel)}</span>
+        <span className='truncate'>{t('View')}</span>
       </button>
       <TaskAuditDataDialog
         data={data}
@@ -130,6 +122,17 @@ function TaskAuditDataCell({
 
 export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   const { t } = useTranslation()
+  const requestDataColumn: ColumnDef<TaskLog> = {
+    accessorKey: 'user_request_data',
+    header: t('Request Data'),
+    cell: ({ row }) => (
+      <TaskAuditDataCell
+        data={row.original.user_request_data}
+        title='Request Data'
+      />
+    ),
+    size: 150,
+  }
   const columns: ColumnDef<TaskLog>[] = [
     {
       accessorKey: 'submit_time',
@@ -160,6 +163,26 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   if (isAdmin) {
     columns.push(
       createChannelColumn<TaskLog>({ headerLabel: t('Channel') }),
+      {
+        accessorKey: 'request_path',
+        header: t('Endpoint'),
+        cell: ({ row }) => {
+          const requestPath = row.original.request_path
+          if (!requestPath) {
+            return <span className='text-muted-foreground/60 text-xs'>-</span>
+          }
+          return (
+            <span
+              className='block max-w-[240px] truncate font-mono text-xs'
+              title={requestPath}
+            >
+              {t('Inbound')}
+              {requestPath}
+            </span>
+          )
+        },
+        size: 240,
+      },
       {
         id: 'user',
         header: t('User'),
@@ -202,18 +225,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           )
         },
       },
-      {
-        accessorKey: 'user_request_data',
-        header: t('Request Data'),
-        cell: ({ row }) => (
-          <TaskAuditDataCell
-            data={row.original.user_request_data}
-            title='Request Data'
-            viewLabel='View request data'
-          />
-        ),
-        size: 150,
-      },
+      requestDataColumn,
       {
         accessorKey: 'upstream_response_data',
         header: t('Upstream Response Data'),
@@ -221,7 +233,6 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           <TaskAuditDataCell
             data={row.original.upstream_response_data}
             title='Upstream Response Data'
-            viewLabel='View upstream response data'
           />
         ),
         size: 180,
@@ -233,12 +244,13 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           <TaskAuditDataCell
             data={row.original.user_response_data}
             title='User Response Data'
-            viewLabel='View user response data'
           />
         ),
         size: 180,
       }
     )
+  } else {
+    columns.push(requestDataColumn)
   }
 
   columns.push(

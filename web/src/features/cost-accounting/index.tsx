@@ -52,6 +52,7 @@ import { AnomalyQueue } from './components/anomaly-queue'
 import { ProfitFilters } from './components/profit-filters'
 import { ProfitSummary } from './components/profit-summary'
 import { ProfitTable } from './components/profit-table'
+import { isCostAccountingMode } from './lib/mode'
 import {
   costReportParamsFromSearch,
   canEnableStrictCostAccounting,
@@ -108,6 +109,12 @@ export function CostAccounting() {
     !coverageQuery.isLoading &&
     !coverageQuery.error &&
     canEnableStrictCostAccounting(coverage)
+  let modeLabel = t('Disabled')
+  if (mode === 'strict') {
+    modeLabel = t('Strict')
+  } else if (mode === 'tracking') {
+    modeLabel = t('Tracking')
+  }
   const modeMutation = useMutation({
     mutationFn: updateCostAccountingSettings,
     onSuccess: async () => {
@@ -130,8 +137,8 @@ export function CostAccounting() {
         <span className='flex min-w-0 items-center gap-2'>
           <ChartNoAxesCombined className='size-4 shrink-0' aria-hidden='true' />
           <span className='truncate'>{t('Cost accounting')}</span>
-          <Badge variant={mode === 'strict' ? 'default' : 'outline'}>
-            {mode === 'strict' ? t('Strict') : t('Disabled')}
+          <Badge variant={mode === 'disabled' ? 'outline' : 'default'}>
+            {modeLabel}
           </Badge>
           {!coverageQuery.isLoading ? (
             <Badge variant={uncovered === 0 ? 'outline' : 'destructive'}>
@@ -210,7 +217,7 @@ export function CostAccounting() {
                   )
                   return
                 }
-                if (value === 'disabled' || value === 'strict') {
+                if (isCostAccountingMode(value)) {
                   modeMutation.mutate({
                     mode: value,
                     minimum_expected_margin_bps: minimumExpectedMarginBPS,
@@ -222,6 +229,9 @@ export function CostAccounting() {
             >
               <ToggleGroupItem value='disabled'>
                 {t('Disabled')}
+              </ToggleGroupItem>
+              <ToggleGroupItem value='tracking'>
+                {t('Tracking')}
               </ToggleGroupItem>
               <ToggleGroupItem value='strict' disabled={!canEnableStrict}>
                 {t('Strict')}

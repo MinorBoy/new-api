@@ -361,9 +361,9 @@ export function CostRequestDetail(props: CostRequestDetailProps) {
     return (
       <Alert>
         <History aria-hidden='true' />
-        <AlertTitle>{t('Historical cost unavailable')}</AlertTitle>
+        <AlertTitle>{t('No supplier cost record')}</AlertTitle>
         <AlertDescription>
-          {t('This log predates supplier cost accounting references.')}
+          {t('This request has no supplier cost record.')}
         </AlertDescription>
       </Alert>
     )

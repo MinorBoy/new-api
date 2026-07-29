@@ -30,6 +30,11 @@ import {
 import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 
+import {
+  getUsageLogTimeRangePreset,
+  type UsageLogTimeRangePreset,
+} from '../lib/time-range'
+
 interface CompactDateTimeRangePickerProps {
   start?: Date
   end?: Date
@@ -85,31 +90,8 @@ export function CompactDateTimeRangePicker({
     setOpen(false)
   }
 
-  const applyPreset = (kind: 'today' | '7d' | 'week' | '30d' | 'month') => {
-    const now = dayjs()
-    const presets = {
-      today: {
-        start: now.startOf('day').toDate(),
-        end: now.endOf('day').toDate(),
-      },
-      '7d': {
-        start: now.subtract(6, 'day').startOf('day').toDate(),
-        end: now.endOf('day').toDate(),
-      },
-      week: {
-        start: now.startOf('week').toDate(),
-        end: now.endOf('week').toDate(),
-      },
-      '30d': {
-        start: now.subtract(29, 'day').startOf('day').toDate(),
-        end: now.endOf('day').toDate(),
-      },
-      month: {
-        start: now.startOf('month').toDate(),
-        end: now.endOf('month').toDate(),
-      },
-    }
-    const range = presets[kind]
+  const applyPreset = (preset: UsageLogTimeRangePreset) => {
+    const range = getUsageLogTimeRangePreset(preset)
     setDraftStart(toInputValue(range.start))
     setDraftEnd(toInputValue(range.end))
     onChange(range)
@@ -167,12 +149,21 @@ export function CompactDateTimeRangePicker({
             </div>
           </div>
 
-          <div className='flex flex-wrap gap-1.5'>
+          <div className='grid grid-cols-2 gap-1.5 sm:grid-cols-4'>
             <Button
               type='button'
               variant='secondary'
               size='sm'
-              className='h-7 flex-1 px-2 text-xs'
+              className='h-7 px-2 text-xs'
+              onClick={() => applyPreset('last24Hours')}
+            >
+              {t('Last 24 Hours')}
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              className='h-7 px-2 text-xs'
               onClick={() => applyPreset('today')}
             >
               {t('Today')}
@@ -181,7 +172,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
-              className='h-7 flex-1 px-2 text-xs'
+              className='h-7 px-2 text-xs'
               onClick={() => applyPreset('7d')}
             >
               {t('7 Days')}
@@ -190,7 +181,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
-              className='h-7 flex-1 px-2 text-xs'
+              className='h-7 px-2 text-xs'
               onClick={() => applyPreset('week')}
             >
               {t('This week')}
@@ -199,7 +190,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
-              className='h-7 flex-1 px-2 text-xs'
+              className='h-7 px-2 text-xs'
               onClick={() => applyPreset('30d')}
             >
               {t('30 Days')}
@@ -208,10 +199,19 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
-              className='h-7 flex-1 px-2 text-xs'
+              className='h-7 px-2 text-xs'
               onClick={() => applyPreset('month')}
             >
               {t('This month')}
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => applyPreset('lastMonth')}
+            >
+              {t('Last Month')}
             </Button>
           </div>
 

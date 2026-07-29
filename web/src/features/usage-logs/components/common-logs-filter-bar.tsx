@@ -16,14 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
-import { useState, useCallback, useMemo } from 'react'
+import {
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  type CompositionEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Select,
   SelectContent,
@@ -39,8 +46,10 @@ import {
 } from '@/components/ui/tooltip'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import { useAutoSearch } from '../hooks/use-auto-search'
+import { useCommonLogFilterOptions } from '../hooks/use-common-log-filter-options'
 import { buildSearchParams } from '../lib/filter'
-import { getDefaultTimeRange } from '../lib/utils'
+import { getDefaultTimeRange } from '../lib/time-range'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -118,7 +127,8 @@ export function CommonLogsFilterBar<TData>(
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
-  const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const { modelOptions, groupOptions, tokenOptions, channelOptions } =
+    useCommonLogFilterOptions(isAdmin)
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -170,68 +180,88 @@ export function CommonLogsFilterBar<TData>(
   const filters = activeDraft.filters
   const logType = activeDraft.logType
 
-  const handleChange = useCallback(
-    (field: keyof CommonLogFilters, value: Date | string | undefined) => {
-      setDraft((current) => {
-        const base =
-          current.sourceKey === searchState.sourceKey ? current : searchState
-        return {
-          sourceKey: searchState.sourceKey,
-          filters: { ...base.filters, [field]: value },
-          logType: base.logType,
-        }
+  const submitDraft = useCallback(
+    (nextDraft: CommonLogDraft) => {
+      const filterParams = buildSearchParams(nextDraft.filters, 'common')
+      navigate({
+        to: '/usage-logs/$section',
+        params: { section: 'common' },
+        search: {
+          ...filterParams,
+          type: [nextDraft.logType],
+          page: 1,
+        },
       })
+      queryClient.invalidateQueries({ queryKey: ['logs'] })
+      queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
     },
-    [searchState]
+    [navigate, queryClient]
+  )
+  const { schedule, flush } = useAutoSearch(submitDraft)
+  const composingFieldsRef = useRef<Set<keyof CommonLogFilters>>(new Set())
+
+  const createDraft = useCallback(
+    (
+      nextFilters: CommonLogFilters,
+      nextLogType: LogTypeValue = logType
+    ): CommonLogDraft => ({
+      sourceKey: searchState.sourceKey,
+      filters: nextFilters,
+      logType: nextLogType,
+    }),
+    [logType, searchState.sourceKey]
   )
 
-  const handleApply = useCallback(() => {
-    const filterParams = buildSearchParams(filters, 'common')
-    navigate({
-      to: '/usage-logs/$section',
-      params: { section: 'common' },
-      search: {
-        ...filterParams,
-        type: [logType],
-        page: 1,
-      },
-    })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [filters, logType, navigate, queryClient])
+  const handleImmediateChange = useCallback(
+    (changes: Partial<CommonLogFilters>) => {
+      const nextDraft = createDraft({ ...filters, ...changes })
+      setDraft(nextDraft)
+      flush(nextDraft)
+    },
+    [createDraft, filters, flush]
+  )
+
+  const handleTextChange = useCallback(
+    (field: keyof CommonLogFilters, value: string) => {
+      const nextDraft = createDraft({ ...filters, [field]: value || undefined })
+      setDraft(nextDraft)
+      if (!composingFieldsRef.current.has(field)) {
+        schedule(nextDraft)
+      }
+    },
+    [createDraft, filters, schedule]
+  )
+
+  const handleCompositionStart = useCallback(
+    (field: keyof CommonLogFilters) => {
+      composingFieldsRef.current.add(field)
+    },
+    []
+  )
+
+  const handleCompositionEnd = useCallback(
+    (field: keyof CommonLogFilters, value: string) => {
+      composingFieldsRef.current.delete(field)
+      handleTextChange(field, value)
+    },
+    [handleTextChange]
+  )
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: CommonLogFilters = { startTime: start, endTime: end }
-    const resetSearch = {
-      type: [LOG_TYPE_ALL_VALUE],
-      startTime: start.getTime(),
-      endTime: end.getTime(),
-    }
-    setDraft({
-      sourceKey: buildSearchSourceKey(resetSearch),
+    const resetDraft: CommonLogDraft = {
+      sourceKey: buildSearchSourceKey({
+        type: [LOG_TYPE_ALL_VALUE],
+        startTime: start.getTime(),
+        endTime: end.getTime(),
+      }),
       filters: resetFilters,
       logType: LOG_TYPE_ALL_VALUE,
-    })
-
-    navigate({
-      to: '/usage-logs/$section',
-      params: { section: 'common' },
-      search: {
-        page: 1,
-        ...resetSearch,
-      },
-    })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [navigate, queryClient])
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') handleApply()
-    },
-    [handleApply]
-  )
+    }
+    setDraft(resetDraft)
+    flush(resetDraft)
+  }, [flush])
 
   const hasExpandedFilters =
     !!filters.token ||
@@ -295,30 +325,42 @@ export function CommonLogsFilterBar<TData>(
         start={filters.startTime}
         end={filters.endTime}
         onChange={({ start, end }) => {
-          handleChange('startTime', start)
-          handleChange('endTime', end)
+          handleImmediateChange({ startTime: start, endTime: end })
         }}
       />
     </LogsFilterField>
   )
   const modelFilter = (
     <LogsFilterField>
-      <LogsFilterInput
+      <Combobox
+        options={modelOptions}
         placeholder={t('Model Name')}
         value={filters.model || ''}
-        onChange={(e) => handleChange('model', e.target.value)}
-        onKeyDown={handleKeyDown}
+        onValueChange={(value) => handleTextChange('model', value ?? '')}
+        onCompositionStart={() => handleCompositionStart('model')}
+        onCompositionEnd={(event: CompositionEvent<HTMLInputElement>) =>
+          handleCompositionEnd('model', event.currentTarget.value)
+        }
+        allowCustomValue
+        openOnFocus
+        className='h-8 min-w-0 text-sm leading-5'
       />
     </LogsFilterField>
   )
   const groupFilter = (
     <LogsFilterField>
-      <LogsFilterInput
+      <Combobox
+        options={groupOptions}
         placeholder={t('Group')}
-        type={sensitiveType}
         value={filters.group || ''}
-        onChange={(e) => handleChange('group', e.target.value)}
-        onKeyDown={handleKeyDown}
+        onValueChange={(value) => handleTextChange('group', value ?? '')}
+        onCompositionStart={() => handleCompositionStart('group')}
+        onCompositionEnd={(event: CompositionEvent<HTMLInputElement>) =>
+          handleCompositionEnd('group', event.currentTarget.value)
+        }
+        allowCustomValue
+        openOnFocus
+        className='h-8 min-w-0 text-sm leading-5'
       />
     </LogsFilterField>
   )
@@ -330,17 +372,9 @@ export function CommonLogsFilterBar<TData>(
         onValueChange={(value) => {
           const nextLogType =
             value !== null && isLogTypeValue(value) ? value : LOG_TYPE_ALL_VALUE
-          setDraft((current) => {
-            const base =
-              current.sourceKey === searchState.sourceKey
-                ? current
-                : searchState
-            return {
-              sourceKey: searchState.sourceKey,
-              filters: base.filters,
-              logType: nextLogType,
-            }
-          })
+          const nextDraft = createDraft(filters, nextLogType)
+          setDraft(nextDraft)
+          flush(nextDraft)
         }}
       >
         <SelectTrigger>
@@ -361,12 +395,18 @@ export function CommonLogsFilterBar<TData>(
   const advancedFilters = (
     <>
       <LogsFilterField>
-        <LogsFilterInput
+        <Combobox
+          options={tokenOptions}
           placeholder={t('Token Name')}
-          type={sensitiveType}
           value={filters.token || ''}
-          onChange={(e) => handleChange('token', e.target.value)}
-          onKeyDown={handleKeyDown}
+          onValueChange={(value) => handleTextChange('token', value ?? '')}
+          onCompositionStart={() => handleCompositionStart('token')}
+          onCompositionEnd={(event: CompositionEvent<HTMLInputElement>) =>
+            handleCompositionEnd('token', event.currentTarget.value)
+          }
+          allowCustomValue
+          openOnFocus
+          className='h-8 min-w-0 text-sm leading-5'
         />
       </LogsFilterField>
       {isAdmin && (
@@ -375,18 +415,28 @@ export function CommonLogsFilterBar<TData>(
             placeholder={t('Username')}
             type={sensitiveType}
             value={filters.username || ''}
-            onChange={(e) => handleChange('username', e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={(e) => handleTextChange('username', e.target.value)}
+            onCompositionStart={() => handleCompositionStart('username')}
+            onCompositionEnd={(e) =>
+              handleCompositionEnd('username', e.currentTarget.value)
+            }
           />
         </LogsFilterField>
       )}
       {isAdmin && (
         <LogsFilterField>
-          <LogsFilterInput
+          <Combobox
+            options={channelOptions}
             placeholder={t('Channel ID')}
             value={filters.channel || ''}
-            onChange={(e) => handleChange('channel', e.target.value)}
-            onKeyDown={handleKeyDown}
+            onValueChange={(value) => handleTextChange('channel', value ?? '')}
+            onCompositionStart={() => handleCompositionStart('channel')}
+            onCompositionEnd={(event: CompositionEvent<HTMLInputElement>) =>
+              handleCompositionEnd('channel', event.currentTarget.value)
+            }
+            allowCustomValue
+            openOnFocus
+            className='h-8 min-w-0 text-sm leading-5'
           />
         </LogsFilterField>
       )}
@@ -394,16 +444,24 @@ export function CommonLogsFilterBar<TData>(
         <LogsFilterInput
           placeholder={t('Request ID')}
           value={filters.requestId || ''}
-          onChange={(e) => handleChange('requestId', e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={(e) => handleTextChange('requestId', e.target.value)}
+          onCompositionStart={() => handleCompositionStart('requestId')}
+          onCompositionEnd={(e) =>
+            handleCompositionEnd('requestId', e.currentTarget.value)
+          }
         />
       </LogsFilterField>
       <LogsFilterField>
         <LogsFilterInput
           placeholder={t('Upstream Request ID')}
           value={filters.upstreamRequestId || ''}
-          onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={(e) =>
+            handleTextChange('upstreamRequestId', e.target.value)
+          }
+          onCompositionStart={() => handleCompositionStart('upstreamRequestId')}
+          onCompositionEnd={(e) =>
+            handleCompositionEnd('upstreamRequestId', e.currentTarget.value)
+          }
         />
       </LogsFilterField>
     </>
@@ -439,8 +497,6 @@ export function CommonLogsFilterBar<TData>(
       hasAdvancedActiveFilters={hasExpandedFilters}
       advancedFilterCount={expandedFilterCount}
       hasActiveFilters={hasAdditionalFilters}
-      onSearch={handleApply}
-      searchLoading={fetchingLogs > 0}
       onReset={handleReset}
     />
   )

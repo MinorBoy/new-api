@@ -132,6 +132,90 @@ test('v1 adapter extracts the corrected fixture baseline and stable line contrac
   assert.equal(mergedScenarioCost.lineRef, 'megabyai-fast-real-person')
 })
 
+test('v1 document decodes compact reference limits into route target constraints', async () => {
+  const result = await buildImportDocument({
+    extracted: extractWorkbook(await loadFixture()),
+    sourceBytes: await fs.readFile(fixturePath),
+    sourceFileName: 'channel-config-v1-corrected.xlsx',
+  })
+
+  const targets = new Map(
+    result.document.entities.route_blueprints.map((blueprint) => [
+      blueprint.business_id,
+      (blueprint.targets as Array<Record<string, unknown>>)[0],
+    ])
+  )
+  const dimensioTarget = targets.get('route-blueprint/MAP-DIMENSIO-R83-720')
+  const clmmTarget = targets.get('route-blueprint/MAP-CLMM-R7-480')
+  const paipuTarget = targets.get('route-blueprint/MAP-PAIPU-R14-720')
+  assert.ok(dimensioTarget)
+  assert.ok(clmmTarget)
+  assert.ok(paipuTarget)
+  assert.deepEqual(dimensioTarget.reference_limits, {
+    images: 9,
+    videos: 3,
+    audios: 3,
+  })
+  assert.deepEqual(dimensioTarget.reference_minimums, {
+    images: 0,
+    videos: 0,
+    audios: 0,
+  })
+  assert.deepEqual(clmmTarget.reference_limits, {
+    images: 4,
+    videos: 3,
+    audios: 1,
+  })
+  assert.deepEqual(paipuTarget.reference_limits, {
+    images: 9,
+    videos: 0,
+    audios: 0,
+  })
+})
+
+test('v1 document rejects an unresolved legacy reference limit', async () => {
+  const snapshot = await loadFixture()
+  const mappingSheet = snapshot.sheets.find((sheet) => sheet.name === '模型映射')
+  assert.ok(mappingSheet)
+  const mappingRow = mappingSheet.rows.find((row) => row.rowNumber === 59)
+  assert.ok(mappingRow)
+  const noteColumn = V1_HEADERS.模型映射.indexOf('备注')
+  mappingRow.cells[noteColumn].value = '源行=sd!60；时长=4-15'
+  const result = await buildImportDocument({
+    extracted: extractWorkbook(snapshot),
+    sourceBytes: await fs.readFile(fixturePath),
+    sourceFileName: 'channel-config-v1-corrected.xlsx',
+  })
+
+  assert.equal(result.hasFailures, true)
+  assert.equal(
+    result.document.entities.route_blueprints.some(
+      (blueprint) => blueprint.business_id === 'route-blueprint/MAP-8YES-R60-480'
+    ),
+    false
+  )
+  assert.equal(
+    result.document.entities.cost_rule_drafts.some(
+      (draft) => draft.route_target_ref === 'route-target/MAP-8YES-R60-480'
+    ),
+    false
+  )
+  assert.equal(
+    result.document.entities.model_mappings.some(
+      (mapping) => mapping.business_id === 'MAP-8YES-R60-480'
+    ),
+    true
+  )
+  assert.ok(
+    result.document.issues.some(
+      (issue) =>
+        issue.code === 'ROUTE_REFERENCE_LIMITS_UNRESOLVED' &&
+        issue.severity === 'error' &&
+        issue.entity_ref === 'MAP-8YES-R60-480'
+    )
+  )
+})
+
 test('v1 import document uses the reserved YSR channel type IDs', async () => {
   const sourceBytes = await fs.readFile(fixturePath)
   const result = await buildImportDocument({

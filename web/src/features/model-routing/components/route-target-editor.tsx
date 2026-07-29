@@ -64,6 +64,7 @@ type RouteTargetEditorProps = {
   candidates: RoutingCandidate[]
   candidatesLoading: boolean
   canRemove: boolean
+  className?: string
   onCopy: () => void
   onRemove: () => void
 }
@@ -197,7 +198,12 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
   }
 
   return (
-    <div className='flex flex-col gap-5 rounded-md border p-3 sm:p-4'>
+    <div
+      className={cn(
+        'flex flex-col gap-5 rounded-md border p-3 sm:p-4',
+        props.className
+      )}
+    >
       <div className='flex min-w-0 items-center justify-between gap-2'>
         <p className='min-w-0 truncate text-sm font-medium'>
           {target?.name || `${t('Routing target')} ${props.index + 1}`}

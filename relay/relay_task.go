@@ -29,51 +29,29 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID   string
-	TaskData         []byte
-	UserResponseData json.RawMessage
-	Platform         constant.TaskPlatform
-	Quota            int
+	UpstreamTaskID string
+	TaskData       []byte
+	Platform       constant.TaskPlatform
+	Quota          int
 	//PerCallPrice   types.PriceData
 }
 
 const maxTaskUserResponseAuditBytes = 1 << 20
 
-// taskUserResponseAuditWriter copies the normalized task submit response that
-// is already being returned to the client. It preserves the wrapped writer's
-// behavior and keeps the captured data out of the public task record.
-type taskUserResponseAuditWriter struct {
-	gin.ResponseWriter
-	body     bytes.Buffer
-	tooLarge bool
-}
-
-func (w *taskUserResponseAuditWriter) capture(data []byte) {
-	if w.tooLarge {
+func persistTerminalTaskUserResponse(c *gin.Context, task *model.Task, responseBody []byte) {
+	if task == nil || len(responseBody) == 0 {
 		return
 	}
-	if w.body.Len()+len(data) > maxTaskUserResponseAuditBytes {
-		w.tooLarge = true
+	if task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
 		return
 	}
-	_, _ = w.body.Write(data)
-}
-
-func (w *taskUserResponseAuditWriter) Write(data []byte) (int, error) {
-	w.capture(data)
-	return w.ResponseWriter.Write(data)
-}
-
-func (w *taskUserResponseAuditWriter) WriteString(data string) (int, error) {
-	w.capture([]byte(data))
-	return w.ResponseWriter.WriteString(data)
-}
-
-func (w *taskUserResponseAuditWriter) Bytes() json.RawMessage {
-	if w.tooLarge || w.body.Len() == 0 {
-		return nil
+	if len(responseBody) > maxTaskUserResponseAuditBytes {
+		logger.LogWarn(c, fmt.Sprintf("skip terminal task user response audit payload because it exceeds %d bytes: task_id=%s", maxTaskUserResponseAuditBytes, task.TaskID))
+		return
 	}
-	return json.RawMessage(bytes.Clone(w.body.Bytes()))
+	if err := model.UpdateTaskUserResponseData(task.ID, json.RawMessage(bytes.Clone(responseBody))); err != nil {
+		logger.LogWarn(c, fmt.Sprintf("persist terminal task user response audit payload failed: task_id=%s error=%v", task.TaskID, err))
+	}
 }
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
@@ -414,18 +392,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	ratiosJSON, _ := common.Marshal(otherRatios)
 	c.Header("X-New-Api-Other-Ratios", string(ratiosJSON))
 
-	// 11. 解析响应并截获已经规范化后返回给客户端的任务提交数据。
-	originalWriter := c.Writer
-	responseAuditWriter := &taskUserResponseAuditWriter{ResponseWriter: originalWriter}
-	c.Writer = responseAuditWriter
+	// 11. 解析并返回规范化的任务提交响应。终态的用户响应会在任务查询时归档。
 	upstreamTaskID, taskData, taskErr := adaptor.DoResponse(c, resp, info)
-	c.Writer = originalWriter
 	if taskErr != nil {
 		markTaskCostDispatchUnknown(c, info, true, "upstream_response_invalid")
 		return nil, taskErr
-	}
-	if responseAuditWriter.tooLarge {
-		logger.LogWarn(c, fmt.Sprintf("skip task user response audit payload because it exceeds %d bytes: request_id=%s task_id=%s", maxTaskUserResponseAuditBytes, info.RequestId, info.PublicTaskID))
 	}
 	settleAcceptedTaskCost(c, info)
 
@@ -441,11 +412,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	return &TaskSubmitResult{
-		UpstreamTaskID:   upstreamTaskID,
-		TaskData:         taskData,
-		UserResponseData: responseAuditWriter.Bytes(),
-		Platform:         platform,
-		Quota:            finalQuota,
+		UpstreamTaskID: upstreamTaskID,
+		TaskData:       taskData,
+		Platform:       platform,
+		Quota:          finalQuota,
 	}, nil
 }
 
@@ -659,6 +629,11 @@ func sunoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dt
 		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		if taskResp == nil {
+			persistTerminalTaskUserResponse(c, originTask, respBody)
+		}
+	}()
 
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
@@ -683,6 +658,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		if taskResp == nil {
+			persistTerminalTaskUserResponse(c, originTask, respBody)
+		}
+	}()
 
 	path := c.Request.URL.Path
 	isOpenAIVideoAPI := strings.HasPrefix(path, "/v1/videos/") ||
@@ -891,29 +871,30 @@ func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 		data = nil
 	}
 	taskDto := &dto.TaskDto{
-		ID:         task.ID,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-		TaskID:     task.TaskID,
-		Platform:   string(task.Platform),
-		UserId:     task.UserId,
-		Group:      task.Group,
-		ChannelId:  task.ChannelId,
-		Quota:      task.Quota,
-		Action:     task.Action,
-		Status:     string(task.Status),
-		FailReason: task.FailReason,
-		ResultURL:  task.GetResultURL(),
-		SubmitTime: task.SubmitTime,
-		StartTime:  task.StartTime,
-		FinishTime: task.FinishTime,
-		Progress:   task.Progress,
-		Properties: properties,
-		Username:   task.Username,
-		Data:       data,
+		ID:              task.ID,
+		CreatedAt:       task.CreatedAt,
+		UpdatedAt:       task.UpdatedAt,
+		TaskID:          task.TaskID,
+		Platform:        string(task.Platform),
+		UserId:          task.UserId,
+		Group:           task.Group,
+		ChannelId:       task.ChannelId,
+		Quota:           task.Quota,
+		Action:          task.Action,
+		Status:          string(task.Status),
+		FailReason:      task.FailReason,
+		ResultURL:       task.GetResultURL(),
+		SubmitTime:      task.SubmitTime,
+		StartTime:       task.StartTime,
+		FinishTime:      task.FinishTime,
+		Progress:        task.Progress,
+		Properties:      properties,
+		Username:        task.Username,
+		Data:            data,
+		RequestPath:     task.Properties.RequestPath,
+		UserRequestData: task.PrivateData.UserRequestData,
 	}
 	if includeAdmin {
-		taskDto.UserRequestData = task.PrivateData.UserRequestData
 		taskDto.UpstreamResponseData = task.PrivateData.UpstreamResponseData
 		taskDto.UserResponseData = task.PrivateData.UserResponseData
 	}

@@ -51,7 +51,7 @@ interface LogsFilterToolbarProps<TData> {
   advancedFilterCount?: number
   searchLoading?: boolean
   onReset: () => void
-  onSearch: () => void
+  onSearch?: () => void
   className?: string
 }
 
@@ -102,7 +102,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
   }
 
   const handleMobileSearch = () => {
-    props.onSearch()
+    props.onSearch?.()
     setMobileFiltersOpen(false)
   }
 
@@ -189,14 +189,16 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
                   )}
                 </Button>
               </DrawerTrigger>
-              <Button
-                type='button'
-                onClick={props.onSearch}
-                disabled={props.searchLoading}
-              >
-                {props.searchLoading && <Loader2 className='animate-spin' />}
-                {t('Search')}
-              </Button>
+              {props.onSearch && (
+                <Button
+                  type='button'
+                  onClick={props.onSearch}
+                  disabled={props.searchLoading}
+                >
+                  {props.searchLoading && <Loader2 className='animate-spin' />}
+                  {t('Search')}
+                </Button>
+              )}
               <DataTableViewOptions table={props.table} />
             </div>
           </div>
@@ -206,9 +208,11 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
           <div className='mx-auto flex w-full max-w-md flex-1 flex-col overflow-hidden'>
             <DrawerHeader className='border-border/70 border-b px-4 py-3 text-left'>
               <DrawerTitle>{t('Filter')}</DrawerTitle>
-              <DrawerDescription>
-                {t('Adjust filters, then search to refresh the logs.')}
-              </DrawerDescription>
+              {props.onSearch && (
+                <DrawerDescription>
+                  {t('Adjust filters, then search to refresh the logs.')}
+                </DrawerDescription>
+              )}
             </DrawerHeader>
             <div className='flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3'>
               {props.mobileFilters ?? (
@@ -218,7 +222,12 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
                 </>
               )}
             </div>
-            <DrawerFooter className='border-border/70 grid grid-cols-2 gap-2 border-t px-4 py-3'>
+            <DrawerFooter
+              className={cn(
+                'border-border/70 grid gap-2 border-t px-4 py-3',
+                props.onSearch ? 'grid-cols-2' : 'grid-cols-1'
+              )}
+            >
               <Button
                 type='button'
                 variant='outline'
@@ -227,14 +236,16 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
               >
                 {t('Reset')}
               </Button>
-              <Button
-                type='button'
-                onClick={handleMobileSearch}
-                disabled={props.searchLoading}
-              >
-                {props.searchLoading && <Loader2 className='animate-spin' />}
-                {t('Search')}
-              </Button>
+              {props.onSearch && (
+                <Button
+                  type='button'
+                  onClick={handleMobileSearch}
+                  disabled={props.searchLoading}
+                >
+                  {props.searchLoading && <Loader2 className='animate-spin' />}
+                  {t('Search')}
+                </Button>
+              )}
             </DrawerFooter>
           </div>
         </DrawerContent>
@@ -278,14 +289,16 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
           >
             {t('Reset')}
           </Button>
-          <Button
-            type='button'
-            onClick={props.onSearch}
-            disabled={props.searchLoading}
-          >
-            {props.searchLoading && <Loader2 className='animate-spin' />}
-            {t('Search')}
-          </Button>
+          {props.onSearch && (
+            <Button
+              type='button'
+              onClick={props.onSearch}
+              disabled={props.searchLoading}
+            >
+              {props.searchLoading && <Loader2 className='animate-spin' />}
+              {t('Search')}
+            </Button>
+          )}
           <DataTableViewOptions table={props.table} />
         </div>
       </div>

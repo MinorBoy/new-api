@@ -30,7 +30,7 @@ const fixturePath = fileURLToPath(
   new URL('../__fixtures__/channel-config-v1-corrected.xlsx', import.meta.url)
 )
 
-test('builds a credential-free import document with global SKUs and one unresolved manual variant', async () => {
+test('blocks unresolved reference limits while preserving valid mappings', async () => {
   const bytes = await fs.readFile(fixturePath)
   const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))
 
@@ -46,16 +46,29 @@ test('builds a credential-free import document with global SKUs and one unresolv
   assert.equal(result.document.entities.channel_lines.length, 12)
   assert.equal(result.document.entities.model_skus.length, 9)
   assert.equal(result.document.entities.sale_proposals.length, 16)
-  assert.equal(result.document.entities.cost_rule_drafts.length, 104)
+  assert.equal(result.document.entities.cost_rule_drafts.length, 98)
   assert.equal(result.document.entities.model_mappings.length, 104)
-  assert.equal(result.document.entities.route_blueprints.length, 104)
+  assert.equal(result.document.entities.route_blueprints.length, 98)
   assert.equal(result.document.entities.unresolved_variants.length, 1)
   assert.equal(
     result.document.entities.unresolved_variants[0].business_id,
     'CH-MEGABYAI/videos-standard'
   )
-  assert.equal(result.hasFailures, false)
+  assert.equal(result.hasFailures, true)
   assert.equal(result.hasWarnings, true)
+  assert.equal(
+    result.document.entities.model_mappings.some(
+      (mapping) => mapping.business_id === 'MAP-8YES-R60-480'
+    ),
+    true
+  )
+  assert.equal(
+    result.document.entities.route_blueprints.some(
+      (blueprint) =>
+        blueprint.business_id === 'route-blueprint/MAP-8YES-R60-480'
+    ),
+    false
+  )
   assert.equal(scanForSecrets(result.document).length, 0)
   assert.match(result.document.manifest.payload_sha256, /^[a-f0-9]{64}$/)
   const businessIDs = new Set<string>()

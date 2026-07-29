@@ -16,14 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
-import { type Table } from '@tanstack/react-table'
-import { useState, useEffect, useCallback } from 'react'
+import type { Table } from '@tanstack/react-table'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useAutoSearch } from '../hooks/use-auto-search'
 import { buildSearchParams } from '../lib/filter'
-import { getDefaultTimeRange } from '../lib/utils'
+import { getDefaultTimeRange } from '../lib/time-range'
 import type { DrawingLogFilters, LogCategory, TaskLogFilters } from '../types'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import {
@@ -70,12 +71,28 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const queryClient = useQueryClient()
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
-  const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
   const [filters, setFilters] = useState<TaskLogsFilters>(() => {
     const { start, end } = getDefaultTimeRange()
     return { startTime: start, endTime: end }
   })
+  const submitFilters = useCallback(
+    (nextFilters: TaskLogsFilters) => {
+      const filterParams = buildSearchParams(nextFilters, props.logCategory)
+      navigate({
+        to: '/usage-logs/$section',
+        params: { section: props.logCategory },
+        search: {
+          ...filterParams,
+          page: 1,
+        },
+      })
+      queryClient.invalidateQueries({ queryKey: ['logs'] })
+    },
+    [navigate, props.logCategory, queryClient]
+  )
+  const { schedule, flush, cancel } = useAutoSearch(submitFilters)
+  const composingFieldsRef = useRef<Set<'filter' | 'channel'>>(new Set())
 
   useEffect(() => {
     const { start, end } = getDefaultTimeRange()
@@ -99,6 +116,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
             ...(searchParams.filter ? { taskId: searchParams.filter } : {}),
           }
 
+    cancel()
     setFilters(next)
   }, [
     props.logCategory,
@@ -106,58 +124,50 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     searchParams.endTime,
     searchParams.channel,
     searchParams.filter,
+    cancel,
   ])
 
-  const handleChange = useCallback(
-    (field: keyof TaskLogsFilters, value: Date | string | undefined) => {
-      setFilters((prev) => ({ ...prev, [field]: value }))
+  const handleImmediateChange = useCallback(
+    (changes: Partial<TaskLogsFilters>) => {
+      const nextFilters = { ...filters, ...changes } as TaskLogsFilters
+      setFilters(nextFilters)
+      flush(nextFilters)
     },
-    []
+    [filters, flush]
   )
 
-  const handleApply = useCallback(() => {
-    const filterParams = buildSearchParams(filters, props.logCategory)
-    navigate({
-      to: '/usage-logs/$section',
-      params: { section: props.logCategory },
-      search: {
-        ...filterParams,
-        page: 1,
-      },
-    })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-  }, [filters, navigate, props.logCategory, queryClient])
+  const handleTextChange = useCallback(
+    (field: 'filter' | 'channel', value: string) => {
+      const nextFilters =
+        field === 'filter'
+          ? setFilterValue(filters, props.logCategory, value)
+          : { ...filters, channel: value || undefined }
+      setFilters(nextFilters)
+      if (!composingFieldsRef.current.has(field)) {
+        schedule(nextFilters)
+      }
+    },
+    [filters, props.logCategory, schedule]
+  )
+
+  const handleCompositionStart = useCallback((field: 'filter' | 'channel') => {
+    composingFieldsRef.current.add(field)
+  }, [])
+
+  const handleCompositionEnd = useCallback(
+    (field: 'filter' | 'channel', value: string) => {
+      composingFieldsRef.current.delete(field)
+      handleTextChange(field, value)
+    },
+    [handleTextChange]
+  )
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: TaskLogsFilters = { startTime: start, endTime: end }
     setFilters(resetFilters)
-
-    navigate({
-      to: '/usage-logs/$section',
-      params: { section: props.logCategory },
-      search: {
-        page: 1,
-        startTime: start.getTime(),
-        endTime: end.getTime(),
-      },
-    })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-  }, [navigate, props.logCategory, queryClient])
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') handleApply()
-    },
-    [handleApply]
-  )
-
-  const handleFilterChange = useCallback(
-    (value: string) => {
-      setFilters((prev) => setFilterValue(prev, props.logCategory, value))
-    },
-    [props.logCategory]
-  )
+    flush(resetFilters)
+  }, [flush])
 
   const filterValue = getFilterValue(filters, props.logCategory)
   const placeholder =
@@ -171,8 +181,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         start={filters.startTime}
         end={filters.endTime}
         onChange={({ start, end }) => {
-          handleChange('startTime', start)
-          handleChange('endTime', end)
+          handleImmediateChange({ startTime: start, endTime: end })
         }}
       />
     </LogsFilterField>
@@ -183,8 +192,11 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         aria-label={t('Task ID')}
         placeholder={placeholder}
         value={filterValue}
-        onChange={(e) => handleFilterChange(e.target.value)}
-        onKeyDown={handleKeyDown}
+        onChange={(e) => handleTextChange('filter', e.target.value)}
+        onCompositionStart={() => handleCompositionStart('filter')}
+        onCompositionEnd={(e) =>
+          handleCompositionEnd('filter', e.currentTarget.value)
+        }
       />
     </LogsFilterField>
   )
@@ -193,8 +205,11 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       <LogsFilterInput
         placeholder={t('Channel ID')}
         value={filters.channel || ''}
-        onChange={(e) => handleChange('channel', e.target.value)}
-        onKeyDown={handleKeyDown}
+        onChange={(e) => handleTextChange('channel', e.target.value)}
+        onCompositionStart={() => handleCompositionStart('channel')}
+        onCompositionEnd={(e) =>
+          handleCompositionEnd('channel', e.currentTarget.value)
+        }
       />
     </LogsFilterField>
   ) : null
@@ -218,8 +233,6 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       }
       mobileFilterCount={[filterValue, filters.channel].filter(Boolean).length}
       hasActiveFilters={hasAdditionalFilters}
-      onSearch={handleApply}
-      searchLoading={fetchingLogs > 0}
       onReset={handleReset}
     />
   )

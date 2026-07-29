@@ -396,6 +396,36 @@ func TestConfigImportSchemaRejectsNonCanonicalRouteTargetCostVariantKey(t *testi
 	}
 }
 
+func TestConfigImportSchemaRejectsIncompleteRouteReferenceBounds(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "missing maximums",
+			mutate: func(target map[string]any) {
+				delete(target, "reference_limits")
+			},
+		},
+		{
+			name: "missing maximum video count",
+			mutate: func(target map[string]any) {
+				delete(target["reference_limits"].(map[string]any), "videos")
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+			target := entities["route_blueprints"].([]any)[0].(map[string]any)["targets"].([]any)[0].(map[string]any)
+			testCase.mutate(target)
+
+			_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+			requireCode(t, err, "SCHEMA_ROUTE_REFERENCE")
+		})
+	}
+}
+
 func TestConfigImportSchemaRequiresRouteTargetRealPersonConstraintWhenLineSetsIt(t *testing.T) {
 	lineSupportsRealPerson := true
 	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", &lineSupportsRealPerson, nil)
@@ -612,6 +642,8 @@ func configImportReferenceTupleEntities(targetLine, targetModel, mappingLine, ma
 	target := map[string]any{
 		"route_target_ref": "target-one", "line_ref": targetLine, "upstream_model": targetModel, "sku_ref": "sku-one",
 		"cost_variant_key": "default", "enabled": false,
+		"reference_minimums": map[string]any{"images": 0, "videos": 0, "audios": 0},
+		"reference_limits":   map[string]any{"images": 0, "videos": 0, "audios": 0},
 	}
 	if targetSupportsRealPerson != nil {
 		target["supports_real_person"] = *targetSupportsRealPerson

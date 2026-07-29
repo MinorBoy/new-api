@@ -270,10 +270,10 @@
     .preview-links a { display: inline-flex; align-items: center; gap: 5px; }
     .preview-links svg { width: 13px; height: 13px; }
 
-    dialog { width: min(460px, calc(100% - 30px)); color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; padding: 0; box-shadow: 0 28px 90px rgba(0, 0, 0, .55); }
+    dialog { width: min(460px, calc(100% - 30px)); max-height: calc(100vh - 30px); overflow: hidden; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; padding: 0; box-shadow: 0 28px 90px rgba(0, 0, 0, .55); }
     dialog::backdrop { background: rgba(0, 0, 0, .62); }
     .dialog-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 17px 18px 13px; border-bottom: 1px solid var(--line); }
-    .dialog-body { padding: 17px 18px 18px; }
+    .dialog-body { max-height: calc(100vh - 94px); overflow-y: auto; padding: 17px 18px 18px; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 17px; }
     .toast-region { position: fixed; z-index: 50; right: 20px; bottom: 20px; display: grid; gap: 8px; width: min(360px, calc(100vw - 40px)); }
     .toast { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; color: var(--text); background: var(--surface-3); border: 1px solid var(--line-strong); border-left: 3px solid var(--teal); border-radius: 5px; box-shadow: var(--shadow); font-size: 12px; animation: toast-in .2s ease both; }
@@ -363,16 +363,16 @@
               <label class="toggle-label" for="rememberProvider"><input id="rememberProvider" type="checkbox"><span><strong>记住此配置</strong><br><span class="field-help">仅写入本机 localStorage</span></span></label>
               <i data-lucide="lock-keyhole" aria-hidden="true" style="width:15px;height:15px;color:var(--faint)"></i>
             </div>
-            <div class="provider-meta"><span class="tag" id="providerStatusTag">未连接</span><span class="tag" id="providerKeyTag">未设置 Key</span></div>
+            <div class="provider-meta"><span class="tag" id="providerStatusTag">未连接</span><span class="tag" id="providerKeyTag">未设置 Key</span><span class="tag" id="providerEndpointTag">未配置端点</span></div>
             <p class="danger-note" style="margin-top:14px">API Key 只会用于浏览器请求。请勿在共享电脑上勾选“记住此配置”。</p>
           </div>
         </section>
 
         <section class="panel">
-          <div class="panel-header"><div><h2 class="panel-title">请求速记</h2><p class="panel-kicker">Seedance 2.0 原生路径</p></div><i data-lucide="route" aria-hidden="true" style="width:16px;height:16px;color:var(--teal)"></i></div>
+          <div class="panel-header"><div><h2 class="panel-title">API 端点</h2><p class="panel-kicker">跟随当前供应商配置</p></div><i data-lucide="route" aria-hidden="true" style="width:16px;height:16px;color:var(--teal)"></i></div>
           <div class="panel-body">
-            <div class="field"><label>创建任务</label><input value="POST /api/v3/contents/generations/tasks" readonly aria-label="创建任务路径"></div>
-            <div class="field"><label>查询任务</label><input value="GET /api/v3/contents/generations/tasks/{id}" readonly aria-label="查询任务路径"></div>
+            <div class="field"><label for="createTaskPath">创建任务 <span class="field-help">POST</span></label><input id="createTaskPath" spellcheck="false" autocomplete="off" placeholder="/api/v3/contents/generations/tasks"></div>
+            <div class="field"><label for="queryTaskPath">查询任务 <span class="field-help">GET · 使用 {id} 占位</span></label><input id="queryTaskPath" spellcheck="false" autocomplete="off" placeholder="/api/v3/contents/generations/tasks/{id}"></div>
             <div class="provider-meta"><span class="tag tag-warm">图片 0–9</span><span class="tag tag-warm">视频 0–3</span><span class="tag tag-warm">音频 0–3</span></div>
           </div>
         </section>
@@ -475,6 +475,8 @@
     <form class="dialog-body" id="providerDialogForm">
       <div class="field"><label for="newProviderName">供应商名称</label><input id="newProviderName" required placeholder="例如：团队代理 / 备用区域"></div>
       <div class="field"><label for="newProviderBaseUrl">Base URL</label><input id="newProviderBaseUrl" required inputmode="url" value="https://ark.cn-beijing.volces.com" placeholder="https://ark.cn-beijing.volces.com"></div>
+      <div class="field"><label for="newProviderCreateTaskPath">创建任务路径 <span class="field-help">POST</span></label><input id="newProviderCreateTaskPath" required spellcheck="false" autocomplete="off" value="/api/v3/contents/generations/tasks"></div>
+      <div class="field"><label for="newProviderQueryTaskPath">查询任务路径 <span class="field-help">GET · 使用 {id} 占位</span></label><input id="newProviderQueryTaskPath" required spellcheck="false" autocomplete="off" value="/api/v3/contents/generations/tasks/{id}"></div>
       <div class="field"><label for="newProviderApiKey">API Key</label><input id="newProviderApiKey" type="password" autocomplete="off" placeholder="sk-..."></div>
       <label class="toggle-label" for="newProviderRemember"><input id="newProviderRemember" type="checkbox"><span><strong>记住此配置</strong><br><span class="field-help">写入本机 localStorage</span></span></label>
       <div class="dialog-actions"><button type="button" class="button button-ghost" id="cancelProviderBtn">取消</button><button type="submit" class="button button-primary"><i data-lucide="plus"></i>添加供应商</button></div>
@@ -488,6 +490,8 @@
 
       const STORAGE_KEY = 'ark-seedance-video-tester:providers:v1';
       const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com';
+      const DEFAULT_CREATE_TASK_PATH = '/api/v3/contents/generations/tasks';
+      const DEFAULT_QUERY_TASK_PATH = '/api/v3/contents/generations/tasks/{id}';
       const MAX_ITEMS = { image: 9, video: 3, audio: 3 };
       const MODEL_PRESETS = [
         { value: 'doubao-seedance-2-0-260128', label: 'Seedance 2.0 · Pro', family: 'Seedance 2.0', resolutions: ['480p', '720p', '1080p', '4k'], badge: '多模态参考 · 4K' },
@@ -528,15 +532,22 @@
         try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; }
       };
       const cleanBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
+      const cleanEndpointPath = (value) => String(value || '').trim();
+      const isEndpointPath = (value) => hasValue(value) && value.startsWith('/') && !value.startsWith('//');
+      const withEndpointDefaults = (provider) => ({
+        ...provider,
+        createTaskPath: hasValue(provider.createTaskPath) ? cleanEndpointPath(provider.createTaskPath) : DEFAULT_CREATE_TASK_PATH,
+        queryTaskPath: hasValue(provider.queryTaskPath) ? cleanEndpointPath(provider.queryTaskPath) : DEFAULT_QUERY_TASK_PATH
+      });
       const activeProvider = () => state.providers.find((provider) => provider.id === state.activeProviderId) || state.providers[0];
       const activeModelPreset = () => MODEL_PRESETS.find((preset) => preset.value === $('modelId').value.trim()) || MODEL_PRESETS.find((preset) => $('modelId').value.trim().startsWith(preset.value.split('-').slice(0, 4).join('-')));
 
       function loadProviders() {
-        const fallback = [{ id: 'default-ark', name: 'Ark 北京主站', baseUrl: DEFAULT_BASE_URL, apiKey: '', remember: false }];
+        const fallback = [withEndpointDefaults({ id: 'default-ark', name: 'Ark 北京主站', baseUrl: DEFAULT_BASE_URL, apiKey: '', remember: false })];
         try {
           const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
           if (!Array.isArray(saved)) return fallback;
-          const valid = saved.filter((item) => item && item.baseUrl && item.name).map((item) => ({ ...item, id: item.id || makeId(), remember: true }));
+          const valid = saved.filter((item) => item && item.baseUrl && item.name).map((item) => withEndpointDefaults({ ...item, id: item.id || makeId(), remember: true }));
           const defaultSaved = valid.find((item) => item.id === 'default-ark');
           if (defaultSaved) return [defaultSaved, ...valid.filter((item) => item.id !== 'default-ark')];
           return [...fallback, ...valid];
@@ -582,7 +593,7 @@
 
       function bindEvents() {
         $('providerSelect').addEventListener('change', (event) => { saveProviderForm(); state.activeProviderId = event.target.value; renderProviders(); updateRequestPreview(); });
-        ['providerName', 'baseUrl', 'apiKey', 'rememberProvider'].forEach((id) => $(id).addEventListener('input', () => { saveProviderForm(); updateRequestPreview(); }));
+        ['providerName', 'baseUrl', 'apiKey', 'createTaskPath', 'queryTaskPath', 'rememberProvider'].forEach((id) => $(id).addEventListener('input', () => { saveProviderForm(); updateRequestPreview(); }));
         $('addProviderBtn').addEventListener('click', () => { $('providerDialog').showModal(); $('newProviderName').focus(); });
         $('closeProviderBtn').addEventListener('click', closeProviderDialog);
         $('cancelProviderBtn').addEventListener('click', closeProviderDialog);
@@ -603,7 +614,7 @@
         qsa('[data-tab]').forEach((tab) => tab.addEventListener('click', () => { state.activeTab = tab.dataset.tab; updateInspector(); }));
       }
 
-      function closeProviderDialog() { $('providerDialog').close(); $('providerDialogForm').reset(); $('newProviderBaseUrl').value = DEFAULT_BASE_URL; }
+      function closeProviderDialog() { $('providerDialog').close(); $('providerDialogForm').reset(); }
 
       function saveProviderForm() {
         const provider = activeProvider();
@@ -611,6 +622,8 @@
         provider.name = $('providerName').value.trim() || '未命名供应商';
         provider.baseUrl = cleanBaseUrl($('baseUrl').value);
         provider.apiKey = $('apiKey').value;
+        provider.createTaskPath = cleanEndpointPath($('createTaskPath').value);
+        provider.queryTaskPath = cleanEndpointPath($('queryTaskPath').value);
         provider.remember = $('rememberProvider').checked;
         persistProviders();
         updateProviderMeta();
@@ -625,6 +638,8 @@
         $('providerName').value = provider.name || '';
         $('baseUrl').value = provider.baseUrl || '';
         $('apiKey').value = provider.apiKey || '';
+        $('createTaskPath').value = provider.createTaskPath || '';
+        $('queryTaskPath').value = provider.queryTaskPath || '';
         $('rememberProvider').checked = Boolean(provider.remember);
         $('deleteProviderBtn').disabled = state.providers.length <= 1;
         updateProviderMeta();
@@ -633,18 +648,25 @@
       function updateProviderMeta() {
         const provider = activeProvider();
         const baseValid = provider && isHttpUrl(provider.baseUrl);
+        const endpointValid = provider && !validateEndpointPaths(provider);
         $('providerStatusTag').textContent = baseValid ? '地址已配置' : '检查 Base URL';
         $('providerStatusTag').className = `tag ${baseValid ? 'tag-teal' : 'tag-warm'}`;
         $('providerKeyTag').textContent = provider && hasValue(provider.apiKey) ? 'Key 已设置' : '未设置 Key';
         $('providerKeyTag').className = `tag ${provider && hasValue(provider.apiKey) ? 'tag-teal' : ''}`;
+        $('providerEndpointTag').textContent = endpointValid ? '端点已配置' : '检查 API 路径';
+        $('providerEndpointTag').className = `tag ${endpointValid ? 'tag-teal' : 'tag-warm'}`;
       }
 
       function handleAddProvider(event) {
         event.preventDefault();
         const name = $('newProviderName').value.trim();
         const baseUrl = cleanBaseUrl($('newProviderBaseUrl').value);
+        const createTaskPath = cleanEndpointPath($('newProviderCreateTaskPath').value);
+        const queryTaskPath = cleanEndpointPath($('newProviderQueryTaskPath').value);
         if (!name || !isHttpUrl(baseUrl)) { showToast('供应商名称和 Base URL 必须有效', true); return; }
-        const provider = { id: makeId(), name, baseUrl, apiKey: $('newProviderApiKey').value, remember: $('newProviderRemember').checked };
+        const endpointError = validateEndpointPaths({ createTaskPath, queryTaskPath });
+        if (endpointError) { showToast(endpointError, true); return; }
+        const provider = { id: makeId(), name, baseUrl, createTaskPath, queryTaskPath, apiKey: $('newProviderApiKey').value, remember: $('newProviderRemember').checked };
         state.providers.push(provider); state.activeProviderId = provider.id; persistProviders(); renderProviders(); updateRequestPreview(); closeProviderDialog(); showToast(`已添加供应商「${name}」`);
       }
 
@@ -694,10 +716,27 @@
         return body;
       }
 
-      function validateRequest(body) {
-        const provider = activeProvider();
+      function validateEndpointPaths(provider) {
+        if (!isEndpointPath(provider.createTaskPath)) return '创建任务路径必须是以 / 开头的相对路径';
+        if (!isEndpointPath(provider.queryTaskPath)) return '查询任务路径必须是以 / 开头的相对路径';
+        if (!provider.queryTaskPath.includes('{id}')) return '查询任务路径必须包含 {id} 占位符';
+        return '';
+      }
+
+      function validateProvider(provider) {
         if (!provider || !isHttpUrl(cleanBaseUrl(provider.baseUrl))) return '请先配置有效的 Base URL';
         if (!hasValue(provider.apiKey)) return '请先填写 API Key';
+        return validateEndpointPaths(provider);
+      }
+
+      function buildApiUrl(provider, path) { return `${cleanBaseUrl(provider.baseUrl)}${cleanEndpointPath(path)}`; }
+
+      function buildQueryTaskPath(provider, taskId) { return provider.queryTaskPath.replaceAll('{id}', encodeURIComponent(taskId)); }
+
+      function validateRequest(body) {
+        const provider = activeProvider();
+        const providerError = validateProvider(provider);
+        if (providerError) return providerError;
         if (!hasValue(body.model)) return 'Model ID 不能为空';
         const images = collectValues('image'); const videos = collectValues('video'); const audios = collectValues('audio');
         if (!body.content.length) return '请填写提示词，或至少添加一张图片 / 一个视频';
@@ -738,9 +777,10 @@
         if (error) { showToast(error, true); addTimeline('error', '校验未通过', error, true); return; }
         state.requestBody = body; state.responseBody = null; state.taskId = ''; state.timeline = [];
         renderTimeline(); updateInspector(); setLoading(true); setHttpStatus('发送中'); setResultStatus('排队'); $('timelineStatus').textContent = '发送中';
-        addTimeline('request', '发送创建请求', `${cleanBaseUrl(activeProvider().baseUrl)}/api/v3/contents/generations/tasks`);
+        const provider = activeProvider();
+        addTimeline('request', '发送创建请求', buildApiUrl(provider, provider.createTaskPath));
         try {
-          const response = await requestApi('POST', '/api/v3/contents/generations/tasks', body);
+          const response = await requestApi('POST', provider.createTaskPath, body);
           state.responseBody = response.data; updateInspector(); setHttpStatus(`${response.status} ${response.statusText || ''}`.trim());
           const id = response.data.id || response.data.task_id || response.data.data?.id;
           if (!id) throw new Error('响应中没有找到任务 ID');
@@ -753,7 +793,7 @@
 
       async function requestApi(method, path, body) {
         const provider = activeProvider();
-        const url = `${cleanBaseUrl(provider.baseUrl)}${path}`;
+        const url = buildApiUrl(provider, path);
         const options = { method, headers: { Accept: 'application/json', Authorization: `Bearer ${provider.apiKey.trim()}` } };
         if (body !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
         let response;
@@ -773,9 +813,13 @@
       async function queryTask(taskId, silent = false) {
         if (!taskId) { if (!silent) showToast('请填写任务 ID', true); return; }
         if (state.pollBusy) return;
+        saveProviderForm();
+        const provider = activeProvider();
+        const providerError = validateProvider(provider);
+        if (providerError) { if (!silent) { showToast(providerError, true); addTimeline('error', '查询配置无效', providerError, true); } return; }
         state.pollBusy = true;
         try {
-          const response = await requestApi('GET', `/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`);
+          const response = await requestApi('GET', buildQueryTaskPath(provider, taskId));
           state.responseBody = response.data; state.taskId = taskId; $('taskIdInput').value = taskId; updateInspector(); setHttpStatus(`${response.status} ${response.statusText || ''}`.trim());
           renderTaskResult(response.data);
           const status = response.data.status || response.data.data?.status || 'unknown';
@@ -823,11 +867,10 @@
       async function copyCurl() { const curl = buildCurl(false); const success = await copyText(curl); showToast(success ? 'cURL 已复制到剪贴板' : '无法访问剪贴板，请手动复制'); }
       async function copyCurrentJson() { const value = state.activeTab === 'request' ? pretty(state.requestBody) : state.responseBody ? pretty(state.responseBody) : ''; if (!value) { showToast('当前没有可复制的 JSON', true); return; } const success = await copyText(value); showToast(success ? 'JSON 已复制到剪贴板' : '无法访问剪贴板，请手动复制'); }
       async function copyText(value) { try { await navigator.clipboard.writeText(value); return true; } catch { const textarea = document.createElement('textarea'); textarea.value = value; textarea.style.position = 'fixed'; textarea.style.opacity = '0'; document.body.append(textarea); textarea.select(); const ok = document.execCommand('copy'); textarea.remove(); return ok; } }
-      function buildCurl(redact = true) { const provider = activeProvider() || { baseUrl: DEFAULT_BASE_URL, apiKey: '' }; const key = redact ? '<YOUR_API_KEY>' : (provider.apiKey || '<YOUR_API_KEY>'); const url = `${cleanBaseUrl(provider.baseUrl)}/api/v3/contents/generations/tasks`; return `curl '${url}' \\\n+  -H 'Authorization: Bearer ${key}' \\\n+  -H 'Content-Type: application/json' \\\n+  --data '${JSON.stringify(state.requestBody).replace(/'/g, "'\\''")}'`; }
       function buildCurl(redact = true) {
-        const provider = activeProvider() || { baseUrl: DEFAULT_BASE_URL, apiKey: '' };
+        const provider = activeProvider() || withEndpointDefaults({ baseUrl: DEFAULT_BASE_URL, apiKey: '' });
         const key = redact ? '<YOUR_API_KEY>' : (provider.apiKey || '<YOUR_API_KEY>');
-        const url = `${cleanBaseUrl(provider.baseUrl)}/api/v3/contents/generations/tasks`;
+        const url = buildApiUrl(provider, provider.createTaskPath);
         const payload = JSON.stringify(state.requestBody).replace(/'/g, "'\\\\''");
         return [
           `curl '${url}' \\\\`,

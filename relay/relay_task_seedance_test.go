@@ -181,9 +181,19 @@ func TestTaskModel2DtoExposesAuditPayloadsToAdminsOnly(t *testing.T) {
 	require.NoError(t, err)
 	var userResponse map[string]json.RawMessage
 	require.NoError(t, common.Unmarshal(userPayload, &userResponse))
-	assert.NotContains(t, userResponse, "user_request_data")
+	assert.JSONEq(t, `{"model":"client-model","prompt":"user request"}`, string(userResponse["user_request_data"]))
 	assert.NotContains(t, userResponse, "upstream_response_data")
 	assert.NotContains(t, userResponse, "user_response_data")
+}
+
+func TestTaskModel2DtoIncludesInboundRequestPath(t *testing.T) {
+	task := &model.Task{
+		Properties: model.Properties{RequestPath: "/v1/video/generations"},
+	}
+
+	taskDTO := TaskModel2Dto(task, true)
+
+	assert.Equal(t, "/v1/video/generations", taskDTO.RequestPath)
 }
 
 func TestTaskModel2DtoHidesMegaByAIDataWithoutRoutingFromUsers(t *testing.T) {
@@ -591,6 +601,10 @@ func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {
 	assert.Equal(t, "task_public", response["id"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, "https://x/video.mp4", response["content"].(map[string]interface{})["video_url"])
+
+	var stored model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task_public").First(&stored).Error)
+	assert.JSONEq(t, string(body), string(stored.PrivateData.UserResponseData))
 }
 
 func TestDimensioTaskFetchPreservesProviderTimestampsAndErrors(t *testing.T) {
@@ -626,6 +640,10 @@ func TestDimensioTaskFetchPreservesProviderTimestampsAndErrors(t *testing.T) {
 	assert.Equal(t, int64(444), response.UpdatedAt)
 	assert.Equal(t, "2043", response.Error.Code)
 	assert.Equal(t, "审核不通过", response.Error.Message)
+
+	var stored model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task_failed").First(&stored).Error)
+	assert.JSONEq(t, string(body), string(stored.PrivateData.UserResponseData))
 }
 
 func TestDimensioTaskAdaptorIsTaskOnly(t *testing.T) {

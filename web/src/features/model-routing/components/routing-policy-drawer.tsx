@@ -39,6 +39,12 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import {
   Combobox,
@@ -57,6 +63,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -159,6 +166,9 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
   const groupName = useWatch({ control: form.control, name: 'group_name' })
   const modelName = useWatch({ control: form.control, name: 'model' })
   const enabled = useWatch({ control: form.control, name: 'enabled' })
+  const targetValues = useWatch({ control: form.control, name: 'targets' })
+  const allTargetsEnabled =
+    targetValues.length > 0 && targetValues.every((target) => target.enabled)
 
   const candidatesQuery = useQuery({
     queryKey: routingPolicyQueryKeys.candidates(groupName, modelName),
@@ -474,7 +484,7 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
             </SideDrawerSection>
 
             <section className='flex flex-col gap-4'>
-              <div className='flex items-center justify-between gap-3'>
+              <div className='flex flex-wrap items-start justify-between gap-3'>
                 <div className='min-w-0'>
                   <h3 className='text-sm font-semibold'>
                     {t('Routing targets')}
@@ -485,32 +495,67 @@ export function RoutingPolicyDrawer(props: RoutingPolicyDrawerProps) {
                     )}
                   </p>
                 </div>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={() => targets.append(createEmptyTarget())}
-                >
-                  <Plus data-icon='inline-start' aria-hidden='true' />
-                  {t('Add target')}
-                </Button>
+                <div className='flex shrink-0 flex-wrap items-center justify-end gap-3'>
+                  <div className='flex items-center gap-2'>
+                    <Label htmlFor='routing-targets-enable-all'>
+                      {t('Enable all targets')}
+                    </Label>
+                    <Switch
+                      id='routing-targets-enable-all'
+                      aria-label={t('Enable all targets')}
+                      checked={allTargetsEnabled}
+                      disabled={targetValues.length === 0}
+                      onCheckedChange={(checked) => {
+                        targetValues.forEach((_, index) => {
+                          form.setValue(`targets.${index}.enabled`, checked, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          })
+                        })
+                      }}
+                    />
+                  </div>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => targets.append(createEmptyTarget())}
+                  >
+                    <Plus data-icon='inline-start' aria-hidden='true' />
+                    {t('Add target')}
+                  </Button>
+                </div>
               </div>
 
-              {targets.fields.map((target, index) => (
-                <RouteTargetEditor
-                  key={target.id}
-                  form={form}
-                  index={index}
-                  candidates={candidates ?? EMPTY_CANDIDATES}
-                  candidatesLoading={candidatesQuery.isLoading}
-                  canRemove={!enabled || targets.fields.length > 1}
-                  onCopy={() => {
-                    const source = form.getValues(`targets.${index}`)
-                    targets.insert(index + 1, copyTargetForm(source))
-                  }}
-                  onRemove={() => targets.remove(index)}
-                />
-              ))}
+              {targets.fields.length > 0 && (
+                <Accordion multiple className='rounded-md border'>
+                  {targets.fields.map((target, index) => (
+                    <AccordionItem key={target.id} value={target.id}>
+                      <AccordionTrigger className='px-3 sm:px-4'>
+                        <span className='min-w-0 truncate'>
+                          {targetValues[index]?.name ||
+                            `${t('Routing target')} ${index + 1}`}
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent className='px-3 sm:px-4'>
+                        <RouteTargetEditor
+                          form={form}
+                          index={index}
+                          candidates={candidates ?? EMPTY_CANDIDATES}
+                          candidatesLoading={candidatesQuery.isLoading}
+                          canRemove={!enabled || targets.fields.length > 1}
+                          className='rounded-none border-0 p-0 sm:p-0'
+                          onCopy={() => {
+                            const source = form.getValues(`targets.${index}`)
+                            targets.insert(index + 1, copyTargetForm(source))
+                          }}
+                          onRemove={() => targets.remove(index)}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              )}
 
               {targets.fields.length === 0 && (
                 <p className='text-muted-foreground py-6 text-center text-sm'>

@@ -615,6 +615,17 @@ function auditNote(entity) {
   return `原始业务ID=${entity.businessId}; 来源定位=${location.sheet}!${location.row}`
 }
 
+function compactReferenceLimits(entity) {
+  const match = extractedText(entity, '备注').match(
+    /素材限制=(\d{3})(?:$|[；;])/u
+  )
+  if (!match) {
+    return null
+  }
+  const [images, videos, audios] = match[1].split('').map(Number)
+  return { images, videos, audios }
+}
+
 function addStructuredSheet(workbook, name, headers, rows, tableName) {
   const sheet = workbook.worksheets.add(name)
   const lastColumn = columnName(headers.length)
@@ -722,6 +733,7 @@ function normalizedPairs(extracted) {
       )
     }
     for (const [index, cost] of costs.entries()) {
+      if (!compactReferenceLimits(mappings[index])) continue
       pairs.push({ cost, mapping: mappings[index] })
     }
   }
@@ -835,6 +847,10 @@ function buildStructuredV2Workbook(extracted) {
     const line = extracted.channelLines.find(
       (candidate) => candidate.businessId === mapping.lineRef
     )
+    const referenceLimits = compactReferenceLimits(mapping)
+    if (!referenceLimits) {
+      throw new Error(`${mapping.businessId} 缺少有效素材限制`)
+    }
     return [
       `ROUTE-${mapping.businessId}`,
       extractedText(sku, '模型'),
@@ -847,6 +863,12 @@ function buildStructuredV2Workbook(extracted) {
       extractedText(sku, '分辨率档位'),
       extractedNumber(sku, 0, '最小时长秒'),
       extractedNumber(sku, 0, '最大时长秒'),
+      0,
+      0,
+      0,
+      referenceLimits.images,
+      referenceLimits.videos,
+      referenceLimits.audios,
       line?.supportsRealPerson ?? null,
       100,
       false,
@@ -937,8 +959,8 @@ function buildStructuredV2Workbook(extracted) {
     'replace',
     'skip',
   ])
-  applyListValidation(routeSheet, 'L', routeRows.length, ['true', 'false'])
-  applyListValidation(routeSheet, 'N', routeRows.length, ['false'])
+  applyListValidation(routeSheet, 'R', routeRows.length, ['true', 'false'])
+  applyListValidation(routeSheet, 'T', routeRows.length, ['false'])
 
   const salesUSDBySKU = new Map(
     extracted.saleProposals.map((sale) => [
@@ -991,7 +1013,7 @@ function buildStructuredV2Workbook(extracted) {
       '禁用路由目标',
       null,
       null,
-      `路由目标!N5:N${routeRows.length + 4}`,
+      `路由目标!T5:T${routeRows.length + 4}`,
       '新路由目标必须保持禁用。',
     ],
     [
@@ -1011,7 +1033,7 @@ function buildStructuredV2Workbook(extracted) {
   )
   validationSheet.getRange('B5:B7').formulas = [
     [`=COUNTBLANK('渠道成本'!$B$5:$B$${costLastRow})`],
-    [`=COUNTIF('路由目标'!$N$5:$N$${routeRows.length + 4},TRUE)`],
+    [`=COUNTIF('路由目标'!$T$5:$T$${routeRows.length + 4},TRUE)`],
     [`=COUNTBLANK('渠道成本'!$G$5:$G$${costLastRow})`],
   ]
   validationSheet.getRange('C5:C7').formulas = [
@@ -1079,10 +1101,10 @@ async function buildV2Template() {
     }),
     firstWorkbook.inspect({
       kind: 'table',
-      range: '路由目标!A1:N12',
+      range: '路由目标!A1:T12',
       include: 'values,formulas',
       tableMaxRows: 12,
-      tableMaxCols: 14,
+      tableMaxCols: 20,
     }),
     firstWorkbook.inspect({
       kind: 'match',
@@ -1143,7 +1165,9 @@ async function main() {
   await output.save(fixturePath)
   const outputBytes = canonicalizeXlsxBytes(await fs.readFile(fixturePath))
   await fs.writeFile(fixturePath, outputBytes)
-  await fs.writeFile(generatedPath, outputBytes)
+  if (process.env.SKIP_GENERATED_WORKBOOK_OUTPUT !== '1') {
+    await fs.writeFile(generatedPath, outputBytes)
+  }
   await fs.writeFile(
     expectedCountsPath,
     `${JSON.stringify(expectedCounts, null, 2)}\n`

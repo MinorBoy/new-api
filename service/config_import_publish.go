@@ -442,6 +442,7 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 		channelIDs = append(channelIDs, channelID)
 	}
 	sort.Ints(channelIDs)
+	hasAbilityTable := tx.Migrator().HasTable(&model.Ability{})
 	for _, channelID := range channelIDs {
 		var channel model.Channel
 		if err := tx.Where("id = ?", channelID).First(&channel).Error; err != nil {
@@ -453,15 +454,44 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 				return configImportError("PUBLISH_MODEL_MAPPING", "channel %d has invalid existing model mapping", channelID)
 			}
 		}
-		for origin, upstream := range mappingsByChannel[channelID] {
+		canonicalModels := make([]string, 0, len(mappingsByChannel[channelID]))
+		for origin := range mappingsByChannel[channelID] {
+			canonicalModels = append(canonicalModels, origin)
+		}
+		sort.Strings(canonicalModels)
+		declaredModels := make(map[string]struct{}, len(channel.GetModels())+len(canonicalModels))
+		for _, modelName := range channel.GetModels() {
+			if modelName = strings.TrimSpace(modelName); modelName != "" {
+				declaredModels[modelName] = struct{}{}
+			}
+		}
+		for _, origin := range canonicalModels {
+			upstream := mappingsByChannel[channelID][origin]
 			mapping[origin] = upstream
+			if _, exists := declaredModels[origin]; exists {
+				continue
+			}
+			channel.Models = strings.Trim(strings.TrimSpace(channel.Models), ",")
+			if channel.Models != "" {
+				channel.Models += ","
+			}
+			channel.Models += origin
+			declaredModels[origin] = struct{}{}
 		}
 		encoded, err := common.Marshal(mapping)
 		if err != nil {
 			return err
 		}
-		if err := tx.Model(&model.Channel{}).Where("id = ?", channelID).Updates(map[string]any{"model_mapping": string(encoded)}).Error; err != nil {
+		if err := tx.Model(&model.Channel{}).Where("id = ?", channelID).Updates(map[string]any{
+			"model_mapping": string(encoded),
+			"models":        channel.Models,
+		}).Error; err != nil {
 			return err
+		}
+		if hasAbilityTable {
+			if err := channel.UpdateAbilities(tx); err != nil {
+				return err
+			}
 		}
 		refresh.ChannelIDs = append(refresh.ChannelIDs, channelID)
 	}
@@ -486,6 +516,11 @@ func configImportPublishedLineChannels(tx *gorm.DB, items []model.ConfigImportIt
 	return lineChannels, nil
 }
 
+type configImportPublishRouteBlueprint struct {
+	item      model.ConfigImportItem
+	blueprint types.ConfigImportRouteBlueprint
+}
+
 func publishConfigImportRoutes(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {
 	if !tx.Migrator().HasTable(&model.RoutingPolicy{}) || !tx.Migrator().HasTable(&model.RouteTarget{}) {
 		return nil
@@ -494,6 +529,7 @@ func publishConfigImportRoutes(tx *gorm.DB, items []model.ConfigImportItem, refr
 	if err != nil {
 		return err
 	}
+	routeBlueprints := make([]configImportPublishRouteBlueprint, 0)
 	for _, item := range items {
 		if item.EntityType != "route_blueprints" || item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
 			continue
@@ -508,7 +544,13 @@ func publishConfigImportRoutes(tx *gorm.DB, items []model.ConfigImportItem, refr
 		if blueprint.MergeMode == "" {
 			blueprint.MergeMode = types.ConfigImportRouteMergeModeMerge
 		}
-		policy, targets, err := configImportRouteRows(lineChannels, blueprint)
+		routeBlueprints = append(routeBlueprints, configImportPublishRouteBlueprint{item: item, blueprint: blueprint})
+	}
+	priorityOverrides := configImportRouteTargetPriorityOverrides(lineChannels, routeBlueprints)
+	for _, routeBlueprint := range routeBlueprints {
+		item := routeBlueprint.item
+		blueprint := routeBlueprint.blueprint
+		policy, targets, err := configImportRouteRowsWithPriorityOverrides(lineChannels, blueprint, priorityOverrides)
 		if err != nil {
 			return err
 		}
@@ -567,6 +609,10 @@ func configImportMergeRouteTargets(existing, incoming []model.RouteTarget) []mod
 }
 
 func configImportRouteRows(lineChannels map[string]int, blueprint types.ConfigImportRouteBlueprint) (model.RoutingPolicy, []model.RouteTarget, error) {
+	return configImportRouteRowsWithPriorityOverrides(lineChannels, blueprint, nil)
+}
+
+func configImportRouteRowsWithPriorityOverrides(lineChannels map[string]int, blueprint types.ConfigImportRouteBlueprint, priorityOverrides map[string]int) (model.RoutingPolicy, []model.RouteTarget, error) {
 	policy := model.RoutingPolicy{
 		GroupName:         "default",
 		Model:             configImportRuntimeCanonicalModel(blueprint.CanonicalModel),
@@ -595,18 +641,32 @@ func configImportRouteRows(lineChannels map[string]int, blueprint types.ConfigIm
 			policy.DefaultRatio = first.AspectRatios[0]
 		}
 	}
+	priorities := configImportRouteTargetPriorities(lineChannels, blueprint.Targets)
+	for index, target := range blueprint.Targets {
+		if priority, found := priorityOverrides[target.RouteTargetRef]; found {
+			priorities[index] = priority
+		}
+	}
 	targets := make([]model.RouteTarget, 0, len(blueprint.Targets))
-	for _, target := range blueprint.Targets {
+	for index, target := range blueprint.Targets {
 		channelID := lineChannels[target.LineRef]
 		if channelID <= 0 {
 			return policy, nil, configImportError("PUBLISH_LINE_UNBOUND", "route target %q references unbound line %q", target.RouteTargetRef, target.LineRef)
+		}
+		referenceMinimums, err := configImportReferenceLimits(target.ReferenceMinimums)
+		if err != nil {
+			return policy, nil, configImportError("PUBLISH_ROUTE_REFERENCE", "route target %q reference minimums are invalid: %v", target.RouteTargetRef, err)
+		}
+		referenceLimits, err := configImportReferenceLimits(target.ReferenceLimits)
+		if err != nil {
+			return policy, nil, configImportError("PUBLISH_ROUTE_REFERENCE", "route target %q reference limits are invalid: %v", target.RouteTargetRef, err)
 		}
 		constraints := modelrouting.Constraints{
 			OutputResolutions:  target.OutputResolutions,
 			Durations:          modelrouting.DurationConstraint{Values: target.DurationValues, Min: target.DurationMin, Max: target.DurationMax},
 			AspectRatios:       target.AspectRatios,
-			ReferenceMinimums:  configImportReferenceLimits(target.ReferenceMinimums),
-			ReferenceLimits:    configImportReferenceLimits(target.ReferenceLimits),
+			ReferenceMinimums:  referenceMinimums,
+			ReferenceLimits:    referenceLimits,
 			SupportsRealPerson: target.SupportsRealPerson,
 		}
 		for _, mode := range target.InputModes {
@@ -616,14 +676,82 @@ func configImportRouteRows(lineChannels map[string]int, blueprint types.ConfigIm
 		if err != nil {
 			return policy, nil, err
 		}
-		priority := 0
-		if target.Priority != nil {
-			priority = *target.Priority
-		}
 		enabled := false
-		targets = append(targets, model.RouteTarget{ChannelID: channelID, Name: target.RouteTargetRef, UpstreamModel: target.UpstreamModel, CostVariantKey: target.CostVariantKey, TargetPriority: priority, Enabled: enabled, Constraints: string(encoded)})
+		targets = append(targets, model.RouteTarget{ChannelID: channelID, Name: target.RouteTargetRef, UpstreamModel: target.UpstreamModel, CostVariantKey: target.CostVariantKey, TargetPriority: priorities[index], Enabled: enabled, Constraints: string(encoded)})
 	}
 	return policy, targets, nil
+}
+
+func configImportRouteTargetPriorityOverrides(lineChannels map[string]int, blueprints []configImportPublishRouteBlueprint) map[string]int {
+	// Priorities are allocated across every blueprint in one publish batch so
+	// separately stored route rows for the same channel cannot collide.
+	type priorityKey struct {
+		canonicalModel string
+		channelID      int
+	}
+	targetCountByKey := make(map[priorityKey]int)
+	usedByKey := make(map[priorityKey]map[int]struct{})
+	for _, routeBlueprint := range blueprints {
+		canonicalModel := configImportRuntimeCanonicalModel(routeBlueprint.blueprint.CanonicalModel)
+		for _, target := range routeBlueprint.blueprint.Targets {
+			key := priorityKey{canonicalModel: canonicalModel, channelID: lineChannels[target.LineRef]}
+			targetCountByKey[key]++
+			if target.Priority == nil {
+				continue
+			}
+			if usedByKey[key] == nil {
+				usedByKey[key] = make(map[int]struct{})
+			}
+			usedByKey[key][*target.Priority] = struct{}{}
+		}
+	}
+
+	overrides := make(map[string]int)
+	nextByKey := make(map[priorityKey]int)
+	for _, routeBlueprint := range blueprints {
+		canonicalModel := configImportRuntimeCanonicalModel(routeBlueprint.blueprint.CanonicalModel)
+		for _, target := range routeBlueprint.blueprint.Targets {
+			if target.Priority != nil {
+				continue
+			}
+			key := priorityKey{canonicalModel: canonicalModel, channelID: lineChannels[target.LineRef]}
+			candidate, initialized := nextByKey[key]
+			if !initialized {
+				candidate = targetCountByKey[key] - 1
+			}
+			if usedByKey[key] == nil {
+				usedByKey[key] = make(map[int]struct{})
+			}
+			for {
+				if _, used := usedByKey[key][candidate]; !used {
+					break
+				}
+				candidate--
+			}
+			overrides[target.RouteTargetRef] = candidate
+			usedByKey[key][candidate] = struct{}{}
+			nextByKey[key] = candidate - 1
+		}
+	}
+	return overrides
+}
+
+// configImportRouteTargetPriorities preserves explicit priorities and assigns
+// descending, collision-free defaults to targets on the same channel. The
+// blueprint order determines precedence for targets without an explicit value.
+func configImportRouteTargetPriorities(lineChannels map[string]int, targets []types.ConfigImportRouteTarget) []int {
+	overrides := configImportRouteTargetPriorityOverrides(lineChannels, []configImportPublishRouteBlueprint{{
+		blueprint: types.ConfigImportRouteBlueprint{Targets: targets},
+	}})
+	priorities := make([]int, len(targets))
+	for index, target := range targets {
+		if target.Priority != nil {
+			priorities[index] = *target.Priority
+			continue
+		}
+		priorities[index] = overrides[target.RouteTargetRef]
+	}
+	return priorities
 }
 
 // Config documents use the stable, human-readable model families in legacy
@@ -641,19 +769,13 @@ func configImportRuntimeCanonicalModel(modelName string) string {
 	}
 }
 
-func configImportReferenceLimits(bounds *types.ConfigImportReferenceBounds) modelrouting.ReferenceLimits {
-	limits := modelrouting.ReferenceLimits{}
-	if bounds == nil {
-		return limits
+func configImportReferenceLimits(bounds *types.ConfigImportReferenceBounds) (modelrouting.ReferenceLimits, error) {
+	if bounds == nil || bounds.Images == nil || bounds.Videos == nil || bounds.Audios == nil {
+		return modelrouting.ReferenceLimits{}, errors.New("reference limits must include images, videos, and audios")
 	}
-	if bounds.Images != nil {
-		limits.Images = *bounds.Images
-	}
-	if bounds.Videos != nil {
-		limits.Videos = *bounds.Videos
-	}
-	if bounds.Audios != nil {
-		limits.Audios = *bounds.Audios
-	}
-	return limits
+	return modelrouting.ReferenceLimits{
+		Images: *bounds.Images,
+		Videos: *bounds.Videos,
+		Audios: *bounds.Audios,
+	}, nil
 }

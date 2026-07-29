@@ -127,7 +127,6 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 
 	requestPayload := []byte(`{"model":"video-model","prompt":"user request"}`)
 	upstreamResponse := []byte(`{"id":"upstream-task","status":"queued"}`)
-	userResponse := []byte(`{"id":"task-public","status":"queued"}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", bytes.NewReader(requestPayload))
 	relayInfo := &relaycommon.RelayInfo{
@@ -141,11 +140,10 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task-public"},
 	}
 	result := &relay.TaskSubmitResult{
-		UpstreamTaskID:   "upstream-task",
-		TaskData:         upstreamResponse,
-		UserResponseData: userResponse,
-		Platform:         constant.TaskPlatform("task-test"),
-		Quota:            100,
+		UpstreamTaskID: "upstream-task",
+		TaskData:       upstreamResponse,
+		Platform:       constant.TaskPlatform("task-test"),
+		Quota:          100,
 	}
 
 	require.NoError(t, persistSubmittedTask(c, relayInfo, result))
@@ -158,7 +156,7 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 	require.NoError(t, common.Unmarshal(persistedPrivateData, &auditPayloads))
 	assert.JSONEq(t, string(requestPayload), string(auditPayloads["user_request_data"]))
 	assert.JSONEq(t, string(upstreamResponse), string(auditPayloads["upstream_response_data"]))
-	assert.JSONEq(t, string(userResponse), string(auditPayloads["user_response_data"]))
+	assert.Empty(t, auditPayloads["user_response_data"])
 }
 
 func TestHandleTaskCostCoverageFailureExcludesChannelAndRetries(t *testing.T) {

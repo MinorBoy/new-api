@@ -814,7 +814,6 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		task.PrivateData.UserRequestData = requestData
 	}
 	task.PrivateData.UpstreamResponseData = result.TaskData
-	task.PrivateData.UserResponseData = result.UserResponseData
 	if err := task.Insert(); err != nil {
 		requestCtx := c.Request.Context()
 		if markerErr := service.MarkOrphanedCostTask(requestCtx, relayInfo.CostRequestID, result.UpstreamTaskID, "orphaned_task_insert_failed"); markerErr != nil {

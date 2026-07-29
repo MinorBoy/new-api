@@ -12,6 +12,7 @@ import (
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -84,6 +85,7 @@ type Properties struct {
 	Input             string `json:"input"`
 	UpstreamModelName string `json:"upstream_model_name,omitempty"`
 	OriginModelName   string `json:"origin_model_name,omitempty"`
+	RequestPath       string `json:"request_path,omitempty"`
 }
 
 func (m *Properties) Scan(val interface{}) error {
@@ -106,8 +108,9 @@ type TaskPrivateData struct {
 	Key            string `json:"key,omitempty"`
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
-	// Admin-only audit payloads captured when the task is submitted. They stay
-	// inside private_data and are never included in user task DTOs.
+	// UserRequestData and UpstreamResponseData are captured at submission.
+	// UserResponseData is captured from the terminal response returned to the
+	// task owner. Upstream and user-response payloads are administrator-only.
 	UserRequestData      json.RawMessage `json:"user_request_data,omitempty"`
 	UpstreamResponseData json.RawMessage `json:"upstream_response_data,omitempty"`
 	UserResponseData     json.RawMessage `json:"user_response_data,omitempty"`
@@ -212,6 +215,7 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	privateData := TaskPrivateData{}
 	if relayInfo != nil {
 		privateData.CostRequestID = relayInfo.CostRequestID
+		properties.RequestPath = commonRelay.SafeRequestPath(relayInfo.RequestURLPath)
 	}
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
 		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
@@ -466,6 +470,18 @@ func (Task *Task) Update() error {
 	var err error
 	err = DB.Save(Task).Error
 	return err
+}
+
+// UpdateTaskUserResponseData stores the terminal response returned to a task owner.
+func UpdateTaskUserResponseData(taskID int64, responseData json.RawMessage) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		task := &Task{}
+		if err := lockForUpdate(tx).Where("id = ?", taskID).First(task).Error; err != nil {
+			return err
+		}
+		task.PrivateData.UserResponseData = responseData
+		return tx.Model(task).Update("private_data", task.PrivateData).Error
+	})
 }
 
 func (t *Task) UpdateQuota() error {

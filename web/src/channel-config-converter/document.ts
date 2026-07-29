@@ -160,6 +160,56 @@ function listField(entity: ExtractedEntity, ...names: string[]): string[] {
     .filter(Boolean)
 }
 
+type ReferenceBounds = {
+  minimums: { images: number; videos: number; audios: number }
+  limits: { images: number; videos: number; audios: number }
+}
+
+function legacyReferenceBounds(entity: ExtractedEntity): ReferenceBounds | null {
+  const match = field(entity, '备注').match(
+    /素材限制=(\d{3})(?:$|[；;])/u
+  )
+  if (!match) {
+    return null
+  }
+  const [images, videos, audios] = match[1].split('').map(Number)
+  return {
+    minimums: { images: 0, videos: 0, audios: 0 },
+    limits: { images, videos, audios },
+  }
+}
+
+function structuredReferenceBounds(entity: ExtractedEntity): ReferenceBounds | null {
+  const minImages = optionalInteger(entity, 'reference_min_images')
+  const minVideos = optionalInteger(entity, 'reference_min_videos')
+  const minAudios = optionalInteger(entity, 'reference_min_audios')
+  const maxImages = optionalInteger(entity, 'reference_max_images')
+  const maxVideos = optionalInteger(entity, 'reference_max_videos')
+  const maxAudios = optionalInteger(entity, 'reference_max_audios')
+  if (
+    minImages === undefined ||
+    minVideos === undefined ||
+    minAudios === undefined ||
+    maxImages === undefined ||
+    maxVideos === undefined ||
+    maxAudios === undefined
+  ) {
+    return null
+  }
+  return {
+    minimums: {
+      images: minImages,
+      videos: minVideos,
+      audios: minAudios,
+    },
+    limits: {
+      images: maxImages,
+      videos: maxVideos,
+      audios: maxAudios,
+    },
+  }
+}
+
 function sourceRef(entity: ExtractedEntity): string {
   return field(entity, 'source_ref', '来源ID')
 }
@@ -586,6 +636,18 @@ export async function buildImportDocument(
         line?.supportsRealPerson ??
         optionalBoolean(route, 'supports_real_person')
       const priority = optionalInteger(route, 'priority')
+      const referenceBounds = structuredReferenceBounds(route)
+      if (!referenceBounds) {
+        issues.push(
+          sourceIssue(
+            'ROUTE_REFERENCE_LIMITS_INVALID',
+            'error',
+            'The route target must provide all reference minimum and maximum values.',
+            route
+          )
+        )
+        continue
+      }
       entities.route_blueprints.push(
         await authoritativeEntity(
           {
@@ -613,6 +675,8 @@ export async function buildImportDocument(
                   ? {}
                   : { supports_real_person: supportsRealPerson }),
                 output_resolutions: listField(route, 'output_resolutions'),
+                reference_minimums: referenceBounds.minimums,
+                reference_limits: referenceBounds.limits,
                 route_target_ref: routeTargetRef,
                 sku_ref: skuRef,
                 upstream_model: field(route, 'upstream_model', '上游模型'),
@@ -681,6 +745,43 @@ export async function buildImportDocument(
               'error',
               'The cost has an unresolved reference.',
               cost
+            )
+          )
+          continue
+        }
+        const mappingSource = sourceRef(mapping)
+        if (!sourceIDs.has(mappingSource)) {
+          issues.push(
+            sourceIssue(
+              'MAPPING_SOURCE_UNRESOLVED',
+              'error',
+              'The mapping has no source record.',
+              mapping
+            )
+          )
+          continue
+        }
+        const line = input.extracted.channelLines.find(
+          (candidate) => candidate.businessId === lineRef
+        )
+        const canonicalModel = field(sku, 'canonical_model', '模型')
+        entities.model_mappings.push(
+          await authoritativeEntity(mapping, mappingSource, {
+            canonical_model: canonicalModel,
+            client_model: field(mapping, 'client_model', '客户端模型'),
+            line_ref: lineRef,
+            sku_ref: skuRef,
+            upstream_model: field(mapping, 'upstream_model', '上游模型'),
+          })
+        )
+        const referenceBounds = legacyReferenceBounds(mapping)
+        if (!referenceBounds) {
+          issues.push(
+            sourceIssue(
+              'ROUTE_REFERENCE_LIMITS_UNRESOLVED',
+              'error',
+              'The legacy mapping note must provide a verified three-digit 素材限制 value.',
+              mapping
             )
           )
           continue
@@ -754,33 +855,8 @@ export async function buildImportDocument(
           await authoritativeEntity(cost, source, costFields)
         )
 
-        const mappingSource = sourceRef(mapping)
-        if (!sourceIDs.has(mappingSource)) {
-          issues.push(
-            sourceIssue(
-              'MAPPING_SOURCE_UNRESOLVED',
-              'error',
-              'The mapping has no source record.',
-              mapping
-            )
-          )
-          continue
-        }
-        const canonicalModel = field(sku, 'canonical_model', '模型')
-        entities.model_mappings.push(
-          await authoritativeEntity(mapping, mappingSource, {
-            canonical_model: canonicalModel,
-            client_model: field(mapping, 'client_model', '客户端模型'),
-            line_ref: lineRef,
-            sku_ref: skuRef,
-            upstream_model: field(mapping, 'upstream_model', '上游模型'),
-          })
-        )
         const durationMin = field(sku, 'duration_min', '最小时长秒')
         const durationMax = field(sku, 'duration_max', '最大时长秒')
-        const line = input.extracted.channelLines.find(
-          (candidate) => candidate.businessId === lineRef
-        )
         entities.route_blueprints.push(
           await authoritativeEntity(
             {
@@ -804,6 +880,8 @@ export async function buildImportDocument(
                     ? {}
                     : { supports_real_person: line.supportsRealPerson }),
                   output_resolutions: [field(sku, 'resolution', '分辨率档位')],
+                  reference_minimums: referenceBounds.minimums,
+                  reference_limits: referenceBounds.limits,
                   route_target_ref: targetRef,
                   sku_ref: skuRef,
                   upstream_model: field(mapping, 'upstream_model', '上游模型'),

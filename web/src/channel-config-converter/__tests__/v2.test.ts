@@ -149,6 +149,12 @@ function createV2Snapshot(): WorkbookSnapshot {
         output_resolutions: '720p',
         duration_min: 4,
         duration_max: 15,
+        reference_min_images: 0,
+        reference_min_videos: 0,
+        reference_min_audios: 0,
+        reference_max_images: 9,
+        reference_max_videos: 3,
+        reference_max_audios: 3,
         supports_real_person: false,
         priority: 10,
         enabled: false,
@@ -278,6 +284,8 @@ test('v2 document preserves explicit line, route target, and cost variant fields
             line_ref: 'example-line',
             output_resolutions: ['720p'],
             priority: 10,
+            reference_limits: { images: 9, videos: 3, audios: 3 },
+            reference_minimums: { images: 0, videos: 0, audios: 0 },
             route_target_ref: 'ROUTE-EXAMPLE',
             sku_ref: 'SKU-EXAMPLE-720',
             supports_real_person: false,
@@ -315,9 +323,9 @@ test('generated v2 workbook has explicit disabled routing and no structural conf
   assert.equal(result.document.entities.channel_lines.length, 12)
   assert.equal(result.document.entities.model_skus.length, 9)
   assert.equal(result.document.entities.sale_proposals.length, 16)
-  assert.equal(result.document.entities.cost_rule_drafts.length, 104)
-  assert.equal(result.document.entities.model_mappings.length, 104)
-  assert.equal(result.document.entities.route_blueprints.length, 104)
+  assert.equal(result.document.entities.cost_rule_drafts.length, 98)
+  assert.equal(result.document.entities.model_mappings.length, 98)
+  assert.equal(result.document.entities.route_blueprints.length, 98)
   assert.equal(result.document.entities.unresolved_variants.length, 0)
   assert.ok(
     result.document.entities.route_blueprints.every((blueprint) =>

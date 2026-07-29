@@ -41,6 +41,7 @@ type CostAccountingMode string
 
 const (
 	CostAccountingDisabled CostAccountingMode = "disabled"
+	CostAccountingTracking CostAccountingMode = "tracking"
 	CostAccountingStrict   CostAccountingMode = "strict"
 )
 

@@ -20,6 +20,10 @@ func TestCostModesExposeCompleteContract(t *testing.T) {
 	assert.Equal(t, []types.CostMode{"free", "per_request", "per_duration", "per_token"}, modes)
 }
 
+func TestCostAccountingModesExposeTrackingContract(t *testing.T) {
+	assert.Equal(t, types.CostAccountingMode("tracking"), types.CostAccountingTracking)
+}
+
 func TestCostMeterPreservesExplicitZeroAndMissingValues(t *testing.T) {
 	zero := int64(0)
 	meter := types.CostMeter{

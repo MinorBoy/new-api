@@ -339,6 +339,25 @@ func TestCostAccountingStrictModeRejectsIncompleteCoverage(t *testing.T) {
 	assert.Equal(t, "cost_coverage_incomplete", response.Code)
 }
 
+func TestCostAccountingTrackingModeAllowsIncompleteCoverage(t *testing.T) {
+	prepareCostAccountingSettingsControllerTest(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/cost-accounting/settings", strings.NewReader(`{"mode":"tracking","minimum_expected_margin_bps":0}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	UpdateCostAccountingSettings(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Data struct {
+			Mode types.CostAccountingMode `json:"mode"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, types.CostAccountingTracking, response.Data.Mode)
+}
+
 func TestCostAccountingSettingsUpdatePreservesExplicitZero(t *testing.T) {
 	prepareCostAccountingSettingsControllerTest(t)
 

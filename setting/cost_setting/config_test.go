@@ -35,6 +35,12 @@ func TestCostSettingAcceptsStrictMode(t *testing.T) {
 	assert.Equal(t, types.CostAccountingStrict, Runtime().Mode)
 }
 
+func TestCostSettingAcceptsTrackingMode(t *testing.T) {
+	withCostSettingConfig(t, map[string]string{KeyMode: string(types.CostAccountingTracking)})
+
+	assert.Equal(t, types.CostAccountingTracking, Runtime().Mode)
+}
+
 func TestCostSettingRejectsUnsupportedModes(t *testing.T) {
 	for _, mode := range []types.CostAccountingMode{"", "permissive", "enabled"} {
 		t.Run(string(mode), func(t *testing.T) {

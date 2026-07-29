@@ -38,7 +38,7 @@ func init() {
 
 func ValidateMode(mode types.CostAccountingMode) error {
 	switch mode {
-	case types.CostAccountingDisabled, types.CostAccountingStrict:
+	case types.CostAccountingDisabled, types.CostAccountingTracking, types.CostAccountingStrict:
 		return nil
 	default:
 		return fmt.Errorf("unsupported cost accounting mode %q", mode)

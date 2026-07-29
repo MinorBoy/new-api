@@ -36,6 +36,8 @@ declare module 'axios' {
     skipAuthRefresh?: boolean
     authRetry?: boolean
     acceptAuthRotation?: boolean
+    /** Use a selected API key for relay requests instead of the dashboard session. */
+    authToken?: string
   }
 }
 
@@ -142,6 +144,11 @@ api.interceptors.response.use(
 )
 
 api.interceptors.request.use((config) => {
+  if (config.authToken) {
+    config.headers.Authorization = `Bearer ${config.authToken}`
+    return config
+  }
+
   const accessToken = useAuthStore.getState().auth.accessToken
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`

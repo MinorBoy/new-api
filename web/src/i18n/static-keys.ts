@@ -551,6 +551,24 @@ export const STATIC_I18N_KEYS = [
   'The model that was requested',
   'The upstream channel that served the requests',
 
+  // Video generation dynamic labels
+  'Reference images',
+  'JPG, PNG, or any public image URL',
+  'Reference videos',
+  'MP4 or another public video URL',
+  'Reference audio',
+  'MP3 or another public audio URL',
+  'Queued',
+  'Generating',
+  'Completed',
+  'Failed',
+  'Expired',
+  'Cancelled',
+  'Unknown',
+  'Request JSON copied',
+  'cURL copied',
+  'Video URL copied',
+
   // Misc
   'Cancel',
   'Status',

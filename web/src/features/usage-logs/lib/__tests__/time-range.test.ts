@@ -19,10 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import {
-  getDefaultTimeRange,
-  getUsageLogTimeRangePreset,
-} from '../time-range'
+import { getDefaultTimeRange, getUsageLogTimeRangePreset } from '../time-range'
 
 describe('usage log time ranges', () => {
   test('defaults to the rolling 24 hours ending at the current moment', () => {
@@ -42,5 +39,15 @@ describe('usage log time ranges', () => {
 
     assert.deepEqual(range.start, new Date(2026, 5, 1, 0, 0, 0, 0))
     assert.deepEqual(range.end, new Date(2026, 5, 30, 23, 59, 59, 999))
+  })
+
+  test('uses the complete previous calendar day for the yesterday preset', () => {
+    const range = getUsageLogTimeRangePreset(
+      'yesterday',
+      new Date(2026, 6, 30, 14, 30, 45)
+    )
+
+    assert.deepEqual(range.start, new Date(2026, 6, 29, 0, 0, 0, 0))
+    assert.deepEqual(range.end, new Date(2026, 6, 29, 23, 59, 59, 999))
   })
 })

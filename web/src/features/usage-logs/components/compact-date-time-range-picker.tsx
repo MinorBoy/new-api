@@ -157,7 +157,16 @@ export function CompactDateTimeRangePicker({
               className='h-7 px-2 text-xs'
               onClick={() => applyPreset('last24Hours')}
             >
-              {t('Last 24 Hours')}
+              {t('24 Hours')}
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => applyPreset('yesterday')}
+            >
+              {t('Yesterday')}
             </Button>
             <Button
               type='button'
@@ -202,7 +211,7 @@ export function CompactDateTimeRangePicker({
               className='h-7 px-2 text-xs'
               onClick={() => applyPreset('month')}
             >
-              {t('This month')}
+              {t('This Month')}
             </Button>
             <Button
               type='button'

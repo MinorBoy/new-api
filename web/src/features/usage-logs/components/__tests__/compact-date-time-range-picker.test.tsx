@@ -51,9 +51,8 @@ const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { CompactDateTimeRangePicker } = await import(
-  '../compact-date-time-range-picker'
-)
+const { CompactDateTimeRangePicker } =
+  await import('../compact-date-time-range-picker')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -61,9 +60,11 @@ await i18n.use(initReactI18next).init({
   resources: {
     en: {
       translation: {
+        '24 Hours': '24 Hours',
         'Date Range': 'Date Range',
-        'Last 24 Hours': 'Last 24 Hours',
         'Last Month': 'Last Month',
+        'This Month': 'This Month',
+        Yesterday: 'Yesterday',
       },
     },
   },
@@ -113,7 +114,13 @@ test('offers and applies the last-month shortcut', async () => {
   assert.ok(shortcut)
   assert.equal(
     [...document.querySelectorAll('button')].some(
-      (button) => button.textContent?.trim() === 'Last 24 Hours'
+      (button) => button.textContent?.trim() === '24 Hours'
+    ),
+    true
+  )
+  assert.equal(
+    [...document.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'This Month'
     ),
     true
   )
@@ -131,6 +138,70 @@ test('offers and applies the last-month shortcut', async () => {
   assert.equal(changedRange.start.getDate(), 1)
   assert.equal(changedRange.start.getMonth(), (now.getMonth() + 11) % 12)
   assert.equal(changedRange.end.getDate(), lastMonthEnd.getDate())
+
+  await act(async () => root.unmount())
+  container.remove()
+})
+
+test('offers and applies the yesterday shortcut', async () => {
+  let changedRange: { start?: Date; end?: Date } | undefined
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <CompactDateTimeRangePicker
+          onChange={(range) => {
+            changedRange = range
+          }}
+        />
+      </I18nextProvider>
+    )
+  })
+
+  const trigger = [...container.querySelectorAll('button')].find(
+    (button) => button.textContent?.trim() === 'Date Range'
+  )
+  assert.ok(trigger)
+
+  await act(async () => {
+    trigger.dispatchEvent(
+      new domWindow.MouseEvent('click', { bubbles: true }) as unknown as Event
+    )
+  })
+
+  const shortcut = [...document.querySelectorAll('button')].find(
+    (button) => button.textContent?.trim() === 'Yesterday'
+  )
+  assert.ok(shortcut)
+
+  await act(async () => {
+    shortcut.dispatchEvent(
+      new domWindow.MouseEvent('click', { bubbles: true }) as unknown as Event
+    )
+  })
+
+  const today = new Date()
+  const yesterday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate() - 1
+  )
+  assert.deepEqual(changedRange?.start, yesterday)
+  assert.deepEqual(
+    changedRange?.end,
+    new Date(
+      yesterday.getFullYear(),
+      yesterday.getMonth(),
+      yesterday.getDate(),
+      23,
+      59,
+      59,
+      999
+    )
+  )
 
   await act(async () => root.unmount())
   container.remove()

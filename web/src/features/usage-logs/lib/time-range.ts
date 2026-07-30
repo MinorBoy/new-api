@@ -20,6 +20,7 @@ import dayjs from '@/lib/dayjs'
 
 export type UsageLogTimeRangePreset =
   | 'last24Hours'
+  | 'yesterday'
   | 'today'
   | '7d'
   | 'week'
@@ -39,6 +40,13 @@ export function getUsageLogTimeRangePreset(
         start: current.subtract(24, 'hour').toDate(),
         end: current.toDate(),
       }
+    case 'yesterday': {
+      const yesterday = current.subtract(1, 'day')
+      return {
+        start: yesterday.startOf('day').toDate(),
+        end: yesterday.endOf('day').toDate(),
+      }
+    }
     case 'today':
       return {
         start: current.startOf('day').toDate(),
@@ -77,8 +85,9 @@ export function getUsageLogTimeRangePreset(
 /**
  * Default usage-log range: the rolling 24 hours ending at the current moment.
  */
-export function getDefaultTimeRange(
-  now: Date = new Date()
-): { start: Date; end: Date } {
+export function getDefaultTimeRange(now: Date = new Date()): {
+  start: Date
+  end: Date
+} {
   return getUsageLogTimeRangePreset('last24Hours', now)
 }

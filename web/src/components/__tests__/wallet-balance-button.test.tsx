@@ -104,7 +104,7 @@ async function mountButton(props: {
     )
   })
 
-  return { container, root }
+  return { container: container as unknown as HTMLElement, root }
 }
 
 async function unmountButton(mounted: { root: Root; container: HTMLElement }) {

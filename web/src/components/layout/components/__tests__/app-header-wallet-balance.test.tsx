@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import test, { after, beforeEach } from 'node:test'
 
+// @ts-expect-error Bun supplies mock.module at test runtime, but the frontend
+// typecheck intentionally only includes Node's test declarations.
 import { mock } from 'bun:test'
 import { Window } from 'happy-dom'
 import { act } from 'react'
@@ -121,7 +123,7 @@ async function mountHeader() {
     root.render(<AppHeader showTopNav={false} />)
   })
 
-  return { container, root }
+  return { container: container as unknown as HTMLElement, root }
 }
 
 async function unmountHeader(mounted: { root: Root; container: HTMLElement }) {
@@ -132,8 +134,8 @@ async function unmountHeader(mounted: { root: Root; container: HTMLElement }) {
 test('places the wallet balance between theme settings and the account menu', async () => {
   const mounted = await mountHeader()
   const controls = [
-    ...mounted.container.querySelectorAll<HTMLElement>('[data-header-control]'),
-  ].map((control) => control.dataset.headerControl)
+    ...mounted.container.querySelectorAll('[data-header-control]'),
+  ].map((control) => (control as HTMLElement).dataset.headerControl)
 
   assert.deepEqual(controls, [
     'search',

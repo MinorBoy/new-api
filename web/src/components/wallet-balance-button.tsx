@@ -51,6 +51,25 @@ export function WalletBalanceButton({
   const accessibleLabel = formattedQuota
     ? `${t('Current Balance')}: ${formattedQuota}`
     : t('Current Balance')
+  let balanceContent: React.ReactNode = null
+
+  if (loading) {
+    balanceContent = (
+      <Skeleton
+        data-testid='wallet-balance-loading'
+        className='hidden h-3.5 w-12 sm:block'
+      />
+    )
+  } else if (formattedQuota) {
+    balanceContent = (
+      <span
+        data-testid='wallet-balance-value'
+        className='hidden font-mono tabular-nums sm:inline'
+      >
+        {formattedQuota}
+      </span>
+    )
+  }
 
   return (
     <Button
@@ -64,19 +83,7 @@ export function WalletBalanceButton({
       onClick={onOpenWallet}
     >
       <Wallet className='size-3.5' data-icon='inline-start' />
-      {loading ? (
-        <Skeleton
-          data-testid='wallet-balance-loading'
-          className='hidden h-3.5 w-12 sm:block'
-        />
-      ) : formattedQuota ? (
-        <span
-          data-testid='wallet-balance-value'
-          className='hidden font-mono tabular-nums sm:inline'
-        >
-          {formattedQuota}
-        </span>
-      ) : null}
+      {balanceContent}
     </Button>
   )
 }

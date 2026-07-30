@@ -365,7 +365,12 @@ function buildCostsAndMappings(
     const modeName = field(record, '计费').toLowerCase()
     const mode = COST_MODES[modeName as keyof typeof COST_MODES]
     const baseId = `R${record.location.row}`
-    const sourceId = `SRC-${slug(sourceChannel)}-${baseId}`
+    const channelSource = source.channels.find(
+      (candidate) => field(candidate, '渠道') === sourceChannel
+    )
+    const sourceId = channelSource
+      ? sourceIdForChannel(channelSource)
+      : `SRC-${slug(sourceChannel)}-${baseId}`
     const override =
       rules.overrides[`${sourceChannel}/${baseId}`] ??
       rules.overrides[String(record.location.row)]
@@ -579,19 +584,41 @@ export function buildTemplateData(
     issues
   )
   const profits = buildProfits(sales, costs, skus, rules.defaults.groupRatio)
-  const sources = source.channels.map((channel) => ({
-    businessId: sourceIdForChannel(channel),
-    project: field(channel, '名称'),
-    valueOrRange: field(channel, '链接'),
-    unit: '',
-    asOf: '',
-    sourceType: 'workbook',
-    sourceName: 'sd收录.xlsx',
-    reference: `${channel.location.sheet}!${channel.location.row}`,
-    owner: '',
-    note: field(channel, 'Base Url'),
-    accessedAt: new Date().toISOString().slice(0, 10),
-  }))
+  const sources = [
+    ...source.channels.map((channel) => ({
+      businessId: sourceIdForChannel(channel),
+      project: field(channel, '名称'),
+      valueOrRange: field(channel, '链接'),
+      unit: '',
+      asOf: '',
+      sourceType: 'workbook',
+      sourceName: 'sd收录.xlsx',
+      reference: `${channel.location.sheet}!${channel.location.row}`,
+      owner: '',
+      note: field(channel, 'Base Url'),
+      accessedAt: new Date().toISOString().slice(0, 10),
+    })),
+    ...[
+      ...new Map(
+        source.officialPrices.map((official) => [
+          field(official, '模型'),
+          {
+            businessId: `SRC-OFFICIAL-${slug(field(official, '模型'))}`,
+            project: field(official, '模型'),
+            valueOrRange: field(official, '分辨率'),
+            unit: 'CNY/1M',
+            asOf: '',
+            sourceType: 'workbook',
+            sourceName: 'sd收录.xlsx',
+            reference: `${official.location.sheet}!${official.location.row}`,
+            owner: '',
+            note: field(official, '备注'),
+            accessedAt: new Date().toISOString().slice(0, 10),
+          },
+        ])
+      ).values(),
+    ],
+  ]
   const data: TemplateData = {
     channels,
     skus,

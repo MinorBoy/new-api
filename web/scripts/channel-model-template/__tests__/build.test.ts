@@ -166,3 +166,12 @@ test('uses the configured exchange rate for official sale previews', () => {
     '9.2'
   )
 })
+
+test('uses a registered source ID for generated cost rows', () => {
+  const output = buildTemplateData(sourceWithOfficialPrice(), rules)
+
+  assert.equal(
+    output.issues.some((item) => item.code === 'COST_SOURCE_UNRESOLVED'),
+    false
+  )
+})

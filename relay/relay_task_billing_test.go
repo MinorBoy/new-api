@@ -326,7 +326,7 @@ func TestCostTaskSubmitPersistsDispatchAuthorizationBeforeTransport(t *testing.T
 	info.UserId = 11
 	info.TokenId = 22
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
@@ -381,7 +381,7 @@ func TestTrackingTaskSubmitSettlesCoveredDurationCost(t *testing.T) {
 	info.RequestId = "task-tracking-covered-duration"
 	info.RequestURLPath = "/v1/video/generations"
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
@@ -424,7 +424,7 @@ func TestTrackingTaskSubmitPreservesUncoveredTransport(t *testing.T) {
 	info.RequestId = "task-tracking-uncovered"
 	info.RequestURLPath = "/v1/video/generations"
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
@@ -493,7 +493,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 			info.RequestId = "task-cost-validated-duration"
 			info.RequestURLPath = "/v1/video/generations"
 
-			result, taskErr := RelayTaskSubmit(c, info)
+			result, taskErr := RelayTaskSubmit(c, info, nil)
 
 			require.Nil(t, taskErr)
 			require.NotNil(t, result)

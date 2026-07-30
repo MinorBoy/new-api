@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,7 +167,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 // 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
 // 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
 // 控制器负责 defer Refund 和成功后 Settle。
-func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*TaskSubmitResult, *dto.TaskError) {
 	if info == nil {
 		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("relay info is nil"), "invalid_request", http.StatusInternalServerError)
 	}
@@ -355,6 +356,8 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 						return nil, service.TaskErrorWrapperLocal(err, "cost_accounting_failed", http.StatusInternalServerError)
 					}
 					logger.LogWarn(c, fmt.Sprintf("skip task cost tracking: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
+				} else if taskErr := prepareSeedanceUsageInputs(c.Request.Context(), retryParam, info, handle.CostMode); taskErr != nil {
+					return nil, taskErr
 				} else if err := service.AuthorizeCostDispatch(c.Request.Context(), handle); err != nil {
 					if mode == types.CostAccountingStrict {
 						return nil, service.TaskErrorWrapperLocal(err, "cost_dispatch_authorization_failed", http.StatusInternalServerError)
@@ -417,6 +420,39 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func prepareSeedanceUsageInputs(ctx context.Context, retryParam *service.RetryParam, info *relaycommon.RelayInfo, costMode types.CostMode) *dto.TaskError {
+	if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
+		return nil
+	}
+	if retryParam == nil {
+		return nil
+	}
+	metadataState := retryParam.ProfitRoutingState()
+	if metadataState == nil {
+		return nil
+	}
+	if info == nil || info.TaskRelayInfo == nil {
+		return service.TaskErrorWrapperLocal(
+			errors.New("task relay info is unavailable"),
+			"video_usage_context_unavailable",
+			http.StatusInternalServerError,
+		)
+	}
+	metadata, err := metadataState.Metadata(ctx)
+	if err != nil {
+		statusCode := http.StatusServiceUnavailable
+		code := "video_metadata_unavailable"
+		var metadataErr *service.VideoMetadataError
+		if errors.As(err, &metadataErr) && metadataErr.Kind == service.VideoMetadataInvalidMedia {
+			statusCode = http.StatusBadRequest
+			code = "invalid_reference_video"
+		}
+		return service.TaskErrorWrapperLocal(err, code, statusCode)
+	}
+	info.TaskRelayInfo.InputVideoDurationMS = metadata.TotalDurationMS
+	return nil
 }
 
 func markTaskCostDispatchUnknown(c *gin.Context, info *relaycommon.RelayInfo, accepted bool, failureCode string) {

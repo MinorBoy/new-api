@@ -143,6 +143,8 @@ type TaskBillingContext struct {
 	ServiceTier              string               `json:"service_tier,omitempty"`
 	Resolution               string               `json:"resolution,omitempty"`
 	BillingTokens            int                  `json:"billing_tokens,omitempty"`
+	InputVideoDurationMS     int64                `json:"input_video_duration_ms,omitempty"`
+	UpstreamCostMode         string               `json:"upstream_cost_mode,omitempty"`
 	PerCallBilling           bool                 `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算
 }
 

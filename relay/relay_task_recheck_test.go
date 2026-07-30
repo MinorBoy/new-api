@@ -94,7 +94,7 @@ func TestProfitRecheckBlocksDispatchAfterRuleChange(t *testing.T) {
 	info.UserId = 11
 	info.TokenId = 22
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, result)
 	require.NotNil(t, taskErr)
@@ -152,7 +152,7 @@ func TestProfitRecheckPassesEligibleChannel(t *testing.T) {
 	info.UserId = 11
 	info.TokenId = 22
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
@@ -214,7 +214,7 @@ func TestProfitRecheckRejectsSnapshotChangedBeforePrepare(t *testing.T) {
 	info.UserId = 11
 	info.TokenId = 22
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	assert.Equal(t, int32(2), ruleQueries.Load(), "PrepareCostAttempt must lock the rule switched after recheck")
 	require.Nil(t, result)

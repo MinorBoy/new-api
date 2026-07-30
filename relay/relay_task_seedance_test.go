@@ -122,7 +122,7 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 		Billing:         seedanceTaskTestBilling{},
 	}
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
@@ -256,7 +256,7 @@ func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {
 		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
 	}
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	assert.Nil(t, result)
 	require.NotNil(t, taskErr)
@@ -584,9 +584,16 @@ func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {
 	task := model.Task{
 		TaskID: "task_public", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)), UserId: 7,
 		Status: model.TaskStatusSuccess, SubmitTime: 111, UpdatedAt: 222,
-		Properties:  model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
-		PrivateData: model.TaskPrivateData{UpstreamTaskID: "dim-upstream"},
-		Data:        json.RawMessage(`{"task_id":"dim-upstream","status":"completed","result":{"url":"https://x/video.mp4"}}`),
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "dim-upstream",
+			BillingContext: &model.TaskBillingContext{
+				RequestedDurationSeconds: 5,
+				Resolution:               "720p",
+				UpstreamCostMode:         string(types.CostModePerDuration),
+			},
+		},
+		Data: json.RawMessage(`{"task_id":"dim-upstream","status":"completed","result":{"url":"https://x/video.mp4"}}`),
 	}
 	require.NoError(t, model.DB.Create(&task).Error)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -601,6 +608,10 @@ func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {
 	assert.Equal(t, "task_public", response["id"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, "https://x/video.mp4", response["content"].(map[string]interface{})["video_url"])
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 108000, usage["total_tokens"])
 
 	var stored model.Task
 	require.NoError(t, model.DB.Where("task_id = ?", "task_public").First(&stored).Error)
@@ -741,6 +752,175 @@ const newAPIVideoDetailedZeroUsage = `{
 		}
 	}
 }`
+
+func TestSeedanceTaskResponseCalculatesUsageForPerDurationUpstream(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_usage",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			RequestedDurationSeconds: 5,
+			Resolution:               "720p",
+			UpstreamCostMode:         string(types.CostModePerDuration),
+		}},
+		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 108000, usage["total_tokens"])
+	assert.Len(t, usage, 2)
+}
+
+func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_reference_usage",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			RequestedDurationSeconds: 5,
+			Resolution:               "720p",
+			HasVideoInput:            true,
+			InputVideoDurationMS:     3000,
+			UpstreamCostMode:         string(types.CostModePerRequest),
+		}},
+		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 172800, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseUsesUpstreamFrameRateForUsage(t *testing.T) {
+	data := strings.Replace(newAPIVideoDetailedZeroUsage, `"framespersecond":24`, `"framespersecond":30`, 1)
+	task := &model.Task{
+		TaskID:     "task_public_frame_rate_usage",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:     model.TaskStatusSuccess,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			RequestedDurationSeconds: 5,
+			Resolution:               "720p",
+			UpstreamCostMode:         string(types.CostModePerDuration),
+		}},
+		Data: json.RawMessage(data),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 135000, usage["completion_tokens"])
+	assert.EqualValues(t, 135000, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponsePreservesAuthoritativeUsage(t *testing.T) {
+	data := strings.Replace(
+		newAPIVideoDetailedZeroUsage,
+		`"usage":{"completion_tokens":0,"total_tokens":0}`,
+		`"usage":{"completion_tokens":108900,"total_tokens":108900}`,
+		1,
+	)
+	task := &model.Task{
+		TaskID:     "task_public_authoritative_usage",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:     model.TaskStatusSuccess,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			RequestedDurationSeconds: 5,
+			Resolution:               "720p",
+			UpstreamCostMode:         string(types.CostModePerDuration),
+		}},
+		Data: json.RawMessage(data),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 108900, usage["completion_tokens"])
+	assert.EqualValues(t, 108900, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseDoesNotCalculateUsageWithoutTrustedInputs(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        model.TaskStatus
+		costMode      types.CostMode
+		hasVideoInput bool
+		inputDuration int64
+		data          string
+	}{
+		{name: "per token upstream", status: model.TaskStatusSuccess, costMode: types.CostModePerToken},
+		{name: "failed task", status: model.TaskStatusFailure, costMode: types.CostModePerDuration},
+		{name: "historical reference video without duration", status: model.TaskStatusSuccess, costMode: types.CostModePerDuration, hasVideoInput: true},
+		{
+			name:     "fractional upstream duration",
+			status:   model.TaskStatusSuccess,
+			costMode: types.CostModePerDuration,
+			data:     strings.Replace(newAPIVideoDetailedZeroUsage, `"duration":5`, `"duration":5.5`, 1),
+		},
+		{
+			name:     "excessive upstream frame rate",
+			status:   model.TaskStatusSuccess,
+			costMode: types.CostModePerDuration,
+			data:     strings.Replace(newAPIVideoDetailedZeroUsage, `"framespersecond":24`, `"framespersecond":241`, 1),
+		},
+		{
+			name:     "overflowing upstream duration",
+			status:   model.TaskStatusSuccess,
+			costMode: types.CostModePerDuration,
+			data:     strings.Replace(newAPIVideoDetailedZeroUsage, `"duration":5`, `"duration":18446744073709551617`, 1),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := tt.data
+			if data == "" {
+				data = newAPIVideoDetailedZeroUsage
+			}
+			task := &model.Task{
+				TaskID:     "task_public_untrusted_usage",
+				Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+				Status:     tt.status,
+				Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+				PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+					RequestedDurationSeconds: 5,
+					Resolution:               "720p",
+					HasVideoInput:            tt.hasVideoInput,
+					InputVideoDurationMS:     tt.inputDuration,
+					UpstreamCostMode:         string(tt.costMode),
+				}},
+				Data: json.RawMessage(data),
+			}
+
+			response, err := seedanceTaskResponse(task)
+
+			require.NoError(t, err)
+			usage, ok := response["usage"].(map[string]interface{})
+			require.True(t, ok)
+			assert.EqualValues(t, 0, usage["completion_tokens"])
+			assert.EqualValues(t, 0, usage["total_tokens"])
+		})
+	}
+}
 
 func createNewAPIVideoQueryTask(t *testing.T, channelTypes ...int) *model.Task {
 	t.Helper()
@@ -991,7 +1171,7 @@ func TestNewAPIVideoDurationFixedModePreservesFractionalValue(t *testing.T) {
 	t.Cleanup(server.Close)
 	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","duration":5.5,"watermark":false,"seed":0}`, server.URL)
 
-	result, taskErr := RelayTaskSubmit(c, info)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
@@ -1036,7 +1216,7 @@ func TestNewAPIVideoDurationPerDurationMode(t *testing.T) {
 			t.Cleanup(server.Close)
 			c, info := newNewAPIVideoRelayContext(tt.body, server.URL)
 
-			result, taskErr := RelayTaskSubmit(c, info)
+			result, taskErr := RelayTaskSubmit(c, info, nil)
 
 			if !tt.wantSuccess {
 				assert.Nil(t, result)

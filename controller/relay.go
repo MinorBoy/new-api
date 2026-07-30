@@ -681,7 +681,7 @@ func RelayTask(c *gin.Context) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		result, taskErr = relay.RelayTaskSubmit(c, relayInfo, retryParam)
 		if taskErr == nil {
 			break
 		}
@@ -782,6 +782,14 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
+	inputVideoDurationMS := int64(0)
+	if relayInfo.TaskRelayInfo != nil {
+		inputVideoDurationMS = relayInfo.TaskRelayInfo.InputVideoDurationMS
+	}
+	upstreamCostMode := ""
+	if relayInfo.CostAttempt != nil {
+		upstreamCostMode = string(relayInfo.CostAttempt.CostMode)
+	}
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		BillingMode:              relayInfo.PriceData.BillingMode,
 		DurationPrice:            relayInfo.PriceData.DurationPrice,
@@ -799,6 +807,8 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		Draft:                    c.GetBool(string(constant.ContextKeyTaskDraft)),
 		ServiceTier:              c.GetString(string(constant.ContextKeyTaskServiceTier)),
 		Resolution:               c.GetString("task_resolution"),
+		InputVideoDurationMS:     inputVideoDurationMS,
+		UpstreamCostMode:         upstreamCostMode,
 		PerCallBilling: common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
 			relayInfo.PriceData.UsePrice ||
 			relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration,

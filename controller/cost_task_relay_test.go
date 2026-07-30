@@ -133,11 +133,15 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 		UserId:          12,
 		OriginModelName: "video-model",
 		PriceData:       types.PriceData{Quota: 100},
+		CostAttempt:     &types.CostAttemptHandle{CostMode: types.CostModePerDuration},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:   73,
 			ChannelType: constant.ChannelTypeNewAPIVideo,
 		},
-		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task-public"},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			PublicTaskID:         "task-public",
+			InputVideoDurationMS: 2500,
+		},
 	}
 	result := &relay.TaskSubmitResult{
 		UpstreamTaskID: "upstream-task",
@@ -157,6 +161,9 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 	assert.JSONEq(t, string(requestPayload), string(auditPayloads["user_request_data"]))
 	assert.JSONEq(t, string(upstreamResponse), string(auditPayloads["upstream_response_data"]))
 	assert.Empty(t, auditPayloads["user_response_data"])
+	require.NotNil(t, task.PrivateData.BillingContext)
+	assert.Equal(t, int64(2500), task.PrivateData.BillingContext.InputVideoDurationMS)
+	assert.Equal(t, string(types.CostModePerDuration), task.PrivateData.BillingContext.UpstreamCostMode)
 }
 
 func TestHandleTaskCostCoverageFailureExcludesChannelAndRetries(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	appI18n "github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -101,6 +102,18 @@ type cancelOnFirstWriteRecorder struct {
 	*httptest.ResponseRecorder
 	cancel context.CancelFunc
 	once   sync.Once
+}
+
+type costE2EVideoMetadataClient struct{}
+
+func (costE2EVideoMetadataClient) Metadata(_ context.Context, _ string) (videometa.Metadata, error) {
+	return videometa.Metadata{DurationMS: 6_000}, nil
+}
+
+func setupCostAccountingSeedanceMetadata(t *testing.T) {
+	t.Helper()
+	service.SetVideoMetadataClient(costE2EVideoMetadataClient{})
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
 }
 
 func (w *cancelOnFirstWriteRecorder) Write(data []byte) (int, error) {
@@ -368,6 +381,7 @@ func TestCostAccountingAsyncChargeEventsE2E(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			setupCostAccountingE2E(t)
+			setupCostAccountingSeedanceMetadata(t)
 			provider := &mockArkServer{}
 			server := httptest.NewServer(provider)
 			t.Cleanup(server.Close)
@@ -391,6 +405,9 @@ func TestCostAccountingAsyncChargeEventsE2E(t *testing.T) {
 			var task model.Task
 			require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
 			assert.Equal(t, requestLedger.ID, task.PrivateData.CostRequestID)
+			require.NotNil(t, task.PrivateData.BillingContext)
+			assert.Equal(t, int64(6_000), task.PrivateData.BillingContext.InputVideoDurationMS)
+			assert.Equal(t, string(types.CostModePerRequest), task.PrivateData.BillingContext.UpstreamCostMode)
 
 			if test.chargeEvent == types.CostChargeTaskSucceeded {
 				assert.Equal(t, string(types.CostAttemptAwaitingMeter), attempt.Status)
@@ -439,6 +456,7 @@ func TestCostAccountingAsyncChargeEventsE2E(t *testing.T) {
 
 func TestCostAccountingOrphanTaskInsertionE2E(t *testing.T) {
 	setupCostAccountingE2E(t)
+	setupCostAccountingSeedanceMetadata(t)
 	provider := &mockArkServer{taskID: "cost-e2e-orphan-upstream"}
 	server := httptest.NewServer(provider)
 	t.Cleanup(server.Close)

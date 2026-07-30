@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,9 +13,13 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/relay/channel"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -253,7 +258,107 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 			response["content"] = content
 		}
 	}
+	populateSeedanceTaskUsage(task, response)
 	return response, nil
+}
+
+func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}) {
+	if task == nil || task.Status != model.TaskStatusSuccess || response == nil {
+		return
+	}
+	if rawUsage, exists := response["usage"]; exists {
+		usageData, err := common.Marshal(rawUsage)
+		if err == nil {
+			var usage struct {
+				CompletionTokens int64 `json:"completion_tokens"`
+				TotalTokens      int64 `json:"total_tokens"`
+			}
+			if common.Unmarshal(usageData, &usage) == nil &&
+				usage.CompletionTokens > 0 && usage.TotalTokens >= usage.CompletionTokens {
+				return
+			}
+		}
+	}
+
+	billingContext := task.PrivateData.BillingContext
+	if billingContext == nil {
+		return
+	}
+	costMode := types.CostMode(billingContext.UpstreamCostMode)
+	if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
+		return
+	}
+	if billingContext.HasVideoInput && billingContext.InputVideoDurationMS <= 0 {
+		return
+	}
+
+	responseData, err := common.Marshal(response)
+	if err != nil {
+		return
+	}
+	var output struct {
+		Duration        *json.Number `json:"duration"`
+		Resolution      string       `json:"resolution"`
+		FramesPerSecond *json.Number `json:"framespersecond"`
+	}
+	if common.Unmarshal(responseData, &output) != nil {
+		return
+	}
+
+	durationSeconds := int64(billingContext.RequestedDurationSeconds)
+	if output.Duration != nil {
+		value, ok := boundedSeedanceResponseInteger(output.Duration, relaycommon.MaxTaskDurationSeconds)
+		if !ok {
+			return
+		}
+		durationSeconds = value
+	}
+	if durationSeconds <= 0 || durationSeconds > relaycommon.MaxTaskDurationSeconds {
+		return
+	}
+	resolution := strings.TrimSpace(output.Resolution)
+	if resolution == "" {
+		resolution = billingContext.Resolution
+	}
+	profile, ok := seedancepricing.Profile(resolution)
+	if !ok {
+		return
+	}
+	frameRate := profile.FrameRateNum
+	if output.FramesPerSecond != nil {
+		value, ok := boundedSeedanceResponseInteger(output.FramesPerSecond, 240)
+		if !ok {
+			return
+		}
+		frameRate = value
+	}
+	facts := service.ProfitRoutingFacts{
+		OutputDurationSeconds: int(durationSeconds),
+		InputDurationMS:       billingContext.InputVideoDurationMS,
+		Width:                 profile.Width,
+		Height:                profile.Height,
+		FrameRateNum:          frameRate,
+		FrameRateDen:          1,
+	}
+	_, completionTokens, totalTokens, err := service.EstimateSeedanceTokens(facts)
+	if err != nil {
+		return
+	}
+	response["usage"] = map[string]interface{}{
+		"completion_tokens": completionTokens,
+		"total_tokens":      totalTokens,
+	}
+}
+
+func boundedSeedanceResponseInteger(number *json.Number, maximum int64) (int64, bool) {
+	if number == nil {
+		return 0, false
+	}
+	value, err := decimal.NewFromString(number.String())
+	if err != nil || value.LessThanOrEqual(decimal.Zero) || value.GreaterThan(decimal.NewFromInt(maximum)) || !value.Equal(value.Truncate(0)) {
+		return 0, false
+	}
+	return value.IntPart(), true
 }
 
 func isSeedanceTaskPlatform(platform constant.TaskPlatform) bool {

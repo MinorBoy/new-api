@@ -375,7 +375,7 @@ func TestProfitRoutingDispatchesFreeAndPerDurationRulesE2E(t *testing.T) {
 	}
 }
 
-func TestProfitRoutingMetadataUnavailableExcludesTokenAndDispatchesNonTokenE2E(t *testing.T) {
+func TestProfitRoutingMetadataUnavailableRejectsNonTokenReferenceVideoBeforeDispatchE2E(t *testing.T) {
 	env := setupStrictProfitRoutingE2E(t, func(context.Context, service.RoutingRevenuePreviewInput) (int64, string, error) {
 		return 2_000_000_000, "1000", nil
 	})
@@ -389,55 +389,19 @@ func TestProfitRoutingMetadataUnavailableExcludesTokenAndDispatchesNonTokenE2E(t
 	body = strings.Replace(body, "video-a.mp4", "video-a.mp4?signature=secret-token", 1)
 	status, response := performProfitRoutingRequest(t, env.engine, "Bearer e2e", "", body)
 
-	require.Equal(t, http.StatusOK, status, string(response))
+	require.Equal(t, http.StatusServiceUnavailable, status, string(response))
 	assert.Empty(t, env.channelA.snapshot())
-	selected := env.channelB.snapshot()
-	require.Len(t, selected, 1)
-	assert.Equal(t, http.MethodPost, selected[0].Method)
-	assert.Equal(t, "/v1/video/generations", selected[0].Path)
+	assert.Empty(t, env.channelB.snapshot())
 	metadataCalls := metadataClient.snapshot()
 	require.NotEmpty(t, metadataCalls)
 	for _, assetURL := range metadataCalls {
 		assert.Equal(t, "https://mock.example/video-a.mp4?signature=secret-token", assetURL)
 	}
-	assert.NotContains(t, string(response), "metadata_unavailable")
+	assert.Contains(t, string(response), `"code":"video_metadata_unavailable"`)
 	assert.NotContains(t, string(response), "routing_diagnostics")
 	assert.NotContains(t, string(response), "assets.example")
 	assert.NotContains(t, string(response), "secret-token")
 
-	adminLogs, _, err := model.GetAllLogs(model.LogTypeUnknown, 0, 0, modelrouting.Seedance20, "", "", 0, 20, 0, "", "", "")
-	require.NoError(t, err)
-	var diagnosticLog *model.Log
-	for _, log := range adminLogs {
-		if strings.Contains(log.Other, "routing_diagnostics") {
-			diagnosticLog = log
-			break
-		}
-	}
-	require.NotNil(t, diagnosticLog)
-	assert.NotContains(t, diagnosticLog.Other, "assets.example")
-	assert.NotContains(t, diagnosticLog.Other, "secret-token")
-	var other map[string]any
-	require.NoError(t, common.UnmarshalJsonStr(diagnosticLog.Other, &other))
-	adminInfo, ok := other["admin_info"].(map[string]any)
-	require.True(t, ok)
-	diagnostics, ok := adminInfo["routing_diagnostics"].([]any)
-	require.True(t, ok)
-	require.Len(t, diagnostics, 1)
-	diagnostic, ok := diagnostics[0].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, float64(capabilityChannelA), diagnostic["channel_id"])
-	assert.Equal(t, string(service.ProfitReasonMetadataUnavailable), diagnostic["reason"])
-
-	userLogs, _, err := model.GetUserLogs(e2eUserID, model.LogTypeUnknown, 0, 0, "", "", 0, 20, "", "", "")
-	require.NoError(t, err)
-	require.NotEmpty(t, userLogs)
-	for _, log := range userLogs {
-		assert.NotContains(t, log.Other, "admin_info")
-		assert.NotContains(t, log.Other, "routing_diagnostics")
-		assert.NotContains(t, log.Other, "assets.example")
-		assert.NotContains(t, log.Other, "secret-token")
-	}
 }
 
 func TestProfitRoutingRejectsInvalidReferenceVideoBeforeUpstreamE2E(t *testing.T) {

@@ -25,7 +25,6 @@
 - Create: `web/scripts/channel-model-template/__tests__/build.test.ts` — mapping, cost calculation, `draft`, stable-ID and issue tests.
 - Create: `web/scripts/channel-model-template/__tests__/generate.test.ts` — command behavior, output workbook and existing V1-converter compatibility tests.
 - Modify: `web/package.json` — expose a `channel-model-template:generate` Bun script.
-- Modify: `web/scripts/build-channel-config-fixtures.mjs` — remove the hard-coded one-off V1 correction generator once the new reusable rules file owns those corrections; retain its V2 fixture generation behavior.
 
 `web/src/channel-config-converter/__fixtures__/channel-config-v1-corrected.xlsx` remains the V1 base regression fixture. The generator takes its path through `--base`; it is not re-created from source data.
 
@@ -331,7 +330,7 @@ type ConversionReport = {
 }
 ```
 
-Scan the written workbook for `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?` and `#N/A`; append formula errors as `FAIL`. Save the workbook only after all FAIL checks pass, and always save the report.
+ExcelJS writes formulas but does not evaluate them. Scan generated formula text for broken references such as `#REF!`, preserve any cached error values already present in the supplied base, and set `workbook.calcProperties.fullCalcOnLoad = true` and `workbook.calcProperties.forceFullCalc = true` so Excel recalculates on opening. Append static formula-reference errors as `FAIL`. Save the workbook only after all FAIL checks pass, and always save the report.
 
 - [ ] **Step 4: Re-run output tests**
 
@@ -346,13 +345,12 @@ git add web/scripts/channel-model-template/write.ts web/scripts/channel-model-te
 git commit -m "feat: write channel model template workbooks"
 ```
 
-### Task 5: Expose the safe command and migrate one-off corrections into rules
+### Task 5: Expose the safe command and capture corrections in rules
 
 **Files:**
 - Create: `web/scripts/channel-model-template/generate.ts`
 - Create: `web/scripts/channel-model-template/conversion-rules.json`
 - Modify: `web/package.json`
-- Modify: `web/scripts/build-channel-config-fixtures.mjs`
 - Modify: `web/scripts/channel-model-template/__tests__/generate.test.ts`
 
 - [ ] **Step 1: Write the failing command-behavior tests**
@@ -392,7 +390,7 @@ Add this script to `web/package.json`:
 "channel-model-template:generate": "bun scripts/channel-model-template/generate.ts"
 ```
 
-Create `conversion-rules.json` by moving every channel mapping, default, model rule and R102-R105 correction from the current one-off generator into structured JSON. Do not leave correction constants in `build-channel-config-fixtures.mjs`. Refactor that script so it reads the corrected V1 fixture for V2 fixture generation; it must no longer read `sd收录.xlsx`, patch V1 rows or write a generated V1 workbook.
+Create `conversion-rules.json` with every channel mapping, default, model rule and R102-R105 correction from the current one-off generator represented as structured data. The existing `build-channel-config-fixtures.mjs` remains an independent historical-fixture generator and is not changed by this task.
 
 - [ ] **Step 4: Re-run command tests and the existing converter tests**
 
@@ -407,7 +405,7 @@ Expected: PASS; the V1/V2 converter fixtures remain valid.
 - [ ] **Step 5: Commit the command surface**
 
 ```bash
-git add web/package.json web/scripts/channel-model-template/generate.ts web/scripts/channel-model-template/conversion-rules.json web/scripts/channel-model-template/__tests__/generate.test.ts web/scripts/build-channel-config-fixtures.mjs
+git add web/package.json web/scripts/channel-model-template/generate.ts web/scripts/channel-model-template/conversion-rules.json web/scripts/channel-model-template/__tests__/generate.test.ts
 git commit -m "feat: add channel model template generator command"
 ```
 
@@ -471,7 +469,7 @@ Run from `web/`: `bunx oxfmt --check scripts/channel-model-template scripts/buil
 
 Expected: PASS.
 
-Run the generator with the supplied raw source, V1 base fixture and rules file into a new `outputs/<timestamp>/` directory. Inspect all ten output sheets, scan formula errors and verify its V1 conversion with `bun --cwd web run converter:test`.
+Run the generator with the supplied raw source, V1 base fixture and rules file into a new `outputs/<timestamp>/` directory. Inspect all ten output sheets, scan generated formula text for broken references, confirm the workbook requests full recalculation on opening, and verify its V1 conversion with `bun --cwd web run converter:test`.
 
 - [ ] **Step 5: Commit the documented and verified generator**
 

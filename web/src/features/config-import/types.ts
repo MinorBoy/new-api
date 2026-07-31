@@ -139,7 +139,6 @@ export const configImportBindingSchema = z
     action: configImportBindingActionSchema,
     channel_id: z.number().int().positive().optional(),
     credentials_confirmed: z.boolean(),
-    reason: z.string().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -158,13 +157,6 @@ export const configImportBindingSchema = z
           message: 'Skipped bindings cannot confirm credentials',
         })
       }
-      if (!value.reason?.trim()) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['reason'],
-          message: 'A reason is required when skipping a binding',
-        })
-      }
       return
     }
 
@@ -173,13 +165,6 @@ export const configImportBindingSchema = z
         code: 'custom',
         path: ['channel_id'],
         message: 'A channel is required for this binding action',
-      })
-    }
-    if (value.reason !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['reason'],
-        message: 'Bound channels cannot include a skip reason',
       })
     }
   })

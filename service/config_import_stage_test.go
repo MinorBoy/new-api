@@ -79,7 +79,7 @@ func TestConfigImportBindingUsesMappingModelsForGlobalSKU(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestConfigImportBindingSkipExcludesLineDependents(t *testing.T) {
+func TestConfigImportBindingAllowsSkipWithoutReason(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
 		lineRef: "line-openai", channelRef: "supplier-openai", channelType: constant.ChannelTypeOpenAI,
@@ -87,7 +87,7 @@ func TestConfigImportBindingSkipExcludesLineDependents(t *testing.T) {
 	})
 
 	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
-		LineRef: "line-openai", Action: types.ConfigImportBindingActionSkip, Reason: "supplier retired",
+		LineRef: "line-openai", Action: types.ConfigImportBindingActionSkip,
 	}})
 
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestConfigImportBindingSkipExcludesLineDependents(t *testing.T) {
 			continue
 		}
 		assert.Equal(t, string(types.ConfigImportItemStateExcluded), item.State)
-		assert.Equal(t, "supplier retired", item.ExclusionReason)
+		assert.Empty(t, item.ExclusionReason)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestConfigImportBindingBindRestoresItemsSkippedByEarlierDecision(t *testing
 		models: []string{"gpt-test"},
 	})
 	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
-		LineRef: "line-openai", Action: types.ConfigImportBindingActionSkip, Reason: "supplier retired",
+		LineRef: "line-openai", Action: types.ConfigImportBindingActionSkip,
 	}})
 	require.NoError(t, err)
 
@@ -149,11 +149,11 @@ func TestConfigImportBindingKeepsOverlappingDependentExcludedUntilEveryOwnerBind
 	})
 
 	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
-		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip, Reason: "line A unavailable",
+		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip,
 	}})
 	require.NoError(t, err)
 	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
-		LineRef: "line-b", Action: types.ConfigImportBindingActionSkip, Reason: "line B unavailable",
+		LineRef: "line-b", Action: types.ConfigImportBindingActionSkip,
 	}})
 	require.NoError(t, err)
 
@@ -167,7 +167,7 @@ func TestConfigImportBindingKeepsOverlappingDependentExcludedUntilEveryOwnerBind
 	var route model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a-b").First(&route).Error)
 	assert.Equal(t, string(types.ConfigImportItemStateExcluded), route.State)
-	assert.Equal(t, "line B unavailable", route.ExclusionReason)
+	assert.Empty(t, route.ExclusionReason)
 
 	channelB := &model.Channel{Type: constant.ChannelTypeOpenAI, Name: "Supplier B", Models: "model-b", Key: "key-b"}
 	require.NoError(t, model.DB.Create(channelB).Error)
@@ -194,7 +194,7 @@ func TestConfigImportBindingSingleRequestReappliesSkipAfterEarlierBind(t *testin
 		},
 	})
 	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
-		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip, Reason: "line A unavailable",
+		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip,
 	}})
 	require.NoError(t, err)
 
@@ -202,14 +202,14 @@ func TestConfigImportBindingSingleRequestReappliesSkipAfterEarlierBind(t *testin
 	require.NoError(t, model.DB.Create(channelA).Error)
 	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{
 		{LineRef: "line-a", Action: types.ConfigImportBindingActionBind, ChannelID: &channelA.Id},
-		{LineRef: "line-b", Action: types.ConfigImportBindingActionSkip, Reason: "line B unavailable"},
+		{LineRef: "line-b", Action: types.ConfigImportBindingActionSkip},
 	})
 	require.NoError(t, err)
 
 	var route model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a-b").First(&route).Error)
 	assert.Equal(t, string(types.ConfigImportItemStateExcluded), route.State)
-	assert.Equal(t, "line B unavailable", route.ExclusionReason)
+	assert.Empty(t, route.ExclusionReason)
 }
 
 func TestConfigImportBindingMapsDatabaseChannelUniquenessConflict(t *testing.T) {
@@ -417,14 +417,10 @@ func TestConfigImportBindingStrictDecodeRejectsCredentialFields(t *testing.T) {
 	}
 }
 
-func TestConfigImportBindingStrictDecodeRejectsCredentialLikeSkipReason(t *testing.T) {
-	for _, credential := range []string{
-		"sk-abcdefghijklmnopqrstuvwxyz0123456789",
-		"AIza" + strings.Repeat("A", 35),
-	} {
-		_, err := DecodeConfigImportBindingRequest(strings.NewReader(`{"bindings":[{"line_ref":"line-openai","action":"skip","reason":"` + credential + `"}]}`))
-		require.ErrorContains(t, err, "SECURITY_CREDENTIAL_VALUE")
-	}
+func TestConfigImportBindingStrictDecodeRejectsRemovedSkipReason(t *testing.T) {
+	_, err := DecodeConfigImportBindingRequest(strings.NewReader(`{"bindings":[{"line_ref":"line-openai","action":"skip","reason":"legacy"}]}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reason")
 }
 
 func prepareConfigImportBindingDB(t *testing.T) {

@@ -11,7 +11,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 
 import type {
   ConfigImportBatchDetail,
@@ -36,7 +35,6 @@ interface BindingDraft {
   action: ConfigImportBinding['action']
   channelID?: number
   credentialsConfirmed: boolean
-  reason: string
 }
 
 export interface ChannelBindingStepProps {
@@ -94,7 +92,6 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
             action: 'create',
             channelID: createdChannelID,
             credentialsConfirmed: false,
-            reason: '',
           }
           continue
         }
@@ -115,7 +112,6 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
           action: persisted.action as 'bind' | 'create',
           channelID: persisted.channel_id,
           credentialsConfirmed: persisted.credentials_confirmed,
-          reason: '',
         }
       }
       return next
@@ -127,7 +123,6 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
       const previous = current[lineRef] ?? {
         action: 'bind' as const,
         credentialsConfirmed: false,
-        reason: '',
       }
       return { ...current, [lineRef]: { ...previous, ...update } }
     })
@@ -139,18 +134,12 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
       const draft = drafts[line.lineRef] ?? {
         action: 'bind' as const,
         credentialsConfirmed: false,
-        reason: '',
       }
       if (draft.action === 'skip') {
-        if (!draft.reason.trim()) {
-          setError(t('A skip reason is required.'))
-          return
-        }
         bindings.push({
           line_ref: line.lineRef,
           action: 'skip',
           credentials_confirmed: false,
-          reason: draft.reason.trim(),
         })
         continue
       }
@@ -205,7 +194,6 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
           const draft = drafts[line.lineRef] ?? {
             action: 'bind' as const,
             credentialsConfirmed: false,
-            reason: '',
           }
           return (
             <article
@@ -229,7 +217,7 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
                     size='sm'
                     variant={draft.action === 'bind' ? 'default' : 'outline'}
                     onClick={() =>
-                      updateDraft(line.lineRef, { action: 'bind', reason: '' })
+                      updateDraft(line.lineRef, { action: 'bind' })
                     }
                   >
                     {t('Bind')}
@@ -257,20 +245,7 @@ export function ChannelBindingStep(props: ChannelBindingStepProps) {
                   </Button>
                 </div>
 
-                {draft.action === 'skip' ? (
-                  <Input
-                    aria-label={t('Skip reason')}
-                    value={draft.reason}
-                    onChange={(event) =>
-                      updateDraft(line.lineRef, { reason: event.target.value })
-                    }
-                    onInput={(event) =>
-                      updateDraft(line.lineRef, {
-                        reason: event.currentTarget.value,
-                      })
-                    }
-                  />
-                ) : (
+                {draft.action !== 'skip' && (
                   <>
                     <select
                       className='border-input bg-background h-9 w-full rounded-md border px-2 text-sm'

@@ -163,7 +163,7 @@ test('saves an existing channel binding only after credential confirmation', asy
   }
 })
 
-test('requires a reason when an operator skips a channel line', async () => {
+test('saves a skipped channel line without a reason input', async () => {
   const mounted = await mount()
   try {
     const skip = [...mounted.container.querySelectorAll('button')].find(
@@ -172,27 +172,16 @@ test('requires a reason when an operator skips a channel line', async () => {
     assert.ok(skip instanceof browserWindow.HTMLButtonElement)
     await act(async () => skip.click())
 
+    assert.equal(
+      mounted.container.querySelector('input[aria-label="Skip reason"]'),
+      null
+    )
+
     const save = [...mounted.container.querySelectorAll('button')].find(
       (button) => button.textContent === 'Save bindings'
     )
     assert.ok(save instanceof browserWindow.HTMLButtonElement)
     await act(async () => save.click())
-    assert.equal(mounted.saved.length, 0)
-
-    const reason = mounted.container.querySelector(
-      'input[aria-label="Skip reason"]'
-    )
-    assert.ok(reason instanceof browserWindow.HTMLInputElement)
-    reason.value = 'Not purchased'
-    await act(async () => {
-      reason.dispatchEvent(new browserWindow.Event('input', { bubbles: true }))
-      reason.dispatchEvent(new browserWindow.Event('change', { bubbles: true }))
-    })
-    const updatedSave = [...mounted.container.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Save bindings'
-    )
-    assert.ok(updatedSave instanceof browserWindow.HTMLButtonElement)
-    await act(async () => updatedSave.click())
 
     assert.deepEqual(mounted.saved, [
       {
@@ -201,7 +190,6 @@ test('requires a reason when an operator skips a channel line', async () => {
             line_ref: 'line-1',
             action: 'skip',
             credentials_confirmed: false,
-            reason: 'Not purchased',
           },
         ],
       },

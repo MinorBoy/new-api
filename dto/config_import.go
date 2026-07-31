@@ -18,7 +18,6 @@ type ConfigImportBindingInput struct {
 	Action               types.ConfigImportBindingAction `json:"action"`
 	ChannelID            *int                            `json:"channel_id,omitempty"`
 	CredentialsConfirmed bool                            `json:"credentials_confirmed"`
-	Reason               string                          `json:"reason,omitempty"`
 }
 
 type ConfigImportResolutionRequest struct {

@@ -86,8 +86,7 @@ function bindingBatch(): ConfigImportBatchDetail {
       entity_type: 'channel_lines',
       business_id: 'line-1',
       entity_hash: 'line-1-hash',
-      canonical_json:
-        '{"line_ref":"line-1","display_name":"Imported line"}',
+      canonical_json: '{"line_ref":"line-1","display_name":"Imported line"}',
       state: 'new',
       source_ref: '渠道!4',
       source_sheet: '渠道',
@@ -161,6 +160,21 @@ test('loads existing channels as binding candidates', async () => {
       [...select.options].some((option) => option.value === '25'),
       true
     )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('renders a scrollable container for a binding batch', async () => {
+  const mounted = await mount({ currentBatch: bindingBatch() })
+  try {
+    const wizard = mounted.container.querySelector(
+      '[aria-labelledby="config-import-wizard-title"]'
+    )
+    assert.ok(wizard instanceof browserWindow.HTMLElement)
+    assert.equal(wizard.classList.contains('min-h-0'), true)
+    assert.equal(wizard.classList.contains('flex-1'), true)
+    assert.equal(wizard.classList.contains('overflow-auto'), true)
   } finally {
     await act(async () => mounted.root.unmount())
   }

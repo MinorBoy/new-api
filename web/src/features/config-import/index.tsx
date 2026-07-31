@@ -216,7 +216,10 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
   const step = forcedStep ?? reviewStep ?? state.step
 
   return (
-    <section className='space-y-5' aria-labelledby='config-import-wizard-title'>
+    <section
+      className='min-h-0 flex-1 space-y-5 overflow-auto p-6'
+      aria-labelledby='config-import-wizard-title'
+    >
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <h1 id='config-import-wizard-title' className='text-xl font-semibold'>
           {t('Channel configuration import')}

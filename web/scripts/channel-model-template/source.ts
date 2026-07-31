@@ -115,8 +115,8 @@ function cellText(value: SourceValue): string {
   return String(value).trim()
 }
 
-function rowIsBlank(row: ExcelJS.Row, columnCount: number): boolean {
-  for (let column = 1; column <= columnCount; column += 1) {
+function rowIsBlank(row: ExcelJS.Row, columns: readonly number[]): boolean {
+  for (const column of columns) {
     if (cellText(cellValue(row.getCell(column).value)) !== '') return false
   }
   return true
@@ -127,21 +127,31 @@ function readHeaders(
   rowNumber: number,
   headers: readonly string[],
   name: string
-): void {
-  const actual = headers.map((_, index) =>
-    cellText(cellValue(sheet.getRow(rowNumber).getCell(index + 1).value))
-  )
-  if (
-    actual.length !== headers.length ||
-    actual.some((value, index) => value !== headers[index])
-  ) {
+): number[] {
+  const headerRow = sheet.getRow(rowNumber)
+  const columns = headers.map((header) => {
+    let matchedColumn = 0
+    for (let column = 1; column <= sheet.columnCount; column += 1) {
+      if (cellText(cellValue(headerRow.getCell(column).value)) !== header) {
+        continue
+      }
+      if (matchedColumn !== 0) {
+        throw new Error(`${name} header mismatch`)
+      }
+      matchedColumn = column
+    }
+    return matchedColumn
+  })
+  if (columns.some((column) => column === 0)) {
     throw new Error(`${name} header mismatch`)
   }
+  return columns
 }
 
 function readRecords(
   sheet: ExcelJS.Worksheet,
   headers: readonly string[],
+  columns: readonly number[],
   headerRow: number
 ): SourceRecord[] {
   const records: SourceRecord[] = []
@@ -151,11 +161,11 @@ function readRecords(
     rowNumber += 1
   ) {
     const row = sheet.getRow(rowNumber)
-    if (rowIsBlank(row, headers.length)) continue
+    if (rowIsBlank(row, columns)) continue
     const fields = Object.fromEntries(
       headers.map((header, index) => [
         header,
-        cellValue(row.getCell(index + 1).value),
+        cellValue(row.getCell(columns[index]!).value),
       ])
     )
     records.push({
@@ -208,13 +218,23 @@ export async function readSourceWorkbook(
   if (!channel || !models || !officialPrices) {
     throw new Error('source worksheets are unavailable')
   }
-  readHeaders(channel, 2, CHANNEL_HEADERS, 'channel')
-  readHeaders(models, 2, SD_HEADERS, 'sd')
-  readHeaders(officialPrices, 6, OFFICIAL_PRICE_HEADERS, 'sd官价')
+  const channelColumns = readHeaders(channel, 2, CHANNEL_HEADERS, 'channel')
+  const modelColumns = readHeaders(models, 2, SD_HEADERS, 'sd')
+  const officialPriceColumns = readHeaders(
+    officialPrices,
+    6,
+    OFFICIAL_PRICE_HEADERS,
+    'sd官价'
+  )
   return {
-    channels: readRecords(channel, CHANNEL_HEADERS, 2),
-    models: readRecords(models, SD_HEADERS, 2),
-    officialPrices: readRecords(officialPrices, OFFICIAL_PRICE_HEADERS, 6),
+    channels: readRecords(channel, CHANNEL_HEADERS, channelColumns, 2),
+    models: readRecords(models, SD_HEADERS, modelColumns, 2),
+    officialPrices: readRecords(
+      officialPrices,
+      OFFICIAL_PRICE_HEADERS,
+      officialPriceColumns,
+      6
+    ),
   }
 }
 

@@ -61,3 +61,27 @@ test('rejects a workbook whose sd header changes', async () => {
     await fs.rm(tempDirectory, { recursive: true, force: true })
   }
 })
+
+test('reads sd records when an optional column is added before remarks', async () => {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.readFile(fixturePath)
+  const sheet = workbook.getWorksheet('sd')
+  assert.ok(sheet)
+  sheet.getCell('AF2').value = '上游模型分组'
+  sheet.getCell('AG2').value = '备注'
+  sheet.getCell('AF3').value = 'group-a'
+  sheet.getCell('AG3').value = 'remark-a'
+
+  const tempDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-source-test-')
+  )
+  const sourcePath = path.join(tempDirectory, 'source.xlsx')
+  try {
+    await workbook.xlsx.writeFile(sourcePath)
+    const source = await readSourceWorkbook(sourcePath)
+
+    assert.equal(source.models[0]?.fields.备注, 'remark-a')
+  } finally {
+    await fs.rm(tempDirectory, { recursive: true, force: true })
+  }
+})

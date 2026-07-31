@@ -180,6 +180,20 @@ test('infers a Seedance official model from a source model family', () => {
   )
 })
 
+test('interprets an Excel date in the duration range as month-day bounds', () => {
+  const source = sourceWithOfficialPrice()
+  source.models[0]!.fields.时长范围 = new Date('2026-04-15T00:00:00.000Z')
+
+  const output = buildTemplateData(
+    source,
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+  const sku = output.skus.find((item) => item.model === 'seedance-2.0')
+
+  assert.equal(sku?.minDurationSeconds, 4)
+  assert.equal(sku?.maxDurationSeconds, 15)
+})
+
 test('uses the configured exchange rate for official sale previews', () => {
   const output = buildTemplateData(
     sourceWithOfficialPrice(),

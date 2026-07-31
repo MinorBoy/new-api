@@ -79,6 +79,8 @@ function resolution(value: string): string {
 }
 
 function parseDuration(value: string): [number, number] {
+  const excelDate = value.match(/^\d{4}-(\d{1,2})-(\d{1,2})(?:T|$)/u)
+  if (excelDate) return [Number(excelDate[1]), Number(excelDate[2])]
   const match = value.match(/(\d+(?:\.\d+)?)\s*[-~至]\s*(\d+(?:\.\d+)?)/u)
   if (!match) return [0, 0]
   return [Number(match[1]), Number(match[2])]

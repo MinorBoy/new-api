@@ -36,11 +36,11 @@ License, or (at your option) any later version.
 
 ## 生成
 
-在 `web` 目录执行。每次使用一个新的输出文件名：
+原始表固定在仓库根目录下的 `docs\new-channels\sd收录.xlsx`。在 `web` 目录执行时，使用其相对路径 `..\docs\new-channels\sd收录.xlsx`。每次使用一个新的输出文件名：
 
 ```powershell
 bun run channel-model-template:generate -- `
-  --source "C:\Users\880pro\Downloads\sd收录.xlsx" `
+  --source "..\docs\new-channels\sd收录.xlsx" `
   --rules "scripts\channel-model-template\conversion-rules.json" `
   --base "src\channel-config-converter\__fixtures__\channel-config-v1-corrected.xlsx" `
   --output "C:\Users\880pro\Documents\new-api\outputs\<日期>\渠道模型成本与利润模板-v1.xlsx" `

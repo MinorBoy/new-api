@@ -560,6 +560,8 @@ export async function writeTemplateWorkbook(
   const issues = [...input.data.issues]
   const hasInputFailures = issues.some((item) => item.severity === 'FAIL')
   const generatedAt = new Date().toISOString()
+  const outputDirectory = path.resolve(path.dirname(input.outputPath))
+  const reportDirectory = path.resolve(path.dirname(input.reportPath))
   const report: ConversionReport = {
     converterVersion: `channel-model-template/${input.rules.version}`,
     source: {
@@ -578,7 +580,7 @@ export async function writeTemplateWorkbook(
     output: { path: input.outputPath, sha256: 'not-written' },
   }
   if (hasInputFailures) {
-    await fs.mkdir(path.dirname(input.reportPath), { recursive: true })
+    await fs.mkdir(reportDirectory, { recursive: true })
     await fs.writeFile(input.reportPath, `${JSON.stringify(report, null, 2)}\n`)
     return { hasFailures: true, report }
   }
@@ -648,16 +650,16 @@ export async function writeTemplateWorkbook(
   issues.push(...staticFormulaIssues(workbook))
   report.issues = issues
   if (issues.some((item) => item.severity === 'FAIL')) {
-    await fs.mkdir(path.dirname(input.reportPath), { recursive: true })
+    await fs.mkdir(reportDirectory, { recursive: true })
     await fs.writeFile(input.reportPath, `${JSON.stringify(report, null, 2)}\n`)
     return { hasFailures: true, report }
   }
 
-  await fs.mkdir(path.dirname(input.outputPath), { recursive: true })
+  await fs.mkdir(outputDirectory, { recursive: true })
   await workbook.xlsx.writeFile(input.outputPath)
   await setFullRecalculation(input.outputPath)
   report.output.sha256 = await hashPath(input.outputPath)
-  await fs.mkdir(path.dirname(input.reportPath), { recursive: true })
+  await fs.mkdir(reportDirectory, { recursive: true })
   await fs.writeFile(input.reportPath, `${JSON.stringify(report, null, 2)}\n`)
   return { hasFailures: false, report }
 }

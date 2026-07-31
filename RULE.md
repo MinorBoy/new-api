@@ -1,5 +1,11 @@
 # ysr Branch Rules
 
+## 主分支硬约束
+
+- 本项目唯一的默认主分支是 `ysr`。
+- 永远禁止合并到 `main` 分支。
+- 永远禁止直接向 `main` 分支提交内容。
+
 ## Upstream Integration
 
 - By default, do not merge `origin/main` or local `main` into `ysr`.

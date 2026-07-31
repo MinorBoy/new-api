@@ -169,3 +169,35 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
     await fs.rm(directory, { recursive: true, force: true })
   }
 })
+
+test('writes a report for a relative output path in a new directory', async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-template-relative-write-')
+  )
+  const outputDirectory = path.join(directory, 'generated')
+  const outputPath = path.relative(
+    process.cwd(),
+    path.join(outputDirectory, 'template.xlsx')
+  )
+  const reportPath = path.relative(
+    process.cwd(),
+    path.join(outputDirectory, 'template.report.json')
+  )
+  try {
+    const result = await writeTemplateWorkbook({
+      basePath,
+      outputPath,
+      reportPath,
+      sourcePath: 'source.xlsx',
+      rulesPath: 'rules.json',
+      rules,
+      data: buildTemplateData(source, rules),
+    })
+
+    assert.equal(result.hasFailures, false)
+    await fs.access(outputPath)
+    await fs.access(reportPath)
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})

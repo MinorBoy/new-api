@@ -26,6 +26,7 @@ import type {
   MappingRow,
   ModelRule,
   ProfitRow,
+  RowOverride,
   Rules,
   SaleRow,
   SkuRow,
@@ -130,6 +131,20 @@ function modelRuleFor(
   )
 }
 
+function inferClientModel(rawModel: string, officialModels: string[]): string {
+  const available = new Set(officialModels)
+  const normalized = rawModel.toLowerCase()
+  const suffix = normalized.includes('mini')
+    ? '-mini'
+    : normalized.includes('fast')
+      ? '-fast'
+      : ''
+  const candidate = `seedance-2.0${suffix}`
+  if (available.has(candidate)) return candidate
+  if (available.has('seedance-2.0')) return 'seedance-2.0'
+  return rawModel
+}
+
 function sourceIdForChannel(channel: SourceRecord): string {
   return `SRC-CH-${slug(field(channel, '渠道'))}`
 }
@@ -193,6 +208,14 @@ function skuId(
   return `SKU-${slug(model)}-${slug(version || 'standard')}-${slug(resolutionValue)}`
 }
 
+function fallbackSkuDimensions(resolutionValue: string): [number, number] {
+  if (resolutionValue === '480p') return [864, 496]
+  if (resolutionValue === '720p') return [1280, 720]
+  if (resolutionValue === '1080p') return [1920, 1080]
+  if (resolutionValue === '4k') return [3840, 2160]
+  return [1, 1]
+}
+
 function buildSkus(
   source: SourceWorkbook,
   rules: Rules,
@@ -205,13 +228,20 @@ function buildSkus(
     const official = source.officialPrices.find(
       (price) => field(price, '模型') === rawModel
     )
-    const modelRule = modelRuleFor(rawModel, rules, field(official, '模型'))
+    const modelRule = modelRuleFor(
+      rawModel,
+      rules,
+      field(official, '模型') ||
+        inferClientModel(
+          rawModel,
+          source.officialPrices.map((price) => field(price, '模型'))
+        )
+    )
     const model = modelRule.clientModel ?? field(official, '模型') ?? rawModel
     const resolutionValue = resolution(field(modelRecord, '清晰度'))
     const officialPrice = findOfficial(officialIndex, model, resolutionValue)
-    if (!officialPrice) continue
     const version =
-      field(officialPrice, '版本') || modelRule.clientModel || '标准'
+      field(officialPrice, '版本') || field(modelRecord, '版本') || '标准'
     const [minDuration, maxDuration] = parseDuration(
       field(modelRecord, '时长范围')
     )
@@ -221,12 +251,35 @@ function buildSkus(
     ]
     const id = skuId(model, version, resolutionValue)
     if (rows.has(id)) continue
-    const width = modelRule.outputWidth ?? Number(field(officialPrice, '长边'))
+    const [fallbackWidth, fallbackHeight] =
+      fallbackSkuDimensions(resolutionValue)
+    const width =
+      modelRule.outputWidth ??
+      (Number(field(officialPrice, '长边')) || fallbackWidth)
     const height =
-      modelRule.outputHeight ?? Number(field(officialPrice, '短边'))
+      modelRule.outputHeight ??
+      (Number(field(officialPrice, '短边')) || fallbackHeight)
     const frameRate =
-      modelRule.frameRate ?? Number(field(officialPrice, '帧率'))
-    const sourceId = `SRC-OFFICIAL-${slug(model)}`
+      modelRule.frameRate ?? (Number(field(officialPrice, '帧率')) || 24)
+    const channelSource = source.channels.find(
+      (channel) => field(channel, '渠道') === field(modelRecord, '渠道')
+    )
+    const sourceId = officialPrice
+      ? `SRC-OFFICIAL-${slug(model)}`
+      : channelSource
+        ? sourceIdForChannel(channelSource)
+        : 'SRC-SD-IMPORT'
+    if (!officialPrice) {
+      issues.push(
+        issue(
+          'SKU_UNRESOLVED',
+          'WARN',
+          `No official SKU matched ${model}/${resolutionValue}.`,
+          modelRecord,
+          id
+        )
+      )
+    }
     rows.set(id, {
       businessId: id,
       model,
@@ -252,11 +305,13 @@ function buildSkus(
             ? '是'
             : '否',
       measurementMethod: 'video_pixel_tokens',
-      status: 'active',
+      status: officialPrice ? 'active' : 'draft',
       sourceId,
-      sourceSheet: officialPrice.location.sheet,
-      sourceRow: officialPrice.location.row,
-      note: '由官方价格矩阵和源模型能力合并生成。',
+      sourceSheet: officialPrice?.location.sheet ?? modelRecord.location.sheet,
+      sourceRow: officialPrice?.location.row ?? modelRecord.location.row,
+      note: officialPrice
+        ? '由官方价格矩阵和源模型能力合并生成。'
+        : '缺少官方价格，已生成 draft SKU。',
     })
   }
   if (rows.size === 0 && source.models.length > 0) {
@@ -333,6 +388,25 @@ function priceForMode(record: SourceRecord, mode: CostMode): Decimal | null {
   return numericField(record, '元/1M')
 }
 
+function overridePrice(
+  override: RowOverride | undefined,
+  mode: CostMode
+): Decimal | null {
+  const value =
+    mode === 'per_duration'
+      ? override?.nativePerSecond
+      : mode === 'per_request'
+        ? override?.nativePerRequest
+        : override?.nativePerMillion
+  if (!value) return null
+  try {
+    const decimal = new Decimal(value)
+    return decimal.isFinite() ? decimal : null
+  } catch {
+    return null
+  }
+}
+
 function buildCostsAndMappings(
   source: SourceWorkbook,
   rules: Rules,
@@ -351,7 +425,14 @@ function buildCostsAndMappings(
     const sourceChannel = field(record, '渠道')
     const channelCode =
       rules.channelCodes[sourceChannel] ?? `CH-RAW-${slug(sourceChannel)}`
-    const modelRule = modelRuleFor(rawModel, rules, '')
+    const modelRule = modelRuleFor(
+      rawModel,
+      rules,
+      inferClientModel(
+        rawModel,
+        source.officialPrices.map((price) => field(price, '模型'))
+      )
+    )
     const clientModel = modelRule.clientModel ?? rawModel
     const upstreamModel = modelRule.upstreamModel ?? rawModel
     const resolutionValue = resolution(field(record, '清晰度'))
@@ -371,6 +452,8 @@ function buildCostsAndMappings(
     const sourceId = channelSource
       ? sourceIdForChannel(channelSource)
       : `SRC-${slug(sourceChannel)}-${baseId}`
+    const materialLimit = field(record, '素材限制')
+    const hasMaterialLimit = /^\d{3}$/u.test(materialLimit)
     const override =
       rules.overrides[`${sourceChannel}/${baseId}`] ??
       rules.overrides[String(record.location.row)]
@@ -386,7 +469,9 @@ function buildCostsAndMappings(
       )
       continue
     }
-    const native = priceForMode(record, effectiveMode)
+    const native =
+      overridePrice(override, effectiveMode) ??
+      priceForMode(record, effectiveMode)
     if (native === null || native.lte(0)) {
       issues.push(
         issue(
@@ -407,6 +492,16 @@ function buildCostsAndMappings(
         )
       )
     }
+    if (!hasMaterialLimit) {
+      issues.push(
+        issue(
+          'MATERIAL_LIMIT_UNRESOLVED',
+          'WARN',
+          'A verified three-digit 素材限制 value is required for the V1 mapping.',
+          record
+        )
+      )
+    }
     const [minDuration, maxDuration] = parseDuration(field(record, '时长范围'))
     const billingMultiplier = numericField(record, '计费倍率') ?? new Decimal(1)
     const feeRate = numericField(record, '手续费') ?? new Decimal(0)
@@ -419,13 +514,16 @@ function buildCostsAndMappings(
       .div(rechargeRatio)
       .mul(new Decimal(1).add(feeRate))
       .mul(currencyToUsd)
-    const status: 'active' | 'draft' =
-      sku && field(record, '状态') === '正常' ? 'active' : 'draft'
-    if (override?.status) {
-      // An explicit rule decision is the only allowed status override.
-      // It is still subject to unresolved-reference validation below.
+    const sourceStatus: 'active' | 'draft' =
+      field(record, '状态') === '正常' ? 'active' : 'draft'
+    const costStatus =
+      sku?.status === 'active' && hasMaterialLimit
+        ? (override?.status ?? sourceStatus)
+        : 'draft'
+    let supportsRealPerson = field(record, '过真人脸')
+    if (override?.supportsRealPerson !== undefined) {
+      supportsRealPerson = override.supportsRealPerson ? '是' : '否'
     }
-    const costStatus = override?.status ?? status
     for (const scenario of ['no_video', 'with_video'] as const) {
       const suffix = scenarioCode(scenario)
       costs.push({
@@ -480,7 +578,7 @@ function buildCostsAndMappings(
       sourceId,
       sourceSheet: record.location.sheet,
       sourceRow: record.location.row,
-      note: `原模型=${rawModel}; 原比例=${field(record, '比例')}; 真人脸=${field(record, '过真人脸')}`,
+      note: `原模型=${rawModel}; 素材限制=${materialLimit}; 原比例=${field(record, '比例')}; 真人脸=${supportsRealPerson}`,
     })
     if (!channels.some((channel) => channel.businessId === channelCode)) {
       issues.push(

@@ -19,6 +19,7 @@
     "converter:dev": "rsbuild dev -c rsbuild.converter.config.ts",
     "converter:build": "rsbuild build -c rsbuild.converter.config.ts",
     "converter:test": "bun test --parallel=1 src/channel-config-converter",
+    "channel-model-template:generate": "bun scripts/channel-model-template/generate.ts",
     "knip": "knip"
   },
   "dependencies": {

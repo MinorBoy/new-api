@@ -140,11 +140,39 @@ test('keeps a source row without an official SKU as draft', () => {
   assert.equal(output.issues[0]?.severity, 'WARN')
 })
 
+test('keeps a source row without a material limit as draft', () => {
+  const source = sourceWithOfficialPrice()
+  source.models[0]!.fields.素材限制 = null
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs[0]?.status, 'draft')
+  assert.ok(
+    output.issues.some(
+      (item) =>
+        item.code === 'MATERIAL_LIMIT_UNRESOLVED' && item.severity === 'WARN'
+    )
+  )
+})
+
 test('matches a Seedance source family to an official Seedance SKU', async () => {
   const source = await readSourceWorkbook(sourceFixturePath)
   const output = buildTemplateData(source, rules)
 
   assert.ok(output.skus.some((sku) => sku.model === 'seedance-2.0'))
+  assert.equal(
+    output.costs.find((cost) => cost.businessId === 'COST-CLMM-R3-720-DUR-NOV')
+      ?.status,
+    'active'
+  )
+})
+
+test('infers a Seedance official model from a source model family', () => {
+  const output = buildTemplateData(
+    sourceWithOfficialPrice(),
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+
   assert.equal(
     output.costs.find((cost) => cost.businessId === 'COST-CLMM-R3-720-DUR-NOV')
       ?.status,
@@ -174,4 +202,32 @@ test('uses a registered source ID for generated cost rows', () => {
     output.issues.some((item) => item.code === 'COST_SOURCE_UNRESOLVED'),
     false
   )
+})
+
+test('applies a typed price override from the rules file', () => {
+  const output = buildTemplateData(
+    sourceWithOfficialPrice(),
+    parseRules({
+      ...rulesInput,
+      overrides: { '3': { nativePerSecond: '2' } },
+    })
+  )
+
+  assert.equal(
+    output.costs.find((cost) => cost.businessId === 'COST-CLMM-R3-720-DUR-NOV')
+      ?.nativePerSecond,
+    '2'
+  )
+})
+
+test('writes a confirmed real-person override to the mapping audit note', () => {
+  const output = buildTemplateData(
+    sourceWithOfficialPrice(),
+    parseRules({
+      ...rulesInput,
+      overrides: { '3': { supportsRealPerson: false } },
+    })
+  )
+
+  assert.match(output.mappings[0]?.note ?? '', /真人脸=否/)
 })

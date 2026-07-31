@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "channelCodes": {
+    "1": "CH-CLMM",
+    "2": "CH-PAIPU",
+    "3": "CH-LUCEN",
+    "4": "CH-8YES",
+    "5": "CH-SECURE",
+    "6": "CH-CANGYUANSUANLI",
+    "7": "CH-DIMENSIO",
+    "8": "CH-MEGABYAI",
+    "9": "CH-4STOKEN"
+  },
+  "defaults": {
+    "currency": "CNY",
+    "currencyToUsd": "0.136986301369863",
+    "rechargeRatio": "1",
+    "purchaseDiscountRatio": "1",
+    "tokenDivisor": 1024,
+    "groupRatio": "1"
+  },
+  "modelRules": {},
+  "overrides": {
+    "102": {
+      "nativePerRequest": "3",
+      "supportsRealPerson": true,
+      "upstreamModel": "videos-fast"
+    },
+    "103": {
+      "nativePerRequest": "4",
+      "supportsRealPerson": true,
+      "upstreamModel": "videos-fast"
+    },
+    "104": {
+      "nativePerRequest": "1.2",
+      "supportsRealPerson": false,
+      "upstreamModel": "videos-fast"
+    },
+    "105": {
+      "nativePerRequest": "1.6",
+      "supportsRealPerson": false,
+      "upstreamModel": "videos-fast"
+    }
+  }
+}

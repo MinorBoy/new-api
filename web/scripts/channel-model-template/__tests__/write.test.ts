@@ -23,6 +23,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { TextWriter, Uint8ArrayReader, ZipReader } from '@zip.js/zip.js'
+
 import { convertWorkbook } from '../../../src/channel-config-converter/conversion'
 import { buildTemplateData } from '../build'
 import { parseRules } from '../rules'
@@ -146,7 +148,22 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
 
     assert.equal(result.hasFailures, false)
     assert.equal(converted.document.template_version, '1')
+    assert.equal(converted.hasFailures, false)
     assert.equal(converted.document.entities.channels.length, 1)
+    const reader = new ZipReader(
+      new Uint8ArrayReader(await fs.readFile(outputPath))
+    )
+    try {
+      const workbookXml = await (
+        await reader.getEntries()
+      )
+        .find((entry) => entry.filename === 'xl/workbook.xml')
+        ?.getData(new TextWriter())
+      assert.match(workbookXml ?? '', /fullCalcOnLoad="1"/)
+      assert.match(workbookXml ?? '', /forceFullCalc="1"/)
+    } finally {
+      await reader.close()
+    }
     await fs.access(reportPath)
   } finally {
     await fs.rm(directory, { recursive: true, force: true })

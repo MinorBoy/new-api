@@ -117,6 +117,53 @@ async function prepareForExcelJs(input: Uint8Array): Promise<Uint8Array> {
   }
 }
 
+function requireFullRecalculation(xml: string): string {
+  const calcProperties = /<calcPr\b([^>]*?)(?:\/>|><\/calcPr>)/iu
+  if (!calcProperties.test(xml)) {
+    return xml.replace(
+      /<\/workbook>\s*$/u,
+      '<calcPr fullCalcOnLoad="1" forceFullCalc="1"/></workbook>'
+    )
+  }
+  return xml.replace(calcProperties, (_match, attributes: string) => {
+    const withoutRecalcFlags = attributes.replace(
+      /\s+(?:fullCalcOnLoad|forceFullCalc)="[^"]*"/giu,
+      ''
+    )
+    return `<calcPr${withoutRecalcFlags} fullCalcOnLoad="1" forceFullCalc="1"/>`
+  })
+}
+
+async function setFullRecalculation(outputPath: string): Promise<void> {
+  const reader = new ZipReader(
+    new Uint8ArrayReader(await fs.readFile(outputPath)),
+    {
+      useWebWorkers: false,
+    }
+  )
+  const writer = new ZipWriter(new Uint8ArrayWriter(), { useWebWorkers: false })
+  try {
+    for (const entry of await reader.getEntries()) {
+      if (entry.directory) continue
+      if (entry.filename === 'xl/workbook.xml') {
+        const xml = await entry.getData(new TextWriter())
+        await writer.add(
+          entry.filename,
+          new TextReader(requireFullRecalculation(xml))
+        )
+        continue
+      }
+      await writer.add(
+        entry.filename,
+        new Uint8ArrayReader(await entry.getData(new Uint8ArrayWriter()))
+      )
+    }
+    await fs.writeFile(outputPath, await writer.close())
+  } finally {
+    await reader.close()
+  }
+}
+
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (value instanceof Date) return value.toISOString()
@@ -608,6 +655,7 @@ export async function writeTemplateWorkbook(
 
   await fs.mkdir(path.dirname(input.outputPath), { recursive: true })
   await workbook.xlsx.writeFile(input.outputPath)
+  await setFullRecalculation(input.outputPath)
   report.output.sha256 = await hashPath(input.outputPath)
   await fs.mkdir(path.dirname(input.reportPath), { recursive: true })
   await fs.writeFile(input.reportPath, `${JSON.stringify(report, null, 2)}\n`)

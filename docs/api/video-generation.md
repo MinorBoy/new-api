@@ -41,6 +41,16 @@ Handler 位置：
 
 > 说明：即梦的"查询"也走 `POST /jimeng/?Action=CVSync2AsyncGetResult`，由 `JimengRequestConvert` 改写成 `GET /v1/video/generations/:task_id`。
 
+## 公共模型目录
+
+客户端只使用以下三个模型 ID：
+
+- `doubao-seedance-2-0-260128`
+- `doubao-seedance-2-0-fast-260128`
+- `doubao-seedance-2-0-mini-260615`
+
+切换服务时只需替换 Base URL 和 API Key。渠道模型 ID 是内部路由实现，不会出现在模型广场或 `/v1/models`；直接请求渠道模型 ID 返回 `model_not_found`。旧 Mini ID `doubao-seedance-2-0-mini-260128` 不属于公共兼容 ID。
+
 ## 请求体
 
 ### 统一格式（`dto/video.go:3`，`VideoRequest`）

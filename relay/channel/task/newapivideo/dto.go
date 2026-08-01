@@ -21,14 +21,16 @@ type requestState struct {
 type arkRequest struct {
 	Model         string       `json:"model"`
 	Content       []arkContent `json:"content"`
-	Ratio         string       `json:"ratio,omitempty"`
-	Resolution    string       `json:"resolution,omitempty"`
+	Ratio         *string      `json:"ratio,omitempty"`
+	Resolution    *string      `json:"resolution,omitempty"`
 	Duration      *int         `json:"duration,omitempty"`
 	Watermark     *bool        `json:"watermark,omitempty"`
 	GenerateAudio *bool        `json:"generate_audio,omitempty"`
 	ServiceTier   *string      `json:"service_tier,omitempty"`
 	Draft         *bool        `json:"draft,omitempty"`
 	Tools         *[]arkTool   `json:"tools,omitempty"`
+	Seed          *json.Number `json:"seed,omitempty"`
+	CallbackURL   *string      `json:"callback_url,omitempty"`
 }
 
 type arkTool struct {
@@ -56,7 +58,7 @@ type upstreamRequest struct {
 	ImageWithRoles []upstreamRoleImage `json:"image_with_roles,omitempty"`
 	Content        []arkContent        `json:"content,omitempty"`
 	GenerateAudio  *bool               `json:"generateAudio,omitempty"`
-	Ratio          string              `json:"ratio,omitempty"`
+	Ratio          *string             `json:"ratio,omitempty"`
 	Seconds        *string             `json:"seconds,omitempty"`
 	Watermark      *bool               `json:"watermark,omitempty"`
 }
@@ -72,7 +74,8 @@ type tokenUsage struct {
 }
 
 type arkVideoContent struct {
-	VideoURL string `json:"video_url,omitempty"`
+	VideoURL     string `json:"video_url,omitempty"`
+	LastFrameURL string `json:"last_frame_url,omitempty"`
 }
 
 type arkTaskData struct {

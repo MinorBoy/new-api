@@ -233,14 +233,21 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 	}
 	parsed.URL = directTaskVideoURL(direct)
 	if status == model.TaskStatusFailure {
+		upstreamTaskID := direct.TaskID
+		if upstreamTaskID == "" {
+			upstreamTaskID = direct.ID
+		}
 		if nested.Error != nil {
-			nested.Error = &upstreamError{Code: nested.Error.Code, Message: sanitizeUpstreamFailure(nested.Error.Message)}
+			nested.Error = &upstreamError{
+				Code:    sanitizePublicTaskFailure(nested.Error.Code, upstreamTaskID),
+				Message: sanitizePublicTaskFailure(nested.Error.Message, upstreamTaskID),
+			}
 			parsed.ErrorCode = nested.Error.Code
 			parsed.Reason = nested.Error.Message
 		}
 		if parsed.Reason == "" && direct.Error != nil {
-			parsed.ErrorCode = direct.Error.Code
-			parsed.Reason = sanitizeUpstreamFailure(direct.Error.Message)
+			parsed.ErrorCode = sanitizePublicTaskFailure(direct.Error.Code, upstreamTaskID)
+			parsed.Reason = sanitizePublicTaskFailure(direct.Error.Message, upstreamTaskID)
 		}
 		if parsed.Reason == "" {
 			parsed.Reason = envelopeMessage
@@ -248,7 +255,7 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 		if parsed.Reason == "" {
 			parsed.Reason = "task failed"
 		}
-		parsed.Reason = sanitizeUpstreamFailure(parsed.Reason)
+		parsed.Reason = sanitizePublicTaskFailure(parsed.Reason, upstreamTaskID)
 	}
 	return parsed, nil
 }
@@ -369,8 +376,14 @@ func mapUpstreamTaskStatus(status string) (model.TaskStatus, error) {
 func normalizedProgress(progress string, status model.TaskStatus) string {
 	progress = strings.TrimSpace(progress)
 	if progress != "" && progress != "%" {
-		if !strings.HasSuffix(progress, "%") {
-			progress += "%"
+		raw := strings.TrimSuffix(progress, "%")
+		if value, err := decimal.NewFromString(strings.TrimSpace(raw)); err == nil {
+			if value.IsNegative() {
+				value = decimal.Zero
+			} else if value.GreaterThan(decimal.NewFromInt(100)) {
+				value = decimal.NewFromInt(100)
+			}
+			return value.String() + "%"
 		}
 		return progress
 	}

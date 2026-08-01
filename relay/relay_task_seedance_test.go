@@ -755,6 +755,54 @@ func TestSecureTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
 	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeSecure))
 }
 
+func TestOmegaAITaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "OmegaAI", adaptor.GetChannelName())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeOmegaAI))
+
+	task := &model.Task{
+		TaskID:    "task_omega_public",
+		Platform:  constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)),
+		Status:    model.TaskStatusSuccess,
+		CreatedAt: 1785585600,
+		Properties: model.Properties{
+			OriginModelName:   "client-visible-model",
+			UpstreamModelName: "klsdpro2-720p",
+		},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "omega-private-task",
+			ResultURL:      "https://cdn.example.com/result.mp4",
+		},
+		Data: []byte(`{"status":"succeeded","content":{"video_url":"https://cdn.example.com/result.mp4"}}`),
+	}
+	payload, err := seedanceTaskPayload(task, adaptor)
+	require.NoError(t, err)
+	assert.Equal(t, "task_omega_public", payload["id"])
+	assert.Equal(t, "client-visible-model", payload["model"])
+	encoded, err := common.Marshal(payload)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "omega-private-task")
+	assert.NotContains(t, string(encoded), "klsdpro2-720p")
+}
+
+func TestFourSTokenTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "4stoken", adaptor.GetChannelName())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeFourSToken))
+}
+
 const newAPIVideoDetailedZeroUsage = `{
 	"code":"success",
 	"message":"",

@@ -306,10 +306,40 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Select only models enabled for this Secure group API key',
     },
   },
+  208: {
+    id: 208,
+    name: CHANNEL_TYPES[208],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://omegaai.xin',
+    supportedModels: [
+      'klsdpro2-720p',
+      'seedance-v2-720p',
+      'dola-seedance-2.0',
+      'lingjing-video-v1',
+    ],
+    hints: {
+      baseUrl: 'Default: https://omegaai.xin',
+      key: 'Enter the raw API key issued by OmegaAI',
+      models: 'Select the four documented OmegaAI Seedance video models',
+    },
+  },
+  209: {
+    id: 209,
+    name: CHANNEL_TYPES[209],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://api.4stoken.cn',
+    supportedModels: [],
+    hints: {
+      baseUrl: 'Default: https://api.4stoken.cn',
+      key: 'Enter the raw API key issued by 4stoken',
+      models:
+        'Map client-visible Ark model names to verified 4stoken upstream models',
+    },
+  },
 }
 
 const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([
-  200, 202, 203, 204, 205, 206, 207,
+  200, 202, 203, 204, 205, 206, 207, 208, 209,
 ])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

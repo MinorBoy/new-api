@@ -17,6 +17,10 @@ const ChannelNamePaipu = "Paipu"
 
 const ChannelNameSecure = "Secure"
 
+const ChannelNameOmegaAI = "OmegaAI"
+
+const ChannelNameFourSToken = "4stoken"
+
 type videoRequestDialect string
 
 const (
@@ -26,7 +30,15 @@ const (
 	videoRequestDialectSecureDiscount      videoRequestDialect = "secure_discount"
 	videoRequestDialectSecureOverseas      videoRequestDialect = "secure_overseas"
 	videoRequestDialectSecureEnterprise    videoRequestDialect = "secure_enterprise"
+	videoRequestDialectOmegaMediaArrays    videoRequestDialect = "omega_media_arrays"
+	videoRequestDialectFourSToken          videoRequestDialect = "fourstoken"
 )
+
+type omegaRequestProfile struct {
+	MaxImages int
+	MaxVideos int
+	MaxAudios int
+}
 
 type textRequestProfile struct {
 	ratioField                   string
@@ -54,6 +66,7 @@ type protocolProfile struct {
 	defaultDurationSeconds             int
 	textRequest                        *textRequestProfile
 	secureRequest                      *secureRequestProfile
+	omegaRequest                       *omegaRequestProfile
 }
 
 func genericProtocolProfile() protocolProfile {
@@ -195,6 +208,40 @@ func secureProtocolProfile(group dto.SecureVideoGroup) (protocolProfile, error) 
 	return profile.normalized(), nil
 }
 
+func omegaAIProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName: ChannelNameOmegaAI,
+		modelList: []string{
+			"klsdpro2-720p",
+			"seedance-v2-720p",
+			"dola-seedance-2.0",
+			"lingjing-video-v1",
+		},
+		submitPath:             "/v1/media/generate",
+		pollPath:               "/v1/tasks/{task_id}",
+		contentType:            "application/json",
+		requestDialect:         videoRequestDialectOmegaMediaArrays,
+		requirePublicHTTPMedia: true,
+		omegaRequest: &omegaRequestProfile{
+			MaxImages: 9,
+			MaxVideos: 3,
+			MaxAudios: 3,
+		},
+	}
+}
+
+func fourSTokenProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:            ChannelNameFourSToken,
+		modelList:              []string{},
+		submitPath:             "/v1/videos",
+		pollPath:               "/v1/videos/{task_id}",
+		contentType:            "application/json",
+		requestDialect:         videoRequestDialectFourSToken,
+		requirePublicHTTPMedia: true,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -232,6 +279,14 @@ func NewSecureTaskAdaptor() *TaskAdaptor {
 		channelName: ChannelNameSecure,
 		modelList:   append([]string(nil), secureModels...),
 	}}
+}
+
+func NewOmegaAITaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: omegaAIProtocolProfile()}
+}
+
+func NewFourSTokenTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: fourSTokenProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

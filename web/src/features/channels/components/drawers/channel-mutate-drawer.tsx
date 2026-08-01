@@ -165,6 +165,7 @@ import {
   extractRedirectModels,
   extractMappingSourceModels,
   getBaseUrlOnChannelTypeChange,
+  getStatusOnChannelTypeChange,
   getChannelTypeHints,
   getChannelModelOptions,
   hasModelConfigChanged,
@@ -2051,7 +2052,22 @@ export function ChannelMutateDrawer({
                                             Number.isInteger(nextType) &&
                                             nextType > 0
                                           ) {
+                                            const previousType = Number(
+                                              field.value
+                                            )
                                             field.onChange(nextType)
+                                            form.setValue(
+                                              'status',
+                                              getStatusOnChannelTypeChange(
+                                                previousType,
+                                                nextType,
+                                                form.getValues('status')
+                                              ),
+                                              {
+                                                shouldDirty: true,
+                                                shouldValidate: false,
+                                              }
+                                            )
                                             if (
                                               nextType !== SECURE_CHANNEL_TYPE
                                             ) {

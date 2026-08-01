@@ -80,7 +80,7 @@ export type BuildImportDocumentInput = {
 }
 
 const V1_CHANNEL_TYPES: Record<string, number> = {
-  'CH-4STOKEN': 1,
+  'CH-4STOKEN': 209,
   'CH-8YES': 1,
   'CH-CANGYUANSUANLI': 205,
   'CH-CLMM': 202,
@@ -165,10 +165,10 @@ type ReferenceBounds = {
   limits: { images: number; videos: number; audios: number }
 }
 
-function legacyReferenceBounds(entity: ExtractedEntity): ReferenceBounds | null {
-  const match = field(entity, '备注').match(
-    /素材限制=(\d{3})(?:$|[；;])/u
-  )
+function legacyReferenceBounds(
+  entity: ExtractedEntity
+): ReferenceBounds | null {
+  const match = field(entity, '备注').match(/素材限制=(\d{3})(?:$|[；;])/u)
   if (!match) {
     return null
   }
@@ -179,7 +179,9 @@ function legacyReferenceBounds(entity: ExtractedEntity): ReferenceBounds | null 
   }
 }
 
-function structuredReferenceBounds(entity: ExtractedEntity): ReferenceBounds | null {
+function structuredReferenceBounds(
+  entity: ExtractedEntity
+): ReferenceBounds | null {
   const minImages = optionalInteger(entity, 'reference_min_images')
   const minVideos = optionalInteger(entity, 'reference_min_videos')
   const minAudios = optionalInteger(entity, 'reference_min_audios')

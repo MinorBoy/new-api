@@ -457,3 +457,91 @@ describe('Secure channel configuration', () => {
     ).toBe('https://proxy.example.com')
   })
 })
+
+describe('OmegaAI channel configuration', () => {
+  test('registers task-only type 208', () => {
+    expect(CHANNEL_TYPES[208]).toBe('OmegaAI')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 208,
+      label: 'OmegaAI',
+    })
+    expect(getChannelTypeIcon(208)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(208)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(208)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(208)).toBe(false)
+  })
+
+  test('uses the documented endpoint, models, and Ark guidance', () => {
+    expect(getChannelTypeConfig(208)).toMatchObject({
+      id: 208,
+      name: 'OmegaAI',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://omegaai.xin',
+      supportedModels: [
+        'klsdpro2-720p',
+        'seedance-v2-720p',
+        'dola-seedance-2.0',
+        'lingjing-video-v1',
+      ],
+    })
+    expect(getDefaultBaseUrl(208)).toBe('https://omegaai.xin')
+    expect(getChannelTypeHints(208)).toEqual({
+      baseUrl: 'Default: https://omegaai.xin',
+      key: 'Enter the raw API key issued by OmegaAI',
+      models: 'Select the four documented OmegaAI Seedance video models',
+    })
+    expect(TYPE_TO_KEY_PROMPT[208]).toBe(
+      'Enter the raw API key issued by OmegaAI'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[208]).toBe(
+      'OmegaAI is task-only. Enable it only after real upstream contract acceptance.'
+    )
+  })
+
+  test('exposes the four models and preserves custom proxy URLs', () => {
+    expect(getChannelModelOptions(208, [], [])).toEqual([
+      'klsdpro2-720p',
+      'seedance-v2-720p',
+      'dola-seedance-2.0',
+      'lingjing-video-v1',
+    ])
+    expect(
+      getBaseUrlOnChannelTypeChange(
+        208,
+        'https://token.secure-skill.com',
+        false
+      )
+    ).toBe('https://omegaai.xin')
+    expect(
+      getBaseUrlOnChannelTypeChange(208, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+})
+
+describe('4stoken channel configuration', () => {
+  test('registers task-only type 209 without inventing a model catalog', () => {
+    expect(CHANNEL_TYPES[209]).toBe('4stoken')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 209,
+      label: '4stoken',
+    })
+    expect(getChannelTypeIcon(209)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(209)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(209)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(209)).toBe(false)
+    expect(getChannelTypeConfig(209)).toMatchObject({
+      id: 209,
+      name: '4stoken',
+      defaultBaseUrl: 'https://api.4stoken.cn',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(209)).toBe('https://api.4stoken.cn')
+    expect(getChannelModelOptions(209, [], [])).toEqual([])
+    expect(getBaseUrlOnChannelTypeChange(209, '', false)).toBe(
+      'https://api.4stoken.cn'
+    )
+    expect(
+      getBaseUrlOnChannelTypeChange(209, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+})

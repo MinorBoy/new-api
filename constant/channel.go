@@ -66,7 +66,9 @@ const (
 	ChannelTypeCangyuan       = 205 // Cangyuan Seedance task protocol
 	ChannelTypePaipu          = 206 // Paipu Seedance task protocol
 	ChannelTypeSecure         = 207 // Secure grouped Seedance task protocol
-	ChannelTypeDummy          = 208 // this one is only for count, do not add any channel after this
+	ChannelTypeOmegaAI        = 208 // OmegaAI Seedance task protocol
+	ChannelTypeFourSToken     = 209 // 4stoken Seedance task protocol
+	ChannelTypeDummy          = 210 // this one is only for count, do not add any channel after this
 
 )
 
@@ -142,6 +144,8 @@ var ChannelBaseURLs = func() []string {
 	baseURLs[ChannelTypeCangyuan] = "https://ai.cangyuansuanli.cn"
 	baseURLs[ChannelTypePaipu] = "https://api.paipu.net"
 	baseURLs[ChannelTypeSecure] = "https://token.secure-skill.com"
+	baseURLs[ChannelTypeOmegaAI] = "https://omegaai.xin"
+	baseURLs[ChannelTypeFourSToken] = "https://api.4stoken.cn"
 	return baseURLs
 }()
 
@@ -211,6 +215,8 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeCangyuan:       "Cangyuan",
 	ChannelTypePaipu:          "Paipu",
 	ChannelTypeSecure:         "Secure",
+	ChannelTypeOmegaAI:        "OmegaAI",
+	ChannelTypeFourSToken:     "4stoken",
 }
 
 func GetChannelTypeName(channelType int) string {

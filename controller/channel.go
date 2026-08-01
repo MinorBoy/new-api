@@ -607,6 +607,15 @@ type AddChannelResponse struct {
 	ChannelIDs []int `json:"channel_ids"`
 }
 
+func isPreAcceptanceVideoChannel(channelType int) bool {
+	switch channelType {
+	case constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken:
+		return true
+	default:
+		return false
+	}
+}
+
 func getVertexArrayKeys(keys string) ([]string, error) {
 	if keys == "" {
 		return nil, nil
@@ -666,6 +675,9 @@ func AddChannel(c *gin.Context) {
 	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
+	if isPreAcceptanceVideoChannel(addChannelRequest.Channel.Type) {
+		addChannelRequest.Channel.Status = common.ChannelStatusManuallyDisabled
+	}
 	keys := make([]string, 0)
 	switch addChannelRequest.Mode {
 	case "multi_to_single":
@@ -1122,6 +1134,9 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if _, typeProvided := requestData["type"]; typeProvided && originChannel.Type != channel.Type && isPreAcceptanceVideoChannel(channel.Type) {
+		channel.Status = common.ChannelStatusManuallyDisabled
+	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {

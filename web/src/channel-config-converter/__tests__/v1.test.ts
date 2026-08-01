@@ -175,7 +175,9 @@ test('v1 document decodes compact reference limits into route target constraints
 
 test('v1 document rejects an unresolved legacy reference limit', async () => {
   const snapshot = await loadFixture()
-  const mappingSheet = snapshot.sheets.find((sheet) => sheet.name === '模型映射')
+  const mappingSheet = snapshot.sheets.find(
+    (sheet) => sheet.name === '模型映射'
+  )
   assert.ok(mappingSheet)
   const mappingRow = mappingSheet.rows.find((row) => row.rowNumber === 59)
   assert.ok(mappingRow)
@@ -190,7 +192,8 @@ test('v1 document rejects an unresolved legacy reference limit', async () => {
   assert.equal(result.hasFailures, true)
   assert.equal(
     result.document.entities.route_blueprints.some(
-      (blueprint) => blueprint.business_id === 'route-blueprint/MAP-8YES-R60-480'
+      (blueprint) =>
+        blueprint.business_id === 'route-blueprint/MAP-8YES-R60-480'
     ),
     false
   )
@@ -233,6 +236,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-DIMENSIO'), 200)
   assert.equal(typesByChannel.get('CH-MEGABYAI'), 204)
   assert.equal(typesByChannel.get('CH-SECURE'), 207)
+  assert.equal(typesByChannel.get('CH-4STOKEN'), 209)
 })
 
 test('v1 adapter preserves the one manual MegaByAI conflict and removes Secure unsupported 480p rows', async () => {

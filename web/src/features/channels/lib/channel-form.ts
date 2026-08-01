@@ -365,6 +365,22 @@ export const channelFormSchema = z
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
 
+const PRE_ACCEPTANCE_DISABLED_CHANNEL_TYPES = new Set([208, 209])
+
+export function getStatusOnChannelTypeChange(
+  previousType: number,
+  nextType: number,
+  currentStatus: number
+): number {
+  if (
+    previousType !== nextType &&
+    PRE_ACCEPTANCE_DISABLED_CHANNEL_TYPES.has(nextType)
+  ) {
+    return CHANNEL_STATUS.MANUAL_DISABLED
+  }
+  return currentStatus
+}
+
 // ============================================================================
 // Default Form Values
 // ============================================================================

@@ -21,7 +21,6 @@ import { BookOpen, Cable, Code2, Terminal } from 'lucide-react'
 import billingRulesEn from './content/en/billing-rules.md'
 import curlEn from './content/en/clients/curl.md'
 import pythonEn from './content/en/clients/python.md'
-import endpointsEn from './content/en/endpoints.md'
 import errorCodesEn from './content/en/error-codes.md'
 import overviewEn from './content/en/overview.md'
 import pricingEn from './content/en/pricing.md'
@@ -29,7 +28,6 @@ import quickstartEn from './content/en/quickstart.md'
 import billingRulesZh from './content/zh/billing-rules.md'
 import curlZh from './content/zh/clients/curl.md'
 import pythonZh from './content/zh/clients/python.md'
-import endpointsZh from './content/zh/endpoints.md'
 import errorCodesZh from './content/zh/error-codes.md'
 // Markdown sources are inlined as raw strings by the rsbuild `asset/source`
 // rule (see rsbuild.config.ts). Keep these imports grouped per category so the
@@ -74,9 +72,11 @@ export const docsNavGroups: DocNavGroup[] = [
     icon: Cable,
     pages: [
       {
-        slug: 'endpoints',
-        title: { en: 'Endpoints', zh: '接口地址' },
-        content: { en: endpointsEn, zh: endpointsZh },
+        // The reference catalog landing page is rendered by <ReferenceHome>,
+        // not from Markdown. `content` is unused for this entry.
+        slug: 'reference',
+        title: { en: 'Endpoints', zh: '接口目录' },
+        content: { en: '' },
         order: 1,
       },
       {
@@ -142,5 +142,5 @@ export const flatDocEntries: FlatDocEntry[] = docsNavGroups.flatMap(
       .map((page, pageIndex) => ({ page, group, groupIndex, pageIndex }))
 )
 
-/** The default page shown at `/docs` with no slug. */
-export const docsHomeSlug = 'overview'
+/** The default page shown at `/docs` with no slug. Points at the reference catalog. */
+export const docsHomeSlug = 'reference'

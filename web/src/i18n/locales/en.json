@@ -2294,7 +2294,6 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Related Projects",
     "footer.defaultCopyright": "All rights reserved.",
-    "footer.new\u0061pi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment",
     "For private deployments, format: https://fastgpt.run/api/openapi": "For private deployments, format: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Force a syntactically valid JSON response",
@@ -5913,6 +5912,20 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Endpoint Info": "Endpoint Info",
+    "Request Parameters": "Request Parameters",
+    "Response Parameters": "Response Parameters",
+    "Returns": "Returns",
+    "Code Samples": "Code Samples",
+    "Method": "Method",
+    "Full URL": "Full URL",
+    "Content-Type": "Content-Type",
+    "No parameters.": "No parameters.",
+    "HTTP Status": "HTTP Status",
+    "View Models & Pricing": "View Models & Pricing",
+    "API Reference": "API Reference",
+    "Browse all available API endpoints. Click any endpoint for full parameter details and code samples.": "Browse all available API endpoints. Click any endpoint for full parameter details and code samples.",
+    "Filter endpoints by name or path…": "Filter endpoints by name or path…",
+    "No endpoints match your filter.": "No endpoints match your filter."
   }
 }

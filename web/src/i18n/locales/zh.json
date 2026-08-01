@@ -2294,7 +2294,6 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "强制返回语法合法的 JSON",
@@ -5913,6 +5912,21 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Endpoint Info": "接口信息",
+    "Request Parameters": "输入参数",
+    "Response Parameters": "输出参数",
+    "Returns": "返回",
+    "Code Samples": "代码示例",
+    "Method": "请求方法",
+    "Full URL": "完整地址",
+    "Content-Type": "内容类型",
+    "No parameters.": "无参数。",
+    "HTTP Status": "HTTP 状态码",
+    "View Models & Pricing": "查看模型与计费",
+    "API Reference": "接口参考",
+    "Browse all available API endpoints. Click any endpoint for full parameter details and code samples.": "浏览所有可用接口。点击任意接口查看完整参数详情与代码示例。",
+    "Filter endpoints by name or path…": "按名称或路径过滤接口…",
+    "No endpoints match your filter.": "没有匹配的接口。",
+    "Error Codes": "错误码"
   }
 }

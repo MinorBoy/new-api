@@ -22,18 +22,16 @@ describe('normalizeDocSlug', () => {
 })
 
 describe('resolveDoc', () => {
-  test('resolves the home slug to the overview page', () => {
+  test('resolves the home slug to the reference catalog entry', () => {
     const result = resolveDoc(docsHomeSlug, 'en')
     assert.equal(result.found, true)
     if (result.found) {
-      assert.equal(result.doc.slug, 'overview')
-      assert.equal(result.doc.title, 'Overview')
-      // English body must be a non-empty string from the markdown import.
-      assert.ok(result.doc.body.length > 0)
+      assert.equal(result.doc.slug, 'reference')
+      assert.equal(result.doc.title, 'Endpoints')
     }
   })
 
-  test('falls back to English body when the zh source is missing', () => {
+  test('resolves a guide page with localized content', () => {
     const result = resolveDoc('overview', 'zh')
     assert.equal(result.found, true)
     if (result.found) {
@@ -44,13 +42,13 @@ describe('resolveDoc', () => {
   })
 
   test('returns the localized title per locale', () => {
-    const en = resolveDoc('endpoints', 'en')
-    const zh = resolveDoc('endpoints', 'zh')
+    const en = resolveDoc('pricing', 'en')
+    const zh = resolveDoc('pricing', 'zh')
     assert.equal(en.found, true)
     assert.equal(zh.found, true)
     if (en.found && zh.found) {
-      assert.equal(en.doc.title, 'Endpoints')
-      assert.equal(zh.doc.title, '接口地址')
+      assert.equal(en.doc.title, 'Models & Pricing')
+      assert.equal(zh.doc.title, '模型与计费')
     }
   })
 
@@ -78,7 +76,8 @@ describe('getDocNeighbors', () => {
   })
 
   test('first page has no previous neighbor', () => {
-    const { prev } = getDocNeighbors(docsHomeSlug, 'en')
+    // overview is the first entry in the flat sidebar order.
+    const { prev } = getDocNeighbors('overview', 'en')
     assert.equal(prev, null)
   })
 

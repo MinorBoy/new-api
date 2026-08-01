@@ -379,7 +379,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   return (
     <>
       <Sheet open={props.open} onOpenChange={handleOpenChange}>
-        <SheetContent className={sideDrawerContentClassName('sm:max-w-2xl')}>
+        <SheetContent className={sideDrawerContentClassName('sm:max-w-4xl')}>
           <SheetHeader className={sideDrawerHeaderClassName()}>
             <SheetTitle>{t('Model costs')}</SheetTitle>
             <SheetDescription>

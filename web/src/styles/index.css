@@ -54,6 +54,15 @@ For commercial licensing, please contact support@quantumnous.com
     text-decoration: var(--shiki-dark-text-decoration) !important;
   }
 
+  /* Docs code blocks: let the wrapper own the background so the code area
+     matches the page surface instead of Shiki's hardcoded theme bg. */
+  .docs-shiki .shiki,
+  .docs-shiki pre {
+    background: transparent !important;
+    margin: 0;
+    padding: 0.875rem 1rem;
+  }
+
   .json-code-editor-textarea {
     overflow: auto !important;
     scrollbar-gutter: stable;

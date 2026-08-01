@@ -22,12 +22,11 @@ mock.module('@/components/ui/markdown', () => ({
 
 // CodeBlock mounts a live CodeMirror editor, which is heavyweight and DOM-bound.
 // For these contract tests we only care that code segments turn into a CodeBlock
-// vs. language Tabs, so we stub CodeBlock to a custom element whose markup we
-// can assert against.
-mock.module('@/components/ai-elements/code-block', () => ({
-  CodeBlock: ({ code, language }: { code: string; language: string }) =>
+// vs. language Tabs, so we stub DocsCodeBlock to a marker element whose markup
+// we can assert against.
+mock.module('../components/docs-code-block', () => ({
+  DocsCodeBlock: ({ code, language }: { code: string; language: string }) =>
     createElement('code-block', { 'data-lang': language }, code),
-  CodeBlockCopyButton: () => createElement('copy-button', null),
 }))
 
 function render(source: string): string {

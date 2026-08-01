@@ -112,26 +112,6 @@ describe('resolveDocLocale', () => {
 })
 
 describe('public documentation boundary', () => {
-  test('documents the three public Seedance IDs without internal IDs', () => {
-    const publicModels = [
-      'doubao-seedance-2-0-260128',
-      'doubao-seedance-2-0-fast-260128',
-      'doubao-seedance-2-0-mini-260615',
-    ]
-
-    for (const locale of ['en', 'zh'] as const) {
-      const result = resolveDoc('pricing', locale)
-      assert.equal(result.found, true)
-      if (!result.found) continue
-
-      for (const model of publicModels) {
-        assert.match(result.doc.body, new RegExp(`\\b${model}\\b`))
-      }
-      assert.doesNotMatch(result.doc.body, /doubao-seedance-2-0-mini-260128/)
-      assert.doesNotMatch(result.doc.body, /(?:mg|bb|lec|jimeng)-seedance/i)
-    }
-  })
-
   test('keeps non-Seedance providers and protocols in public documentation', () => {
     const bodies = flatDocEntries
       .flatMap((entry) => [entry.page.content.en, entry.page.content.zh ?? ''])

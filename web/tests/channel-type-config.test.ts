@@ -517,3 +517,31 @@ describe('OmegaAI channel configuration', () => {
     ).toBe('https://proxy.example.com')
   })
 })
+
+describe('4stoken channel configuration', () => {
+  test('registers task-only type 209 without inventing a model catalog', () => {
+    expect(CHANNEL_TYPES[209]).toBe('4stoken')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 209,
+      label: '4stoken',
+    })
+    expect(getChannelTypeIcon(209)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(209)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(209)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(209)).toBe(false)
+    expect(getChannelTypeConfig(209)).toMatchObject({
+      id: 209,
+      name: '4stoken',
+      defaultBaseUrl: 'https://api.4stoken.cn',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(209)).toBe('https://api.4stoken.cn')
+    expect(getChannelModelOptions(209, [], [])).toEqual([])
+    expect(getBaseUrlOnChannelTypeChange(209, '', false)).toBe(
+      'https://api.4stoken.cn'
+    )
+    expect(
+      getBaseUrlOnChannelTypeChange(209, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+})

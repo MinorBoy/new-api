@@ -1,5 +1,6 @@
 {
   " — you see exactly what the provider charges.": " — you see exactly what the provider charges.",
+  "4stoken": "4stoken",
   "50+ upstreams": "50+ upstreams",
   "A request leaves your client, fans out to the cheapest healthy upstream, and returns — metered, logged, cached.": "A request leaves your client, fans out to the cheapest healthy upstream, and returns — metered, logged, cached.",
   "Activate cost drafts": "Activate cost drafts",

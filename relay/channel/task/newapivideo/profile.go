@@ -19,6 +19,8 @@ const ChannelNameSecure = "Secure"
 
 const ChannelNameOmegaAI = "OmegaAI"
 
+const ChannelNameFourSToken = "4stoken"
+
 type videoRequestDialect string
 
 const (
@@ -29,6 +31,7 @@ const (
 	videoRequestDialectSecureOverseas      videoRequestDialect = "secure_overseas"
 	videoRequestDialectSecureEnterprise    videoRequestDialect = "secure_enterprise"
 	videoRequestDialectOmegaMediaArrays    videoRequestDialect = "omega_media_arrays"
+	videoRequestDialectFourSToken          videoRequestDialect = "fourstoken"
 )
 
 type omegaRequestProfile struct {
@@ -227,6 +230,18 @@ func omegaAIProtocolProfile() protocolProfile {
 	}
 }
 
+func fourSTokenProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:            ChannelNameFourSToken,
+		modelList:              []string{},
+		submitPath:             "/v1/videos",
+		pollPath:               "/v1/videos/{task_id}",
+		contentType:            "application/json",
+		requestDialect:         videoRequestDialectFourSToken,
+		requirePublicHTTPMedia: true,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -268,6 +283,10 @@ func NewSecureTaskAdaptor() *TaskAdaptor {
 
 func NewOmegaAITaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: omegaAIProtocolProfile()}
+}
+
+func NewFourSTokenTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: fourSTokenProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

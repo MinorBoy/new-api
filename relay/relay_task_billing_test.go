@@ -457,6 +457,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 		{name: "Secure overseas", channelType: constant.ChannelTypeSecure, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`, upstreamModel: "video-2.0-fast", durationSeconds: 8, arkOfficialRoute: true, settings: dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupOverseas}},
 		{name: "Secure enterprise", channelType: constant.ChannelTypeSecure, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`, upstreamModel: "video-2.0-pro", durationSeconds: 8, arkOfficialRoute: true, settings: dto.ChannelOtherSettings{SecureVideoGroup: dto.SecureVideoGroupEnterprise}},
 		{name: "OmegaAI", channelType: constant.ChannelTypeOmegaAI, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "klsdpro2-720p", durationSeconds: 8, arkOfficialRoute: true},
+		{name: "4stoken", channelType: constant.ChannelTypeFourSToken, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "4sdance_v2.0_900", durationSeconds: 8, arkOfficialRoute: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

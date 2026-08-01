@@ -29,6 +29,8 @@ type arkRequest struct {
 	ServiceTier   *string      `json:"service_tier,omitempty"`
 	Draft         *bool        `json:"draft,omitempty"`
 	Tools         *[]arkTool   `json:"tools,omitempty"`
+	Seed          *json.Number `json:"seed,omitempty"`
+	CallbackURL   *string      `json:"callback_url,omitempty"`
 }
 
 type arkTool struct {
@@ -72,7 +74,8 @@ type tokenUsage struct {
 }
 
 type arkVideoContent struct {
-	VideoURL string `json:"video_url,omitempty"`
+	VideoURL     string `json:"video_url,omitempty"`
+	LastFrameURL string `json:"last_frame_url,omitempty"`
 }
 
 type arkTaskData struct {

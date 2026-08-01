@@ -21,7 +21,7 @@ import (
 var acceptedARKFields = map[string]struct{}{
 	"model": {}, "content": {}, "ratio": {}, "resolution": {},
 	"duration": {}, "watermark": {}, "generate_audio": {},
-	"service_tier": {}, "draft": {}, "tools": {}, "routing": {},
+	"service_tier": {}, "draft": {}, "tools": {}, "routing": {}, "seed": {}, "callback_url": {},
 }
 
 type arkRequestError struct {
@@ -56,6 +56,11 @@ func parseARKRequest(body []byte, profiles ...protocolProfile) (arkRequest, erro
 
 	var request arkRequest
 	if err := common.Unmarshal(body, &request); err != nil {
+		if raw, exists := fields["seed"]; exists {
+			if common.GetJsonType(raw) != "number" {
+				return arkRequest{}, &arkRequestError{Code: "InvalidParameter.seed", Message: "seed must be an integer between -1 and 4294967295"}
+			}
+		}
 		return arkRequest{}, &arkRequestError{Code: "InvalidParameter", Message: "request body contains invalid parameters"}
 	}
 	if err := validateARKSemantics(request, profile); err != nil {
@@ -201,6 +206,12 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if request.Duration != nil && (*request.Duration <= 0 || *request.Duration > relaycommon.MaxTaskDurationSeconds) {
 		return &arkRequestError{Code: "InvalidParameter.duration", Message: fmt.Sprintf("duration must be between 1 and %d", relaycommon.MaxTaskDurationSeconds)}
 	}
+	if request.CallbackURL != nil && !profile.ignoreUnsupportedOptionalARKFields {
+		return &arkRequestError{Code: "InvalidParameter.callback_url", Message: "callback_url is not supported by this channel"}
+	}
+	if request.Seed != nil && profile.requestDialect != videoRequestDialectFourSToken {
+		return &arkRequestError{Code: "InvalidParameter.seed", Message: "seed is not supported by this channel"}
+	}
 	if !profile.ignoreUnsupportedOptionalARKFields {
 		if request.ServiceTier != nil && *request.ServiceTier != "default" {
 			return &arkRequestError{Code: "InvalidParameter.service_tier", Message: "only service_tier=default is supported"}
@@ -277,6 +288,12 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	}
 	if audioCount > 0 && request.GenerateAudio != nil && !*request.GenerateAudio {
 		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "reference audio conflicts with generate_audio=false"}
+	}
+	if request.Seed != nil && profile.requestDialect == videoRequestDialectFourSToken {
+		value, err := decimal.NewFromString(request.Seed.String())
+		if err != nil || !value.Equal(value.Truncate(0)) || value.LessThan(decimal.NewFromInt(-1)) || value.GreaterThan(decimal.NewFromInt(4294967295)) {
+			return &arkRequestError{Code: "InvalidParameter.seed", Message: "seed must be an integer between -1 and 4294967295"}
+		}
 	}
 	return nil
 }

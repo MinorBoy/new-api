@@ -90,13 +90,14 @@ export const CHANNEL_TYPES = {
   206: 'Paipu',
   207: 'Secure',
   208: 'OmegaAI',
+  209: '4stoken',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
   1, 14, 33, 24, 43, 3, 41, 48, 60, 58, 42, 34, 20, 4, 40, 27, 25, 17, 26, 15,
   46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22, 21, 44, 2,
   5, 36, 50, 51, 52, 53, 54, 55, 56, 200, 201, 202, 203, 204, 205, 206, 207,
-  208,
+  208, 209,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
@@ -398,11 +399,11 @@ export const MODEL_FETCHABLE_TYPES = new Set([
 ])
 
 export const GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES = new Set([
-  2, 5, 36, 50, 51, 52, 54, 200, 201, 202, 203, 204, 205, 206, 207, 208,
+  2, 5, 36, 50, 51, 52, 54, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
 ])
 
 export const TASK_ONLY_CHANNEL_TYPES = new Set([
-  200, 201, 202, 203, 204, 205, 206, 207, 208,
+  200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
 ])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
@@ -425,6 +426,7 @@ export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   206: 'Enter the raw API key issued by Paipu',
   207: 'Enter the API key issued for the selected Secure video group',
   208: 'Enter the raw API key issued by OmegaAI',
+  209: 'Enter the raw API key issued by 4stoken',
 }
 
 export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
@@ -440,4 +442,5 @@ export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
   206: 'Paipu is task-only. Enable it only after real upstream contract acceptance.',
   207: 'Secure is task-only. Create separate channels for the Discount, Overseas, and Enterprise keys.',
   208: 'OmegaAI is task-only. Enable it only after real upstream contract acceptance.',
+  209: '4stoken is task-only. Enable it only after real upstream contract acceptance.',
 }

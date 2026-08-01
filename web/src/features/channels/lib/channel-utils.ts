@@ -113,6 +113,7 @@ export function getChannelTypeIcon(type: number): string {
     206: 'NewAPI', // Paipu
     207: 'NewAPI', // Secure
     208: 'NewAPI', // OmegaAI
+    209: 'NewAPI', // 4stoken
 
     // Tools & Platforms
     37: 'Dify', // Dify

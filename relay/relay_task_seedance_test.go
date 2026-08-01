@@ -791,6 +791,18 @@ func TestOmegaAITaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
 	assert.NotContains(t, string(encoded), "klsdpro2-720p")
 }
 
+func TestFourSTokenTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "4stoken", adaptor.GetChannelName())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeFourSToken))
+}
+
 const newAPIVideoDetailedZeroUsage = `{
 	"code":"success",
 	"message":"",

@@ -51,13 +51,14 @@ func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapab
 }
 
 type upstreamSubmitResponse struct {
-	ID        string `json:"id"`
-	TaskID    string `json:"task_id"`
-	Object    string `json:"object"`
-	Model     string `json:"model"`
-	Status    string `json:"status"`
-	Progress  int    `json:"progress"`
-	CreatedAt int64  `json:"created_at"`
+	ID          string `json:"id"`
+	TaskID      string `json:"task_id"`
+	TaskIDCamel string `json:"taskId"`
+	Object      string `json:"object"`
+	Model       string `json:"model"`
+	Status      string `json:"status"`
+	Progress    int    `json:"progress"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 type upstreamErrorEnvelope struct {
@@ -124,6 +125,20 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
 			}
 			if err := validateOmegaAIRequest(*state.ARK, *profile.omegaRequest, ""); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+			}
+			return nil
+		}
+		if profile.requestDialect == videoRequestDialectFourSToken {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			if err := validateFourSTokenRequest(*state.ARK, ""); err != nil {
 				var requestErr *arkRequestError
 				if errors.As(err, &requestErr) {
 					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
@@ -268,6 +283,29 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 			}
 		}
 		if err := validateOmegaAIRequest(*state.ARK, *profile.omegaRequest, upstreamModel); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+		state.ProviderValidationComplete = true
+		c.Set(requestStateContextKey, state)
+		return nil
+	}
+	if profile.requestDialect == videoRequestDialectFourSToken {
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+			if upstreamModel == "" {
+				upstreamModel = info.OriginModelName
+			}
+		}
+		if err := validateFourSTokenRequest(*state.ARK, upstreamModel); err != nil {
 			var requestErr *arkRequestError
 			if errors.As(err, &requestErr) {
 				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
@@ -451,6 +489,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, fmt.Errorf("OmegaAI provider validation is incomplete")
 			}
 			body, err = buildOmegaAIRequest(*state.ARK, modelName, *profile.omegaRequest)
+		case videoRequestDialectFourSToken:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if !state.ProviderValidationComplete {
+				return nil, fmt.Errorf("4stoken provider validation is incomplete")
+			}
+			body, err = buildFourSTokenRequest(*state.ARK, modelName)
 		default:
 			body, err = buildARKRequestBody(c, info, profile)
 		}
@@ -492,12 +542,18 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	if err := common.Unmarshal(body, &response); err != nil {
 		return "", body, service.TaskErrorWrapperLocal(fmt.Errorf("invalid upstream submit response: %w", err), "invalid_response", http.StatusBadGateway)
 	}
-	if response.ID != "" && response.TaskID != "" && response.ID != response.TaskID {
-		return "", body, service.TaskErrorWrapperLocal(fmt.Errorf("upstream id and task_id do not match"), "invalid_response", http.StatusBadGateway)
-	}
-	taskID = response.TaskID
-	if taskID == "" {
-		taskID = response.ID
+	ids := []string{response.TaskID, response.TaskIDCamel, response.ID}
+	for _, candidate := range ids {
+		if candidate == "" {
+			continue
+		}
+		if taskID == "" {
+			taskID = candidate
+			continue
+		}
+		if taskID != candidate {
+			return "", body, service.TaskErrorWrapperLocal(fmt.Errorf("upstream task ids do not match"), "invalid_response", http.StatusBadGateway)
+		}
 	}
 	if taskID == "" {
 		return "", body, service.TaskErrorWrapperLocal(fmt.Errorf("upstream task id is empty"), "invalid_response", http.StatusBadGateway)

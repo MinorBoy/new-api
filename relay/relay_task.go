@@ -788,7 +788,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMegaByAI)) ||
 		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeCangyuan)) ||
 		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypePaipu)) ||
-		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)) {
+		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)) ||
+		originTask.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)) {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if converter, ok := adaptor.(channel.ArkVideoTaskConverter); ok {
 			converted, err := converter.ConvertToArkVideoTask(originTask)

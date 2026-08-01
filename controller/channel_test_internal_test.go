@@ -294,6 +294,7 @@ func TestSupportsGenericChannelTestRejectsDimensio(t *testing.T) {
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeCangyuan))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypePaipu))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeSecure))
+	require.False(t, supportsGenericChannelTest(constant.ChannelTypeOmegaAI))
 	require.True(t, supportsGenericChannelTest(constant.ChannelTypeOpenAI))
 }
 

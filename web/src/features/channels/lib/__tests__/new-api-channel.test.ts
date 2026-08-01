@@ -100,7 +100,7 @@ describe('New API channel', () => {
   })
 })
 
-describe('OmegaAI channel defaults', () => {
+describe('pre-acceptance channel defaults', () => {
   test('selecting OmegaAI defaults a new channel to manually disabled', () => {
     assert.equal(
       getStatusOnChannelTypeChange(1, 208, CHANNEL_FORM_DEFAULT_VALUES.status),
@@ -112,5 +112,12 @@ describe('OmegaAI channel defaults', () => {
     assert.equal(getStatusOnChannelTypeChange(1, 208, 1), 2)
     assert.equal(getStatusOnChannelTypeChange(208, 208, 1), 1)
     assert.equal(getStatusOnChannelTypeChange(208, 208, 2), 2)
+  })
+
+  test('selecting 4stoken defaults a new channel to manually disabled', () => {
+    assert.equal(
+      getStatusOnChannelTypeChange(1, 209, CHANNEL_FORM_DEFAULT_VALUES.status),
+      2
+    )
   })
 })

@@ -365,7 +365,7 @@ export const channelFormSchema = z
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
 
-const OMEGA_AI_CHANNEL_TYPE = 208
+const PRE_ACCEPTANCE_DISABLED_CHANNEL_TYPES = new Set([208, 209])
 
 export function getStatusOnChannelTypeChange(
   previousType: number,
@@ -373,8 +373,8 @@ export function getStatusOnChannelTypeChange(
   currentStatus: number
 ): number {
   if (
-    previousType !== OMEGA_AI_CHANNEL_TYPE &&
-    nextType === OMEGA_AI_CHANNEL_TYPE
+    previousType !== nextType &&
+    PRE_ACCEPTANCE_DISABLED_CHANNEL_TYPES.has(nextType)
   ) {
     return CHANNEL_STATUS.MANUAL_DISABLED
   }

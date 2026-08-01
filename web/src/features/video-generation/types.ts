@@ -43,8 +43,8 @@ export type SeedanceVideoRequest = {
   ratio: string
   duration: number
   execution_expires_after?: number
-  generate_audio: boolean
-  watermark: boolean
+  generate_audio?: boolean
+  watermark?: boolean
   return_last_frame?: boolean
   callback_url?: string
 }

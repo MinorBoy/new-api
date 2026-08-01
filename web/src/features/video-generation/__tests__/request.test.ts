@@ -49,7 +49,24 @@ describe('video generation request helpers', () => {
     ])
     assert.equal(request.model, 'doubao-seedance-2-0-260128')
     assert.equal(request.generate_audio, true)
-    assert.equal(request.watermark, false)
+    assert.equal(request.watermark, undefined)
+  })
+
+  test('omits disabled optional ARK features', () => {
+    const request = buildVideoRequest({
+      model: 'doubao-seedance-2-0-mini-260128',
+      prompt: 'text-only acceptance test',
+      media: { images: [], videos: [], audios: [] },
+      resolution: '720p',
+      ratio: '16:9',
+      duration: 5,
+      generateAudio: false,
+      watermark: false,
+      returnLastFrame: false,
+    })
+
+    assert.equal('generate_audio' in request, false)
+    assert.equal('watermark' in request, false)
   })
 
   test('rejects non-http media and Seedance media count overflow', () => {

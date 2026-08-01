@@ -104,6 +104,18 @@ func TestExtractSeedanceRoutingInputPreservesOmittedValuesAndSmartDuration(t *te
 	assert.Equal(t, -1, *input.DurationSeconds)
 }
 
+func TestExtractSeedanceRoutingInputNormalizesMiniAlias(t *testing.T) {
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", `{
+		"model":"doubao-seedance-2-0-mini-260128",
+		"content":[{"type":"text","text":"video"}]
+	}`, true)
+
+	input, routeErr := extractSeedanceRoutingInput(c, "doubao-seedance-2-0-mini-260128")
+	require.Nil(t, routeErr)
+	require.NotNil(t, input)
+	assert.Equal(t, modelrouting.Seedance20Mini, input.CanonicalModel)
+}
+
 func TestExtractSeedanceRoutingInputRejectsInvalidFields(t *testing.T) {
 	images := make([]string, 10)
 	for index := range images {

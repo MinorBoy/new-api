@@ -538,10 +538,7 @@ function buildCostsAndMappings(
         tokenSubMode: effectiveMode === 'per_token' ? 'total_tokens' : '',
         meterSource: effectiveMode === 'per_token' ? 'upstream_usage' : '',
         tokenField: effectiveMode === 'per_token' ? 'total_tokens' : '',
-        chargeEvent:
-          effectiveMode === 'per_request'
-            ? 'response_succeeded'
-            : 'response_succeeded',
+        chargeEvent: 'task_succeeded',
         currency: rules.defaults.currency,
         nativePerRequest:
           effectiveMode === 'per_request' ? decimalString(native) : '',

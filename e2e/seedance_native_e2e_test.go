@@ -16,6 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/router"
@@ -63,6 +65,12 @@ type mockDimensioServer struct {
 	mu               sync.Mutex
 	requests         []mockArkRequest
 	terminalResponse string
+}
+
+type seedanceE2EVideoMetadataClient struct{}
+
+func (seedanceE2EVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	return videometa.Metadata{DurationMS: 5000}, nil
 }
 
 func (m *mockDimensioServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -364,12 +372,11 @@ func performJSONRequest(t *testing.T, engine http.Handler, method, path, authori
 func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 	models := []struct {
 		name, upstreamModel, resolution string
-		resolutionRatio                 float64
 		pricePerSecond                  float64
 	}{
-		{"fast_vip_720p", "jimeng-video-seedance-2.0-fast-vip", "720p", 1, 0.48 / 7.3},
-		{"mini_720p", "jimeng-video-seedance-2.0-mini", "720p", 1, 0.39 / 7.3},
-		{"vip_1080p", "jimeng-video-seedance-2.0-vip", "1080p", 2.5, 0.62 / 7.3},
+		{"fast_vip_720p", "jimeng-video-seedance-2.0-fast-vip", "720p", 0.48 / 7.3},
+		{"mini_720p", "jimeng-video-seedance-2.0-mini", "720p", 0.39 / 7.3},
+		{"vip_1080p", "jimeng-video-seedance-2.0-vip", "1080p", 0.62 / 7.3},
 	}
 	terminalCases := []struct {
 		name, response, arkStatus, errorCode, errorMessage string
@@ -385,11 +392,15 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 	for _, modelCase := range models {
 		for _, terminalCase := range terminalCases {
 			t.Run(modelCase.name+"/"+terminalCase.name, func(t *testing.T) {
+				durationMultiplier, ok := seedancepricing.DurationMultiplier("doubao-seedance-2-0-260128", modelCase.resolution, true, 5000, 6)
+				require.True(t, ok)
 				expectedQuota := common.QuotaFromDecimal(decimal.NewFromFloat(modelCase.pricePerSecond).
 					Mul(decimal.NewFromInt(6)).
 					Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-					Mul(decimal.NewFromFloat(modelCase.resolutionRatio)))
+					Mul(decimal.NewFromFloat(durationMultiplier)))
 				setupSeedanceE2EDB(t)
+				service.SetVideoMetadataClient(seedanceE2EVideoMetadataClient{})
+				t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
 				mock := &mockDimensioServer{terminalResponse: terminalCase.response}
 				mockServer := httptest.NewServer(mock)
 				t.Cleanup(mockServer.Close)
@@ -442,7 +453,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 				assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
 				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "seconds")
 				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "duration")
-				assert.Equal(t, map[string]float64{"resolution": modelCase.resolutionRatio}, task.PrivateData.BillingContext.OtherRatios)
+				assert.Equal(t, map[string]float64{"seedance_price_matrix": durationMultiplier}, task.PrivateData.BillingContext.OtherRatios)
 				require.NotNil(t, task.PrivateData.BillingContext.DurationPrice)
 				assert.Equal(t, types.DurationPrice{
 					Price:                  modelCase.pricePerSecond,
@@ -534,7 +545,8 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					assert.Equal(t, string(types.DurationUnitSecond), refundOther["duration_unit"])
 					assert.Equal(t, float64(1), refundOther["rounding_step_seconds"])
 					assert.Equal(t, float64(4), refundOther["minimum_duration_seconds"])
-					assert.Equal(t, modelCase.resolutionRatio, refundOther["resolution_ratio"])
+					assert.InDelta(t, durationMultiplier, refundOther["seedance_price_matrix"], 1e-12)
+					assert.NotContains(t, refundOther, "resolution_ratio")
 					assert.NotContains(t, refundOther, "seconds")
 					assert.NotContains(t, refundOther, "duration")
 				} else {

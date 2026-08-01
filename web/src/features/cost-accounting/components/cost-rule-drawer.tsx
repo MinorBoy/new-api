@@ -142,6 +142,8 @@ const paidDefaults = {
   charge_event: 'response_succeeded' as const,
 }
 
+const relayModeVideoSubmit = 31
+
 function createCostRuleFormValues(
   mode: CostMode,
   seed: CostRuleFormSeed = {}
@@ -330,11 +332,12 @@ function buildPreviewRequest(
     outputTokens: string
   }
 ): CostPreviewRequest {
+  const taskOnly = TASK_ONLY_CHANNEL_TYPES.has(props.channel.type)
   const request: CostPreviewRequest = {
     origin_model: props.originModel || props.billableModel,
     user_group: samples.userGroup.trim(),
-    relay_mode: 1,
-    request_path: '/v1/chat/completions',
+    relay_mode: taskOnly ? relayModeVideoSubmit : 1,
+    request_path: taskOnly ? '/v1/video/generations' : '/v1/chat/completions',
     cost_mode: values.cost_mode,
     config: parseCostRuleForm(values),
     meter: { source: '' },

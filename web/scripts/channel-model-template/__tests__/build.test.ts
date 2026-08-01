@@ -129,6 +129,7 @@ test('maps a second-priced source row to a per-duration USD cost', () => {
   assert.equal(cost.nativePerSecond, '1.38')
   assert.equal(cost.normalizedUsdUnitPrice, '0.18904109589041094')
   assert.equal(cost.status, 'active')
+  assert.equal(cost.chargeEvent, 'task_succeeded')
 })
 
 test('keeps a source row without an official SKU as draft', () => {

@@ -5,13 +5,13 @@ import { DEFAULT_VIDEO_FORM } from '../lib/defaults'
 import { buildVideoRequest } from '../lib/request'
 
 describe('Seedance video defaults', () => {
-  test('starts with the supplied Seedance 2.0 multimodal sample', () => {
+  test('starts with a Seedance 2.0 multimodal form', () => {
     assert.equal(DEFAULT_VIDEO_FORM.model, 'doubao-seedance-2-0-260128')
     assert.equal(DEFAULT_VIDEO_FORM.media.images.length, 2)
     assert.equal(DEFAULT_VIDEO_FORM.media.videos.length, 1)
     assert.equal(DEFAULT_VIDEO_FORM.media.audios.length, 1)
     assert.equal(DEFAULT_VIDEO_FORM.ratio, '16:9')
-    assert.equal(DEFAULT_VIDEO_FORM.duration, 11)
+    assert.equal(DEFAULT_VIDEO_FORM.duration, 5)
     assert.equal(DEFAULT_VIDEO_FORM.generateAudio, true)
     assert.equal(DEFAULT_VIDEO_FORM.watermark, false)
   })
@@ -25,7 +25,6 @@ describe('Seedance video defaults', () => {
       'generate_audio',
       'model',
       'ratio',
-      'watermark',
     ])
   })
 })

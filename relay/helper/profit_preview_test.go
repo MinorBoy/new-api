@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,39 @@ func TestPreviewRoutingRevenueMatchesUserBillingChain(t *testing.T) {
 	assert.Equal(t, referenceSnapshot, routingSnapshot)
 	assert.Equal(t, "500000", routingSnapshot)
 }
+
+func TestPreviewRoutingRevenueAppliesSeedanceReferenceVideoMultiplier(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptionMap
+		common.OptionMapRWMutex.Unlock()
+	})
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":   `{"doubao-seedance-2-0-mini-260615":"per_duration"}`,
+		"billing_setting.duration_price": `{"doubao-seedance-2-0-mini-260615":{"price":1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`,
+	}))
+
+	textQuota, _, err := PreviewRoutingRevenue("doubao-seedance-2-0-mini-260615", "default", "/v1/video/generations", relayconstant.RelayModeVideoSubmit, intPointer(5), 42)
+	require.NoError(t, err)
+	videoQuota, _, err := PreviewRoutingRevenueWithSeedanceInput("doubao-seedance-2-0-mini-260615", "default", "/v1/video/generations", relayconstant.RelayModeVideoSubmit, intPointer(5), 42, "720p", true, 5000)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2500000), textQuota)
+	assert.Equal(t, int64(3043478), videoQuota)
+}
+
+func intPointer(value int) *int { return &value }
 
 func costPreviewRequest(model, group string) (r dto.CostPreviewRequest) {
 	r.OriginModel = model

@@ -10,7 +10,10 @@
 // adapter and the profit predictor from maintaining two parallel copies.
 package seedancepricing
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // Seedance family identifiers. They double as the keys into the official price
 // matrix and are returned by Family so callers can branch on family without
@@ -163,6 +166,37 @@ func VideoInputRatio(modelName, resolution string, hasVideo bool) (float64, bool
 		return 0, false
 	}
 	return price / base, true
+}
+
+// DurationMultiplier scales the 720p text-to-video base duration price for a
+// request's official unit price, output pixel rate, and total processed video
+// duration. Reference-video requests require a positive inspected input
+// duration, so callers cannot silently undercharge an unmetered asset.
+func DurationMultiplier(modelName, resolution string, hasVideo bool, inputDurationMS int64, outputDurationSeconds int) (float64, bool) {
+	if outputDurationSeconds <= 0 || inputDurationMS < 0 || (hasVideo && inputDurationMS <= 0) {
+		return 0, false
+	}
+	profile, ok := Profile(resolution)
+	if !ok {
+		return 0, false
+	}
+	baseProfile, ok := Profile("720p")
+	if !ok {
+		return 0, false
+	}
+	unitPriceRatio, ok := VideoInputRatio(modelName, resolution, hasVideo)
+	if !ok {
+		return 0, false
+	}
+	outputSeconds := float64(outputDurationSeconds)
+	inputSeconds := float64(inputDurationMS) / 1000
+	pixelRate := float64(profile.Width) * float64(profile.Height) * float64(profile.FrameRateNum) / float64(profile.FrameRateDen)
+	basePixelRate := float64(baseProfile.Width) * float64(baseProfile.Height) * float64(baseProfile.FrameRateNum) / float64(baseProfile.FrameRateDen)
+	multiplier := unitPriceRatio * (pixelRate / basePixelRate) * ((inputSeconds + outputSeconds) / outputSeconds)
+	if multiplier <= 0 || math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+		return 0, false
+	}
+	return multiplier, true
 }
 
 // OfficialUnitPrice returns the raw published unit price (元/百万 token) for the

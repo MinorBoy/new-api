@@ -18,7 +18,7 @@ export const DEFAULT_VIDEO_FORM: VideoGenerationForm = {
   },
   resolution: '',
   ratio: '16:9',
-  duration: 11,
+  duration: 5,
   generateAudio: true,
   watermark: false,
   returnLastFrame: false,

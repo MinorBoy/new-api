@@ -67,6 +67,41 @@ func configureSeedanceDurationPricing(t *testing.T, prices map[string]types.Dura
 	}))
 }
 
+func TestSeedanceDurationPricingUsesBasePriceFor720pText(t *testing.T) {
+	price := types.DurationPrice{Price: 1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1}
+	priceData := types.PriceData{
+		BillingMode:    billing_setting.BillingModePerDuration,
+		DurationPrice:  &price,
+		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+	}
+
+	require.NoError(t, applySeedanceDurationPricing(&priceData, modelrouting.Seedance20Mini, "720p", false, 0, 5))
+	assert.InDelta(t, 1, priceData.OtherRatios()["seedance_price_matrix"], 1e-9)
+	quota, _, _, err := taskDurationQuota(priceData, 5)
+	require.NoError(t, err)
+	assert.Equal(t, 2_500_000, quota)
+}
+
+func TestSeedanceDurationPricingReplacesLegacyAdapterRatiosForReferenceVideo(t *testing.T) {
+	price := types.DurationPrice{Price: 1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1}
+	priceData := types.PriceData{
+		BillingMode:    billing_setting.BillingModePerDuration,
+		DurationPrice:  &price,
+		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+	}
+	priceData.AddOtherRatio("resolution", 2.5)
+	priceData.AddOtherRatio("video_input", 14.0/23.0)
+
+	require.NoError(t, applySeedanceDurationPricing(&priceData, modelrouting.Seedance20Mini, "720p", true, 5000, 5))
+	ratios := priceData.OtherRatios()
+	assert.NotContains(t, ratios, "resolution")
+	assert.NotContains(t, ratios, "video_input")
+	assert.InDelta(t, 28.0/23.0, ratios["seedance_price_matrix"], 1e-9)
+	quota, _, _, err := taskDurationQuota(priceData, 5)
+	require.NoError(t, err)
+	assert.Equal(t, 3_043_478, quota)
+}
+
 func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()

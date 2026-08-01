@@ -282,6 +282,11 @@ type RoutingRevenuePreviewInput struct {
 	// DurationSeconds is the validated requested output duration, used by per-duration
 	// billing models. Zero/nil means "let the helper apply its own default".
 	DurationSeconds *int
+	// OutputResolution and the reference-video facts keep strict profit routing's
+	// revenue preview aligned with Seedance's request-aware duration multiplier.
+	OutputResolution     string
+	HasReferenceVideo    bool
+	InputVideoDurationMS int64
 	// UserId carries the requesting user so the helper can resolve per-user settings.
 	UserId int
 }
@@ -797,6 +802,8 @@ func currentRecheckMarginThreshold(info *relaycommon.RelayInfo, globalThreshold 
 func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayInfo, group string) (ProfitRoutingFacts, int64, bool) {
 	resolution := ""
 	duration := 0
+	hasReferenceVideo := false
+	inputDurationMS := int64(0)
 	if info.Routing != nil {
 		resolution = info.Routing.Facts.OutputResolution
 		duration = info.Routing.Facts.DurationSeconds
@@ -811,6 +818,7 @@ func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayIn
 			}
 		}
 		if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok {
+			hasReferenceVideo = input.ReferenceVideos > 0
 			if resolution == "" && input.OutputResolution != nil {
 				resolution = *input.OutputResolution
 			}
@@ -819,12 +827,16 @@ func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayIn
 			}
 		}
 	}
+	if info.TaskRelayInfo != nil {
+		inputDurationMS = info.TaskRelayInfo.InputVideoDurationMS
+		hasReferenceVideo = hasReferenceVideo || inputDurationMS > 0
+	}
 	if (resolution == "" || duration <= 0) && info.PriceData.RequestedDurationSeconds > 0 {
 		duration = info.PriceData.RequestedDurationSeconds
 	}
 	facts := ProfitRoutingFacts{OutputDurationSeconds: duration}
 	if resolution != "" && duration > 0 {
-		if estimated, err := EstimateProfitRoutingFacts(resolution, duration, 0); err == nil {
+		if estimated, err := EstimateProfitRoutingFacts(resolution, duration, inputDurationMS); err == nil {
 			facts = estimated
 		}
 	}
@@ -835,6 +847,9 @@ func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayIn
 		RequestPath:     relaycommon.SafeRequestPath(info.RequestURLPath),
 		RelayMode:       info.RelayMode,
 		DurationSeconds: &durationSeconds,
+		OutputResolution: resolution,
+		HasReferenceVideo: hasReferenceVideo,
+		InputVideoDurationMS: inputDurationMS,
 		UserId:          info.UserId,
 	})
 	if err != nil {

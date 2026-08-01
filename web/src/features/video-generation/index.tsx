@@ -451,7 +451,7 @@ export function VideoGeneration() {
                   </FieldError>
                 </div>
 
-                <details className='rounded-lg border'>
+                <details className='rounded-lg border' open>
                   <summary className='cursor-pointer px-4 py-3 text-sm font-medium'>
                     {t('Generation options')}
                   </summary>

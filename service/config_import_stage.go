@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -2008,6 +2010,9 @@ func configImportCostRuleConfig(draft types.ConfigImportCostRuleDraft) (types.Co
 	if mode == types.CostModeFree && config.ZeroCostReason == "" {
 		config.ZeroCostReason = "config_import"
 	}
+	if mode == types.CostModePerDuration && config.ChargeEvent == types.CostChargeResponseSucceeded {
+		config.ChargeEvent = types.CostChargeTaskSucceeded
+	}
 	if config.ChargeEvent == "" {
 		if mode == types.CostModePerDuration {
 			config.ChargeEvent = types.CostChargeTaskSucceeded
@@ -2187,6 +2192,29 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 		canonicalModel = proposal.ModelSKURef
 	}
 	patches := make(map[string]any)
+	isSeedance := seedancepricing.Family(canonicalModel) != ""
+	hasPricing := proposal.UnitPrice != nil || proposal.PricePerUnit != nil || proposal.InputPerMillion != nil || proposal.OutputPerMillion != nil || proposal.CompletionPerMillion != nil || proposal.TotalPerMillion != nil || proposal.DurationPrice != nil || strings.TrimSpace(proposal.BillingExpr) != ""
+	if isSeedance && hasPricing {
+		durationPrice, err := configImportSeedanceDurationPrice(canonicalModel)
+		if err != nil {
+			return nil, err
+		}
+		models := configImportSeedancePricingModels(canonicalModel)
+		modes := make(map[string]string, len(models))
+		prices := make(map[string]types.DurationPrice, len(models))
+		for _, modelName := range models {
+			modes[modelName] = billing_setting.BillingModePerDuration
+			prices[modelName] = durationPrice
+		}
+		expressions := make(map[string]string, len(models))
+		for _, modelName := range models {
+			expressions[modelName] = ""
+		}
+		patches["billing_setting.billing_mode"] = modes
+		patches["billing_setting.billing_expr"] = expressions
+		patches["billing_setting.duration_price"] = prices
+		return patches, nil
+	}
 	if proposal.BillingExpr != "" {
 		patches["billing_setting.billing_mode"] = map[string]string{canonicalModel: billing_setting.BillingModeTieredExpr}
 		patches["billing_setting.billing_expr"] = map[string]string{canonicalModel: proposal.BillingExpr}
@@ -2222,6 +2250,41 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 		patches["ModelPrice"] = map[string]float64{canonicalModel: asFloat}
 	}
 	return patches, nil
+}
+
+func configImportSeedanceDurationPrice(modelName string) (types.DurationPrice, error) {
+	unitPrice, ok := seedancepricing.OfficialUnitPrice(modelName, "720p", false)
+	if !ok {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_PROFILE", "Seedance model %q has no 720p text-to-video price", modelName)
+	}
+	profile, ok := seedancepricing.Profile("720p")
+	if !ok {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_PROFILE", "Seedance 720p profile is unavailable")
+	}
+	price := unitPrice * float64(profile.Width) * float64(profile.Height) * float64(profile.FrameRateNum) /
+		float64(profile.FrameRateDen) / 1024 / 1_000_000 / ratio_setting.USD2RMB
+	durationPrice := types.DurationPrice{
+		Price:               price,
+		Unit:                types.DurationUnitSecond,
+		RoundingStepSeconds: 1,
+	}
+	if err := durationPrice.Validate(relaycommon.MaxTaskDurationSeconds); err != nil {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_PROFILE", "%v", err)
+	}
+	return durationPrice, nil
+}
+
+func configImportSeedancePricingModels(canonicalModel string) []string {
+	models := []string{canonicalModel}
+	if seedancepricing.Family(canonicalModel) != seedancepricing.Family20Mini {
+		return models
+	}
+	for _, alias := range []string{modelrouting.Seedance20Mini, "doubao-seedance-2-0-mini-260128"} {
+		if !common.StringsContains(models, alias) {
+			models = append(models, alias)
+		}
+	}
+	return models
 }
 
 func configImportDurationPrice(proposal types.DurationPriceProposal) (types.DurationPrice, error) {
@@ -2365,6 +2428,7 @@ func validateConfigImportPricingGroupScope(db *gorm.DB, canonicalModel string, p
 
 func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, costUSD string) (types.ConfigImportSaleProposal, []model.ConfigImportIssue, error) {
 	issues := make([]model.ConfigImportIssue, 0)
+	proposal.Enabled = nil
 	for name, value := range map[string]*string{
 		"unit_price": proposal.UnitPrice, "price_per_unit": proposal.PricePerUnit, "margin_ratio": proposal.MarginRatio,
 		"input_per_million": proposal.InputPerMillion, "output_per_million": proposal.OutputPerMillion,

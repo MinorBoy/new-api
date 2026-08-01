@@ -116,13 +116,32 @@ func TestCheckAuthoritativeCostCoverageEvaluatesActiveVariants(t *testing.T) {
 	results, err := CheckAuthoritativeCostCoverage()
 
 	require.NoError(t, err)
-	require.Len(t, results, 2)
+	require.Len(t, results, 1)
 	coveredByVariant := make(map[string]bool, len(results))
 	for _, result := range results {
 		coveredByVariant[result.CostVariantKey] = result.Covered
 	}
-	assert.False(t, coveredByVariant[string(types.DefaultCostVariantKey)])
+	assert.NotContains(t, coveredByVariant, string(types.DefaultCostVariantKey))
 	assert.True(t, coveredByVariant["480p"])
+}
+
+func TestCheckAuthoritativeCostCoverageRequiresDefaultWithoutVariantRules(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	})
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "default", Model: "vendor-model", ChannelId: 7, Enabled: true,
+	}).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, string(types.DefaultCostVariantKey), results[0].CostVariantKey)
+	assert.False(t, results[0].Covered)
 }
 
 func TestCheckAuthoritativeCostCoverageIncludesEnabledRoutingTargetVariant(t *testing.T) {

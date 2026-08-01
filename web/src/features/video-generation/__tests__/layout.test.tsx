@@ -66,8 +66,10 @@ test('renders labeled key and model selectors and blocks submit without a key', 
     'select[aria-label="Model"]'
   )
   const submit = browserWindow.document.querySelector('button[type="submit"]')
+  const generationOptions = browserWindow.document.querySelector('details')
   assert.ok(keySelect)
   assert.ok(modelSelect)
+  assert.equal((generationOptions as HTMLDetailsElement | null)?.open, true)
   assert.equal((submit as HTMLButtonElement | null)?.disabled, true)
 
   await act(async () => root.unmount())

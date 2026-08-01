@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -441,6 +442,12 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 			}
 		}
 		for modelName, value := range patches[key] {
+			if key == "billing_setting."+billing_setting.BillingExprField {
+				if expression, ok := value.(string); ok && strings.TrimSpace(expression) == "" {
+					delete(current, modelName)
+					continue
+				}
+			}
 			current[modelName] = value
 		}
 		encoded, marshalErr := common.Marshal(current)
@@ -664,6 +671,7 @@ func configImportMergeRouteTargets(existing, incoming []model.RouteTarget) []mod
 	}
 	for _, target := range incoming {
 		if index, found := byName[target.Name]; found {
+			target.Enabled = merged[index].Enabled
 			merged[index] = target
 			continue
 		}

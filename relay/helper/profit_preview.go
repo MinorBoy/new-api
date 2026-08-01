@@ -16,6 +16,13 @@ import (
 // channel's mapped upstream model, the supplier cost, or any reference video URL, so
 // user revenue is computed exactly as a user would be billed.
 func PreviewRoutingRevenue(originModelName, group, requestPath string, relayMode int, durationSeconds *int, userId int) (int64, string, error) {
+	return PreviewRoutingRevenueWithSeedanceInput(originModelName, group, requestPath, relayMode, durationSeconds, userId, "", false, 0)
+}
+
+// PreviewRoutingRevenueWithSeedanceInput is the routing-layer preview with the
+// request facts needed to reproduce Seedance's duration pricing. The extra facts
+// stay in request memory and are never included in the public cost-preview DTO.
+func PreviewRoutingRevenueWithSeedanceInput(originModelName, group, requestPath string, relayMode int, durationSeconds *int, userId int, resolution string, hasVideoInput bool, inputDurationMS int64) (int64, string, error) {
 	input := dto.CostPreviewRequest{
 		OriginModel:     originModelName,
 		UserGroup:       group,
@@ -23,5 +30,5 @@ func PreviewRoutingRevenue(originModelName, group, requestPath string, relayMode
 		RelayMode:       relayMode,
 		DurationSeconds: durationSeconds,
 	}
-	return previewUserBillingQuotaForUser(userId, input)
+	return previewUserBillingQuotaForUserWithSeedanceInput(userId, input, resolution, hasVideoInput, inputDurationMS)
 }

@@ -24,6 +24,7 @@ func (e *routingInputError) Error() string {
 }
 
 func extractSeedanceRoutingInput(c *gin.Context, canonicalModel string) (*modelrouting.FactsInput, *routingInputError) {
+	canonicalModel = modelrouting.NormalizeCanonicalModel(canonicalModel)
 	if !c.GetBool(common.KeySeedanceOfficialAPI) || c.Request.Method != http.MethodPost ||
 		c.Request.URL.Path != "/v1/video/generations" || !containsRoutingString(modelrouting.CanonicalModels, canonicalModel) {
 		return nil, nil

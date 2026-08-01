@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -240,6 +241,24 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 		requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
 		if taskErr != nil {
 			return nil, taskErr
+		}
+		if seedancepricing.Family(info.OriginModelName) != "" {
+			hasVideoInput := c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
+			if retryParam != nil && retryParam.RoutingInput != nil && retryParam.RoutingInput.ReferenceVideos > 0 {
+				hasVideoInput = true
+			}
+			if hasVideoInput {
+				if taskErr := prepareSeedanceUsageInputs(c.Request.Context(), retryParam, info, types.CostModePerDuration); taskErr != nil {
+					return nil, taskErr
+				}
+			}
+			inputDurationMS := int64(0)
+			if info.TaskRelayInfo != nil {
+				inputDurationMS = info.TaskRelayInfo.InputVideoDurationMS
+			}
+			if err := applySeedanceDurationPricing(&info.PriceData, info.OriginModelName, c.GetString("task_resolution"), hasVideoInput, inputDurationMS, requestedSeconds); err != nil {
+				return nil, service.TaskErrorWrapperLocal(err, "duration_billing_error", http.StatusBadRequest)
+			}
 		}
 		quota, billableSeconds, clamp, err := taskDurationQuota(info.PriceData, requestedSeconds)
 		if err != nil {
@@ -559,6 +578,25 @@ func taskDurationQuota(priceData types.PriceData, requestedSeconds int) (int, in
 	quotaDecimal = priceData.ApplyOtherRatiosToDecimal(quotaDecimal)
 	quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
 	return quota, billableSeconds, clamp, nil
+}
+
+func applySeedanceDurationPricing(priceData *types.PriceData, modelName, resolution string, hasVideoInput bool, inputDurationMS int64, outputDurationSeconds int) error {
+	if priceData == nil {
+		return errors.New("price data is unavailable")
+	}
+	multiplier, ok := seedancepricing.DurationMultiplier(modelName, resolution, hasVideoInput, inputDurationMS, outputDurationSeconds)
+	if !ok {
+		return fmt.Errorf("unsupported Seedance duration pricing inputs for model %s", modelName)
+	}
+	ratios := priceData.OtherRatios()
+	if ratios == nil {
+		ratios = make(map[string]float64)
+	}
+	delete(ratios, "resolution")
+	delete(ratios, "video_input")
+	ratios["seedance_price_matrix"] = multiplier
+	priceData.ReplaceOtherRatios(ratios)
+	return nil
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

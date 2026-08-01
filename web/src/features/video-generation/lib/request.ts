@@ -89,11 +89,11 @@ export function buildVideoRequest(
     content,
     ratio: form.ratio,
     duration: form.duration,
-    generate_audio: form.generateAudio,
-    watermark: form.watermark,
   }
 
   if (form.resolution.trim()) request.resolution = form.resolution.trim()
+  if (form.generateAudio) request.generate_audio = true
+  if (form.watermark) request.watermark = true
   if (form.executionExpiresAfter != null) {
     request.execution_expires_after = form.executionExpiresAfter
   }

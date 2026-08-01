@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,11 +66,19 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	assert.NotContains(t, scope.modelMappings[channel.Id], "supplier-video-alias")
 	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
 
-	var option model.Option
-	require.NoError(t, model.DB.Where("key = ?", "ModelPrice").First(&option).Error)
-	var prices map[string]float64
-	require.NoError(t, common.UnmarshalJsonStr(option.Value, &prices))
-	assert.Equal(t, 1.0, prices[runtimeModel])
+	var billingModeOption model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.billing_mode").First(&billingModeOption).Error)
+	var billingModes map[string]string
+	require.NoError(t, common.UnmarshalJsonStr(billingModeOption.Value, &billingModes))
+	assert.Equal(t, billing_setting.BillingModePerDuration, billingModes[runtimeModel])
+
+	var durationPriceOption model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.duration_price").First(&durationPriceOption).Error)
+	var durationPrices map[string]types.DurationPrice
+	require.NoError(t, common.UnmarshalJsonStr(durationPriceOption.Value, &durationPrices))
+	expectedDurationPrice, err := configImportSeedanceDurationPrice(runtimeModel)
+	require.NoError(t, err)
+	assert.Equal(t, expectedDurationPrice, durationPrices[runtimeModel])
 	var saved model.Channel
 	require.NoError(t, model.DB.First(&saved, channel.Id).Error)
 	var savedMapping map[string]string
@@ -220,6 +229,37 @@ func TestPublishConfigImportModelSnapshotRollsBackWithTransaction(t *testing.T) 
 	assert.True(t, oldTarget.Enabled)
 }
 
+func TestPublishConfigImportSaleOptionsRemovesStaleBillingExpression(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
+	require.NoError(t, model.DB.Create(&model.Option{
+		Key:   "billing_setting.billing_expr",
+		Value: `{"doubao-seedance-2-0-mini-260615":"v1:tier(\"base\", c * 99)"}`,
+	}).Error)
+	document := map[string]any{
+		"staged_proposal": map[string]any{
+			"option_patches": map[string]any{
+				"billing_setting.billing_expr": map[string]any{
+					"doubao-seedance-2-0-mini-260615": "",
+				},
+			},
+		},
+	}
+	encoded, err := common.Marshal(document)
+	require.NoError(t, err)
+	refresh := ConfigImportRefreshKeys{}
+	tx := model.DB.Begin()
+	require.NoError(t, tx.Error)
+	require.NoError(t, publishConfigImportSaleOptions(tx, []model.ConfigImportItem{{
+		EntityType: "sale_proposals", BusinessID: "sale-seedance", CanonicalJSON: string(encoded), State: "new",
+	}}, &refresh))
+	require.NoError(t, tx.Commit().Error)
+
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.billing_expr").First(&option).Error)
+	assert.JSONEq(t, `{}`, option.Value)
+}
+
 func TestConfigImportRouteRowsAssignsStablePrioritiesForImplicitTargets(t *testing.T) {
 	blueprint := types.ConfigImportRouteBlueprint{
 		CanonicalModel: modelrouting.Seedance20,
@@ -288,6 +328,17 @@ func TestConfigImportRouteTargetPriorityOverridesCoverSeparateBlueprints(t *test
 	overrides := configImportRouteTargetPriorityOverrides(map[string]int{"line-a": 21}, routeBlueprints)
 	assert.Equal(t, 1, overrides["blueprint-a"])
 	assert.Equal(t, 0, overrides["blueprint-b"])
+}
+
+func TestConfigImportMergeRouteTargetsPreservesExistingEnabledState(t *testing.T) {
+	merged := configImportMergeRouteTargets(
+		[]model.RouteTarget{{Name: "route-target/MAP-DIMENSIO-R83-720", Enabled: true, UpstreamModel: "previous-model"}},
+		[]model.RouteTarget{{Name: "route-target/MAP-DIMENSIO-R83-720", Enabled: false, UpstreamModel: "updated-model"}},
+	)
+
+	require.Len(t, merged, 1)
+	assert.True(t, merged[0].Enabled)
+	assert.Equal(t, "updated-model", merged[0].UpstreamModel)
 }
 
 func TestPublishConfigImportRoutesAssignsPrioritiesAcrossBlueprints(t *testing.T) {

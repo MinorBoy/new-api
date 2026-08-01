@@ -1,5 +1,7 @@
 package modelrouting
 
+import "strings"
+
 const (
 	Seedance20     = "doubao-seedance-2-0-260128"
 	Seedance20Fast = "doubao-seedance-2-0-fast-260128"
@@ -7,6 +9,17 @@ const (
 )
 
 var CanonicalModels = []string{Seedance20, Seedance20Fast, Seedance20Mini}
+
+// NormalizeCanonicalModel maps supported public aliases to the single routing
+// policy identity for that model family. The caller's original model remains
+// available for billing and audit; this normalization only selects a policy.
+func NormalizeCanonicalModel(modelName string) string {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "doubao-seedance-2-0-mini-260128" {
+		return Seedance20Mini
+	}
+	return modelName
+}
 
 type InputMode string
 

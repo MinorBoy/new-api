@@ -172,7 +172,7 @@ function legacyReferenceBounds(entity: ExtractedEntity): ReferenceBounds | null 
   if (!match) {
     return null
   }
-  const [images, videos, audios] = match[1].split('').map(Number)
+  const [images, videos, audios] = [...match[1]].map(Number)
   return {
     minimums: { images: 0, videos: 0, audios: 0 },
     limits: { images, videos, audios },
@@ -466,7 +466,6 @@ export async function buildImportDocument(
       await authoritativeEntity(sale, source, {
         billing_mode: field(sale, 'billing_mode', '计费模式'),
         currency: field(sale, 'currency', '币种'),
-        enabled: false,
         model_sku_ref: skuRef,
         ...(price ? { total_per_million: price } : {}),
       })

@@ -52,6 +52,31 @@ func TestSelectCapabilityChannelPublishesTargetDecision(t *testing.T) {
 	assert.Equal(t, "1080p", facts.OutputResolution)
 }
 
+func TestSelectCapabilityChannelNormalizesMiniClientAlias(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	seedRoutingCandidate(t, 11, "mini", "分组A", modelrouting.Seedance20Mini, true)
+	policy := capabilityPolicyRequest("分组A", modelrouting.Seedance20Mini, 11, "provider-mini", "720p")
+	saved, err := service.SaveRoutingPolicy(0, policy)
+	require.NoError(t, err)
+
+	c := capabilitySelectionContext()
+	const legacyMiniAlias = "doubao-seedance-2-0-mini-260128"
+	input := seedanceFactsInput(legacyMiniAlias, "720p", 5, "16:9")
+	channel, group, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "分组A", ModelName: legacyMiniAlias,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "分组A", group)
+	assert.Equal(t, 11, channel.Id)
+	assert.Equal(t, saved.ID, common.GetContextKeyInt(c, constant.ContextKeyRoutingPolicyID))
+	facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
+	require.True(t, ok)
+	assert.Equal(t, modelrouting.Seedance20Mini, facts.CanonicalModel)
+}
+
 func TestRoutingPolicyNormalizesInputModesAndReferenceMinimums(t *testing.T) {
 	prepareCapabilitySelectionTest(t)
 	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)

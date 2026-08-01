@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
@@ -156,6 +157,76 @@ func TestConfigImportPricingStagesTokenPricesAsVersionedExpression(t *testing.T)
 	patches, err := configImportSaleOptionPatches(recomputed, "canonical-model")
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"canonical-model": recomputed.BillingExpr}, patches["billing_setting.billing_expr"])
+}
+
+func TestConfigImportSeedanceSaleStagesOfficialDurationPriceForMiniAliases(t *testing.T) {
+	proposal := types.ConfigImportSaleProposal{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sale-seedance-mini"},
+		ModelSKURef:                     "sku-mini",
+		Currency:                        "CNY",
+		TotalPerMillion:                 stringPointer("999"),
+		BillingMode:                     string(types.CostModePerToken),
+	}
+
+	recomputed, _, err := recomputeConfigImportSaleProposal(proposal, "0")
+	require.NoError(t, err)
+	patches, err := configImportSaleOptionPatches(recomputed, modelrouting.Seedance20Mini)
+	require.NoError(t, err)
+
+	miniAliases := []string{modelrouting.Seedance20Mini, "doubao-seedance-2-0-mini-260128"}
+	assert.Equal(t, map[string]string{
+		miniAliases[0]: billing_setting.BillingModePerDuration,
+		miniAliases[1]: billing_setting.BillingModePerDuration,
+	}, patches["billing_setting.billing_mode"])
+	prices, ok := patches["billing_setting.duration_price"].(map[string]types.DurationPrice)
+	require.True(t, ok)
+	for _, modelName := range miniAliases {
+		price, found := prices[modelName]
+		require.True(t, found)
+		assert.InDelta(t, 0.4968/7.3, price.Price, 1e-12)
+		assert.Equal(t, types.DurationUnitSecond, price.Unit)
+		assert.Equal(t, 1, price.RoundingStepSeconds)
+	}
+	assert.Equal(t, map[string]string{
+		miniAliases[0]: "",
+		miniAliases[1]: "",
+	}, patches["billing_setting.billing_expr"])
+}
+
+func TestConfigImportSeedanceSaleAlwaysOverridesExplicitPricingModes(t *testing.T) {
+	for _, proposal := range []types.ConfigImportSaleProposal{
+		{
+			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sale-seedance-duration"},
+			ModelSKURef:                     "sku-mini",
+			DurationPrice:                   &types.DurationPriceProposal{Price: "99", Unit: types.DurationUnitSecond, RoundingStepSeconds: 1},
+		},
+		{
+			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sale-seedance-expr"},
+			ModelSKURef:                     "sku-mini",
+			BillingExpr:                     `v1:tier("base", c * 99)`,
+		},
+	} {
+		patches, err := configImportSaleOptionPatches(proposal, modelrouting.Seedance20Mini)
+		require.NoError(t, err)
+		assert.Contains(t, patches, "billing_setting.duration_price")
+		assert.Equal(t, map[string]string{
+			modelrouting.Seedance20Mini:       "",
+			"doubao-seedance-2-0-mini-260128": "",
+		}, patches["billing_setting.billing_expr"])
+	}
+}
+
+func TestConfigImportSaleRecomputeRemovesLegacyEnabledFlag(t *testing.T) {
+	enabled := false
+	proposal := types.ConfigImportSaleProposal{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sale-legacy-enabled"},
+		ModelSKURef:                     "sku-a",
+		UnitPrice:                       stringPointer("1"),
+		Enabled:                         &enabled,
+	}
+	recomputed, _, err := recomputeConfigImportSaleProposal(proposal, "0")
+	require.NoError(t, err)
+	assert.Nil(t, recomputed.Enabled)
 }
 
 func TestConfigImportPricingRejectsConflictingPricingModes(t *testing.T) {
@@ -652,3 +723,15 @@ func createConfigImportStageBatch(t *testing.T, channelID int, lineRef, upstream
 }
 
 func boolPointer(value bool) *bool { return &value }
+
+func TestConfigImportCostRuleConfigUpgradesLegacyTaskChargeEvent(t *testing.T) {
+	draft := types.ConfigImportCostRuleDraft{
+		CostMode:    string(types.CostModePerDuration),
+		ChargeEvent: string(types.CostChargeResponseSucceeded),
+	}
+
+	config, err := configImportCostRuleConfig(draft)
+
+	require.NoError(t, err)
+	assert.Equal(t, types.CostChargeTaskSucceeded, config.ChargeEvent)
+}

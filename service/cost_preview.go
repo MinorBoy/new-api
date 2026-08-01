@@ -60,6 +60,7 @@ func PreviewFinalUserQuota(ctx *gin.Context, info *relaycommon.RelayInfo, input 
 			Div(decimal.NewFromInt(int64(previewInfo.PriceData.DurationPrice.UnitSeconds()))).
 			Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
 			Mul(decimal.NewFromFloat(previewInfo.PriceData.GroupRatioInfo.GroupRatio))
+		quotaDecimal = previewInfo.PriceData.ApplyOtherRatiosToDecimal(quotaDecimal)
 		quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
 		if clamp != nil {
 			return 0, fmt.Errorf("billing preview quota is out of range: %w", clamp)

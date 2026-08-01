@@ -17,21 +17,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import test, { after, beforeEach } from 'node:test'
+import test, { after, afterEach, beforeEach } from 'node:test'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { Window } from 'happy-dom'
 import { createInstance } from 'i18next'
 import { act } from 'react'
 import type { Container, Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 
+import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import type { Channel } from '../../../channels/types'
 import { costAccountingQueryKeys } from '../../api'
-import type { CostRule } from '../../types'
+import type { CostPreviewRequest, CostRule } from '../../types'
 
 const browserWindow = new Window({ url: 'http://localhost/' })
 const browserGlobals = {
@@ -80,6 +82,12 @@ beforeEach(() => {
     username: 'admin',
     role: ROLE.SUPER_ADMIN,
   })
+})
+
+const originalAdapter = api.defaults.adapter
+
+afterEach(() => {
+  api.defaults.adapter = originalAdapter
 })
 
 const { createRoot } = await import('react-dom/client')
@@ -258,6 +266,19 @@ function findButton(label: string): HTMLButtonElement {
   )
   assert.ok(button instanceof browserWindow.HTMLButtonElement)
   return button as unknown as HTMLButtonElement
+}
+
+function responseFor<T>(
+  config: InternalAxiosRequestConfig,
+  data: T
+): AxiosResponse<T> {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config,
+  }
 }
 
 test('shows mapped models, official price, active rule, normalized price, and coverage', async () => {
@@ -439,6 +460,69 @@ test('task-only channels default new rules to task completion', async () => {
       browserWindow.document.body.textContent ?? '',
       /Task succeeded/
     )
+  } finally {
+    await unmount(mounted)
+  }
+})
+
+test('previews task-only duration costs through the video billing path', async () => {
+  const taskDurationRule: CostRule = {
+    ...activeRule,
+    cost_mode: 'per_duration',
+    config: {
+      currency: 'CNY',
+      billing_multiplier: '1',
+      purchase_discount_ratio: '1',
+      recharge_exchange_ratio: '1',
+      fee_rate: '0',
+      currency_to_usd_rate: '0.136986301369863',
+      price_per_second: '0.25',
+      charge_event: 'submit_accepted',
+      meter_source: 'validated_request',
+      normalized_usd_prices: { price_per_second: '0.03424657534246575' },
+    },
+  }
+  let previewRequest: CostPreviewRequest | undefined
+  let resolvePreviewRequest!: () => void
+  const previewRequestSent = new Promise<void>((resolve) => {
+    resolvePreviewRequest = resolve
+  })
+  api.defaults.adapter = async (config) => {
+    previewRequest = JSON.parse(config.data as string) as CostPreviewRequest
+    resolvePreviewRequest()
+    return responseFor(config, {
+      success: true,
+      message: '',
+      data: {
+        estimated: true,
+        original_cost: '1.25',
+        revenue_nano_usd: '248400000',
+        cost_nano_usd: '171232877',
+        profit_nano_usd: '77167123',
+      },
+    })
+  }
+
+  const mounted = await mount(
+    <CostRuleDrawer
+      open
+      channel={{ ...channel, type: 200, name: 'Dimensio' }}
+      billableModel='jimeng-video-seedance-2.0-mini'
+      originModel='doubao-seedance-2-0-mini-260615'
+      rule={taskDurationRule}
+      canWrite
+      onOpenChange={() => {}}
+    />
+  )
+  try {
+    await act(async () => {
+      findButton('Preview cost').click()
+      await previewRequestSent
+    })
+
+    assert.ok(previewRequest)
+    assert.equal(previewRequest.relay_mode, 31)
+    assert.equal(previewRequest.request_path, '/v1/video/generations')
   } finally {
     await unmount(mounted)
   }

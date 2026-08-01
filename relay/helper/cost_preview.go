@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"time"
@@ -8,10 +9,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
@@ -24,6 +27,10 @@ func PreviewUserBillingQuota(c *gin.Context, input dto.CostPreviewRequest) (fina
 // PreviewUserBillingQuota. Extracting it lets the routing revenue preview reuse the
 // exact same pricing chain without fabricating a gin.Context just to carry a user id.
 func previewUserBillingQuotaForUser(userId int, input dto.CostPreviewRequest) (finalQuota int64, quotaPerUnitSnapshot string, err error) {
+	return previewUserBillingQuotaForUserWithSeedanceInput(userId, input, "", false, 0)
+}
+
+func previewUserBillingQuotaForUserWithSeedanceInput(userId int, input dto.CostPreviewRequest, resolution string, hasVideoInput bool, inputDurationMS int64) (finalQuota int64, quotaPerUnitSnapshot string, err error) {
 	previewContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	requestPath := strings.TrimSpace(input.RequestPath)
 	if requestPath == "" {
@@ -56,6 +63,22 @@ func previewUserBillingQuotaForUser(userId int, input dto.CostPreviewRequest) (f
 		priceData, priceErr := ModelPriceHelperPerCall(previewContext, info)
 		if priceErr != nil {
 			return 0, "", priceErr
+		}
+		if priceData.BillingMode == billing_setting.BillingModePerDuration && seedancepricing.Family(input.OriginModel) != "" && input.DurationSeconds != nil && *input.DurationSeconds > 0 {
+			multiplier, ok := seedancepricing.DurationMultiplier(input.OriginModel, resolution, hasVideoInput, inputDurationMS, *input.DurationSeconds)
+			if !ok {
+				return 0, "", fmt.Errorf("unsupported Seedance duration pricing inputs for model %s", input.OriginModel)
+			}
+			ratios := priceData.OtherRatios()
+			if ratios == nil {
+				ratios = make(map[string]float64)
+			}
+			delete(ratios, "resolution")
+			delete(ratios, "video_input")
+			ratios["seedance_price_matrix"] = multiplier
+			if !priceData.ReplaceOtherRatios(ratios) {
+				return 0, "", fmt.Errorf("failed to apply Seedance duration pricing for model %s", input.OriginModel)
+			}
 		}
 		info.PriceData = priceData
 	} else {

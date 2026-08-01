@@ -538,11 +538,14 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 			results = append(results, result)
 			continue
 		}
-		variants := map[string]struct{}{string(types.DefaultCostVariantKey): {}}
+		variants := make(map[string]struct{})
 		if models, ok := activeVariants[ability.ChannelId]; ok {
 			for variant := range models[predictedModel] {
 				variants[variant] = struct{}{}
 			}
+		}
+		if len(variants) == 0 {
+			variants[string(types.DefaultCostVariantKey)] = struct{}{}
 		}
 		variantKeys := make([]string, 0, len(variants))
 		for variant := range variants {

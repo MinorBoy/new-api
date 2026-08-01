@@ -46,6 +46,11 @@ test('blocks unresolved reference limits while preserving valid mappings', async
   assert.equal(result.document.entities.channel_lines.length, 12)
   assert.equal(result.document.entities.model_skus.length, 9)
   assert.equal(result.document.entities.sale_proposals.length, 16)
+
+  for (const proposal of result.document.entities.sale_proposals) {
+    assert.equal('enabled' in proposal, false)
+  }
+
   assert.equal(result.document.entities.cost_rule_drafts.length, 98)
   assert.equal(result.document.entities.model_mappings.length, 104)
   assert.equal(result.document.entities.route_blueprints.length, 98)

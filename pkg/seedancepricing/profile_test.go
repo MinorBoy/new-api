@@ -135,3 +135,63 @@ func TestVideoInputRatioNormalizesResolution(t *testing.T) {
 	require.True(t, ok)
 	assert.InDelta(t, 1.0, got, 1e-9)
 }
+
+func TestDurationMultiplierUsesOfficialTokensAndInputDuration(t *testing.T) {
+	tests := []struct {
+		name          string
+		model         string
+		resolution    string
+		hasVideo      bool
+		inputDuration int64
+		outputSeconds int
+		want          float64
+	}{
+		{
+			name:          "mini 720p text uses the base price",
+			model:         "doubao-seedance-2-0-mini-260615",
+			resolution:    "720p",
+			outputSeconds: 5,
+			want:          1,
+		},
+		{
+			name:          "mini 720p includes five seconds of reference video",
+			model:         "doubao-seedance-2-0-mini-260615",
+			resolution:    "720p",
+			hasVideo:      true,
+			inputDuration: 5000,
+			outputSeconds: 5,
+			want:          (14.0 / 23.0) * 2,
+		},
+		{
+			name:          "standard 480p scales by output pixels",
+			model:         "doubao-seedance-2-0-260128",
+			resolution:    "480p",
+			outputSeconds: 5,
+			want:          (864.0 * 496.0) / (1280.0 * 720.0),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := DurationMultiplier(tt.model, tt.resolution, tt.hasVideo, tt.inputDuration, tt.outputSeconds)
+			require.True(t, ok)
+			assert.InDelta(t, tt.want, got, 1e-9)
+		})
+	}
+}
+
+func TestDurationMultiplierRejectsUntrustedDurations(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		inputDuration int64
+		outputSeconds int
+	}{
+		{name: "missing video duration", inputDuration: 0, outputSeconds: 5},
+		{name: "negative video duration", inputDuration: -1, outputSeconds: 5},
+		{name: "missing output duration", inputDuration: 0, outputSeconds: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := DurationMultiplier("doubao-seedance-2-0-mini-260615", "720p", tt.name != "missing output duration", tt.inputDuration, tt.outputSeconds)
+			assert.False(t, ok)
+		})
+	}
+}

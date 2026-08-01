@@ -16,25 +16,30 @@ type publicPricingProjection struct {
 	SupportedEndpoints map[string]common.EndpointInfo
 }
 
-func projectPublicPricing(pricing []model.Pricing, endpoints map[string]common.EndpointInfo) publicPricingProjection {
-	pricingByName := make(map[string]model.Pricing, len(pricing))
-	for _, item := range pricing {
-		pricingByName[item.ModelName] = item
-	}
-
+func projectPublicPricing(
+	pricing []model.Pricing,
+	vendors []model.PricingVendor,
+	endpoints map[string]common.EndpointInfo,
+) publicPricingProjection {
 	projection := publicPricingProjection{
-		Pricing:            make([]model.Pricing, 0, len(modelrouting.CanonicalModels)),
+		Pricing:            make([]model.Pricing, 0, len(pricing)),
 		Vendors:            []model.PricingVendor{},
 		SupportedEndpoints: make(map[string]common.EndpointInfo),
 	}
-	for _, modelName := range modelrouting.CanonicalModels {
-		item, ok := pricingByName[modelName]
-		if !ok {
+	usedVendorIDs := make(map[int]struct{})
+	includeDoubaoVendor := false
+	for _, item := range pricing {
+		if modelrouting.IsHiddenSeedanceModel(item.ModelName) {
 			continue
 		}
-		item.VendorID = publicDoubaoVendor.ID
-		item.Icon = publicDoubaoVendor.Icon
-		item.OwnerBy = modelrouting.PublicModelOwner
+		if modelrouting.IsPublicSeedanceModel(item.ModelName) {
+			item.VendorID = publicDoubaoVendor.ID
+			item.Icon = publicDoubaoVendor.Icon
+			item.OwnerBy = modelrouting.PublicModelOwner
+			includeDoubaoVendor = true
+		} else {
+			usedVendorIDs[item.VendorID] = struct{}{}
+		}
 		projection.Pricing = append(projection.Pricing, item)
 		for _, endpointType := range item.SupportedEndpointTypes {
 			key := string(endpointType)
@@ -43,7 +48,12 @@ func projectPublicPricing(pricing []model.Pricing, endpoints map[string]common.E
 			}
 		}
 	}
-	if len(projection.Pricing) > 0 {
+	for _, vendor := range vendors {
+		if _, ok := usedVendorIDs[vendor.ID]; ok {
+			projection.Vendors = append(projection.Vendors, vendor)
+		}
+	}
+	if includeDoubaoVendor {
 		projection.Vendors = append(projection.Vendors, publicDoubaoVendor)
 	}
 	return projection

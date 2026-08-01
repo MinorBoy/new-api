@@ -5894,6 +5894,15 @@
     "Review added, retained, and retired models for every bound channel.": "检查每个已绑定渠道中新增、保留和下架的模型。",
     "{{count}} models will be retired": "本次导入将下架 {{count}} 个模型",
     "No models will be retired by this import.": "本次导入不会下架任何模型。",
-    "Models to retire": "待下架模型"
+    "Models to retire": "待下架模型",
+    "Documentation": "文档",
+    "Page not found": "页面未找到",
+    "We could not find a documentation page for": "未找到该文档页面对应的内容",
+    "Back to documentation": "返回文档",
+    "Search docs": "搜索文档",
+    "Search documentation": "搜索文档",
+    "On this page": "本页目录",
+    "Page navigation": "页面导航",
+    "Open navigation": "打开导航"
   }
 }

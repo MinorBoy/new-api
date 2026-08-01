@@ -21,12 +21,25 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestDistributeRejectsInternalModelBeforeChannelSelection(t *testing.T) {
+func TestDistributeRejectsInternalSeedanceBeforeChannelSelection(t *testing.T) {
 	prepareDistributorRoutingTest(t)
-	seedDistributorRoutingChannelModel(t, 11, "A1", 100, "provider-hidden")
+	seedDistributorRoutingChannelModel(t, 11, "A1", 100, modelrouting.Seedance20)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 11).
+		Update("models", modelrouting.Seedance20+",video-2.0-pro").Error)
+	priority := int64(100)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "分组A", Model: "video-2.0-pro", ChannelId: 11, Enabled: true,
+		Priority: &priority, Weight: 100,
+	}).Error)
+	request := distributorRoutingPolicyRequest()
+	request.Targets = []service.RouteTargetWriteRequest{
+		distributorRoutingTarget(11, "video-2.0-pro", "720p"),
+	}
+	_, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
 
 	recorder, reached := runDistributorRoutingRequest(t, "", `{
-		"model":"provider-hidden",
+		"model":"video-2.0-pro",
 		"content":[{"type":"text","text":"video"}],
 		"resolution":"720p","duration":10,"ratio":"16:9"
 	}`)
@@ -35,7 +48,18 @@ func TestDistributeRejectsInternalModelBeforeChannelSelection(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"code":"model_not_found"`)
 	assert.NotContains(t, recorder.Body.String(), "channel")
-	assert.NotContains(t, recorder.Body.String(), "provider-hidden")
+	assert.NotContains(t, recorder.Body.String(), "video-2.0-pro")
+}
+
+func TestDistributeDoesNotApplySeedanceBoundaryToOtherModels(t *testing.T) {
+	prepareDistributorRoutingTest(t)
+	seedDistributorRoutingChannelModel(t, 11, "openai", 100, "gpt-4o")
+
+	recorder, reached := runDistributorRoutingRequest(t, "", `{"model":"gpt-4o"}`)
+
+	assert.True(t, reached)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "11", recorder.Header().Get("X-Selected-Channel"))
 }
 
 func TestDistributeAllowsAllPublicModels(t *testing.T) {

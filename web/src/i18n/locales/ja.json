@@ -5894,6 +5894,15 @@
     "Review added, retained, and retired models for every bound channel.": "バインド済みの各チャネルについて、追加・維持・廃止されるモデルを確認します。",
     "{{count}} models will be retired": "{{count}} 個のモデルが廃止されます",
     "No models will be retired by this import.": "このインポートで廃止されるモデルはありません。",
-    "Models to retire": "廃止予定のモデル"
+    "Models to retire": "廃止予定のモデル",
+    "Documentation": "ドキュメント",
+    "Page not found": "ページが見つかりません",
+    "We could not find a documentation page for": "次のドキュメントページが見つかりません",
+    "Back to documentation": "ドキュメントに戻る",
+    "Search docs": "ドキュメントを検索",
+    "Search documentation": "ドキュメントを検索",
+    "On this page": "このページの内容",
+    "Page navigation": "ページナビゲーション",
+    "Open navigation": "ナビゲーションを開く"
   }
 }

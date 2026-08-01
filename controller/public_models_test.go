@@ -17,34 +17,50 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestProjectPublicPricingRemovesInternalModelsAndVendors(t *testing.T) {
+const internalSeedanceModel = "mg-seedance2.0-480p-fast-gz-15s"
+
+func TestProjectPublicPricingOnlyProjectsSeedanceFamily(t *testing.T) {
 	pricing := []model.Pricing{
-		{ModelName: "provider-hidden", VendorID: 99, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAIResponse}},
-		{ModelName: modelrouting.Seedance20Mini, VendorID: 99, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}},
-		{ModelName: modelrouting.Seedance20, VendorID: 99, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}},
-		{ModelName: modelrouting.Seedance20Fast, VendorID: 99, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}},
+		{ModelName: "gpt-4o", VendorID: 10, OwnerBy: "openai", Icon: "OpenAI", SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAIResponse}},
+		{ModelName: internalSeedanceModel, VendorID: 99, OwnerBy: "internal", SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeAnthropic}},
+		{ModelName: modelrouting.Seedance20Mini, VendorID: 99, OwnerBy: "internal", SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}},
+		{ModelName: modelrouting.Seedance20, VendorID: 99, OwnerBy: "internal", SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}},
+		{ModelName: modelrouting.Seedance20Fast, VendorID: 99, OwnerBy: "internal", SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}},
+	}
+	vendors := []model.PricingVendor{
+		{ID: 10, Name: "OpenAI", Icon: "OpenAI"},
+		{ID: 99, Name: "Internal Seedance", Icon: "Internal"},
 	}
 	endpoints := map[string]common.EndpointInfo{
 		string(constant.EndpointTypeOpenAI):         {Path: "/v1/chat/completions", Method: "POST"},
 		string(constant.EndpointTypeOpenAIResponse): {Path: "/v1/responses", Method: "POST"},
+		string(constant.EndpointTypeAnthropic):      {Path: "/v1/messages", Method: "POST"},
 	}
 
-	projection := projectPublicPricing(pricing, endpoints)
+	projection := projectPublicPricing(pricing, vendors, endpoints)
 	require.Equal(t, []string{
-		modelrouting.Seedance20, modelrouting.Seedance20Fast, modelrouting.Seedance20Mini,
+		"gpt-4o",
+		modelrouting.Seedance20Mini,
+		modelrouting.Seedance20,
+		modelrouting.Seedance20Fast,
 	}, []string{
 		projection.Pricing[0].ModelName,
 		projection.Pricing[1].ModelName,
 		projection.Pricing[2].ModelName,
+		projection.Pricing[3].ModelName,
 	})
-	for _, item := range projection.Pricing {
+	assert.Equal(t, 10, projection.Pricing[0].VendorID)
+	assert.Equal(t, "openai", projection.Pricing[0].OwnerBy)
+	assert.Equal(t, "OpenAI", projection.Pricing[0].Icon)
+	for _, item := range projection.Pricing[1:] {
 		assert.Equal(t, publicDoubaoVendor.ID, item.VendorID)
 		assert.Equal(t, modelrouting.PublicModelOwner, item.OwnerBy)
 		assert.Equal(t, publicDoubaoVendor.Icon, item.Icon)
 	}
-	require.Equal(t, []model.PricingVendor{publicDoubaoVendor}, projection.Vendors)
+	require.Equal(t, []model.PricingVendor{vendors[0], publicDoubaoVendor}, projection.Vendors)
 	require.Contains(t, projection.SupportedEndpoints, string(constant.EndpointTypeOpenAI))
-	require.NotContains(t, projection.SupportedEndpoints, string(constant.EndpointTypeOpenAIResponse))
+	require.Contains(t, projection.SupportedEndpoints, string(constant.EndpointTypeOpenAIResponse))
+	require.NotContains(t, projection.SupportedEndpoints, string(constant.EndpointTypeAnthropic))
 }
 
 func seedPublicModelAbilities(t *testing.T, db *gorm.DB, modelNames []string) {
@@ -68,12 +84,20 @@ func seedPublicModelAbilities(t *testing.T, db *gorm.DB, modelNames []string) {
 	require.NoError(t, db.Create(&abilities).Error)
 }
 
-func TestListModelsReturnsOnlyPublicCatalogWithDoubaoOwner(t *testing.T) {
+func mixedPublicModelNames() []string {
+	return []string{
+		"gpt-4o",
+		internalSeedanceModel,
+		modelrouting.Seedance20,
+		modelrouting.Seedance20Fast,
+		modelrouting.Seedance20Mini,
+	}
+}
+
+func TestListModelsKeepsNonSeedanceAndUsesDoubaoOwnerOnlyForPublicSeedance(t *testing.T) {
 	withSelfUseModeEnabled(t)
 	db := setupModelListControllerTestDB(t)
-	modelNames := append([]string(nil), modelrouting.CanonicalModels...)
-	modelNames = append(modelNames, "provider-hidden")
-	seedPublicModelAbilities(t, db, modelNames)
+	seedPublicModelAbilities(t, db, mixedPublicModelNames())
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -83,24 +107,24 @@ func TestListModelsReturnsOnlyPublicCatalogWithDoubaoOwner(t *testing.T) {
 	ListModels(ctx, constant.ChannelTypeOpenAI)
 
 	payload := decodeListModelsPayload(t, recorder)
-	require.Len(t, payload.Data, 3)
-	for index, modelName := range modelrouting.CanonicalModels {
-		assert.Equal(t, modelName, payload.Data[index].Id)
-		assert.Equal(t, modelrouting.PublicModelOwner, payload.Data[index].OwnedBy)
+	require.Len(t, payload.Data, 4)
+	modelsByID := make(map[string]dto.OpenAIModels, len(payload.Data))
+	for _, item := range payload.Data {
+		modelsByID[item.Id] = item
 	}
+	assert.Equal(t, "openai", modelsByID["gpt-4o"].OwnedBy)
+	for _, modelName := range modelrouting.CanonicalModels {
+		assert.Equal(t, modelrouting.PublicModelOwner, modelsByID[modelName].OwnedBy)
+	}
+	assert.NotContains(t, modelsByID, internalSeedanceModel)
 }
 
-func TestListModelsCompatibilityFormatsHideInternalModels(t *testing.T) {
-	for _, modelType := range []int{
-		constant.ChannelTypeAnthropic,
-		constant.ChannelTypeGemini,
-	} {
+func TestListModelsCompatibilityFormatsKeepNonSeedanceAndHideInternalSeedance(t *testing.T) {
+	for _, modelType := range []int{constant.ChannelTypeAnthropic, constant.ChannelTypeGemini} {
 		t.Run(constant.GetChannelTypeName(modelType), func(t *testing.T) {
 			withSelfUseModeEnabled(t)
 			db := setupModelListControllerTestDB(t)
-			modelNames := append([]string(nil), modelrouting.CanonicalModels...)
-			modelNames = append(modelNames, "provider-hidden")
-			seedPublicModelAbilities(t, db, modelNames)
+			seedPublicModelAbilities(t, db, mixedPublicModelNames())
 
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
@@ -109,7 +133,8 @@ func TestListModelsCompatibilityFormatsHideInternalModels(t *testing.T) {
 			ListModels(ctx, modelType)
 
 			require.Equal(t, http.StatusOK, recorder.Code)
-			assert.NotContains(t, recorder.Body.String(), "provider-hidden")
+			assert.Contains(t, recorder.Body.String(), "gpt-4o")
+			assert.NotContains(t, recorder.Body.String(), internalSeedanceModel)
 			for _, modelName := range modelrouting.CanonicalModels {
 				assert.Contains(t, recorder.Body.String(), modelName)
 			}
@@ -117,23 +142,24 @@ func TestListModelsCompatibilityFormatsHideInternalModels(t *testing.T) {
 	}
 }
 
-func TestListModelsTokenLimitCannotExposeInternalModel(t *testing.T) {
+func TestListModelsTokenLimitCannotExposeInternalSeedance(t *testing.T) {
 	withSelfUseModeEnabled(t)
 	setupModelListControllerTestDB(t)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, map[string]bool{
-		"provider-hidden": true,
+		"gpt-4o":              true,
+		internalSeedanceModel: true,
 	})
 
 	ListModels(ctx, constant.ChannelTypeOpenAI)
 
 	payload := decodeListModelsPayload(t, recorder)
-	require.Empty(t, payload.Data)
+	require.Len(t, payload.Data, 1)
+	assert.Equal(t, "gpt-4o", payload.Data[0].Id)
 }
 
 func TestListModelsEmptyAnthropicCatalogDoesNotPanic(t *testing.T) {
@@ -143,10 +169,9 @@ func TestListModelsEmptyAnthropicCatalogDoesNotPanic(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, map[string]bool{
-		"provider-hidden": true,
+		internalSeedanceModel: true,
 	})
 
 	ListModels(ctx, constant.ChannelTypeAnthropic)
@@ -161,40 +186,48 @@ func TestListModelsEmptyAnthropicCatalogDoesNotPanic(t *testing.T) {
 	assert.False(t, payload.HasMore)
 }
 
-func TestRetrieveModelRejectsInternalModelAndReturnsPublicModel(t *testing.T) {
-	hiddenRecorder := httptest.NewRecorder()
-	hiddenContext, _ := gin.CreateTestContext(hiddenRecorder)
-	hiddenContext.Params = gin.Params{{Key: "model", Value: "provider-hidden"}}
+func TestRetrieveModelRejectsInternalSeedanceAndKeepsOtherPublicModels(t *testing.T) {
+	for _, hiddenModel := range []string{internalSeedanceModel, "doubao-seedance-2-0-mini-260128"} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Params = gin.Params{{Key: "model", Value: hiddenModel}}
 
-	RetrieveModel(hiddenContext, constant.ChannelTypeOpenAI)
+		RetrieveModel(ctx, constant.ChannelTypeOpenAI)
 
-	require.Equal(t, http.StatusOK, hiddenRecorder.Code)
-	var hiddenPayload struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var payload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+		assert.Equal(t, "model_not_found", payload.Error.Code)
 	}
-	require.NoError(t, common.Unmarshal(hiddenRecorder.Body.Bytes(), &hiddenPayload))
-	assert.Equal(t, "model_not_found", hiddenPayload.Error.Code)
 
-	publicRecorder := httptest.NewRecorder()
-	publicContext, _ := gin.CreateTestContext(publicRecorder)
-	publicContext.Params = gin.Params{{Key: "model", Value: modelrouting.Seedance20}}
+	for modelName, expectedOwner := range map[string]string{
+		"gpt-4o":                openAIModelsMap["gpt-4o"].OwnedBy,
+		modelrouting.Seedance20: modelrouting.PublicModelOwner,
+	} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Params = gin.Params{{Key: "model", Value: modelName}}
 
-	RetrieveModel(publicContext, constant.ChannelTypeOpenAI)
+		RetrieveModel(ctx, constant.ChannelTypeOpenAI)
 
-	require.Equal(t, http.StatusOK, publicRecorder.Code)
-	var publicModel dto.OpenAIModels
-	require.NoError(t, common.Unmarshal(publicRecorder.Body.Bytes(), &publicModel))
-	assert.Equal(t, modelrouting.Seedance20, publicModel.Id)
-	assert.Equal(t, modelrouting.PublicModelOwner, publicModel.OwnedBy)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var publicModel dto.OpenAIModels
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &publicModel))
+		assert.Equal(t, modelName, publicModel.Id)
+		assert.Equal(t, expectedOwner, publicModel.OwnedBy)
+		if modelName == "gpt-4o" {
+			assert.NotEqual(t, modelrouting.PublicModelOwner, publicModel.OwnedBy)
+		}
+	}
 }
 
-func TestGetUserModelsReturnsOnlyPublicCatalog(t *testing.T) {
+func TestGetUserModelsKeepsNonSeedanceAndHidesInternalSeedance(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	modelNames := append([]string(nil), modelrouting.CanonicalModels...)
-	modelNames = append(modelNames, "provider-hidden")
-	seedPublicModelAbilities(t, db, modelNames)
+	seedPublicModelAbilities(t, db, mixedPublicModelNames())
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -203,17 +236,16 @@ func TestGetUserModelsReturnsOnlyPublicCatalog(t *testing.T) {
 
 	GetUserModels(ctx)
 
-	require.Equal(t, modelrouting.CanonicalModels, decodeUserModelsResponse(t, recorder))
+	assert.ElementsMatch(t, append([]string{"gpt-4o"}, modelrouting.CanonicalModels...), decodeUserModelsResponse(t, recorder))
 }
 
-func TestDashboardListModelsReturnsOnlyPublicModelsPerChannel(t *testing.T) {
+func TestDashboardListModelsOnlyFiltersInternalSeedancePerChannel(t *testing.T) {
 	original := channelId2Models
 	channelId2Models = map[int][]string{
 		constant.ChannelTypeOpenAI: {
-			"provider-hidden", modelrouting.Seedance20Mini,
-			modelrouting.Seedance20, modelrouting.Seedance20Fast,
+			"gpt-4o", internalSeedanceModel, modelrouting.Seedance20,
 		},
-		constant.ChannelTypeAnthropic: {"provider-only"},
+		constant.ChannelTypeAnthropic: {"claude-sonnet-4-5"},
 	}
 	t.Cleanup(func() { channelId2Models = original })
 
@@ -228,18 +260,18 @@ func TestDashboardListModelsReturnsOnlyPublicModelsPerChannel(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.True(t, payload.Success)
-	assert.Equal(t, modelrouting.CanonicalModels, payload.Data[constant.ChannelTypeOpenAI])
-	assert.Empty(t, payload.Data[constant.ChannelTypeAnthropic])
+	assert.Equal(t, []string{"gpt-4o", modelrouting.Seedance20}, payload.Data[constant.ChannelTypeOpenAI])
+	assert.Equal(t, []string{"claude-sonnet-4-5"}, payload.Data[constant.ChannelTypeAnthropic])
 }
 
 func TestChannelListModelsKeepsInternalCatalogForAdmins(t *testing.T) {
 	original := openAIModels
-	openAIModels = []dto.OpenAIModels{{Id: "provider-hidden", Object: "model"}}
+	openAIModels = []dto.OpenAIModels{{Id: internalSeedanceModel, Object: "model"}}
 	t.Cleanup(func() { openAIModels = original })
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ChannelListModels(ctx)
 
-	require.Contains(t, recorder.Body.String(), "provider-hidden")
+	require.Contains(t, recorder.Body.String(), internalSeedanceModel)
 }

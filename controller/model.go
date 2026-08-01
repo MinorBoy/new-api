@@ -258,9 +258,14 @@ func ListModels(c *gin.Context, modelType int) {
 	}
 
 	userModelNames = modelrouting.FilterPublicModels(userModelNames)
-	ownerByModel := make(map[string]string, len(userModelNames))
+	ownerByModel := map[string]string{}
+	if len(ownerGroups) > 0 {
+		ownerByModel = getPreferredModelOwners(userModelNames, ownerGroups)
+	}
 	for _, modelName := range userModelNames {
-		ownerByModel[modelName] = modelrouting.PublicModelOwner
+		if modelrouting.IsPublicSeedanceModel(modelName) {
+			ownerByModel[modelName] = modelrouting.PublicModelOwner
+		}
 	}
 	userOpenAiModels := make([]dto.OpenAIModels, 0, len(userModelNames))
 	for _, modelName := range userModelNames {
@@ -332,7 +337,7 @@ func EnabledListModels(c *gin.Context) {
 
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
-	if !modelrouting.IsPublicModel(modelId) {
+	if modelrouting.IsHiddenSeedanceModel(modelId) {
 		openAIError := types.OpenAIError{
 			Message: fmt.Sprintf("The model '%s' does not exist", modelId),
 			Type:    "invalid_request_error",
@@ -343,9 +348,25 @@ func RetrieveModel(c *gin.Context, modelType int) {
 		return
 	}
 
-	aiModel := buildOpenAIModel(modelId, map[string]string{
-		modelId: modelrouting.PublicModelOwner,
-	})
+	var aiModel dto.OpenAIModels
+	if modelrouting.IsPublicSeedanceModel(modelId) {
+		aiModel = buildOpenAIModel(modelId, map[string]string{
+			modelId: modelrouting.PublicModelOwner,
+		})
+	} else {
+		var ok bool
+		aiModel, ok = openAIModelsMap[modelId]
+		if !ok {
+			openAIError := types.OpenAIError{
+				Message: fmt.Sprintf("The model '%s' does not exist", modelId),
+				Type:    "invalid_request_error",
+				Param:   "model",
+				Code:    "model_not_found",
+			}
+			c.JSON(http.StatusOK, gin.H{"error": openAIError})
+			return
+		}
+	}
 	switch modelType {
 	case constant.ChannelTypeAnthropic:
 		c.JSON(http.StatusOK, dto.AnthropicModel{

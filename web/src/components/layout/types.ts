@@ -99,6 +99,13 @@ export type TopNavLink = {
   disabled?: boolean
   requiresAuth?: boolean
   external?: boolean
+  /**
+   * Open an in-app route path in a new browser tab. Unlike `external` (which
+   * targets a different origin), this keeps the same-origin SPA path but
+   * bypasses client-side routing to launch a fresh tab — used for the docs
+   * platform so it opens beside the console.
+   */
+  openInNewTab?: boolean
 }
 
 /**

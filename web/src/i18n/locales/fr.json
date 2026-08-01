@@ -5894,6 +5894,15 @@
     "Review added, retained, and retired models for every bound channel.": "Vérifiez les modèles ajoutés, conservés et retirés pour chaque canal associé.",
     "{{count}} models will be retired": "{{count}} modèles seront retirés",
     "No models will be retired by this import.": "Aucun modèle ne sera retiré par cet import.",
-    "Models to retire": "Modèles à retirer"
+    "Models to retire": "Modèles à retirer",
+    "Documentation": "Documentation",
+    "Page not found": "Page introuvable",
+    "We could not find a documentation page for": "Impossible de trouver une page de documentation pour",
+    "Back to documentation": "Retour à la documentation",
+    "Search docs": "Rechercher dans la documentation",
+    "Search documentation": "Rechercher dans la documentation",
+    "On this page": "Sur cette page",
+    "Page navigation": "Navigation entre les pages",
+    "Open navigation": "Ouvrir la navigation"
   }
 }

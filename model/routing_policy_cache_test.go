@@ -35,6 +35,20 @@ func TestInitRoutingPolicyCacheLoadsOnlyEnabledPoliciesAndTargets(t *testing.T) 
 	assert.False(t, ok)
 }
 
+func TestInitRoutingPolicyCacheMarksSeedanceUpstreamModelsAsHidden(t *testing.T) {
+	db := openRoutingTestDB(t)
+	prepareRoutingCacheTest(t, db)
+	createCachedPolicy(t, modelrouting.Seedance20, true, 11, "4sdance431", true)
+	createCachedPolicy(t, modelrouting.Seedance20Fast, true, 12, "videos-fast", true)
+	createCachedPolicy(t, modelrouting.Seedance20Mini, true, 13, "video-2.0-pro", true)
+
+	require.NoError(t, model.InitRoutingPolicyCache())
+	for _, modelName := range []string{"4sdance431", "videos-fast", "video-2.0-pro"} {
+		assert.True(t, modelrouting.IsHiddenSeedanceModel(modelName), modelName)
+	}
+	assert.False(t, modelrouting.IsHiddenSeedanceModel("gpt-5"))
+}
+
 func TestInitRoutingPolicyCacheDefaultsLegacyBlankCostVariant(t *testing.T) {
 	db := openRoutingTestDB(t)
 	prepareRoutingCacheTest(t, db)

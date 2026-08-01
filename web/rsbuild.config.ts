@@ -88,6 +88,18 @@ export default defineConfig(({ envMode }) => {
     },
     tools: {
       rspack: {
+        // Inline documentation Markdown as raw strings under features/docs/content.
+        // RSPack `asset/source` (same semantics as webpack 5) returns the file
+        // contents verbatim, so `import md from './overview.md'` yields a string.
+        module: {
+          rules: [
+            {
+              test: /\.md$/i,
+              type: 'asset/source',
+              include: path.resolve(__dirname, 'src/features/docs/content'),
+            },
+          ],
+        },
         plugins: [
           tanstackRouter({
             target: 'react',

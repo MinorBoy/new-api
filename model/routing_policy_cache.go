@@ -41,6 +41,7 @@ func InitRoutingPolicyCache() error {
 		return err
 	}
 	routingPolicySnapshots.Store(next)
+	syncHiddenSeedanceModels(next)
 	return nil
 }
 
@@ -83,7 +84,23 @@ func RefreshRoutingPolicyCacheKeys(keys []RoutingPolicyKey) error {
 		}
 	}
 	routingPolicySnapshots.Store(next)
+	syncHiddenSeedanceModels(next)
 	return nil
+}
+
+func syncHiddenSeedanceModels(snapshots map[RoutingPolicyKey]modelrouting.PolicySnapshot) {
+	upstreamModels := make([]string, 0)
+	for key, snapshot := range snapshots {
+		if !modelrouting.IsPublicSeedanceModel(key.Model) {
+			continue
+		}
+		for _, targets := range snapshot.TargetsByChannel {
+			for _, target := range targets {
+				upstreamModels = append(upstreamModels, target.UpstreamModel)
+			}
+		}
+	}
+	modelrouting.SetHiddenSeedanceModels(upstreamModels)
 }
 
 func SyncRoutingPolicyCache(frequency int) {

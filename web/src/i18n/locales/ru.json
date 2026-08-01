@@ -5894,6 +5894,15 @@
     "Review added, retained, and retired models for every bound channel.": "Проверьте добавленные, сохраненные и выведенные из эксплуатации модели для каждого привязанного канала.",
     "{{count}} models will be retired": "Будет выведено из эксплуатации моделей: {{count}}",
     "No models will be retired by this import.": "При этом импорте модели не будут выведены из эксплуатации.",
-    "Models to retire": "Модели для вывода из эксплуатации"
+    "Models to retire": "Модели для вывода из эксплуатации",
+    "Documentation": "Документация",
+    "Page not found": "Страница не найдена",
+    "We could not find a documentation page for": "Не удалось найти страницу документации для",
+    "Back to documentation": "Вернуться к документации",
+    "Search docs": "Поиск по документации",
+    "Search documentation": "Поиск по документации",
+    "On this page": "На этой странице",
+    "Page navigation": "Навигация по страницам",
+    "Open navigation": "Открыть навигацию"
   }
 }

@@ -38,7 +38,7 @@ export function NavLinkItem({ link, className }: NavLinkItemProps) {
     className
   )
 
-  if (link.external) {
+  if (link.external || link.openInNewTab) {
     return (
       <a
         href={link.href}
@@ -76,9 +76,9 @@ export function NavLinkList({
 }: NavLinkListProps) {
   return (
     <>
-      {links.map((link, index) => (
+      {links.map((link) => (
         <NavLinkItem
-          key={index}
+          key={`${link.title}:${link.href}`}
           link={link}
           className={cn(className, itemClassName)}
         />

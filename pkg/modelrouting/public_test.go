@@ -7,24 +7,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsPublicModelRequiresExactCanonicalID(t *testing.T) {
+func TestIsPublicSeedanceModelRequiresExactCanonicalID(t *testing.T) {
 	for _, modelName := range CanonicalModels {
-		assert.True(t, IsPublicModel(modelName), modelName)
+		assert.True(t, IsPublicSeedanceModel(modelName), modelName)
 	}
 	for _, modelName := range []string{
 		"doubao-seedance-2-0-mini-260128",
 		"mg-seedance2.0-480p-fast-gz-15s",
-		" " + Seedance20,
-		Seedance20 + " ",
+		"GPT-5",
+		"claude-sonnet-4-5",
 		"",
 	} {
-		assert.False(t, IsPublicModel(modelName), modelName)
+		assert.False(t, IsPublicSeedanceModel(modelName), modelName)
 	}
 }
 
-func TestFilterPublicModelsUsesCatalogOrderAndDeduplicates(t *testing.T) {
+func TestIsHiddenSeedanceModelOnlyRejectsNonPublicSeedanceIDs(t *testing.T) {
+	SetHiddenSeedanceModels([]string{"4sdance431", "videos-fast", "video-2.0-pro"})
+	t.Cleanup(func() { SetHiddenSeedanceModels(nil) })
+
+	for _, modelName := range []string{
+		"doubao-seedance-2-0-mini-260128",
+		"mg-seedance2.0-480p-fast-gz-15s",
+		"BB-SEEDANCE-2.0-PRO",
+		"4sdance431",
+		"videos-fast",
+		"video-2.0-pro",
+	} {
+		assert.True(t, IsHiddenSeedanceModel(modelName), modelName)
+	}
+
+	for _, modelName := range append([]string{
+		"gpt-5",
+		"gpt-image-2",
+		"claude-sonnet-4-5",
+		"gemini-2.5-pro",
+		"deepseek-chat",
+		"glm-4.5",
+		"",
+	}, CanonicalModels...) {
+		assert.False(t, IsHiddenSeedanceModel(modelName), modelName)
+	}
+}
+
+func TestFilterPublicModelsKeepsNonSeedanceAndPublicSeedanceInInputOrder(t *testing.T) {
+	SetHiddenSeedanceModels([]string{"4sdance431", "videos-fast", "video-2.0-pro"})
+	t.Cleanup(func() { SetHiddenSeedanceModels(nil) })
+
 	actual := FilterPublicModels([]string{
-		"provider-hidden", Seedance20Mini, Seedance20, Seedance20Mini, Seedance20Fast,
+		"gpt-5",
+		"mg-seedance2.0-480p-fast-gz-15s",
+		"4sdance431",
+		"videos-fast",
+		"video-2.0-pro",
+		Seedance20Mini,
+		"claude-sonnet-4-5",
+		Seedance20,
+		"gpt-5",
+		Seedance20Mini,
+		Seedance20Fast,
+		"doubao-seedance-2-0-mini-260128",
 	})
-	require.Equal(t, []string{Seedance20, Seedance20Fast, Seedance20Mini}, actual)
+
+	require.Equal(t, []string{
+		"gpt-5",
+		Seedance20Mini,
+		"claude-sonnet-4-5",
+		Seedance20,
+		Seedance20Fast,
+	}, actual)
 }

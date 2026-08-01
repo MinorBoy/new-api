@@ -5894,6 +5894,15 @@
     "Review added, retained, and retired models for every bound channel.": "Review added, retained, and retired models for every bound channel.",
     "{{count}} models will be retired": "{{count}} models will be retired",
     "No models will be retired by this import.": "No models will be retired by this import.",
-    "Models to retire": "Models to retire"
+    "Models to retire": "Models to retire",
+    "Documentation": "Documentation",
+    "Page not found": "Page not found",
+    "We could not find a documentation page for": "We could not find a documentation page for",
+    "Back to documentation": "Back to documentation",
+    "Search docs": "Search docs",
+    "Search documentation": "Search documentation",
+    "On this page": "On this page",
+    "Page navigation": "Page navigation",
+    "Open navigation": "Open navigation"
   }
 }

@@ -5894,6 +5894,15 @@
     "Review added, retained, and retired models for every bound channel.": "Xem lại các mô hình được thêm, giữ lại và ngừng hoạt động cho từng kênh đã liên kết.",
     "{{count}} models will be retired": "{{count}} mô hình sẽ ngừng hoạt động",
     "No models will be retired by this import.": "Không có mô hình nào bị ngừng hoạt động trong lần nhập này.",
-    "Models to retire": "Các mô hình sẽ ngừng hoạt động"
+    "Models to retire": "Các mô hình sẽ ngừng hoạt động",
+    "Documentation": "Tài liệu",
+    "Page not found": "Không tìm thấy trang",
+    "We could not find a documentation page for": "Không tìm thấy trang tài liệu cho",
+    "Back to documentation": "Quay lại tài liệu",
+    "Search docs": "Tìm trong tài liệu",
+    "Search documentation": "Tìm kiếm tài liệu",
+    "On this page": "Trên trang này",
+    "Page navigation": "Điều hướng trang",
+    "Open navigation": "Mở điều hướng"
   }
 }

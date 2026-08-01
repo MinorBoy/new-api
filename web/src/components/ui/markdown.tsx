@@ -734,7 +734,15 @@ function addExternalLinkAttributes(html: string): string {
   return template.innerHTML
 }
 
-function renderMarkdown(markdown: string, breaks = false): string {
+/**
+ * Render a markdown string to sanitized HTML using the shared marked parser
+ * (GFM, KaTeX math, flow/seq diagrams, emoji shortcodes, external-link attrs).
+ *
+ * Exposed so feature renderers that build markdown incrementally — for example
+ * the docs renderer, which splits the token stream to mount React code blocks —
+ * can reuse the exact same prose pipeline instead of duplicating it.
+ */
+export function renderMarkdown(markdown: string, breaks = false): string {
   const parsedHtml = markdownParser.parse(markdown, {
     ...markdownOptions,
     breaks,

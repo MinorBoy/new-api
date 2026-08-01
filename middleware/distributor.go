@@ -41,7 +41,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
-		if shouldSelectChannel && modelRequest.Model != "" && !modelrouting.IsPublicModel(modelRequest.Model) {
+		if shouldSelectChannel && modelRequest.Model != "" && modelrouting.IsHiddenSeedanceModel(modelRequest.Model) {
 			abortSeedanceRoutingError(
 				c,
 				http.StatusNotFound,

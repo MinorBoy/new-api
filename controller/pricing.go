@@ -57,7 +57,7 @@ func GetPricing(c *gin.Context) {
 
 	usableGroup = service.GetUserUsableGroups(group)
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
-	projection := projectPublicPricing(pricing, model.GetSupportedEndpointMap())
+	projection := projectPublicPricing(pricing, model.GetVendors(), model.GetSupportedEndpointMap())
 	// check groupRatio contains usableGroup
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {

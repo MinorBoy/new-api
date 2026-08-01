@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -27,8 +29,8 @@ import (
 
 func TestCostRoutingGetChannelSkipsUncoveredCandidate(t *testing.T) {
 	prepareCostRoutingControllerTest(t, types.CostAccountingStrict)
-	seedCostRoutingChannel(t, 11, 200, `{"client-model":"missing-model"}`)
-	seedCostRoutingChannel(t, 12, 100, `{"client-model":"covered-model"}`)
+	seedCostRoutingChannel(t, 11, 200, costRoutingModelMapping(t, "missing-model"))
+	seedCostRoutingChannel(t, 12, 100, costRoutingModelMapping(t, "covered-model"))
 	seedActiveFreeCostRule(t, 12, "covered-model")
 
 	c := costRoutingControllerContext()
@@ -43,8 +45,8 @@ func TestCostRoutingGetChannelSkipsUncoveredCandidate(t *testing.T) {
 
 func TestCostRoutingGetChannelKeepsLegacySelectionWhenDisabled(t *testing.T) {
 	prepareCostRoutingControllerTest(t, types.CostAccountingDisabled)
-	seedCostRoutingChannel(t, 11, 200, `{"client-model":"missing-model"}`)
-	seedCostRoutingChannel(t, 12, 100, `{"client-model":"covered-model"}`)
+	seedCostRoutingChannel(t, 11, 200, costRoutingModelMapping(t, "missing-model"))
+	seedCostRoutingChannel(t, 12, 100, costRoutingModelMapping(t, "covered-model"))
 
 	c := costRoutingControllerContext()
 	channel, apiErr := getChannel(c, costRoutingRelayInfo(), costRoutingRetryParam(c))
@@ -56,8 +58,8 @@ func TestCostRoutingGetChannelKeepsLegacySelectionWhenDisabled(t *testing.T) {
 func TestCostRoutingAutoGroupContinuesAfterUncoveredCandidate(t *testing.T) {
 	prepareCostRoutingControllerTest(t, types.CostAccountingStrict)
 	configureCostRoutingAutoGroups(t)
-	seedCostRoutingChannelForGroup(t, 11, 200, `{"client-model":"missing-model"}`, "分组A")
-	seedCostRoutingChannelForGroup(t, 12, 100, `{"client-model":"covered-model"}`, "分组B")
+	seedCostRoutingChannelForGroup(t, 11, 200, costRoutingModelMapping(t, "missing-model"), "分组A")
+	seedCostRoutingChannelForGroup(t, 12, 100, costRoutingModelMapping(t, "covered-model"), "分组B")
 	seedActiveFreeCostRule(t, 12, "covered-model")
 
 	c := costRoutingControllerContext()
@@ -77,7 +79,7 @@ func TestCostRoutingAutoGroupContinuesAfterUncoveredCandidate(t *testing.T) {
 
 func TestCostRoutingAllUncoveredReturnsGenericError(t *testing.T) {
 	prepareCostRoutingControllerTest(t, types.CostAccountingStrict)
-	seedCostRoutingChannel(t, 11, 200, `{"client-model":"supplier-secret-model"}`)
+	seedCostRoutingChannel(t, 11, 200, costRoutingModelMapping(t, "supplier-secret-model"))
 
 	c := costRoutingControllerContext()
 	channel, apiErr := getChannel(c, costRoutingRelayInfo(), costRoutingRetryParam(c))
@@ -93,8 +95,8 @@ func TestCostRoutingAllUncoveredReturnsGenericError(t *testing.T) {
 
 func TestCostRoutingDistributorSkipsUncoveredInitialCandidate(t *testing.T) {
 	prepareCostRoutingControllerTest(t, types.CostAccountingStrict)
-	seedCostRoutingChannel(t, 11, 200, `{"client-model":"missing-model"}`)
-	seedCostRoutingChannel(t, 12, 100, `{"client-model":"covered-model"}`)
+	seedCostRoutingChannel(t, 11, 200, costRoutingModelMapping(t, "missing-model"))
+	seedCostRoutingChannel(t, 12, 100, costRoutingModelMapping(t, "covered-model"))
 	seedActiveFreeCostRule(t, 12, "covered-model")
 
 	recorder := performCostRoutingDistribution(t, "")
@@ -108,7 +110,7 @@ func TestCostRoutingDistributorSkipsUncoveredInitialCandidate(t *testing.T) {
 
 func TestCostRoutingDistributorRejectsUncoveredSpecificChannelGenerically(t *testing.T) {
 	prepareCostRoutingControllerTest(t, types.CostAccountingStrict)
-	seedCostRoutingChannel(t, 11, 200, `{"client-model":"supplier-secret-model"}`)
+	seedCostRoutingChannel(t, 11, 200, costRoutingModelMapping(t, "supplier-secret-model"))
 
 	recorder := performCostRoutingDistribution(t, "11")
 	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
@@ -179,9 +181,18 @@ func seedCostRoutingChannelForGroup(t *testing.T, channelID int, priority int64,
 		Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &weight, ModelMapping: &mapping, Group: group,
 	}).Error)
 	require.NoError(t, model.DB.Create(&model.Ability{
-		Group: group, Model: "client-model", ChannelId: channelID, Enabled: true,
+		Group: group, Model: modelrouting.Seedance20, ChannelId: channelID, Enabled: true,
 		Priority: &priority, Weight: weight,
 	}).Error)
+}
+
+func costRoutingModelMapping(t *testing.T, upstreamModel string) string {
+	t.Helper()
+	mapping, err := common.Marshal(map[string]string{
+		modelrouting.Seedance20: upstreamModel,
+	})
+	require.NoError(t, err)
+	return string(mapping)
 }
 
 func configureCostRoutingAutoGroups(t *testing.T) {
@@ -218,14 +229,14 @@ func costRoutingControllerContext() *gin.Context {
 
 func costRoutingRelayInfo() *relaycommon.RelayInfo {
 	return &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{}, OriginModelName: "client-model",
+		ChannelMeta: &relaycommon.ChannelMeta{}, OriginModelName: modelrouting.Seedance20,
 		TokenGroup: "default", UserGroup: "default", UsingGroup: "default",
 	}
 }
 
 func costRoutingRetryParam(c *gin.Context) *service.RetryParam {
 	return &service.RetryParam{
-		Ctx: c, TokenGroup: "default", ModelName: "client-model",
+		Ctx: c, TokenGroup: "default", ModelName: modelrouting.Seedance20,
 		RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0),
 	}
 }
@@ -247,7 +258,9 @@ func performCostRoutingDistribution(t *testing.T, specificChannelID string) *htt
 		c.JSON(http.StatusOK, gin.H{"channel_id": common.GetContextKeyInt(c, constant.ContextKeyChannelId)})
 	})
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"client-model"}`))
+	body, err := common.Marshal(map[string]string{"model": modelrouting.Seedance20})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 	return recorder

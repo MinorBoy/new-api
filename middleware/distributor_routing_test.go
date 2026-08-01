@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -19,6 +20,50 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestDistributeRejectsInternalModelBeforeChannelSelection(t *testing.T) {
+	prepareDistributorRoutingTest(t)
+	seedDistributorRoutingChannelModel(t, 11, "A1", 100, "provider-hidden")
+
+	recorder, reached := runDistributorRoutingRequest(t, "", `{
+		"model":"provider-hidden",
+		"content":[{"type":"text","text":"video"}],
+		"resolution":"720p","duration":10,"ratio":"16:9"
+	}`)
+
+	assert.False(t, reached)
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"code":"model_not_found"`)
+	assert.NotContains(t, recorder.Body.String(), "channel")
+	assert.NotContains(t, recorder.Body.String(), "provider-hidden")
+}
+
+func TestDistributeAllowsAllPublicModels(t *testing.T) {
+	for index, modelName := range modelrouting.CanonicalModels {
+		t.Run(modelName, func(t *testing.T) {
+			prepareDistributorRoutingTest(t)
+			channelID := 30 + index
+			seedDistributorRoutingChannelModel(t, channelID, "public", 100, modelName)
+			request := distributorRoutingPolicyRequestForModel(modelName)
+			request.Targets = []service.RouteTargetWriteRequest{
+				distributorRoutingTarget(channelID, "provider-public", "720p"),
+			}
+			_, err := service.SaveRoutingPolicy(0, request)
+			require.NoError(t, err)
+
+			body := fmt.Sprintf(`{
+				"model":%q,
+				"content":[{"type":"text","text":"video"}],
+				"resolution":"720p","duration":10,"ratio":"16:9"
+			}`, modelName)
+			recorder, reached := runDistributorRoutingRequest(t, "", body)
+
+			assert.True(t, reached)
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Equal(t, strconv.Itoa(channelID), recorder.Header().Get("X-Selected-Channel"))
+		})
+	}
+}
 
 func TestDistributeCapabilityRoutingSkipsIncompatibleHigherPriorityChannel(t *testing.T) {
 	prepareDistributorRoutingTest(t)
@@ -161,21 +206,30 @@ func prepareDistributorRoutingTest(t *testing.T) {
 
 func seedDistributorRoutingChannel(t *testing.T, id int, name string, priority int64) {
 	t.Helper()
+	seedDistributorRoutingChannelModel(t, id, name, priority, modelrouting.Seedance20)
+}
+
+func seedDistributorRoutingChannelModel(t *testing.T, id int, name string, priority int64, modelName string) {
+	t.Helper()
 	weight := uint(100)
 	require.NoError(t, model.DB.Create(&model.Channel{
 		Id: id, Type: constant.ChannelTypeNewAPIVideo, Key: "secret", Status: common.ChannelStatusEnabled,
-		Name: name, Models: modelrouting.Seedance20, Group: "分组A", Priority: &priority, Weight: &weight,
+		Name: name, Models: modelName, Group: "分组A", Priority: &priority, Weight: &weight,
 	}).Error)
 	require.NoError(t, model.DB.Create(&model.Ability{
-		Group: "分组A", Model: modelrouting.Seedance20, ChannelId: id, Enabled: true,
+		Group: "分组A", Model: modelName, ChannelId: id, Enabled: true,
 		Priority: &priority, Weight: weight,
 	}).Error)
 }
 
 func distributorRoutingPolicyRequest() service.RoutingPolicyWriteRequest {
+	return distributorRoutingPolicyRequestForModel(modelrouting.Seedance20)
+}
+
+func distributorRoutingPolicyRequestForModel(modelName string) service.RoutingPolicyWriteRequest {
 	return service.RoutingPolicyWriteRequest{
 		GroupName: "分组A",
-		Model:     modelrouting.Seedance20,
+		Model:     modelName,
 		Enabled:   true,
 		Defaults: modelrouting.Defaults{
 			OutputResolution: "720p",

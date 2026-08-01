@@ -24,7 +24,11 @@ import {
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
-import { CHANNEL_FORM_DEFAULT_VALUES, channelFormSchema } from '../channel-form'
+import {
+  CHANNEL_FORM_DEFAULT_VALUES,
+  channelFormSchema,
+  getStatusOnChannelTypeChange,
+} from '../channel-form'
 import { getChannelTypeConfig } from '../channel-type-config'
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
@@ -93,5 +97,20 @@ describe('New API channel', () => {
     })
 
     assert.equal(result.success, true)
+  })
+})
+
+describe('OmegaAI channel defaults', () => {
+  test('selecting OmegaAI defaults a new channel to manually disabled', () => {
+    assert.equal(
+      getStatusOnChannelTypeChange(1, 208, CHANNEL_FORM_DEFAULT_VALUES.status),
+      2
+    )
+  })
+
+  test('switching an existing channel to OmegaAI disables it without overriding an explicit status', () => {
+    assert.equal(getStatusOnChannelTypeChange(1, 208, 1), 2)
+    assert.equal(getStatusOnChannelTypeChange(208, 208, 1), 1)
+    assert.equal(getStatusOnChannelTypeChange(208, 208, 2), 2)
   })
 })

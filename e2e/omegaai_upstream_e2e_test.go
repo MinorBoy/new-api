@@ -111,6 +111,10 @@ func TestOmegaAIARKLifecyclePreservesPublicContractE2E(t *testing.T) {
 		`{"task_id":"omega-private-task","status":"running","progress":50}`,
 		`{"task_id":"omega-private-task","status":"succeeded","progress":100,"content":{"video_url":"https://assets.example/omegaai.mp4"}}`,
 	)
+	var beforeUser model.User
+	var beforeToken model.Token
+	require.NoError(t, model.DB.First(&beforeUser, e2eUserID).Error)
+	require.NoError(t, model.DB.First(&beforeToken, 1).Error)
 	requestBody := `{
 		"model":"doubao-seedance-2-0-260128",
 		"content":[
@@ -154,6 +158,21 @@ func TestOmegaAIARKLifecyclePreservesPublicContractE2E(t *testing.T) {
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 	assert.Equal(t, omegaAIE2EUpstreamTaskID, task.PrivateData.UpstreamTaskID)
 	assert.Equal(t, omegaAIE2EVideoURL, task.PrivateData.ResultURL)
+	var afterSuccessUser model.User
+	var afterSuccessToken model.Token
+	require.NoError(t, model.DB.First(&afterSuccessUser, e2eUserID).Error)
+	require.NoError(t, model.DB.First(&afterSuccessToken, 1).Error)
+	assert.Less(t, afterSuccessUser.Quota, beforeUser.Quota)
+	assert.Greater(t, afterSuccessUser.UsedQuota, beforeUser.UsedQuota)
+	assert.Greater(t, afterSuccessToken.UsedQuota, beforeToken.UsedQuota)
+	service.RunTaskPollingOnce(context.Background(), nil)
+	var afterReplayUser model.User
+	var afterReplayToken model.Token
+	require.NoError(t, model.DB.First(&afterReplayUser, e2eUserID).Error)
+	require.NoError(t, model.DB.First(&afterReplayToken, 1).Error)
+	assert.Equal(t, afterSuccessUser.Quota, afterReplayUser.Quota)
+	assert.Equal(t, afterSuccessUser.UsedQuota, afterReplayUser.UsedQuota)
+	assert.Equal(t, afterSuccessToken.UsedQuota, afterReplayToken.UsedQuota)
 
 	requests = env.mock.snapshot()
 	require.Len(t, requests, 3)

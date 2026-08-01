@@ -427,6 +427,69 @@ func TestAddChannelReturnsCreatedIDs(t *testing.T) {
 	assert.Equal(t, int64(2), count)
 }
 
+func TestAddChannelDisablesUnacceptedVideoChannels(t *testing.T) {
+	for _, channelType := range []int{constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken} {
+		t.Run(constant.GetChannelTypeName(channelType), func(t *testing.T) {
+			db := setupModelListControllerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Log{}))
+			channel := &model.Channel{
+				Type: channelType, Name: "unaccepted video", Key: "secret",
+				Models: "client-video", Group: "default", Status: common.ChannelStatusEnabled,
+			}
+			requestBody, err := common.Marshal(AddChannelRequest{Mode: "single", Channel: channel})
+			require.NoError(t, err)
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/", bytes.NewReader(requestBody))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			AddChannel(ctx)
+
+			var response struct {
+				Success bool `json:"success"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.True(t, response.Success, recorder.Body.String())
+			var persisted model.Channel
+			require.NoError(t, db.First(&persisted).Error)
+			assert.Equal(t, common.ChannelStatusManuallyDisabled, persisted.Status)
+		})
+	}
+}
+
+func TestUpdateChannelDisablesTransitionToUnacceptedVideoChannel(t *testing.T) {
+	for _, channelType := range []int{constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken} {
+		t.Run(constant.GetChannelTypeName(channelType), func(t *testing.T) {
+			db := setupModelListControllerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Log{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+			channel := &model.Channel{
+				Type: constant.ChannelTypeOpenAI, Name: "enabled channel", Key: "secret",
+				Models: "client-video", Group: "default", Status: common.ChannelStatusEnabled,
+			}
+			require.NoError(t, db.Create(channel).Error)
+			requestBody, err := common.Marshal(map[string]any{"id": channel.Id, "type": channelType})
+			require.NoError(t, err)
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("role", common.RoleRootUser)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(requestBody))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			UpdateChannel(ctx)
+
+			var response struct {
+				Success bool `json:"success"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.True(t, response.Success, recorder.Body.String())
+			var persisted model.Channel
+			require.NoError(t, db.First(&persisted, channel.Id).Error)
+			assert.Equal(t, channelType, persisted.Type)
+			assert.Equal(t, common.ChannelStatusManuallyDisabled, persisted.Status)
+		})
+	}
+}
+
 func TestUpdateChannelValidatesMergedSecureConfiguration(t *testing.T) {
 	tests := []struct {
 		name        string

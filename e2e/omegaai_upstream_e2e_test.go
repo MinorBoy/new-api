@@ -113,8 +113,12 @@ func TestOmegaAIARKLifecyclePreservesPublicContractE2E(t *testing.T) {
 	)
 	var beforeUser model.User
 	var beforeToken model.Token
+	var beforeChannel model.Channel
+	var beforeConsumeLogs int64
 	require.NoError(t, model.DB.First(&beforeUser, e2eUserID).Error)
 	require.NoError(t, model.DB.First(&beforeToken, 1).Error)
+	require.NoError(t, model.DB.First(&beforeChannel, e2eChannelID).Error)
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&beforeConsumeLogs).Error)
 	requestBody := `{
 		"model":"doubao-seedance-2-0-260128",
 		"content":[
@@ -160,19 +164,32 @@ func TestOmegaAIARKLifecyclePreservesPublicContractE2E(t *testing.T) {
 	assert.Equal(t, omegaAIE2EVideoURL, task.PrivateData.ResultURL)
 	var afterSuccessUser model.User
 	var afterSuccessToken model.Token
+	var afterSuccessChannel model.Channel
+	var afterSuccessConsumeLogs int64
 	require.NoError(t, model.DB.First(&afterSuccessUser, e2eUserID).Error)
 	require.NoError(t, model.DB.First(&afterSuccessToken, 1).Error)
+	require.NoError(t, model.DB.First(&afterSuccessChannel, e2eChannelID).Error)
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&afterSuccessConsumeLogs).Error)
+	require.Positive(t, task.Quota)
 	assert.Less(t, afterSuccessUser.Quota, beforeUser.Quota)
-	assert.Greater(t, afterSuccessUser.UsedQuota, beforeUser.UsedQuota)
-	assert.Greater(t, afterSuccessToken.UsedQuota, beforeToken.UsedQuota)
+	assert.Equal(t, beforeUser.UsedQuota+task.Quota, afterSuccessUser.UsedQuota)
+	assert.Equal(t, beforeToken.UsedQuota+task.Quota, afterSuccessToken.UsedQuota)
+	assert.Equal(t, beforeChannel.UsedQuota+int64(task.Quota), afterSuccessChannel.UsedQuota)
+	assert.Equal(t, beforeConsumeLogs+1, afterSuccessConsumeLogs)
 	service.RunTaskPollingOnce(context.Background(), nil)
 	var afterReplayUser model.User
 	var afterReplayToken model.Token
+	var afterReplayChannel model.Channel
+	var afterReplayConsumeLogs int64
 	require.NoError(t, model.DB.First(&afterReplayUser, e2eUserID).Error)
 	require.NoError(t, model.DB.First(&afterReplayToken, 1).Error)
+	require.NoError(t, model.DB.First(&afterReplayChannel, e2eChannelID).Error)
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&afterReplayConsumeLogs).Error)
 	assert.Equal(t, afterSuccessUser.Quota, afterReplayUser.Quota)
 	assert.Equal(t, afterSuccessUser.UsedQuota, afterReplayUser.UsedQuota)
 	assert.Equal(t, afterSuccessToken.UsedQuota, afterReplayToken.UsedQuota)
+	assert.Equal(t, afterSuccessChannel.UsedQuota, afterReplayChannel.UsedQuota)
+	assert.Equal(t, afterSuccessConsumeLogs, afterReplayConsumeLogs)
 
 	requests = env.mock.snapshot()
 	require.Len(t, requests, 3)

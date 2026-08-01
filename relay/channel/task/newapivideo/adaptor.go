@@ -118,6 +118,20 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if taskErr := validateARKRequest(c, info, body, profile); taskErr != nil {
 			return taskErr
 		}
+		if profile.omegaRequest != nil {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			if err := validateOmegaAIRequest(*state.ARK, *profile.omegaRequest, ""); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+			}
+			return nil
+		}
 		if profile.secureRequest != nil {
 			state, err := getRequestState(c)
 			if err != nil || state.ARK == nil {
@@ -241,6 +255,29 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
 	}
 	profile := a.activeProfile()
+	if profile.omegaRequest != nil {
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+			if upstreamModel == "" {
+				upstreamModel = info.OriginModelName
+			}
+		}
+		if err := validateOmegaAIRequest(*state.ARK, *profile.omegaRequest, upstreamModel); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+		state.ProviderValidationComplete = true
+		c.Set(requestStateContextKey, state)
+		return nil
+	}
 	if profile.secureRequest != nil {
 		state, err := getRequestState(c)
 		if err != nil {
@@ -281,7 +318,7 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		if profile.textRequest != nil && profile.textRequest.enforceModelResolutionSuffix {
 			validationErr = validateTextVideoRequest(*state.ARK, *profile.textRequest, upstreamModel)
 		} else {
-			validationErr = validateMappedResolution(state.ARK.Resolution, upstreamModel)
+			validationErr = validateMappedResolution(optionalStringValue(state.ARK.Resolution), upstreamModel)
 		}
 		if validationErr != nil {
 			code := "InvalidParameter.resolution"
@@ -399,6 +436,21 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, fmt.Errorf("MegaByAI provider validation is incomplete")
 			}
 			body, err = buildMegaByAIRequest(*state.ARK, modelName)
+		case videoRequestDialectOmegaMediaArrays:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if profile.omegaRequest == nil {
+				return nil, fmt.Errorf("OmegaAI request profile is missing")
+			}
+			if !state.ProviderValidationComplete {
+				return nil, fmt.Errorf("OmegaAI provider validation is incomplete")
+			}
+			body, err = buildOmegaAIRequest(*state.ARK, modelName, *profile.omegaRequest)
 		default:
 			body, err = buildARKRequestBody(c, info, profile)
 		}

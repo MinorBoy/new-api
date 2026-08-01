@@ -21,8 +21,8 @@ type requestState struct {
 type arkRequest struct {
 	Model         string       `json:"model"`
 	Content       []arkContent `json:"content"`
-	Ratio         string       `json:"ratio,omitempty"`
-	Resolution    string       `json:"resolution,omitempty"`
+	Ratio         *string      `json:"ratio,omitempty"`
+	Resolution    *string      `json:"resolution,omitempty"`
 	Duration      *int         `json:"duration,omitempty"`
 	Watermark     *bool        `json:"watermark,omitempty"`
 	GenerateAudio *bool        `json:"generate_audio,omitempty"`
@@ -56,7 +56,7 @@ type upstreamRequest struct {
 	ImageWithRoles []upstreamRoleImage `json:"image_with_roles,omitempty"`
 	Content        []arkContent        `json:"content,omitempty"`
 	GenerateAudio  *bool               `json:"generateAudio,omitempty"`
-	Ratio          string              `json:"ratio,omitempty"`
+	Ratio          *string             `json:"ratio,omitempty"`
 	Seconds        *string             `json:"seconds,omitempty"`
 	Watermark      *bool               `json:"watermark,omitempty"`
 }

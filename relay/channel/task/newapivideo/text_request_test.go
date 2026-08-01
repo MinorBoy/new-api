@@ -200,8 +200,8 @@ func TestCangyuanDoesNotLocallyRestrictRatioOrResolution(t *testing.T) {
 	request := arkRequest{
 		Model:      "client-model",
 		Content:    []arkContent{{Type: "text", Text: "text"}},
-		Ratio:      "4:3",
-		Resolution: "2160p",
+		Ratio:      common.GetPointer("4:3"),
+		Resolution: common.GetPointer("2160p"),
 	}
 	assert.NoError(t, validateTextVideoRequest(request, *cangyuanProtocolProfile().textRequest))
 }

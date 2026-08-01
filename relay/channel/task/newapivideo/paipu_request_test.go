@@ -92,7 +92,7 @@ func TestPaipuResolutionSuffixValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := arkRequest{Model: "client", Content: []arkContent{{Type: "text", Text: "text"}}, Resolution: tt.resolution}
+			request := arkRequest{Model: "client", Content: []arkContent{{Type: "text", Text: "text"}}, Resolution: common.GetPointer(tt.resolution)}
 			err := validateTextVideoRequest(request, *paipuProtocolProfile().textRequest, tt.model)
 			if tt.wantErr {
 				var requestErr *arkRequestError
@@ -167,7 +167,7 @@ func TestPaipuValidateBillingRequestUsesMappedModel(t *testing.T) {
 }
 
 func TestBuildPaipuTextRequestDefensivelyRevalidates(t *testing.T) {
-	request := arkRequest{Model: "client", Content: []arkContent{{Type: "text", Text: "text"}}, Resolution: "720p"}
+	request := arkRequest{Model: "client", Content: []arkContent{{Type: "text", Text: "text"}}, Resolution: common.GetPointer("720p")}
 	body, err := buildTextVideoRequest(request, "lec-gongteng-seedance-2-0-1080p", *paipuProtocolProfile().textRequest)
 	var requestErr *arkRequestError
 	require.ErrorAs(t, err, &requestErr)
@@ -176,7 +176,7 @@ func TestBuildPaipuTextRequestDefensivelyRevalidates(t *testing.T) {
 }
 
 func TestBuildPaipuTextRequestUsesRatioField(t *testing.T) {
-	request := arkRequest{Model: "client", Content: []arkContent{{Type: "text", Text: "text"}}, Ratio: "4:3"}
+	request := arkRequest{Model: "client", Content: []arkContent{{Type: "text", Text: "text"}}, Ratio: common.GetPointer("4:3")}
 	body, err := buildTextVideoRequest(request, "lec-seedance-2-0", *paipuProtocolProfile().textRequest)
 	require.NoError(t, err)
 	var got map[string]any

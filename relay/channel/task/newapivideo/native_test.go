@@ -1,6 +1,7 @@
 package newapivideo
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -149,6 +150,31 @@ func TestValidateMappedResolution(t *testing.T) {
 	assert.NoError(t, validateMappedResolution("", "provider-model"))
 	assert.Error(t, validateMappedResolution("1080p", "seedance-720p-token"))
 	assert.Error(t, validateMappedResolution("720p", "provider-model"))
+}
+
+func TestOptionalARKStringsPreserveAbsenceAndRejectExplicitEmptyValues(t *testing.T) {
+	absent, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}]}`))
+	require.NoError(t, err)
+	assert.Nil(t, absent.Ratio)
+	assert.Nil(t, absent.Resolution)
+
+	present, err := parseARKRequest([]byte(`{"model":"m","content":[{"type":"text","text":"text"}],"ratio":"16:9","resolution":"720p"}`))
+	require.NoError(t, err)
+	require.NotNil(t, present.Ratio)
+	require.NotNil(t, present.Resolution)
+	assert.Equal(t, "16:9", *present.Ratio)
+	assert.Equal(t, "720p", *present.Resolution)
+
+	for _, field := range []string{"ratio", "resolution"} {
+		t.Run(field, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":"m","content":[{"type":"text","text":"text"}],%q:""}`, field))
+			_, err := parseARKRequest(body)
+			require.Error(t, err)
+			var requestErr *arkRequestError
+			require.ErrorAs(t, err, &requestErr)
+			assert.Equal(t, "InvalidParameter."+field, requestErr.Code)
+		})
+	}
 }
 
 func TestARKCapabilityRoutingStripsExtensionAndUsesPrevalidatedResolution(t *testing.T) {

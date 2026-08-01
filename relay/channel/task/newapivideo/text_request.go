@@ -8,12 +8,12 @@ import (
 )
 
 type textVideoRequest struct {
-	Model       string `json:"model"`
-	Prompt      string `json:"prompt"`
-	Duration    *int   `json:"duration,omitempty"`
-	Ratio       string `json:"ratio,omitempty"`
-	AspectRatio string `json:"aspect_ratio,omitempty"`
-	Resolution  string `json:"resolution,omitempty"`
+	Model       string  `json:"model"`
+	Prompt      string  `json:"prompt"`
+	Duration    *int    `json:"duration,omitempty"`
+	Ratio       *string `json:"ratio,omitempty"`
+	AspectRatio *string `json:"aspect_ratio,omitempty"`
+	Resolution  *string `json:"resolution,omitempty"`
 }
 
 func validateTextVideoRequest(request arkRequest, profile textRequestProfile, upstreamModels ...string) error {
@@ -47,10 +47,10 @@ func validateTextVideoRequest(request arkRequest, profile textRequestProfile, up
 			return &arkRequestError{Code: "InvalidParameter.duration", Message: fmt.Sprintf("duration must be between %d and %d", profile.minimumDuration, profile.maximumDuration)}
 		}
 	}
-	if len(profile.allowedRatios) > 0 && request.Ratio != "" {
+	if len(profile.allowedRatios) > 0 && request.Ratio != nil {
 		allowed := false
 		for _, ratio := range profile.allowedRatios {
-			if request.Ratio == ratio {
+			if *request.Ratio == ratio {
 				allowed = true
 				break
 			}
@@ -59,10 +59,10 @@ func validateTextVideoRequest(request arkRequest, profile textRequestProfile, up
 			return &arkRequestError{Code: "InvalidParameter.ratio", Message: "ratio is not supported by this channel"}
 		}
 	}
-	if len(profile.allowedResolutions) > 0 && request.Resolution != "" {
+	if len(profile.allowedResolutions) > 0 && request.Resolution != nil {
 		allowed := false
 		for _, resolution := range profile.allowedResolutions {
-			if request.Resolution == resolution {
+			if *request.Resolution == resolution {
 				allowed = true
 				break
 			}
@@ -71,7 +71,7 @@ func validateTextVideoRequest(request arkRequest, profile textRequestProfile, up
 			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "resolution is not supported by this channel"}
 		}
 	}
-	if profile.enforceModelResolutionSuffix && request.Resolution != "" && len(upstreamModels) > 0 && upstreamModels[0] != "" {
+	if profile.enforceModelResolutionSuffix && request.Resolution != nil && len(upstreamModels) > 0 && upstreamModels[0] != "" {
 		requiredResolution := ""
 		switch {
 		case strings.HasSuffix(upstreamModels[0], "-1080p"):
@@ -81,7 +81,7 @@ func validateTextVideoRequest(request arkRequest, profile textRequestProfile, up
 		case strings.HasSuffix(upstreamModels[0], "-480p"):
 			requiredResolution = "480p"
 		}
-		if requiredResolution != "" && request.Resolution != requiredResolution {
+		if requiredResolution != "" && *request.Resolution != requiredResolution {
 			return &arkRequestError{Code: "InvalidParameter.resolution", Message: fmt.Sprintf("model %s requires resolution %s", upstreamModels[0], requiredResolution)}
 		}
 	}

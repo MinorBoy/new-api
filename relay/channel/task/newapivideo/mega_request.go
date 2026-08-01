@@ -12,8 +12,8 @@ type megaByAIRequest struct {
 	Model           string   `json:"model"`
 	Prompt          string   `json:"prompt"`
 	Duration        *int     `json:"duration,omitempty"`
-	Ratio           string   `json:"ratio,omitempty"`
-	Resolution      string   `json:"resolution,omitempty"`
+	Ratio           *string  `json:"ratio,omitempty"`
+	Resolution      *string  `json:"resolution,omitempty"`
 	ReferenceImages []string `json:"referenceImages,omitempty"`
 	ReferenceVideos []string `json:"referenceVideos,omitempty"`
 	ReferenceAudios []string `json:"referenceAudios,omitempty"`
@@ -26,15 +26,19 @@ func validateMegaByAIRequest(request arkRequest) error {
 	if request.Duration != nil && (*request.Duration < 4 || *request.Duration > 15) {
 		return &arkRequestError{Code: "InvalidParameter.duration", Message: "MegaByAI duration must be between 4 and 15"}
 	}
-	switch request.Ratio {
-	case "", "16:9", "9:16", "1:1":
-	default:
-		return &arkRequestError{Code: "InvalidParameter.ratio", Message: "MegaByAI ratio is unsupported"}
+	if request.Ratio != nil {
+		switch *request.Ratio {
+		case "16:9", "9:16", "1:1":
+		default:
+			return &arkRequestError{Code: "InvalidParameter.ratio", Message: "MegaByAI ratio is unsupported"}
+		}
 	}
-	switch request.Resolution {
-	case "", "480p", "720p":
-	default:
-		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "MegaByAI resolution is unsupported"}
+	if request.Resolution != nil {
+		switch *request.Resolution {
+		case "480p", "720p":
+		default:
+			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "MegaByAI resolution is unsupported"}
+		}
 	}
 	if request.Watermark != nil {
 		return &arkRequestError{Code: "InvalidParameter.watermark", Message: "watermark is not supported by MegaByAI"}

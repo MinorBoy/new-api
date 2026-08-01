@@ -132,7 +132,7 @@ func arkToUpstream(request arkRequest, upstreamModel string, resolutionPrevalida
 		return upstreamRequest{}, err
 	}
 	if !resolutionPrevalidated {
-		if err := validateMappedResolution(request.Resolution, upstreamModel); err != nil {
+		if err := validateMappedResolution(optionalStringValue(request.Resolution), upstreamModel); err != nil {
 			return upstreamRequest{}, &arkRequestError{Code: "InvalidParameter.resolution", Message: err.Error()}
 		}
 	}
@@ -191,6 +191,12 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	}
 	if len(request.Content) == 0 {
 		return &arkRequestError{Code: "MissingParameter.content", Message: "content is required"}
+	}
+	if request.Ratio != nil && strings.TrimSpace(*request.Ratio) == "" {
+		return &arkRequestError{Code: "InvalidParameter.ratio", Message: "ratio cannot be empty"}
+	}
+	if request.Resolution != nil && strings.TrimSpace(*request.Resolution) == "" {
+		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "resolution cannot be empty"}
 	}
 	if request.Duration != nil && (*request.Duration <= 0 || *request.Duration > relaycommon.MaxTaskDurationSeconds) {
 		return &arkRequestError{Code: "InvalidParameter.duration", Message: fmt.Sprintf("duration must be between 1 and %d", relaycommon.MaxTaskDurationSeconds)}
@@ -289,6 +295,13 @@ func validateMappedResolution(requested, upstreamModel string) error {
 		}
 	}
 	return fmt.Errorf("mapped model %s does not declare a resolution tier", upstreamModel)
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func arkPrompt(content []arkContent) string {

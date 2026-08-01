@@ -26,7 +26,7 @@ type secureEnterpriseRequest struct {
 	Model       string   `json:"model"`
 	Prompt      string   `json:"prompt"`
 	Duration    *int     `json:"duration"`
-	AspectRatio string   `json:"aspect_ratio,omitempty"`
+	AspectRatio *string  `json:"aspect_ratio,omitempty"`
 	ImageURL    string   `json:"image_url,omitempty"`
 	ExtraImages []string `json:"extra_images,omitempty"`
 	ExtraVideos []string `json:"extra_videos,omitempty"`
@@ -99,15 +99,19 @@ func validateSecureRequest(request arkRequest, profile secureRequestProfile, ups
 		if request.Duration != nil && (*request.Duration < 4 || *request.Duration > 15) {
 			return &arkRequestError{Code: "InvalidParameter.duration", Message: "Secure discount duration must be between 4 and 15"}
 		}
-		switch request.Ratio {
-		case "", "16:9", "9:16":
-		default:
-			return &arkRequestError{Code: "InvalidParameter.ratio", Message: "Secure discount ratio is unsupported"}
+		if request.Ratio != nil {
+			switch *request.Ratio {
+			case "16:9", "9:16":
+			default:
+				return &arkRequestError{Code: "InvalidParameter.ratio", Message: "Secure discount ratio is unsupported"}
+			}
 		}
-		switch request.Resolution {
-		case "", "720p", "1080p", "4k":
-		default:
-			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "Secure discount resolution is unsupported"}
+		if request.Resolution != nil {
+			switch *request.Resolution {
+			case "720p", "1080p", "4k":
+			default:
+				return &arkRequestError{Code: "InvalidParameter.resolution", Message: "Secure discount resolution is unsupported"}
+			}
 		}
 	case dto.SecureVideoGroupOverseas:
 		if len(media.images)+len(media.videos)+len(media.audios) > 12 {
@@ -119,15 +123,19 @@ func validateSecureRequest(request arkRequest, profile secureRequestProfile, ups
 		if request.Duration != nil && (*request.Duration < 4 || *request.Duration > 15) {
 			return &arkRequestError{Code: "InvalidParameter.duration", Message: "Secure overseas duration must be between 4 and 15"}
 		}
-		switch request.Ratio {
-		case "", "1:1", "4:3", "3:4", "16:9", "9:16", "21:9":
-		default:
-			return &arkRequestError{Code: "InvalidParameter.ratio", Message: "Secure overseas ratio is unsupported"}
+		if request.Ratio != nil {
+			switch *request.Ratio {
+			case "1:1", "4:3", "3:4", "16:9", "9:16", "21:9":
+			default:
+				return &arkRequestError{Code: "InvalidParameter.ratio", Message: "Secure overseas ratio is unsupported"}
+			}
 		}
-		switch request.Resolution {
-		case "", "720p", "1080p":
-		default:
-			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "Secure overseas resolution is unsupported"}
+		if request.Resolution != nil {
+			switch *request.Resolution {
+			case "720p", "1080p":
+			default:
+				return &arkRequestError{Code: "InvalidParameter.resolution", Message: "Secure overseas resolution is unsupported"}
+			}
 		}
 	case dto.SecureVideoGroupEnterprise:
 		if hasLastFrame {
@@ -139,14 +147,14 @@ func validateSecureRequest(request arkRequest, profile secureRequestProfile, ups
 		if *request.Duration < 5 || *request.Duration > 15 {
 			return &arkRequestError{Code: "InvalidParameter.duration", Message: "Secure enterprise duration must be between 5 and 15"}
 		}
-		switch request.Ratio {
-		case "", "16:9", "9:16", "1:1":
-		default:
-			return &arkRequestError{Code: "InvalidParameter.ratio", Message: "Secure enterprise ratio is unsupported"}
+		if request.Ratio != nil {
+			switch *request.Ratio {
+			case "16:9", "9:16", "1:1":
+			default:
+				return &arkRequestError{Code: "InvalidParameter.ratio", Message: "Secure enterprise ratio is unsupported"}
+			}
 		}
-		switch request.Resolution {
-		case "", "720p":
-		default:
+		if request.Resolution != nil && *request.Resolution != "720p" {
 			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "Secure enterprise resolution must be 720p"}
 		}
 	default:
@@ -161,7 +169,7 @@ func validateSecureRequest(request arkRequest, profile secureRequestProfile, ups
 		if profile.group == dto.SecureVideoGroupEnterprise {
 			return &arkRequestError{Code: "InvalidParameter.model", Message: "Secure enterprise video requires video-2.0-pro"}
 		}
-		if request.Resolution != "" && request.Resolution != "720p" {
+		if request.Resolution != nil && *request.Resolution != "720p" {
 			return &arkRequestError{Code: "InvalidParameter.resolution", Message: upstreamModel + " only supports 720p"}
 		}
 	case "video-2.0-pro":
@@ -209,13 +217,13 @@ func buildSecureDiscountRequest(request arkRequest, upstreamModel string, profil
 			return nil, "", err
 		}
 	}
-	if request.Ratio != "" {
-		if err := writer.WriteField("ratio", request.Ratio); err != nil {
+	if request.Ratio != nil {
+		if err := writer.WriteField("ratio", *request.Ratio); err != nil {
 			return nil, "", err
 		}
 	}
-	if request.Resolution != "" {
-		if err := writer.WriteField("resolution", request.Resolution); err != nil {
+	if request.Resolution != nil {
+		if err := writer.WriteField("resolution", *request.Resolution); err != nil {
 			return nil, "", err
 		}
 	}
@@ -293,13 +301,13 @@ func buildSecureOverseasRequest(request arkRequest, upstreamModel string, profil
 			return nil, "", err
 		}
 	}
-	if request.Ratio != "" {
-		if err := writer.WriteField("ratio", request.Ratio); err != nil {
+	if request.Ratio != nil {
+		if err := writer.WriteField("ratio", *request.Ratio); err != nil {
 			return nil, "", err
 		}
 	}
-	if request.Resolution != "" {
-		if err := writer.WriteField("resolution", request.Resolution); err != nil {
+	if request.Resolution != nil {
+		if err := writer.WriteField("resolution", *request.Resolution); err != nil {
 			return nil, "", err
 		}
 	}

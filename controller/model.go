@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/channel/ai360"
 	"github.com/QuantumNous/new-api/relay/channel/lingyiwanwu"
@@ -256,9 +257,10 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 	}
 
-	ownerByModel := map[string]string{}
-	if len(ownerGroups) > 0 {
-		ownerByModel = getPreferredModelOwners(userModelNames, ownerGroups)
+	userModelNames = modelrouting.FilterPublicModels(userModelNames)
+	ownerByModel := make(map[string]string, len(userModelNames))
+	for _, modelName := range userModelNames {
+		ownerByModel[modelName] = modelrouting.PublicModelOwner
 	}
 	userOpenAiModels := make([]dto.OpenAIModels, 0, len(userModelNames))
 	for _, modelName := range userModelNames {
@@ -276,12 +278,12 @@ func ListModels(c *gin.Context, modelType int) {
 				Type:        "model",
 			}
 		}
-		c.JSON(200, gin.H{
-			"data":     useranthropicModels,
-			"first_id": useranthropicModels[0].ID,
-			"has_more": false,
-			"last_id":  useranthropicModels[len(useranthropicModels)-1].ID,
-		})
+		response := gin.H{"data": useranthropicModels, "has_more": false}
+		if len(useranthropicModels) > 0 {
+			response["first_id"] = useranthropicModels[0].ID
+			response["last_id"] = useranthropicModels[len(useranthropicModels)-1].ID
+		}
+		c.JSON(http.StatusOK, response)
 	case constant.ChannelTypeGemini:
 		userGeminiModels := make([]dto.GeminiModel, len(userOpenAiModels))
 		for i, model := range userOpenAiModels {
@@ -311,9 +313,13 @@ func ChannelListModels(c *gin.Context) {
 }
 
 func DashboardListModels(c *gin.Context) {
-	c.JSON(200, gin.H{
+	publicModelsByChannel := make(map[int][]string, len(channelId2Models))
+	for channelType, modelNames := range channelId2Models {
+		publicModelsByChannel[channelType] = modelrouting.FilterPublicModels(modelNames)
+	}
+	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    channelId2Models,
+		"data":    publicModelsByChannel,
 	})
 }
 
@@ -326,27 +332,29 @@ func EnabledListModels(c *gin.Context) {
 
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
-	if aiModel, ok := openAIModelsMap[modelId]; ok {
-		switch modelType {
-		case constant.ChannelTypeAnthropic:
-			c.JSON(200, dto.AnthropicModel{
-				ID:          aiModel.Id,
-				CreatedAt:   time.Unix(int64(aiModel.Created), 0).UTC().Format(time.RFC3339),
-				DisplayName: aiModel.Id,
-				Type:        "model",
-			})
-		default:
-			c.JSON(200, aiModel)
-		}
-	} else {
+	if !modelrouting.IsPublicModel(modelId) {
 		openAIError := types.OpenAIError{
 			Message: fmt.Sprintf("The model '%s' does not exist", modelId),
 			Type:    "invalid_request_error",
 			Param:   "model",
 			Code:    "model_not_found",
 		}
-		c.JSON(200, gin.H{
-			"error": openAIError,
+		c.JSON(http.StatusOK, gin.H{"error": openAIError})
+		return
+	}
+
+	aiModel := buildOpenAIModel(modelId, map[string]string{
+		modelId: modelrouting.PublicModelOwner,
+	})
+	switch modelType {
+	case constant.ChannelTypeAnthropic:
+		c.JSON(http.StatusOK, dto.AnthropicModel{
+			ID:          aiModel.Id,
+			CreatedAt:   time.Unix(int64(aiModel.Created), 0).UTC().Format(time.RFC3339),
+			DisplayName: aiModel.Id,
+			Type:        "model",
 		})
+	default:
+		c.JSON(http.StatusOK, aiModel)
 	}
 }

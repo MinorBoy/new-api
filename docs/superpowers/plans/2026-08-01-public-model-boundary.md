@@ -470,7 +470,7 @@ func TestDashboardListModelsReturnsOnlyPublicModelsPerChannel(t *testing.T) {
 			"provider-hidden", modelrouting.Seedance20Mini,
 			modelrouting.Seedance20, modelrouting.Seedance20Fast,
 		},
-		constant.ChannelTypeClaude: {"provider-only"},
+		constant.ChannelTypeAnthropic: {"provider-only"},
 	}
 	t.Cleanup(func() { channelId2Models = original })
 
@@ -486,7 +486,7 @@ func TestDashboardListModelsReturnsOnlyPublicModelsPerChannel(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.True(t, payload.Success)
 	assert.Equal(t, modelrouting.CanonicalModels, payload.Data[constant.ChannelTypeOpenAI])
-	assert.Empty(t, payload.Data[constant.ChannelTypeClaude])
+	assert.Empty(t, payload.Data[constant.ChannelTypeAnthropic])
 }
 
 func TestChannelListModelsKeepsInternalCatalogForAdmins(t *testing.T) {

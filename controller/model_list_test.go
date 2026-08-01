@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -153,7 +154,7 @@ func TestListModelsIncludesDurationBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	db := setupModelListControllerTestDB(t)
 
-	const modelName = "duration-visible-model"
+	const modelName = modelrouting.Seedance20
 	rule := types.DurationPrice{
 		Price: 0.25, Unit: types.DurationUnitMinute,
 		RoundingStepSeconds: 5, MinimumDurationSeconds: 10,
@@ -263,8 +264,8 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 		Status:   common.UserStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&[]model.Ability{
-		{Group: "default", Model: "zz-default-only-model", ChannelId: 1, Enabled: true},
-		{Group: "default", Model: "zz-disabled-model", ChannelId: 1, Enabled: false},
+		{Group: "default", Model: modelrouting.Seedance20, ChannelId: 1, Enabled: true},
+		{Group: "default", Model: modelrouting.Seedance20Fast, ChannelId: 1, Enabled: false},
 	}).Error)
 
 	defaultRecorder := httptest.NewRecorder()
@@ -275,7 +276,7 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	GetUserModels(defaultContext)
 
 	defaultModels := decodeUserModelsResponse(t, defaultRecorder)
-	require.ElementsMatch(t, []string{"zz-default-only-model"}, defaultModels)
+	require.Equal(t, []string{modelrouting.Seedance20}, defaultModels)
 
 	vipRecorder := httptest.NewRecorder()
 	vipContext, _ := gin.CreateTestContext(vipRecorder)
@@ -287,7 +288,7 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	require.Empty(t, decodeUserModelsResponse(t, vipRecorder))
 }
 
-func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
+func TestGetUserModelsProjectsAutoGroupsInPublicCatalogOrder(t *testing.T) {
 	originalAutoGroups := setting.AutoGroups2JsonString()
 	originalUsableGroups := setting.UserUsableGroups2JSONString()
 	originalSpecialGroups := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.ReadAll()
@@ -317,11 +318,11 @@ func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
 		Status:   common.UserStatusEnabled,
 	}).Error)
 	require.NoError(t, db.Create(&[]model.Ability{
-		{Group: "vip", Model: "zz-vip-model", ChannelId: 1, Enabled: true},
-		{Group: "vip", Model: "zz-shared-model", ChannelId: 1, Enabled: true},
-		{Group: "default", Model: "zz-default-model", ChannelId: 1, Enabled: true},
-		{Group: "default", Model: "zz-shared-model", ChannelId: 2, Enabled: true},
-		{Group: "unavailable", Model: "zz-unavailable-model", ChannelId: 1, Enabled: true},
+		{Group: "vip", Model: modelrouting.Seedance20Fast, ChannelId: 1, Enabled: true},
+		{Group: "vip", Model: modelrouting.Seedance20, ChannelId: 1, Enabled: true},
+		{Group: "default", Model: modelrouting.Seedance20Mini, ChannelId: 1, Enabled: true},
+		{Group: "default", Model: modelrouting.Seedance20, ChannelId: 2, Enabled: true},
+		{Group: "unavailable", Model: "provider-hidden", ChannelId: 1, Enabled: true},
 	}).Error)
 
 	recorder := httptest.NewRecorder()
@@ -331,21 +332,18 @@ func TestGetUserModelsExpandsAutoGroupsInConfiguredOrder(t *testing.T) {
 
 	GetUserModels(context)
 
-	models := decodeUserModelsResponse(t, recorder)
-	require.Len(t, models, 3)
-	assert.ElementsMatch(t, []string{"zz-vip-model", "zz-shared-model"}, models[:2])
-	assert.Equal(t, "zz-default-model", models[2])
+	require.Equal(t, modelrouting.CanonicalModels, decodeUserModelsResponse(t, recorder))
 }
 
 func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{
-		"zz-tiered-visible-model":      "tiered_expr",
-		"zz-tiered-empty-expr-model":   "tiered_expr",
-		"zz-tiered-missing-expr-model": "tiered_expr",
+		modelrouting.Seedance20:     "tiered_expr",
+		modelrouting.Seedance20Fast: "tiered_expr",
+		modelrouting.Seedance20Mini: "tiered_expr",
 	}, map[string]string{
-		"zz-tiered-visible-model":    `tier("base", p * 1 + c * 2)`,
-		"zz-tiered-empty-expr-model": "   ",
+		modelrouting.Seedance20:     `tier("base", p * 1 + c * 2)`,
+		modelrouting.Seedance20Fast: "   ",
 	})
 
 	db := setupModelListControllerTestDB(t)
@@ -360,9 +358,9 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 		Id: 1001, Type: constant.ChannelTypeOpenAI, Name: "tiered-model-channel",
 	}).Error)
 	require.NoError(t, db.Create(&[]model.Ability{
-		{Group: "default", Model: "zz-tiered-visible-model", ChannelId: 1001, Enabled: true},
-		{Group: "default", Model: "zz-tiered-empty-expr-model", ChannelId: 1001, Enabled: true},
-		{Group: "default", Model: "zz-tiered-missing-expr-model", ChannelId: 1001, Enabled: true},
+		{Group: "default", Model: modelrouting.Seedance20, ChannelId: 1001, Enabled: true},
+		{Group: "default", Model: modelrouting.Seedance20Fast, ChannelId: 1001, Enabled: true},
+		{Group: "default", Model: modelrouting.Seedance20Mini, ChannelId: 1001, Enabled: true},
 		{Group: "default", Model: "zz-unpriced-model", ChannelId: 1001, Enabled: true},
 	}).Error)
 
@@ -374,23 +372,23 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	ListModels(ctx, constant.ChannelTypeOpenAI)
 
 	ids := decodeListModelsResponse(t, recorder)
-	require.Contains(t, ids, "zz-tiered-visible-model")
-	require.NotContains(t, ids, "zz-tiered-empty-expr-model")
-	require.NotContains(t, ids, "zz-tiered-missing-expr-model")
+	require.Contains(t, ids, modelrouting.Seedance20)
+	require.NotContains(t, ids, modelrouting.Seedance20Fast)
+	require.NotContains(t, ids, modelrouting.Seedance20Mini)
 	require.NotContains(t, ids, "zz-unpriced-model")
 
 	pricingByName := pricingByModelName(model.GetPricing())
-	visiblePricing, ok := pricingByName["zz-tiered-visible-model"]
+	visiblePricing, ok := pricingByName[modelrouting.Seedance20]
 	require.True(t, ok)
 	require.Equal(t, "tiered_expr", visiblePricing.BillingMode)
 	require.NotEmpty(t, visiblePricing.BillingExpr)
 
-	emptyExprPricing, ok := pricingByName["zz-tiered-empty-expr-model"]
+	emptyExprPricing, ok := pricingByName[modelrouting.Seedance20Fast]
 	require.True(t, ok)
 	require.Empty(t, emptyExprPricing.BillingMode)
 	require.Empty(t, emptyExprPricing.BillingExpr)
 
-	missingExprPricing, ok := pricingByName["zz-tiered-missing-expr-model"]
+	missingExprPricing, ok := pricingByName[modelrouting.Seedance20Mini]
 	require.True(t, ok)
 	require.Empty(t, missingExprPricing.BillingMode)
 	require.Empty(t, missingExprPricing.BillingExpr)
@@ -422,7 +420,7 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 		Status: common.ChannelStatusEnabled,
 		Name:   "advanced-custom-channel",
 		Group:  "default",
-		Models: "gemini-3.5-flash",
+		Models: modelrouting.Seedance20,
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
 		AdvancedCustom: &dto.AdvancedCustomConfig{
@@ -435,7 +433,7 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 					IncomingPath: "/v1/responses",
 					UpstreamPath: "/v1beta/models/{model}:generateContent",
 					Converter:    "openai_responses_to_gemini_generate_content",
-					Models:       []string{"re:^gemini-"},
+					Models:       []string{modelrouting.Seedance20},
 				},
 			},
 		},
@@ -443,7 +441,7 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 	require.NoError(t, db.Create(channel).Error)
 	require.NoError(t, db.Create(&model.Ability{
 		Group:     "default",
-		Model:     "gemini-3.5-flash",
+		Model:     modelrouting.Seedance20,
 		ChannelId: 701,
 		Enabled:   true,
 	}).Error)
@@ -460,7 +458,7 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 
 	payload := decodeListModelsPayload(t, recorder)
 	require.Len(t, payload.Data, 1)
-	require.Equal(t, "gemini-3.5-flash", payload.Data[0].Id)
+	require.Equal(t, modelrouting.Seedance20, payload.Data[0].Id)
 	require.Equal(t, []constant.EndpointType{
 		constant.EndpointTypeOpenAI,
 		constant.EndpointTypeOpenAIResponse,
@@ -470,12 +468,12 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{
-		"zz-token-tiered-visible-model":      "tiered_expr",
-		"zz-token-tiered-empty-expr-model":   "tiered_expr",
-		"zz-token-tiered-missing-expr-model": "tiered_expr",
+		modelrouting.Seedance20:     "tiered_expr",
+		modelrouting.Seedance20Fast: "tiered_expr",
+		modelrouting.Seedance20Mini: "tiered_expr",
 	}, map[string]string{
-		"zz-token-tiered-visible-model":    `tier("base", p * 1 + c * 2)`,
-		"zz-token-tiered-empty-expr-model": "",
+		modelrouting.Seedance20:     `tier("base", p * 1 + c * 2)`,
+		modelrouting.Seedance20Fast: "",
 	})
 	setupModelListControllerTestDB(t)
 
@@ -485,18 +483,18 @@ func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, map[string]bool{
-		"zz-token-tiered-visible-model":      true,
-		"zz-token-tiered-empty-expr-model":   true,
-		"zz-token-tiered-missing-expr-model": true,
-		"zz-token-unpriced-model":            true,
+		modelrouting.Seedance20:     true,
+		modelrouting.Seedance20Fast: true,
+		modelrouting.Seedance20Mini: true,
+		"zz-token-unpriced-model":   true,
 	})
 
 	ListModels(ctx, constant.ChannelTypeOpenAI)
 
 	ids := decodeListModelsResponse(t, recorder)
-	require.Contains(t, ids, "zz-token-tiered-visible-model")
-	require.NotContains(t, ids, "zz-token-tiered-empty-expr-model")
-	require.NotContains(t, ids, "zz-token-tiered-missing-expr-model")
+	require.Contains(t, ids, modelrouting.Seedance20)
+	require.NotContains(t, ids, modelrouting.Seedance20Fast)
+	require.NotContains(t, ids, modelrouting.Seedance20Mini)
 	require.NotContains(t, ids, "zz-token-unpriced-model")
 }
 

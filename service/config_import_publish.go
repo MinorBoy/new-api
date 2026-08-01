@@ -170,7 +170,60 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		}
 		return fmt.Errorf("published but cache refresh failed: %w", err)
 	}
+	if err := recordPostPublishCostCoverage(ctx, batchID); err != nil {
+		common.SysError(fmt.Sprintf("failed to record post-publish cost coverage for batch %d: %v", batchID, err))
+	}
 	return nil
+}
+
+// recordPostPublishCostCoverage makes the cost-accounting consequence of an
+// import visible on the import batch itself. It is deliberately best-effort:
+// publication has already committed, so a coverage-check persistence failure
+// must not report the committed import as failed.
+func recordPostPublishCostCoverage(ctx context.Context, batchID int64) error {
+	if !model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
+		return nil
+	}
+	coverage, err := CheckAuthoritativeCostCoverage()
+	if err != nil {
+		return err
+	}
+	uncovered := 0
+	for _, item := range coverage {
+		if !item.Covered {
+			uncovered++
+		}
+	}
+	now := common.GetTimestamp()
+	var issue model.ConfigImportIssue
+	err = model.DB.WithContext(ctx).
+		Where("batch_id = ? AND code = ?", batchID, "COST_COVERAGE_INCOMPLETE").
+		First(&issue).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if uncovered == 0 {
+			return nil
+		}
+		return model.DB.WithContext(ctx).Create(&model.ConfigImportIssue{
+			BatchID: batchID, Severity: string(types.ConfigImportIssueSeverityWarning),
+			Code: "COST_COVERAGE_INCOMPLETE", EntityType: "cost_accounting",
+			Message:          fmt.Sprintf("Published configuration has %d uncovered enabled channel model mappings.", uncovered),
+			Suggestion:       "Add an active compatible cost rule or disable the corresponding channel/model mapping.",
+			ResolutionStatus: "open", CreatedAt: now, UpdatedAt: now,
+		}).Error
+	}
+	if err != nil {
+		return err
+	}
+	message := "Authoritative cost coverage is complete after publish."
+	status := "resolved"
+	if uncovered > 0 {
+		message = fmt.Sprintf("Published configuration has %d uncovered enabled channel model mappings.", uncovered)
+		status = "open"
+	}
+	return model.DB.WithContext(ctx).Model(&issue).Updates(map[string]any{
+		"severity": string(types.ConfigImportIssueSeverityWarning),
+		"message":  message, "resolution_status": status, "updated_at": now,
+	}).Error
 }
 
 func markConfigImportPublishFailed(ctx context.Context, batchID int64, publishErr error) error {

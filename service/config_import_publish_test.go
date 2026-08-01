@@ -104,6 +104,30 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	assert.Equal(t, after.Hash, audit.AfterSHA256)
 }
 
+func TestPublishConfigImportBatchRecordsPostPublishCostCoverage(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{},
+		&model.ConfigImportIssue{}, &model.ConfigImportPublishAudit{},
+	))
+	channel := &model.Channel{
+		Type: 1, Name: "unpriced", Group: "default", Status: common.ChannelStatusEnabled,
+		Models: "unpriced-model", Key: "key",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, channel.UpdateAbilities(model.DB))
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "unpriced-model")
+	_, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
+
+	var issue model.ConfigImportIssue
+	require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", batch.ID, "COST_COVERAGE_INCOMPLETE").First(&issue).Error)
+	assert.Equal(t, string(types.ConfigImportIssueSeverityWarning), issue.Severity)
+	assert.Equal(t, "open", issue.ResolutionStatus)
+	assert.Contains(t, issue.Message, "1")
+}
+
 func TestPublishConfigImportBatchReplacesBoundChannelModelSnapshot(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	common.OptionMapRWMutex.Lock()

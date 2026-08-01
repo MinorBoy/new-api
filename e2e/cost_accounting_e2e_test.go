@@ -30,9 +30,10 @@ import (
 )
 
 const (
-	costE2EChatModel  = "cost-e2e-chat"
-	costE2EChatUserID = 2001
-	costE2EChatToken  = "cost"
+	costE2EChatModel         = "doubao-seedance-2-0-260128"
+	costE2EChatUpstreamModel = "cost-e2e-chat"
+	costE2EChatUserID        = 2001
+	costE2EChatToken         = "cost"
 )
 
 type costE2EOpenAIProvider struct {
@@ -207,7 +208,8 @@ func seedCostAccountingChatData(t *testing.T, upstreamURLs ...string) {
 			Id: 101 + index, Type: constant.ChannelTypeOpenAI, Key: "cost-e2e-key",
 			Status: common.ChannelStatusEnabled, Name: "cost-e2e-provider-" + string(rune('a'+index)),
 			Weight: common.GetPointer[uint](1), Priority: &priority, BaseURL: common.GetPointer(upstreamURL),
-			Models: costE2EChatModel, Group: "default", CreatedTime: time.Now().Unix(), OtherSettings: "{}",
+			Models: costE2EChatModel, ModelMapping: common.GetPointer(`{"doubao-seedance-2-0-260128":"cost-e2e-chat"}`),
+			Group: "default", CreatedTime: time.Now().Unix(), OtherSettings: "{}",
 		}
 		require.NoError(t, channel.Insert())
 	}
@@ -239,11 +241,11 @@ func TestCostAccountingPreservesRequestQueryE2E(t *testing.T) {
 	server := httptest.NewServer(provider)
 	t.Cleanup(server.Close)
 	seedCostAccountingChatData(t, server.URL)
-	seedCostAccountingRule(t, 101, costE2EChatModel, types.CostChargeResponseSucceeded, "0.10")
+	seedCostAccountingRule(t, 101, costE2EChatUpstreamModel, types.CostChargeResponseSucceeded, "0.10")
 
 	status, response := performJSONRequest(t, costAccountingE2ERouter(), http.MethodPost,
 		"/v1/chat/completions?foo=bar&signature=secret", "Bearer "+costE2EChatToken,
-		`{"model":"cost-e2e-chat","messages":[{"role":"user","content":"hello"}]}`)
+		`{"model":"doubao-seedance-2-0-260128","messages":[{"role":"user","content":"hello"}]}`)
 
 	require.Equal(t, http.StatusOK, status, string(response))
 	assert.Equal(t, []string{"foo=bar&signature=secret"}, provider.queries())
@@ -270,14 +272,14 @@ func TestCostAccountingSyncRetryAndLogPrivacyE2E(t *testing.T) {
 	successServer := httptest.NewServer(successProvider)
 	t.Cleanup(successServer.Close)
 	seedCostAccountingChatData(t, failedServer.URL, successServer.URL)
-	seedCostAccountingRule(t, 101, costE2EChatModel, types.CostChargeResponseSucceeded, "0.10")
-	seedCostAccountingRule(t, 102, costE2EChatModel, types.CostChargeResponseSucceeded, "0.20")
+	seedCostAccountingRule(t, 101, costE2EChatUpstreamModel, types.CostChargeResponseSucceeded, "0.10")
+	seedCostAccountingRule(t, 102, costE2EChatUpstreamModel, types.CostChargeResponseSucceeded, "0.20")
 
 	previousRetryTimes := common.RetryTimes
 	common.RetryTimes = 1
 	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
 	status, body := performJSONRequest(t, costAccountingE2ERouter(), http.MethodPost, "/v1/chat/completions", "Bearer "+costE2EChatToken,
-		`{"model":"cost-e2e-chat","messages":[{"role":"user","content":"hello"}]}`)
+		`{"model":"doubao-seedance-2-0-260128","messages":[{"role":"user","content":"hello"}]}`)
 	require.Equal(t, http.StatusOK, status, string(body))
 	assert.Equal(t, 1, failedProvider.count())
 	assert.Equal(t, 1, successProvider.count())
@@ -337,7 +339,7 @@ func TestCostAccountingStreamCancellationPersistsAttemptE2E(t *testing.T) {
 	server := httptest.NewServer(provider)
 	t.Cleanup(server.Close)
 	seedCostAccountingChatData(t, server.URL)
-	seedCostAccountingRule(t, 101, costE2EChatModel, types.CostChargeResponseSucceeded, "0.05")
+	seedCostAccountingRule(t, 101, costE2EChatUpstreamModel, types.CostChargeResponseSucceeded, "0.05")
 
 	previousRetryTimes := common.RetryTimes
 	common.RetryTimes = 0
@@ -346,7 +348,7 @@ func TestCostAccountingStreamCancellationPersistsAttemptE2E(t *testing.T) {
 	t.Cleanup(cancel)
 	recorder := &cancelOnFirstWriteRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(
-		`{"model":"cost-e2e-chat","messages":[{"role":"user","content":"disconnect"}],"stream":true}`,
+		`{"model":"doubao-seedance-2-0-260128","messages":[{"role":"user","content":"disconnect"}],"stream":true}`,
 	)).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer "+costE2EChatToken)
 	request.Header.Set("Content-Type", "application/json")

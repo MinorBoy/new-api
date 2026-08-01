@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const newAPIVideoPollingResponse = `{"code":"success","message":"","data":{"task_id":"upstream-task","status":"SUCCESS","result_url":"https://example.com/video.mp4","submit_time":1784728184,"start_time":1784728190,"finish_time":1784728390,"progress":"100%","user_id":59,"channel_id":14,"group":"secret","quota":2000000,"platform":"54","properties":{"origin_model_name":"client-video","upstream_model_name":"seedance-720p-token"},"data":{"content":{"video_url":"https://example.com/video.mp4"},"created_at":1784728184,"updated_at":1784728390,"draft":false,"duration":10,"execution_expires_after":172800,"framespersecond":24,"generate_audio":true,"id":"provider-secret","model":"doubao-seedance-2.0","priority":0,"ratio":"16:9","resolution":"720p","seed":92859,"service_tier":"default","status":"succeeded","usage":{"completion_tokens":216900,"total_tokens":216900},"future_field":{"keep":true}}}}`
+const newAPIVideoPollingResponse = `{"code":"success","message":"","data":{"task_id":"upstream-task","status":"SUCCESS","result_url":"https://example.com/video.mp4","submit_time":1784728184,"start_time":1784728190,"finish_time":1784728390,"progress":"100%","user_id":59,"channel_id":14,"group":"secret","quota":2000000,"platform":"54","properties":{"origin_model_name":"doubao-seedance-2-0-260128","upstream_model_name":"seedance-720p-token"},"data":{"content":{"video_url":"https://example.com/video.mp4"},"created_at":1784728184,"updated_at":1784728390,"draft":false,"duration":10,"execution_expires_after":172800,"framespersecond":24,"generate_audio":true,"id":"provider-secret","model":"doubao-seedance-2.0","priority":0,"ratio":"16:9","resolution":"720p","seed":92859,"service_tier":"default","status":"succeeded","usage":{"completion_tokens":216900,"total_tokens":216900},"future_field":{"keep":true}}}}`
 
 type mockNewAPIVideoServer struct {
 	mu       sync.Mutex
@@ -63,15 +63,15 @@ func setupNewAPIVideoLifecycle(t *testing.T) (*gin.Engine, *mockNewAPIVideoServe
 
 	channel, err := model.GetChannelById(e2eChannelID, true)
 	require.NoError(t, err)
-	mapping := `{"client-video":"seedance-720p-token"}`
+	mapping := `{"doubao-seedance-2-0-260128":"seedance-720p-token"}`
 	channel.Type = constant.ChannelTypeNewAPIVideo
 	channel.Key = "mock-newapi-video-key"
-	channel.Models = "client-video"
+	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	require.NoError(t, channel.Update())
 
 	ratios := ratio_setting.GetModelRatioCopy()
-	ratios["client-video"] = 0.1
+	ratios["doubao-seedance-2-0-260128"] = 0.1
 	encoded, err := common.Marshal(ratios)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
@@ -105,7 +105,7 @@ func assertNewAPIVideoLifecycleQueries(t *testing.T, engine http.Handler, public
 	require.NoError(t, common.Unmarshal(openAI, &openAIResponse))
 	assert.Equal(t, publicID, openAIResponse["id"])
 	assert.Equal(t, publicID, openAIResponse["task_id"])
-	assert.Equal(t, "client-video", openAIResponse["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", openAIResponse["model"])
 	assert.Equal(t, "completed", openAIResponse["status"])
 	assert.Equal(t, "https://example.com/video.mp4", openAIResponse["metadata"].(map[string]interface{})["url"])
 
@@ -115,7 +115,7 @@ func assertNewAPIVideoLifecycleQueries(t *testing.T, engine http.Handler, public
 	var arkResponse map[string]interface{}
 	require.NoError(t, common.Unmarshal(ark, &arkResponse))
 	assert.Equal(t, publicID, arkResponse["id"])
-	assert.Equal(t, "client-video", arkResponse["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", arkResponse["model"])
 	assert.Equal(t, "succeeded", arkResponse["status"])
 	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(216900), "total_tokens": float64(216900)}, arkResponse["usage"])
 }
@@ -132,7 +132,7 @@ func assertNewAPIVideoE2EPublicBody(t *testing.T, body []byte) {
 
 func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	engine, mock := setupNewAPIVideoLifecycle(t)
-	requestBody := `{"model":"client-video","prompt":"A cinematic rainy city","seconds":"10","watermark":false,"seed":0,"unknown":{"zero":0,"flag":false}}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","prompt":"A cinematic rainy city","seconds":"10","watermark":false,"seed":0,"unknown":{"zero":0,"flag":false}}`
 	status, submit := performJSONRequest(t, engine, http.MethodPost, "/v1/video/generations", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
 	assert.NotContains(t, string(submit), "upstream-task")
@@ -142,7 +142,7 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, strings.HasPrefix(publicID, "task_"))
 	assert.Equal(t, publicID, submitResponse["task_id"])
-	assert.Equal(t, "client-video", submitResponse["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", submitResponse["model"])
 
 	requests := mock.snapshot()
 	require.Len(t, requests, 1)
@@ -157,7 +157,7 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	assert.Equal(t, "https://example.com/video.mp4", task.PrivateData.ResultURL)
 	assert.Contains(t, string(task.Data), `"future_field":{"keep":true}`)
 	assert.Contains(t, string(task.Data), `"start_time":1784728190`)
-	assert.Contains(t, string(task.Data), `"origin_model_name":"client-video"`)
+	assert.Contains(t, string(task.Data), `"origin_model_name":"doubao-seedance-2-0-260128"`)
 	assert.Contains(t, string(task.Data), `"upstream_model_name":"seedance-720p-token"`)
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
@@ -171,7 +171,7 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 
 func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
 	engine, mock := setupNewAPIVideoLifecycle(t)
-	requestBody := `{"model":"client-video","content":[{"type":"text","text":"text"},{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://x/b.png"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://x/a.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://x/a.mp3"},"role":"reference_audio"}],"generate_audio":true,"duration":10}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"text"},{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://x/b.png"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://x/a.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://x/a.mp3"},"role":"reference_audio"}],"generate_audio":true,"duration":10}`
 	status, submit := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
 	assert.NotContains(t, string(submit), "upstream-task")
@@ -205,7 +205,7 @@ func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
 	assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
 	assertNewAPIVideoLifecycleQueries(t, engine, publicID)
 
-	invalid := `{"model":"client-video","content":[{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"first_frame"}]}`
+	invalid := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"first_frame"}]}`
 	status, invalidResponse := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", invalid)
 	assert.Equal(t, http.StatusBadRequest, status, string(invalidResponse))
 	assert.Contains(t, string(invalidResponse), "text")

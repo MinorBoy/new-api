@@ -39,16 +39,16 @@ func TestLucenARKLifecycleE2E(t *testing.T) {
 
 	channel, err := model.GetChannelById(e2eChannelID, true)
 	require.NoError(t, err)
-	mapping := `{"client-video":"seedance-720p-token"}`
+	mapping := `{"doubao-seedance-2-0-260128":"seedance-720p-token"}`
 	channel.Type = constant.ChannelTypeLucen
 	channel.Key = "mock-lucen-token-key"
-	channel.Models = "client-video"
+	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	channel.BaseURL = common.GetPointer(server.URL)
 	require.NoError(t, channel.Update())
 
 	ratios := ratio_setting.GetModelRatioCopy()
-	ratios["client-video"] = 0.1
+	ratios["doubao-seedance-2-0-260128"] = 0.1
 	encoded, err := common.Marshal(ratios)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
@@ -60,7 +60,7 @@ func TestLucenARKLifecycleE2E(t *testing.T) {
 	engine := seedanceE2ERouter()
 
 	requestBody := `{
-		"model":"client-video",
+		"model":"doubao-seedance-2-0-260128",
 		"content":[
 			{"type":"text","text":"multimodal Lucen acceptance"},
 			{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}},
@@ -148,7 +148,7 @@ func assertLucenARKTaskResponse(t *testing.T, body []byte, publicID string) {
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(body, &response))
 	assert.Equal(t, publicID, response["id"])
-	assert.Equal(t, "client-video", response["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, map[string]any{"video_url": "https://example.com/video.mp4"}, response["content"])
 	assert.Equal(t, map[string]any{"completion_tokens": float64(216900), "total_tokens": float64(216900)}, response["usage"])

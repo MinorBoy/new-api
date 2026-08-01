@@ -123,10 +123,10 @@ func setupSecureE2E(t *testing.T, group dto.SecureVideoGroup, upstreamModel stri
 	channel, err := model.GetChannelById(e2eChannelID, true)
 	require.NoError(t, err)
 	key := "secure-" + string(group) + "-key"
-	mapping := `{"client-video":"` + upstreamModel + `"}`
+	mapping := `{"doubao-seedance-2-0-260128":"` + upstreamModel + `"}`
 	channel.Type = constant.ChannelTypeSecure
 	channel.Key = key
-	channel.Models = "client-video"
+	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
 		DisableTaskPollingSleep: true,
@@ -135,7 +135,7 @@ func setupSecureE2E(t *testing.T, group dto.SecureVideoGroup, upstreamModel stri
 	require.NoError(t, channel.Update())
 
 	ratios := ratio_setting.GetModelRatioCopy()
-	ratios["client-video"] = 0.1
+	ratios["doubao-seedance-2-0-260128"] = 0.1
 	encoded, err := common.Marshal(ratios)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
@@ -171,7 +171,7 @@ func TestSecureGroupedARKLifecyclesE2E(t *testing.T) {
 			name:          "discount",
 			group:         dto.SecureVideoGroupDiscount,
 			upstreamModel: "video-2.0-pro",
-			requestBody: `{"model":"client-video","content":[
+			requestBody: `{"model":"doubao-seedance-2-0-260128","content":[
 				{"type":"text","text":"discount product shot"},
 				{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/first.jpg"}},
 				{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/second.jpg"}}
@@ -192,7 +192,7 @@ func TestSecureGroupedARKLifecyclesE2E(t *testing.T) {
 			name:          "overseas",
 			group:         dto.SecureVideoGroupOverseas,
 			upstreamModel: "video-2.0-fast",
-			requestBody: `{"model":"client-video","content":[
+			requestBody: `{"model":"doubao-seedance-2-0-260128","content":[
 				{"type":"text","text":"overseas omni"},
 				{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},
 				{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},
@@ -216,7 +216,7 @@ func TestSecureGroupedARKLifecyclesE2E(t *testing.T) {
 			name:          "enterprise",
 			group:         dto.SecureVideoGroupEnterprise,
 			upstreamModel: "video-2.0-pro",
-			requestBody:   `{"model":"client-video","content":[{"type":"text","text":"enterprise text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
+			requestBody:   `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"enterprise text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
 			submitPath:    "/v1/videos",
 			pollPath:      "/v1/videos/secure-enterprise-private",
 			wantJSON:      `{"model":"video-2.0-pro","prompt":"enterprise text","duration":8,"aspect_ratio":"16:9"}`,
@@ -290,19 +290,19 @@ func TestSecureGroupedFailuresRefundE2E(t *testing.T) {
 			name:          "discount",
 			group:         dto.SecureVideoGroupDiscount,
 			upstreamModel: "video-2.0-pro",
-			requestBody:   `{"model":"client-video","content":[{"type":"text","text":"refund"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
+			requestBody:   `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"refund"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
 		},
 		{
 			name:          "overseas",
 			group:         dto.SecureVideoGroupOverseas,
 			upstreamModel: "video-2.0-fast",
-			requestBody:   `{"model":"client-video","content":[{"type":"text","text":"refund"}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
+			requestBody:   `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"refund"}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
 		},
 		{
 			name:          "enterprise",
 			group:         dto.SecureVideoGroupEnterprise,
 			upstreamModel: "video-2.0-pro",
-			requestBody:   `{"model":"client-video","content":[{"type":"text","text":"refund"}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
+			requestBody:   `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"refund"}],"duration":8,"ratio":"16:9","resolution":"720p"}`,
 		},
 	}
 
@@ -391,7 +391,7 @@ func assertSecureE2ESucceededTask(t *testing.T, body []byte, publicID string, en
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(body, &response))
 	assert.Equal(t, publicID, response["id"])
-	assert.Equal(t, "client-video", response["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, map[string]any{"video_url": env.mock.videoURL}, response["content"])
 }

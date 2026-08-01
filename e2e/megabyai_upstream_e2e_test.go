@@ -114,15 +114,15 @@ func setupMegaByAIE2E(t *testing.T, pollResponses ...string) *megaByAIE2EEnviron
 
 	channel, err := model.GetChannelById(e2eChannelID, true)
 	require.NoError(t, err)
-	mapping := `{"client-video":"videos-mini"}`
+	mapping := `{"doubao-seedance-2-0-260128":"videos-mini"}`
 	channel.Type = constant.ChannelTypeMegaByAI
 	channel.Key = "mock-megabyai-key"
-	channel.Models = "client-video"
+	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	require.NoError(t, channel.Update())
 
 	ratios := ratio_setting.GetModelRatioCopy()
-	ratios["client-video"] = 0.1
+	ratios["doubao-seedance-2-0-260128"] = 0.1
 	encoded, err := common.Marshal(ratios)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
@@ -153,7 +153,7 @@ func TestMegaByAIARKLifecycleAndPreConsumeValidationE2E(t *testing.T) {
 		`{"task_id":"videos-mini_private","status":"completed","progress":100,"metadata":{"content_url":"https://assets.example/megabyai.mp4"}}`,
 	)
 	requestBody := `{
-		"model":"client-video","content":[
+		"model":"doubao-seedance-2-0-260128","content":[
 			{"type":"text","text":"multimodal MegaByAI acceptance"},
 			{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},
 			{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},
@@ -234,7 +234,7 @@ func TestMegaByAIFailedTaskRefundsAndPreservesErrorE2E(t *testing.T) {
 	require.NoError(t, model.DB.First(&beforeToken, 1).Error)
 	require.NoError(t, model.DB.First(&beforeChannel, e2eChannelID).Error)
 
-	requestBody := `{"model":"client-video","content":[{"type":"text","text":"refund failure"}],"duration":8}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"refund failure"}],"duration":8}`
 	status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
 	var submitResponse map[string]any
@@ -263,7 +263,7 @@ func TestMegaByAIFailedTaskRefundsAndPreservesErrorE2E(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(failed, &response))
 	assert.Equal(t, publicID, response.ID)
-	assert.Equal(t, "client-video", response.Model)
+	assert.Equal(t, "doubao-seedance-2-0-260128", response.Model)
 	assert.Equal(t, "failed", response.Status)
 	assert.Equal(t, "unsupported_material", response.Error.Code)
 	assert.Equal(t, "\u7d20\u6750\u683c\u5f0f\u4e0d\u652f\u6301", response.Error.Message)
@@ -322,7 +322,7 @@ func assertMegaByAIE2ESucceededTask(t *testing.T, body []byte, publicID string) 
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(body, &response))
 	assert.Equal(t, publicID, response["id"])
-	assert.Equal(t, "client-video", response["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, map[string]any{"video_url": megaByAIE2EVideoURL}, response["content"])
 }

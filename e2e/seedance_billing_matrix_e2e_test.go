@@ -173,7 +173,6 @@ func seedanceBillingModelRatios() map[string]float64 {
 		"doubao-seedance-2-0-260128":      46.0 / 14.0,
 		"doubao-seedance-2-0-fast-260128": 37.0 / 14.0,
 		"doubao-seedance-2-0-mini-260615": 23.0 / 14.0,
-		"doubao-seedance-1-5-pro-251215":  8.0 / 14.0,
 	}
 }
 
@@ -211,16 +210,12 @@ func seedanceBillingOfficialUnitRMB(modelID, resolution string, hasVideo bool) (
 			}
 			return 23, true
 		}
-	case "doubao-seedance-1-5-pro-251215":
-		if resolution == "480p" || resolution == "720p" || resolution == "1080p" {
-			return 8, true
-		}
 	}
 	return 0, false
 }
 
 func seedanceBillingExplicitCases() []seedanceBillingCase {
-	testCases := make([]seedanceBillingCase, 0, 636)
+	testCases := make([]seedanceBillingCase, 0, 384)
 	seedance20Models := []struct {
 		model       string
 		resolutions []string
@@ -250,43 +245,11 @@ func seedanceBillingExplicitCases() []seedanceBillingCase {
 			}
 		}
 	}
-
-	const seedance15Model = "doubao-seedance-1-5-pro-251215"
-	for _, resolution := range []string{"480p", "720p", "1080p"} {
-		for duration := 4; duration <= 12; duration++ {
-			for _, hasImage := range []bool{false, true} {
-				for _, generateAudio := range []bool{false, true} {
-					for _, serviceTier := range []string{"default", "flex"} {
-						testCases = append(testCases, seedanceBillingCase{
-							ID:    fmt.Sprintf("%s/%s/duration-%02d/image-%t/audio-%t/tier-%s/draft-false", seedance15Model, resolution, duration, hasImage, generateAudio, serviceTier),
-							Model: seedance15Model, Resolution: resolution,
-							RequestDuration: common.GetPointer(duration), TerminalDuration: duration,
-							HasReferenceImage: hasImage, GenerateAudio: generateAudio, ServiceTier: serviceTier,
-							ExpectedUnitRMB: 8,
-						})
-					}
-				}
-			}
-		}
-	}
-	for duration := 4; duration <= 12; duration++ {
-		for _, hasImage := range []bool{false, true} {
-			for _, generateAudio := range []bool{false, true} {
-				testCases = append(testCases, seedanceBillingCase{
-					ID:    fmt.Sprintf("%s/480p/duration-%02d/image-%t/audio-%t/tier-default/draft-true", seedance15Model, duration, hasImage, generateAudio),
-					Model: seedance15Model, Resolution: "480p",
-					RequestDuration: common.GetPointer(duration), TerminalDuration: duration,
-					HasReferenceImage: hasImage, GenerateAudio: generateAudio, ServiceTier: "default", Draft: true,
-					ExpectedUnitRMB: 8,
-				})
-			}
-		}
-	}
 	return testCases
 }
 
 func seedanceBillingDurationModeCases() []seedanceBillingCase {
-	testCases := make([]seedanceBillingCase, 0, 120)
+	testCases := make([]seedanceBillingCase, 0, 64)
 	appendModeCases := func(base seedanceBillingCase) {
 		for _, mode := range []string{"omitted", "smart"} {
 			caseCopy := base
@@ -324,30 +287,6 @@ func seedanceBillingDurationModeCases() []seedanceBillingCase {
 					})
 				}
 			}
-		}
-	}
-	const seedance15Model = "doubao-seedance-1-5-pro-251215"
-	for _, resolution := range []string{"480p", "720p", "1080p"} {
-		for _, hasImage := range []bool{false, true} {
-			for _, generateAudio := range []bool{false, true} {
-				for _, serviceTier := range []string{"default", "flex"} {
-					appendModeCases(seedanceBillingCase{
-						ID:    fmt.Sprintf("%s/%s/image-%t/audio-%t/tier-%s/draft-false", seedance15Model, resolution, hasImage, generateAudio, serviceTier),
-						Model: seedance15Model, Resolution: resolution,
-						HasReferenceImage: hasImage, GenerateAudio: generateAudio, ServiceTier: serviceTier,
-						ExpectedUnitRMB: 8,
-					})
-				}
-			}
-		}
-	}
-	for _, hasImage := range []bool{false, true} {
-		for _, generateAudio := range []bool{false, true} {
-			appendModeCases(seedanceBillingCase{
-				ID:    fmt.Sprintf("%s/480p/image-%t/audio-%t/tier-default/draft-true", seedance15Model, hasImage, generateAudio),
-				Model: seedance15Model, Resolution: "480p", HasReferenceImage: hasImage,
-				GenerateAudio: generateAudio, ServiceTier: "default", Draft: true, ExpectedUnitRMB: 8,
-			})
 		}
 	}
 	return testCases
@@ -430,7 +369,6 @@ func setupSeedanceBillingE2E(t *testing.T) *seedanceBillingE2EEnv {
 		"doubao-seedance-2-0-260128",
 		"doubao-seedance-2-0-fast-260128",
 		"doubao-seedance-2-0-mini-260615",
-		"doubao-seedance-1-5-pro-251215",
 	}
 	channel := &model.Channel{
 		Id:            e2eChannelID,
@@ -579,12 +517,8 @@ func seedanceBillingExplicitRequest(t *testing.T, testCase seedanceBillingCase) 
 	t.Helper()
 	content := []any{map[string]any{"type": "text", "text": "Seedance explicit billing acceptance " + testCase.ID}}
 	if testCase.HasReferenceImage {
-		role := "reference_image"
-		if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-			role = "first_frame"
-		}
 		content = append(content, map[string]any{
-			"type": "image_url", "role": role,
+			"type": "image_url", "role": "reference_image",
 			"image_url": map[string]any{"url": "https://mock.example/reference.png"},
 		})
 	}
@@ -598,11 +532,6 @@ func seedanceBillingExplicitRequest(t *testing.T, testCase seedanceBillingCase) 
 		"model": testCase.Model, "content": content, "resolution": testCase.Resolution,
 		"duration": *testCase.RequestDuration,
 	}
-	if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-		request["generate_audio"] = testCase.GenerateAudio
-		request["service_tier"] = testCase.ServiceTier
-		request["draft"] = testCase.Draft
-	}
 	encoded, err := common.Marshal(request)
 	require.NoError(t, err)
 	return request, encoded
@@ -612,12 +541,8 @@ func seedanceBillingDurationModeRequest(t *testing.T, testCase seedanceBillingCa
 	t.Helper()
 	content := []any{map[string]any{"type": "text", "text": "Seedance duration mode billing acceptance " + testCase.ID}}
 	if testCase.HasReferenceImage {
-		role := "reference_image"
-		if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-			role = "first_frame"
-		}
 		content = append(content, map[string]any{
-			"type": "image_url", "role": role,
+			"type": "image_url", "role": "reference_image",
 			"image_url": map[string]any{"url": "https://mock.example/reference.png"},
 		})
 	}
@@ -632,11 +557,6 @@ func seedanceBillingDurationModeRequest(t *testing.T, testCase seedanceBillingCa
 	}
 	if testCase.RequestDuration != nil {
 		request["duration"] = *testCase.RequestDuration
-	}
-	if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-		request["generate_audio"] = testCase.GenerateAudio
-		request["service_tier"] = testCase.ServiceTier
-		request["draft"] = testCase.Draft
 	}
 	encoded, err := common.Marshal(request)
 	require.NoError(t, err)
@@ -669,38 +589,16 @@ func seedanceBillingReferenceVideoRequest(t *testing.T, profile []int, hasRefere
 	return normalized, encoded
 }
 
-func seedanceBillingExpectedRatios(testCase seedanceBillingCase, includeDraftEstimate bool) (float64, map[string]float64) {
-	if testCase.Model != "doubao-seedance-1-5-pro-251215" {
-		baseRMB := map[string]float64{
-			"doubao-seedance-2-0-260128": 46, "doubao-seedance-2-0-fast-260128": 37,
-			"doubao-seedance-2-0-mini-260615": 23,
-		}[testCase.Model]
-		multiplier := testCase.ExpectedUnitRMB / baseRMB
-		if multiplier == 1 {
-			return multiplier, map[string]float64{}
-		}
-		return multiplier, map[string]float64{"video_input": multiplier}
+func seedanceBillingExpectedRatios(testCase seedanceBillingCase, _ bool) (float64, map[string]float64) {
+	baseRMB := map[string]float64{
+		"doubao-seedance-2-0-260128": 46, "doubao-seedance-2-0-fast-260128": 37,
+		"doubao-seedance-2-0-mini-260615": 23,
+	}[testCase.Model]
+	multiplier := testCase.ExpectedUnitRMB / baseRMB
+	if multiplier == 1 {
+		return multiplier, map[string]float64{}
 	}
-
-	multiplier := 1.0
-	ratios := map[string]float64{}
-	if testCase.GenerateAudio {
-		multiplier *= 2
-		ratios["audio"] = 2
-	}
-	if testCase.ServiceTier == "flex" {
-		multiplier *= 0.5
-		ratios["service_tier"] = 0.5
-	}
-	if testCase.Draft && includeDraftEstimate {
-		draftEstimate := 0.7
-		if testCase.GenerateAudio {
-			draftEstimate = 0.6
-		}
-		multiplier *= draftEstimate
-		ratios["draft_estimate"] = draftEstimate
-	}
-	return multiplier, ratios
+	return multiplier, map[string]float64{"video_input": multiplier}
 }
 
 func (after seedanceBillingDomainSnapshot) delta(before seedanceBillingDomainSnapshot) seedanceBillingDomainSnapshot {
@@ -1304,9 +1202,10 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 	silenceSeedanceBillingLogs(t)
 	env := setupSeedanceBillingE2E(t)
 	type invalidHTTPCase struct {
-		id       string
-		request  map[string]any
-		wantCode string
+		id         string
+		request    map[string]any
+		wantStatus int
+		wantCode   string
 	}
 
 	textContent := []any{map[string]any{"type": "text", "text": "local invalid billing acceptance"}}
@@ -1317,9 +1216,8 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		{id: "doubao-seedance-2-0-260128", maxDuration: 15},
 		{id: "doubao-seedance-2-0-fast-260128", maxDuration: 15},
 		{id: "doubao-seedance-2-0-mini-260615", maxDuration: 15},
-		{id: "doubao-seedance-1-5-pro-251215", maxDuration: 12},
 	}
-	invalidCases := make([]invalidHTTPCase, 0, 38)
+	invalidCases := make([]invalidHTTPCase, 0, 29)
 	for _, modelID := range []string{"doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-mini-260615"} {
 		for _, resolution := range []string{"1080p", "4k"} {
 			invalidCases = append(invalidCases, invalidHTTPCase{
@@ -1362,44 +1260,16 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		wantCode: "InvalidParameter.content",
 	})
 
-	invalidCases = append(invalidCases,
-		invalidHTTPCase{
-			id: "model=doubao-seedance-1-5-pro-251215/content=reference_image",
-			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215",
-				"content": []any{
-					map[string]any{"type": "text", "text": "unsupported reference image"},
-					map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://mock.example/reference.png"}},
-				},
-			},
-			wantCode: "InvalidParameter",
+	invalidCases = append(invalidCases, invalidHTTPCase{
+		id: "model=doubao-seedance-1-5-pro-251215/not-public",
+		request: map[string]any{
+			"model": "doubao-seedance-1-5-pro-251215", "content": textContent,
 		},
-		invalidHTTPCase{
-			id: "model=doubao-seedance-1-5-pro-251215/content=reference_video",
-			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215",
-				"content": []any{
-					map[string]any{"type": "text", "text": "unsupported reference video"},
-					map[string]any{"type": "video_url", "role": "reference_video", "video_url": map[string]any{"url": "https://mock.example/reference-2s.mp4"}},
-				},
-			},
-			wantCode: "InvalidParameter",
-		},
-		invalidHTTPCase{
-			id: "model=doubao-seedance-1-5-pro-251215/content=reference_audio",
-			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215",
-				"content": []any{
-					map[string]any{"type": "text", "text": "unsupported reference audio"},
-					map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://mock.example/reference.png"}},
-					map[string]any{"type": "audio_url", "role": "reference_audio", "audio_url": map[string]any{"url": "https://mock.example/reference.wav"}},
-				},
-			},
-			wantCode: "InvalidParameter",
-		},
-	)
+		wantStatus: http.StatusNotFound,
+		wantCode:   "model_not_found",
+	})
 
-	for _, modelConfig := range models[:3] {
+	for _, modelConfig := range models {
 		invalidCases = append(invalidCases,
 			invalidHTTPCase{
 				id: fmt.Sprintf("model=%s/service_tier=flex", modelConfig.id),
@@ -1418,27 +1288,6 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		)
 	}
 	invalidCases = append(invalidCases,
-		invalidHTTPCase{
-			id: "model=doubao-seedance-1-5-pro-251215/draft=true/resolution=720p",
-			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215", "content": textContent, "draft": true, "resolution": "720p",
-			},
-			wantCode: "InvalidParameter",
-		},
-		invalidHTTPCase{
-			id: "model=doubao-seedance-1-5-pro-251215/draft=true/resolution=1080p",
-			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215", "content": textContent, "draft": true, "resolution": "1080p",
-			},
-			wantCode: "InvalidParameter",
-		},
-		invalidHTTPCase{
-			id: "model=doubao-seedance-1-5-pro-251215/draft=true/service_tier=flex",
-			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215", "content": textContent, "draft": true, "service_tier": "flex",
-			},
-			wantCode: "InvalidParameter",
-		},
 		invalidHTTPCase{
 			id: "content=video_url/role=first_frame",
 			request: map[string]any{
@@ -1466,20 +1315,20 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		invalidHTTPCase{
 			id: "generate_audio=malformed_string",
 			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215", "content": textContent, "generate_audio": "not-a-bool",
+				"model": "doubao-seedance-2-0-260128", "content": textContent, "generate_audio": "not-a-bool",
 			},
 			wantCode: "InvalidParameter",
 		},
 		invalidHTTPCase{
 			id: "draft=malformed_object",
 			request: map[string]any{
-				"model": "doubao-seedance-1-5-pro-251215", "content": textContent, "draft": map[string]any{"value": true},
+				"model": "doubao-seedance-2-0-260128", "content": textContent, "draft": map[string]any{"value": true},
 			},
 			wantCode: "InvalidParameter",
 		},
 	)
 
-	require.Len(t, invalidCases, 38)
+	require.Len(t, invalidCases, 29)
 	seen := make(map[string]struct{}, len(invalidCases))
 	executed := 0
 	for _, testCase := range invalidCases {
@@ -1495,7 +1344,11 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		requestBody, err := common.Marshal(testCase.request)
 		require.NoError(t, err, caseID)
 		status, responseBody := performJSONRequest(t, env.Router, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", string(requestBody))
-		require.Equal(t, http.StatusBadRequest, status, "%s: %s", caseID, responseBody)
+		wantStatus := testCase.wantStatus
+		if wantStatus == 0 {
+			wantStatus = http.StatusBadRequest
+		}
+		require.Equal(t, wantStatus, status, "%s: %s", caseID, responseBody)
 		requireSeedanceBillingARKError(t, responseBody, testCase.wantCode, "")
 		assert.Len(t, env.Mock.snapshot(), len(requestsBefore), caseID)
 		assert.Equal(t, mockTasksBefore, env.Mock.taskCount(), caseID)
@@ -1506,8 +1359,8 @@ func TestSeedanceBillingInvalidCombinationsE2E(t *testing.T) {
 		}
 		executed++
 	}
-	require.Len(t, seen, 38)
-	require.Equal(t, 38, executed)
+	require.Len(t, seen, 29)
+	require.Equal(t, 29, executed)
 	t.Logf("local_invalid_cases=%d", executed)
 }
 
@@ -1639,65 +1492,42 @@ func TestSeedanceBillingUpstreamDurationRefundE2E(t *testing.T) {
 func TestSeedanceBillingModelRatioNormalization(t *testing.T) {
 	ratios := seedanceBillingModelRatios()
 
-	require.Len(t, ratios, 4)
+	require.Len(t, ratios, 3)
 	assert.InDelta(t, 46.0/14.0, ratios["doubao-seedance-2-0-260128"], 1e-12)
 	assert.InDelta(t, 37.0/14.0, ratios["doubao-seedance-2-0-fast-260128"], 1e-12)
 	assert.InDelta(t, 23.0/14.0, ratios["doubao-seedance-2-0-mini-260615"], 1e-12)
-	assert.InDelta(t, 8.0/14.0, ratios["doubao-seedance-1-5-pro-251215"], 1e-12)
 }
 
 func TestSeedanceBillingExplicitCaseCount(t *testing.T) {
 	testCases := seedanceBillingExplicitCases()
-	require.Len(t, testCases, 636)
+	require.Len(t, testCases, 384)
 
 	countsByModel := make(map[string]int)
-	countsByFamily := map[string]int{"2.0": 0, "1.5_non_draft": 0, "1.5_draft": 0}
 	ids := make(map[string]struct{}, len(testCases))
-	draftCount := 0
 	for _, testCase := range testCases {
 		countsByModel[testCase.Model]++
 		_, duplicate := ids[testCase.ID]
 		assert.False(t, duplicate, testCase.ID)
 		ids[testCase.ID] = struct{}{}
-		if testCase.Draft {
-			draftCount++
-			countsByFamily["1.5_draft"]++
-		} else if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-			countsByFamily["1.5_non_draft"]++
-		} else {
-			countsByFamily["2.0"]++
-		}
 	}
 	assert.Equal(t, map[string]int{
 		"doubao-seedance-2-0-260128":      192,
 		"doubao-seedance-2-0-fast-260128": 96,
 		"doubao-seedance-2-0-mini-260615": 96,
-		"doubao-seedance-1-5-pro-251215":  252,
 	}, countsByModel)
-	assert.Equal(t, 36, draftCount)
-	assert.Equal(t, map[string]int{"2.0": 384, "1.5_non_draft": 216, "1.5_draft": 36}, countsByFamily)
-	assert.Len(t, ids, 636)
+	assert.Len(t, ids, 384)
 }
 
 func TestSeedanceBillingDurationModeCaseCount(t *testing.T) {
 	testCases := seedanceBillingDurationModeCases()
-	require.Len(t, testCases, 120)
+	require.Len(t, testCases, 64)
 	ids := make(map[string]struct{}, len(testCases))
-	countsByFamily := map[string]int{"2.0": 0, "1.5_non_draft": 0, "1.5_draft": 0}
 	for _, testCase := range testCases {
 		_, duplicate := ids[testCase.ID]
 		assert.False(t, duplicate, testCase.ID)
 		ids[testCase.ID] = struct{}{}
-		if testCase.Draft {
-			countsByFamily["1.5_draft"]++
-		} else if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-			countsByFamily["1.5_non_draft"]++
-		} else {
-			countsByFamily["2.0"]++
-		}
 	}
-	assert.Equal(t, map[string]int{"2.0": 64, "1.5_non_draft": 48, "1.5_draft": 8}, countsByFamily)
-	assert.Len(t, ids, 120)
+	assert.Len(t, ids, 64)
 }
 
 func TestSeedanceBillingReferenceVideoProfileCount(t *testing.T) {
@@ -1948,9 +1778,6 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 		assert.Equal(t, testCase.HasReferenceVideo, billingContext.HasVideoInput, caseID)
 		require.NotNil(t, billingContext.GenerateAudio, caseID)
 		expectedGenerateAudio := true
-		if testCase.Model == "doubao-seedance-1-5-pro-251215" {
-			expectedGenerateAudio = testCase.GenerateAudio
-		}
 		require.Equal(t, expectedGenerateAudio, *billingContext.GenerateAudio, caseID)
 		assert.Equal(t, testCase.Draft, billingContext.Draft, caseID)
 		expectedTier := testCase.ServiceTier
@@ -2261,7 +2088,7 @@ func TestSeedanceBillingEnvironment(t *testing.T) {
 
 		var abilities []model.Ability
 		require.NoError(t, model.DB.Where("channel_id = ?", env.Channel.Id).Order("model").Find(&abilities).Error)
-		require.Len(t, abilities, 4)
+		require.Len(t, abilities, 3)
 		for modelID, expectedRatio := range seedanceBillingModelRatios() {
 			assert.Contains(t, seededChannel.Models, modelID)
 			actualRatio, configured, _ := ratio_setting.GetModelRatio(modelID)

@@ -83,15 +83,15 @@ func setupCangyuanE2E(t *testing.T, pollResponses ...string) *cangyuanE2EEnviron
 
 	channel, err := model.GetChannelById(e2eChannelID, true)
 	require.NoError(t, err)
-	mapping := `{"client-video":"seedance-2.0-720p"}`
+	mapping := `{"doubao-seedance-2-0-260128":"seedance-2.0-720p"}`
 	channel.Type = constant.ChannelTypeCangyuan
 	channel.Key = "mock-cangyuan-key"
-	channel.Models = "client-video"
+	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	require.NoError(t, channel.Update())
 
 	ratio := ratio_setting.GetModelRatioCopy()
-	ratio["client-video"] = 0.1
+	ratio["doubao-seedance-2-0-260128"] = 0.1
 	encoded, err := common.Marshal(ratio)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
@@ -108,7 +108,7 @@ func TestCangyuanARKLifecycleAndTextRequestE2E(t *testing.T) {
 		`{"task_id":"cangyuan-private","status":"in_progress","progress":50}`,
 		`{"task_id":"cangyuan-private","status":"completed","data":[{"url":"https://assets.example/cangyuan.mp4"}]}`,
 	)
-	requestBody := `{"model":"client-video","content":[{"type":"text","text":"cangyuan text acceptance"}],"duration":8,"ratio":"16:9","resolution":"720p"}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"cangyuan text acceptance"}],"duration":8,"ratio":"16:9","resolution":"720p"}`
 
 	status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
@@ -146,7 +146,7 @@ func TestCangyuanARKLifecycleAndTextRequestE2E(t *testing.T) {
 
 func TestCangyuanRejectsReferenceMediaBeforeUpstreamAndPreConsumeE2E(t *testing.T) {
 	env := setupCangyuanE2E(t)
-	requestBody := `{"model":"client-video","content":[{"type":"text","text":"media is unsupported"},{"type":"image_url","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"media is unsupported"},{"type":"image_url","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8}`
 
 	var beforeTasks int64
 	var beforeUser model.User
@@ -174,7 +174,7 @@ func TestCangyuanFailedTaskRefundsE2E(t *testing.T) {
 	require.NoError(t, model.DB.First(&beforeToken, 1).Error)
 	require.NoError(t, model.DB.First(&beforeChannel, e2eChannelID).Error)
 
-	requestBody := `{"model":"client-video","content":[{"type":"text","text":"refund failure"}],"duration":8}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"refund failure"}],"duration":8}`
 	status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
 	var submitResponse map[string]any
@@ -218,7 +218,7 @@ func assertCangyuanE2ESucceededTask(t *testing.T, body []byte, publicID string) 
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(body, &response))
 	assert.Equal(t, publicID, response["id"])
-	assert.Equal(t, "client-video", response["model"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, map[string]any{"video_url": cangyuanE2EVideoURL}, response["content"])
 }

@@ -74,3 +74,10 @@ _codex_sheet_work/
 outputs/
 go.work
 go.work.sum
+.codex-tmp/
+.zcode/
+output/
+_codex_sheet_work/
+.claude/
+**/node_modules/
+.codex-tmp/

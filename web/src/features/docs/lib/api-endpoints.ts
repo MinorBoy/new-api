@@ -605,4 +605,134 @@ print(resp.data[0].embedding[:8])`,
       },
     ],
   },
+  {
+    slug: 'ark-video-tasks-create',
+    method: 'POST',
+    path: '/api/v3/contents/generations/tasks',
+    protocol: 'ark',
+    category: 'video',
+    title: { en: 'Ark Video Task Create', zh: 'Seedance 视频任务创建' },
+    summary: {
+      en: 'Volcengine Ark native video generation task submission (Seedance).',
+      zh: '火山引擎方舟原生视频生成任务提交（Seedance）。',
+    },
+    auth: 'Bearer Token',
+    contentType: 'application/json',
+    requestParams: [
+      { name: 'model', type: 'string', required: 'yes', description: { en: 'Seedance model name.', zh: 'Seedance 模型名称。' } },
+      { name: 'content', type: 'object[]', required: 'yes', description: { en: 'Content blocks: text prompts, image/video/audio references.', zh: '内容块：文本提示词、图片/视频/音频引用。' } },
+      { name: 'content[].type', type: 'string', required: 'yes', description: { en: 'Block type: text, image_url, video_url, audio_url.', zh: '内容块类型：text、image_url、video_url、audio_url。' } },
+      { name: 'content[].text', type: 'string', required: 'conditional', description: { en: 'Text prompt (when type=text).', zh: '文本提示词（type=text 时）。' } },
+      { name: 'content[].image_url', type: 'object', required: 'conditional', description: { en: 'Reference image URL object (when type=image_url).', zh: '参考图 URL 对象（type=image_url 时）。' } },
+      { name: 'resolution', type: 'string', required: 'no', description: { en: 'Output resolution, e.g. 720p, 1080p.', zh: '输出分辨率，如 720p、1080p。' } },
+      { name: 'ratio', type: 'string', required: 'no', description: { en: 'Aspect ratio, e.g. 16:9, 9:16.', zh: '画面比例，如 16:9、9:16。' } },
+      { name: 'duration', type: 'integer', required: 'no', description: { en: 'Video duration in seconds.', zh: '视频时长（秒）。' } },
+      { name: 'frames', type: 'integer', required: 'no', description: { en: 'Total frame count.', zh: '总帧数。' } },
+      { name: 'seed', type: 'integer', required: 'no', description: { en: 'Random seed for reproducibility.', zh: '随机种子，用于结果复现。' } },
+      { name: 'service_tier', type: 'string', required: 'no', description: { en: 'Service tier.', zh: '服务等级。' } },
+      { name: 'generate_audio', type: 'boolean', required: 'no', description: { en: 'Whether to generate audio.', zh: '是否生成音频。' } },
+      { name: 'watermark', type: 'boolean', required: 'no', description: { en: 'Whether to add watermark.', zh: '是否添加水印。' } },
+    ],
+    responseParams: [
+      { name: 'id', type: 'string', required: 'yes', description: { en: 'Task ID for polling.', zh: '任务 ID，用于轮询查询。' } },
+      { name: 'model', type: 'string', required: 'no', description: { en: 'Model name.', zh: '模型名称。' } },
+      { name: 'status', type: 'string', required: 'no', description: { en: 'Task status: queued, running, succeeded, failed.', zh: '任务状态：queued、running、succeeded、failed。' } },
+    ],
+    errorCodes: [
+      { status: 400, description: { en: 'InvalidParameter — malformed request body or missing model/content.', zh: '参数无效——请求体格式错误或缺少 model/content。' } },
+      { status: 401, description: { en: 'Unauthorized — API key invalid or missing.', zh: '未授权——API Key 无效或未提供。' } },
+      { status: 429, description: { en: 'Rate limited or insufficient quota.', zh: '触发限流或额度不足。' } },
+    ],
+    codeSamples: [
+      {
+        lang: 'curl',
+        label: 'cURL',
+        highlight: 'bash',
+        code: `curl https://<your-domain>/api/v3/contents/generations/tasks \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer <YOUR_API_KEY>" \\
+  -d '{
+    "model": "seedance-1-0-pro-250528",
+    "content": [
+      { "type": "text", "text": "一只猫在草地上奔跑" }
+    ],
+    "resolution": "1080p",
+    "ratio": "16:9",
+    "duration": 5
+  }'`,
+      },
+      {
+        lang: 'python',
+        label: 'Python',
+        highlight: 'python',
+        code: `import requests
+
+resp = requests.post(
+    "https://<your-domain>/api/v3/contents/generations/tasks",
+    headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer <YOUR_API_KEY>",
+    },
+    json={
+        "model": "seedance-1-0-pro-250528",
+        "content": [{"type": "text", "text": "一只猫在草地上奔跑"}],
+        "resolution": "1080p",
+        "ratio": "16:9",
+        "duration": 5,
+    },
+)
+print(resp.json()["id"])`,
+      },
+    ],
+  },
+  {
+    slug: 'ark-video-tasks-fetch',
+    method: 'GET',
+    path: '/api/v3/contents/generations/tasks/{task_id}',
+    protocol: 'ark',
+    category: 'video',
+    title: { en: 'Ark Video Task Query', zh: 'Seedance 视频任务查询' },
+    summary: {
+      en: 'Query the status and result of a Volcengine Ark video generation task.',
+      zh: '查询火山引擎方舟视频生成任务的状态与结果。',
+    },
+    auth: 'Bearer Token',
+    contentType: 'application/json',
+    requestParams: [
+      { name: 'task_id (path)', type: 'string', required: 'yes', description: { en: 'Task ID returned by the create endpoint.', zh: '创建接口返回的任务 ID。' } },
+    ],
+    responseParams: [
+      { name: 'id', type: 'string', required: 'yes', description: { en: 'Task ID.', zh: '任务 ID。' } },
+      { name: 'status', type: 'string', required: 'yes', description: { en: 'succeeded, running, failed.', zh: 'succeeded、running、failed。' } },
+      { name: 'model', type: 'string', required: 'no', description: { en: 'Model name.', zh: '模型名称。' } },
+      { name: 'content', type: 'object[]', required: 'conditional', description: { en: 'Output content (video URL) when succeeded.', zh: '成功时输出的内容（视频 URL）。' } },
+      { name: 'usage', type: 'object', required: 'no', description: { en: 'Token / duration usage.', zh: 'token / 时长用量。' } },
+      { name: 'error', type: 'object', required: 'conditional', description: { en: 'Error detail when failed.', zh: '失败时的错误详情。' } },
+    ],
+    errorCodes: [
+      { status: 401, description: { en: 'Unauthorized.', zh: '未授权。' } },
+      { status: 404, description: { en: 'task_not_exist — unknown task ID.', zh: 'task_not_exist——任务 ID 不存在。' } },
+    ],
+    codeSamples: [
+      {
+        lang: 'curl',
+        label: 'cURL',
+        highlight: 'bash',
+        code: `curl "https://<your-domain>/api/v3/contents/generations/tasks/<TASK_ID>" \\
+  -H "Authorization: Bearer <YOUR_API_KEY>"`,
+      },
+      {
+        lang: 'python',
+        label: 'Python',
+        highlight: 'python',
+        code: `import requests
+
+resp = requests.get(
+    "https://<your-domain>/api/v3/contents/generations/tasks/<TASK_ID>",
+    headers={"Authorization": "Bearer <YOUR_API_KEY>"},
+)
+print(resp.json()["status"])`,
+      },
+    ],
+  },
 ]

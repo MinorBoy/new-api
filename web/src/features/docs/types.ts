@@ -81,6 +81,7 @@ export type EndpointProtocol =
   | 'anthropic'
   | 'gemini'
   | 'gateway'
+  | 'ark'
   | 'mj'
   | 'suno'
 

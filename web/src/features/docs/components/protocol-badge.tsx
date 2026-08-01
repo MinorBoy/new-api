@@ -25,6 +25,7 @@ const PROTOCOL_LABELS: Record<EndpointProtocol, string> = {
   anthropic: 'Anthropic',
   gemini: 'Gemini',
   gateway: 'Gateway',
+  ark: 'Ark',
   mj: 'Midjourney',
   suno: 'Suno',
 }

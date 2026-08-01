@@ -24,13 +24,22 @@ import { cn } from '@/lib/utils'
 import { groupEndpointsByCategory } from '../lib/api-endpoints-helpers'
 import { resolveDocLocale } from '../lib/resolve-doc'
 import { docsNavGroups } from '../manifest'
-import type { DocLocale } from '../types'
+import type { DocLocale, HttpMethod } from '../types'
 
 /**
  * The id of the nav group whose landing page is the reference catalog. When
  * rendering this group we expand the full endpoint list under the landing link.
  */
 const REFERENCE_GROUP_ID = 'api-reference'
+
+/** Compact semantic color for the HTTP verb in the endpoint list. */
+const METHOD_TEXT_COLOR: Record<HttpMethod, string> = {
+  GET: 'text-emerald-600 dark:text-emerald-400',
+  POST: 'text-blue-600 dark:text-blue-400',
+  DELETE: 'text-rose-600 dark:text-rose-400',
+  PUT: 'text-amber-600 dark:text-amber-400',
+  PATCH: 'text-violet-600 dark:text-violet-400',
+}
 
 export function DocsSidebar({
   activeSlug,
@@ -46,17 +55,18 @@ export function DocsSidebar({
   const endpointGroups = groupEndpointsByCategory()
 
   return (
-    <nav aria-label={t('Documentation')} className='space-y-6 text-sm'>
+    <nav aria-label={t('Documentation')} className='flex flex-col gap-7 text-sm'>
       {docsNavGroups.map((group) => {
         const Icon = group.icon
         const isReferenceGroup = group.id === REFERENCE_GROUP_ID
         return (
-          <div key={group.id} className='space-y-1'>
-            <div className='text-muted-foreground flex items-center gap-2 px-2 text-xs font-semibold tracking-wide uppercase'>
+          <div key={group.id} className='flex flex-col gap-1.5'>
+            <div className='text-muted-foreground/80 flex items-center gap-1.5 px-2 text-[11px] font-semibold tracking-wide'>
               <Icon className='size-3.5' />
               <span>{resolveDocLocale(group.title, locale)}</span>
             </div>
-            <ul className='space-y-0.5'>
+
+            <ul className='flex flex-col gap-px'>
               {group.pages.map((page) => {
                 const isActive = page.slug === activeSlug
                 return (
@@ -66,55 +76,78 @@ export function DocsSidebar({
                       params={{ _splat: page.slug }}
                       onClick={onNavigate}
                       className={cn(
-                        'block rounded-md px-2 py-1.5 transition-colors',
+                        'group relative block rounded-md py-1.5 pr-2 pl-3 transition-colors',
                         isActive
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                          ? 'text-primary font-medium'
+                          : 'text-muted-foreground hover:text-foreground'
                       )}
                     >
-                      {resolveDocLocale(page.title, locale)}
+                      {isActive && (
+                        <span className='bg-primary absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full' />
+                      )}
+                      <span
+                        className={cn(
+                          'rounded-md px-1 py-0.5 -ml-1 transition-colors',
+                          isActive
+                            ? 'bg-primary/10'
+                            : 'group-hover:bg-muted'
+                        )}
+                      >
+                        {resolveDocLocale(page.title, locale)}
+                      </span>
                     </Link>
                   </li>
                 )
               })}
             </ul>
 
-            {/* Expand the full endpoint list under the API Reference group. */}
+            {/* Expand the full endpoint list under the API Reference group,
+                separated from the guide links by a hairline divider. */}
             {isReferenceGroup && (
-              <ul className='mt-2 space-y-3 border-l pl-2'>
-                {endpointGroups.map((endpointGroup) => (
-                  <li key={endpointGroup.id} className='space-y-0.5'>
-                    <div className='text-muted-foreground/70 px-2 text-[10px] font-semibold tracking-wide uppercase'>
-                      {resolveDocLocale(endpointGroup.title, locale)}
-                    </div>
-                    {endpointGroup.endpoints.map((endpoint) => {
-                      const endpointSlug = `reference/${endpoint.slug}`
-                      const isActive = endpointSlug === activeSlug
-                      return (
-                        <Link
-                          key={endpoint.slug}
-                          to='/docs/$'
-                          params={{ _splat: endpointSlug }}
-                          onClick={onNavigate}
-                          className={cn(
-                            'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
-                            isActive
-                              ? 'bg-primary/10 text-primary font-medium'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                          )}
-                        >
-                          <span className='font-mono text-[10px] font-bold opacity-70'>
-                            {endpoint.method}
-                          </span>
-                          <span className='truncate'>
-                            {resolveDocLocale(endpoint.title, locale)}
-                          </span>
-                        </Link>
-                      )
-                    })}
-                  </li>
-                ))}
-              </ul>
+              <div className='border-border/60 mt-1 border-t pt-3'>
+                <ul className='flex flex-col gap-3.5'>
+                  {endpointGroups.map((endpointGroup) => (
+                    <li key={endpointGroup.id} className='flex flex-col gap-px'>
+                      <div className='text-muted-foreground/60 px-3 text-[10px] font-medium tracking-wide uppercase'>
+                        {resolveDocLocale(endpointGroup.title, locale)}
+                      </div>
+                      {endpointGroup.endpoints.map((endpoint) => {
+                        const endpointSlug = `reference/${endpoint.slug}`
+                        const isActive = endpointSlug === activeSlug
+                        return (
+                          <Link
+                            key={endpoint.slug}
+                            to='/docs/$'
+                            params={{ _splat: endpointSlug }}
+                            onClick={onNavigate}
+                            className={cn(
+                              'group relative flex items-center gap-2 rounded-md py-1 pr-2 pl-3 text-xs transition-colors',
+                              isActive
+                                ? 'text-primary font-medium'
+                                : 'text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            {isActive && (
+                              <span className='bg-primary absolute top-1/2 left-0 h-3.5 w-0.5 -translate-y-1/2 rounded-full' />
+                            )}
+                            <span
+                              className={cn(
+                                'font-mono text-[10px] font-bold w-9 shrink-0',
+                                METHOD_TEXT_COLOR[endpoint.method]
+                              )}
+                            >
+                              {endpoint.method}
+                            </span>
+                            <span className='truncate'>
+                              {resolveDocLocale(endpoint.title, locale)}
+                            </span>
+                          </Link>
+                        )
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         )

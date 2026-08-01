@@ -19,9 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { PublicLayout } from '@/components/layout'
 
 import type { DocHeading } from '../lib/headings'
-import { docsNavGroups } from '../manifest'
 import type { DocLocale, ResolvedDoc } from '../types'
-import { DocsCategoryTabs } from './docs-category-tabs'
 import { DocsContent } from './docs-content'
 import { DocsMobileNav } from './docs-mobile-nav'
 import { DocsSidebar } from './docs-sidebar'
@@ -45,8 +43,7 @@ type DocsLayoutProps = {
 )
 
 /**
- * Three-column documentation shell:
- *   - top:    category switcher (sticky under the public header)
+ * Two-column documentation shell:
  *   - left:   docs sidebar (sticky on desktop, Sheet on mobile)
  *   - center: reading column (guide Markdown OR custom reference content)
  *   - right:  on-this-page outline (guide pages only, desktop)
@@ -59,18 +56,13 @@ export function DocsLayout({ doc, headings, locale, children }: DocsLayoutProps)
   // The active sidebar slug: guide pages use the doc slug; reference/endpoint
   // pages highlight the reference catalog entry.
   const activeSlug = doc?.slug ?? 'reference'
-  const activeGroup = docsNavGroups.find((group) =>
-    group.pages.some((page) => page.slug === activeSlug)
-  )
 
   return (
     <PublicLayout showMainContainer={false}>
-      <DocsCategoryTabs activeGroupId={activeGroup?.id ?? null} locale={locale} />
-
       <div className='mx-auto flex max-w-screen-2xl gap-0 lg:gap-8'>
         {/* Left rail */}
         <aside className='hidden w-64 shrink-0 lg:block'>
-          <div className='sticky top-32 max-h-[calc(100vh-9rem)] overflow-y-auto py-8 pr-4'>
+          <div className='sticky top-16 max-h-[calc(100vh-5rem)] overflow-y-auto py-8 pr-4'>
             <div className='mt-6'>
               <DocsSidebar activeSlug={activeSlug} locale={locale} />
             </div>
@@ -93,7 +85,7 @@ export function DocsLayout({ doc, headings, locale, children }: DocsLayoutProps)
         {/* Right rail — on-this-page only makes sense for guide pages */}
         {doc && headings && headings.length > 0 && (
           <aside className='hidden w-56 shrink-0 xl:block'>
-            <div className='sticky top-32 max-h-[calc(100vh-9rem)] overflow-y-auto py-8'>
+            <div className='sticky top-16 max-h-[calc(100vh-5rem)] overflow-y-auto py-8'>
               <OnThisPage headings={headings} />
             </div>
           </aside>

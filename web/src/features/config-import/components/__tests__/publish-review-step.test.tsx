@@ -183,3 +183,44 @@ test('keeps publishing disabled when a warning is unresolved', async () => {
     await act(async () => mounted.root.unmount())
   }
 })
+
+test('lists every model that will be retired for each affected channel', async () => {
+  const mounted = await mount({
+    currentBatch: batch({
+      channel_model_snapshots: [
+        {
+          channel_id: 21,
+          channel_name: 'clmm',
+          line_refs: ['channel-clmm'],
+          added_models: ['new-model'],
+          retained_models: ['kept-model'],
+          removed_models: [
+            'mg-seedance2.0-480p-fast-gz-15s',
+            'retired-model-with-a-very-long-name',
+          ],
+        },
+      ],
+    }),
+  })
+  try {
+    const content = mounted.container.textContent ?? ''
+    assert.match(content, /Channel model snapshot/)
+    assert.match(content, /clmm/)
+    assert.match(content, /mg-seedance2\.0-480p-fast-gz-15s/)
+    assert.match(content, /retired-model-with-a-very-long-name/)
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('shows a stable empty state when no models will be retired', async () => {
+  const mounted = await mount({ currentBatch: batch() })
+  try {
+    assert.match(
+      mounted.container.textContent ?? '',
+      /No models will be retired by this import\./
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})

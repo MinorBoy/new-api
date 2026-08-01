@@ -5889,6 +5889,11 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Channel model snapshot": "チャネルモデルのスナップショット",
+    "Review added, retained, and retired models for every bound channel.": "バインド済みの各チャネルについて、追加・維持・廃止されるモデルを確認します。",
+    "{{count}} models will be retired": "{{count}} 個のモデルが廃止されます",
+    "No models will be retired by this import.": "このインポートで廃止されるモデルはありません。",
+    "Models to retire": "廃止予定のモデル"
   }
 }

@@ -64,6 +64,17 @@ const entityCountsSchema = z.object({
   unresolved_variants: z.number().int().nonnegative(),
 })
 
+const channelModelSnapshotSchema = z
+  .object({
+    channel_id: z.number().int().positive(),
+    channel_name: z.string(),
+    line_refs: z.array(z.string()),
+    added_models: z.array(z.string()),
+    retained_models: z.array(z.string()),
+    removed_models: z.array(z.string()),
+  })
+  .strict()
+
 export const configImportItemSchema = z
   .object({
     id: z.number().int().positive(),
@@ -131,6 +142,7 @@ export const configImportBatchDetailSchema =
       )
       .optional(),
     issues: z.array(configImportIssueSchema),
+    channel_model_snapshots: z.array(channelModelSnapshotSchema).optional(),
   })
 
 export const configImportBindingSchema = z

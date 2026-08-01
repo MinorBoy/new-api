@@ -109,6 +109,15 @@ type ConfigImportEntityCounts struct {
 	UnresolvedVariants int `json:"unresolved_variants"`
 }
 
+type ConfigImportChannelModelSnapshotDiff struct {
+	ChannelID      int      `json:"channel_id"`
+	ChannelName    string   `json:"channel_name"`
+	LineRefs       []string `json:"line_refs"`
+	AddedModels    []string `json:"added_models"`
+	RetainedModels []string `json:"retained_models"`
+	RemovedModels  []string `json:"removed_models"`
+}
+
 // ConfigImportAuthoritativeEntity is embedded by every entity supplied by the
 // converter. Its source location makes each imported fact traceable to a
 // workbook row without relying on a mutable database identifier.

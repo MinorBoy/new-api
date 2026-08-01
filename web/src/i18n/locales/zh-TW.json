@@ -5889,6 +5889,11 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Channel model snapshot": "渠道模型快照",
+    "Review added, retained, and retired models for every bound channel.": "檢查每個已綁定渠道中新增、保留和下架的模型。",
+    "{{count}} models will be retired": "本次匯入將下架 {{count}} 個模型",
+    "No models will be retired by this import.": "本次匯入不會下架任何模型。",
+    "Models to retire": "待下架模型"
   }
 }

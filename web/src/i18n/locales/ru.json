@@ -5889,6 +5889,11 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Channel model snapshot": "Снимок моделей канала",
+    "Review added, retained, and retired models for every bound channel.": "Проверьте добавленные, сохраненные и выведенные из эксплуатации модели для каждого привязанного канала.",
+    "{{count}} models will be retired": "Будет выведено из эксплуатации моделей: {{count}}",
+    "No models will be retired by this import.": "При этом импорте модели не будут выведены из эксплуатации.",
+    "Models to retire": "Модели для вывода из эксплуатации"
   }
 }

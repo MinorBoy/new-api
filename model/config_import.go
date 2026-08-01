@@ -6,27 +6,54 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
+
+type ConfigImportBaselineJSON string
+
+func (ConfigImportBaselineJSON) GormDataType() string {
+	return "config_import_baseline_json"
+}
+
+func (ConfigImportBaselineJSON) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db.Dialector.Name() == "mysql" {
+		return "longtext"
+	}
+	return "text"
+}
+
+type ConfigImportSummaryJSON string
+
+func (ConfigImportSummaryJSON) GormDataType() string {
+	return "config_import_summary_json"
+}
+
+func (ConfigImportSummaryJSON) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db.Dialector.Name() == "mysql" {
+		return "longtext"
+	}
+	return "text"
+}
 
 // ConfigImportBatch is the resumable record for one credential-free
 // configuration import document.
 type ConfigImportBatch struct {
-	ID              int64  `json:"id" gorm:"primaryKey"`
-	SchemaVersion   int    `json:"schema_version"`
-	TemplateVersion string `json:"template_version" gorm:"type:varchar(32)"`
-	SourceSHA256    string `json:"source_sha256" gorm:"type:varchar(64);index"`
-	PayloadSHA256   string `json:"payload_sha256" gorm:"type:varchar(64);uniqueIndex"`
-	Status          string `json:"status" gorm:"type:varchar(32);index"`
-	CreatedBy       int    `json:"created_by" gorm:"index"`
-	SummaryJSON     string `json:"summary_json" gorm:"type:text"`
-	BaselineJSON    string `json:"baseline_json" gorm:"type:text"`
-	FailureCode     string `json:"failure_code" gorm:"type:varchar(64)"`
-	FailureMessage  string `json:"failure_message" gorm:"type:text"`
-	ValidatedAt     *int64 `json:"validated_at,omitempty"`
-	PublishedAt     *int64 `json:"published_at,omitempty"`
-	FailedAt        *int64 `json:"failed_at,omitempty"`
-	CreatedAt       int64  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       int64  `json:"updated_at" gorm:"autoUpdateTime"`
+	ID              int64                    `json:"id" gorm:"primaryKey"`
+	SchemaVersion   int                      `json:"schema_version"`
+	TemplateVersion string                   `json:"template_version" gorm:"type:varchar(32)"`
+	SourceSHA256    string                   `json:"source_sha256" gorm:"type:varchar(64);index"`
+	PayloadSHA256   string                   `json:"payload_sha256" gorm:"type:varchar(64);uniqueIndex"`
+	Status          string                   `json:"status" gorm:"type:varchar(32);index"`
+	CreatedBy       int                      `json:"created_by" gorm:"index"`
+	SummaryJSON     ConfigImportSummaryJSON  `json:"summary_json"`
+	BaselineJSON    ConfigImportBaselineJSON `json:"baseline_json"`
+	FailureCode     string                   `json:"failure_code" gorm:"type:varchar(64)"`
+	FailureMessage  string                   `json:"failure_message" gorm:"type:text"`
+	ValidatedAt     *int64                   `json:"validated_at,omitempty"`
+	PublishedAt     *int64                   `json:"published_at,omitempty"`
+	FailedAt        *int64                   `json:"failed_at,omitempty"`
+	CreatedAt       int64                    `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       int64                    `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (ConfigImportBatch) TableName() string {
@@ -63,10 +90,10 @@ func (ConfigImportItem) TableName() string {
 // deliberately absent; only their confirmation metadata is retained.
 type ConfigImportBinding struct {
 	ID                     int64  `json:"id" gorm:"primaryKey"`
-	BatchID                int64  `json:"batch_id" gorm:"not null;uniqueIndex:idx_config_import_binding_line,priority:1;uniqueIndex:idx_config_import_binding_channel,priority:1;index"`
+	BatchID                int64  `json:"batch_id" gorm:"not null;uniqueIndex:idx_config_import_binding_line,priority:1;index"`
 	LineRef                string `json:"line_ref" gorm:"type:varchar(191);not null;uniqueIndex:idx_config_import_binding_line,priority:2"`
 	Action                 string `json:"action" gorm:"type:varchar(32)"`
-	ChannelID              *int   `json:"channel_id,omitempty" gorm:"uniqueIndex:idx_config_import_binding_channel,priority:2;index"`
+	ChannelID              *int   `json:"channel_id,omitempty" gorm:"index"`
 	CredentialsConfirmedBy int    `json:"credentials_confirmed_by"`
 	CredentialsConfirmedAt *int64 `json:"credentials_confirmed_at,omitempty"`
 	SkipStateJSON          string `json:"-" gorm:"type:text"`

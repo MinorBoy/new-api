@@ -43,8 +43,11 @@ Expected: PASS。
 ### Task 2: 允许绑定渠道接受快照新增模型
 
 **Files:**
+- Modify: `model/config_import.go`
+- Modify: `model/main.go`
+- Test: `model/config_import_migration_test.go`
 - Modify: `service/config_import_stage.go`
-- Test: `service/config_import_pricing_test.go`
+- Test: `service/config_import_stage_test.go`
 
 - [ ] **Step 1: 编写失败测试**
 
@@ -58,7 +61,7 @@ Expected: FAIL，当前 `validateConfigImportBindingChannel` 返回 `BINDING_CHA
 
 - [ ] **Step 3: 实现最小绑定变更**
 
-删除现有渠道必须预先声明每个上游模型的验证；保留渠道类型、Secure 渠道线和 MegaByAI 能力验证。删除绑定阶段为新建渠道追加模型的副作用，所有模型写入统一延迟到发布事务。
+删除现有渠道必须预先声明每个上游模型的验证；保留渠道类型、Secure 渠道线和 MegaByAI 能力验证。删除绑定阶段为新建渠道追加模型的副作用，所有模型写入统一延迟到发布事务。删除旧 `idx_config_import_binding_channel` 唯一约束并加入幂等迁移，使同一渠道可绑定多条渠道线；保留每条渠道线在批次内唯一。
 
 - [ ] **Step 4: 运行绑定相关测试**
 

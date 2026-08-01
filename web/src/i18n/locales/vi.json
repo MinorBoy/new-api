@@ -5889,6 +5889,11 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Channel model snapshot": "Ảnh chụp mô hình kênh",
+    "Review added, retained, and retired models for every bound channel.": "Xem lại các mô hình được thêm, giữ lại và ngừng hoạt động cho từng kênh đã liên kết.",
+    "{{count}} models will be retired": "{{count}} mô hình sẽ ngừng hoạt động",
+    "No models will be retired by this import.": "Không có mô hình nào bị ngừng hoạt động trong lần nhập này.",
+    "Models to retire": "Các mô hình sẽ ngừng hoạt động"
   }
 }

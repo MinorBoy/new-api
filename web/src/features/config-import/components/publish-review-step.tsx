@@ -35,6 +35,11 @@ export function PublishReviewStep(props: PublishReviewStepProps) {
   const [confirmed, setConfirmed] = useState(false)
   const [error, setError] = useState<string>()
   const openIssues = useMemo(() => unresolvedIssues(props.batch), [props.batch])
+  const channelModelSnapshots = props.batch.channel_model_snapshots ?? []
+  const removedModelCount = channelModelSnapshots.reduce(
+    (total, snapshot) => total + snapshot.removed_models.length,
+    0
+  )
   const blocked = !props.canPublish || openIssues.length > 0
 
   const publish = async () => {
@@ -109,6 +114,75 @@ export function PublishReviewStep(props: PublishReviewStepProps) {
           <li>{t('Refresh configuration caches')}</li>
         </ol>
       </div>
+
+      <section
+        className='space-y-3 border-y py-3'
+        aria-labelledby='config-import-channel-model-snapshot-title'
+      >
+        <div className='flex flex-wrap items-start justify-between gap-2'>
+          <div>
+            <h3
+              id='config-import-channel-model-snapshot-title'
+              className='text-sm font-semibold'
+            >
+              {t('Channel model snapshot')}
+            </h3>
+            <p className='text-muted-foreground text-sm'>
+              {t(
+                'Review added, retained, and retired models for every bound channel.'
+              )}
+            </p>
+          </div>
+          {removedModelCount > 0 && (
+            <p className='text-destructive text-sm font-medium'>
+              {t('{{count}} models will be retired', {
+                count: removedModelCount,
+              })}
+            </p>
+          )}
+        </div>
+
+        {removedModelCount === 0 ? (
+          <p className='text-muted-foreground text-sm'>
+            {t('No models will be retired by this import.')}
+          </p>
+        ) : (
+          <div className='divide-y border-y'>
+            {channelModelSnapshots
+              .filter((snapshot) => snapshot.removed_models.length > 0)
+              .map((snapshot) => (
+                <section
+                  key={snapshot.channel_id}
+                  className='grid gap-2 py-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]'
+                >
+                  <div className='min-w-0'>
+                    <h4 className='text-sm font-medium break-words'>
+                      {snapshot.channel_name || `#${snapshot.channel_id}`}
+                    </h4>
+                    <p className='text-muted-foreground text-xs break-words'>
+                      {snapshot.line_refs.join(', ')}
+                    </p>
+                  </div>
+                  <div className='min-w-0'>
+                    <p className='text-destructive mb-1 text-xs font-medium'>
+                      {t('Models to retire')}
+                    </p>
+                    <ul className='space-y-1'>
+                      {snapshot.removed_models.map((modelName) => (
+                        <li
+                          key={modelName}
+                          className='bg-destructive/5 text-destructive px-2 py-1 font-mono text-xs break-all'
+                        >
+                          {modelName}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+              ))}
+          </div>
+        )}
+      </section>
 
       <IssueList issues={openIssues} />
 

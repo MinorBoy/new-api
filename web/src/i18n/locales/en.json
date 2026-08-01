@@ -5889,6 +5889,11 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Channel model snapshot": "Channel model snapshot",
+    "Review added, retained, and retired models for every bound channel.": "Review added, retained, and retired models for every bound channel.",
+    "{{count}} models will be retired": "{{count}} models will be retired",
+    "No models will be retired by this import.": "No models will be retired by this import.",
+    "Models to retire": "Models to retire"
   }
 }

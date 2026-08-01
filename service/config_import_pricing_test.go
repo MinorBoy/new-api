@@ -452,7 +452,7 @@ func TestConfigImportV1BaselineHashIsDeterministic(t *testing.T) {
 	assert.NotEmpty(t, first.Hash)
 }
 
-func TestConfigImportBaselineTracksOnlyPublishedPricingMappingsAndRoutes(t *testing.T) {
+func TestConfigImportBaselineTracksFullAffectedChannelState(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Option{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
 	modelMapping := `{"canonical-video":"vendor-video","unrelated-model":"unrelated-upstream"}`
@@ -489,16 +489,130 @@ func TestConfigImportBaselineTracksOnlyPublishedPricingMappingsAndRoutes(t *test
 	require.NoError(t, err)
 
 	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "ModelPrice").Update("value", `{"canonical-video":1,"unrelated-model":3}`).Error)
-	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("model_mapping", `{"canonical-video":"vendor-video","unrelated-model":"changed"}`).Error)
 	require.NoError(t, model.DB.Model(&model.RoutingPolicy{}).Where("id = ?", unrelatedPolicy.ID).Update("enabled", true).Error)
 	second, err := captureConfigImportBaseline(model.DB, batch.ID)
 	require.NoError(t, err)
 	assert.Equal(t, first.Hash, second.Hash)
 
-	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "ModelPrice").Update("value", `{"canonical-video":4,"unrelated-model":3}`).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("model_mapping", `{"canonical-video":"vendor-video","unrelated-model":"changed"}`).Error)
 	third, err := captureConfigImportBaseline(model.DB, batch.ID)
 	require.NoError(t, err)
 	assert.NotEqual(t, second.Hash, third.Hash)
+
+	require.NoError(t, model.DB.Model(&model.Option{}).Where("key = ?", "ModelPrice").Update("value", `{"canonical-video":4,"unrelated-model":3}`).Error)
+	fourth, err := captureConfigImportBaseline(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, third.Hash, fourth.Hash)
+}
+
+func TestGetConfigImportBatchIncludesChannelModelSnapshotDiff(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	existingMapping := `{"canonical-keep":"upstream-keep","canonical-old":"upstream-old"}`
+	channel := &model.Channel{
+		Type:         1,
+		Name:         "supplier",
+		Models:       "canonical-keep,upstream-keep,canonical-old,upstream-old",
+		Key:          "key",
+		ModelMapping: &existingMapping,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-keep")
+
+	for _, mapping := range []types.ConfigImportModelMapping{
+		{
+			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-keep"},
+			CanonicalModel:                  "canonical-keep",
+			ClientModel:                     "canonical-keep",
+			LineRef:                         "line-a",
+			UpstreamModel:                   "upstream-keep",
+			SKURef:                          "sku-a",
+		},
+		{
+			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-new"},
+			CanonicalModel:                  "canonical-new",
+			ClientModel:                     "canonical-new",
+			LineRef:                         "line-a",
+			UpstreamModel:                   "upstream-new",
+			SKURef:                          "sku-a",
+		},
+	} {
+		encoded, err := common.Marshal(mapping)
+		require.NoError(t, err)
+		require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+			BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+			CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+		}).Error)
+	}
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.ChannelModelSnapshots, 1)
+	assert.Equal(t, channel.Id, detail.ChannelModelSnapshots[0].ChannelID)
+	assert.Equal(t, "supplier", detail.ChannelModelSnapshots[0].ChannelName)
+	assert.Equal(t, []string{"line-a"}, detail.ChannelModelSnapshots[0].LineRefs)
+	assert.Equal(t, []string{"canonical-new", "upstream-new"}, detail.ChannelModelSnapshots[0].AddedModels)
+	assert.Equal(t, []string{"canonical-keep", "upstream-keep"}, detail.ChannelModelSnapshots[0].RetainedModels)
+	assert.Equal(t, []string{"canonical-old", "upstream-old"}, detail.ChannelModelSnapshots[0].RemovedModels)
+}
+
+func TestConfigImportChannelModelSnapshotUnionsLinesBoundToOneChannel(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-a")
+	confirmedAt := int64(1)
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "line-b", Action: string(types.ConfigImportBindingActionBind), ChannelID: &channel.Id,
+		CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+	}).Error)
+	for _, mapping := range []types.ConfigImportModelMapping{
+		{ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-a"}, CanonicalModel: "canonical-a", LineRef: "line-a", UpstreamModel: "upstream-a"},
+		{ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-b"}, CanonicalModel: "canonical-b", LineRef: "line-b", UpstreamModel: "upstream-b"},
+	} {
+		encoded, err := common.Marshal(mapping)
+		require.NoError(t, err)
+		require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+			BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+			CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+		}).Error)
+	}
+	var items []model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Find(&items).Error)
+
+	targets, err := configImportChannelModelSnapshotTargets(model.DB, items)
+	require.NoError(t, err)
+	require.Contains(t, targets, channel.Id)
+	assert.Equal(t, map[string]struct{}{
+		"canonical-a": {}, "upstream-a": {}, "canonical-b": {}, "upstream-b": {},
+	}, targets[channel.Id].Models)
+	assert.Equal(t, map[string]struct{}{"line-a": {}, "line-b": {}}, targets[channel.Id].LineRefs)
+}
+
+func TestConfigImportChannelModelSnapshotIncludesBoundChannelWithNoEffectiveMappings(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	existingMapping := `{"canonical-old":"upstream-old"}`
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "canonical-old,upstream-old", Key: "key", ModelMapping: &existingMapping}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-old")
+
+	var items []model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Find(&items).Error)
+	targets, err := configImportChannelModelSnapshotTargets(model.DB, items)
+	require.NoError(t, err)
+	require.Contains(t, targets, channel.Id)
+	assert.Empty(t, targets[channel.Id].Models)
+	assert.Empty(t, targets[channel.Id].Mapping)
+	assert.Equal(t, map[string]struct{}{"line-a": {}}, targets[channel.Id].LineRefs)
+
+	diffs, err := configImportChannelModelSnapshotDiffs(model.DB, items)
+	require.NoError(t, err)
+	require.Len(t, diffs, 1)
+	assert.Empty(t, diffs[0].AddedModels)
+	assert.Empty(t, diffs[0].RetainedModels)
+	assert.Equal(t, []string{"canonical-old", "upstream-old"}, diffs[0].RemovedModels)
 }
 
 func createConfigImportStageBatch(t *testing.T, channelID int, lineRef, upstreamModel string) model.ConfigImportBatch {
@@ -507,7 +621,7 @@ func createConfigImportStageBatch(t *testing.T, channelID int, lineRef, upstream
 	require.NoError(t, err)
 	batch := model.ConfigImportBatch{
 		SchemaVersion: 1, TemplateVersion: "1", SourceSHA256: strings.Repeat("a", 64), PayloadSHA256: strings.Repeat("b", 64),
-		Status: string(types.ConfigImportBatchStatusBinding), CreatedBy: 42, SummaryJSON: string(summary), BaselineJSON: "{}",
+		Status: string(types.ConfigImportBatchStatusBinding), CreatedBy: 42, SummaryJSON: model.ConfigImportSummaryJSON(summary), BaselineJSON: "{}",
 	}
 	require.NoError(t, model.DB.Create(&batch).Error)
 

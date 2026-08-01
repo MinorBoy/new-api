@@ -23,3 +23,9 @@ func lockForUpdate(tx *gorm.DB) *gorm.DB {
 	}
 	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 }
+
+// LockChannelsForUpdate applies the shared cross-database row-lock policy to
+// channel reads that must remain stable for a surrounding transaction.
+func LockChannelsForUpdate(tx *gorm.DB) *gorm.DB {
+	return lockForUpdate(tx).Model(&Channel{})
+}

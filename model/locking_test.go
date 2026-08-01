@@ -36,3 +36,19 @@ func TestLockForUpdateEmitsRowLock(t *testing.T) {
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	assert.NotContains(t, buildSQL(), "FOR UPDATE")
 }
+
+func TestLockChannelsForUpdateEmitsRowLock(t *testing.T) {
+	dummyDB, err := gorm.Open(tests.DummyDialector{}, &gorm.Config{DryRun: true})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	})
+
+	common.SetDatabaseTypes(common.DatabaseTypeMySQL, common.DatabaseTypeSQLite)
+	var channels []Channel
+	statement := LockChannelsForUpdate(dummyDB).
+		Where("id IN ?", []int{2, 1}).
+		Order("id ASC").
+		Find(&channels).Statement.SQL.String()
+	assert.Contains(t, statement, "FOR UPDATE")
+}

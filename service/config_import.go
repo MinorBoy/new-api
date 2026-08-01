@@ -21,8 +21,9 @@ const (
 )
 
 type configImportBatchSummaryStorage struct {
-	ItemCounts types.ConfigImportEntityCounts `json:"item_counts"`
-	IssueCount int                            `json:"issue_count"`
+	ItemCounts            types.ConfigImportEntityCounts               `json:"item_counts"`
+	IssueCount            int                                          `json:"issue_count"`
+	ChannelModelSnapshots []types.ConfigImportChannelModelSnapshotDiff `json:"channel_model_snapshots,omitempty"`
 }
 
 // CreateConfigImportBatch persists a credential-free, normalized import
@@ -106,8 +107,8 @@ func createConfigImportBatch(ctx context.Context, adminID int, document *types.C
 			PayloadSHA256:   document.Manifest.PayloadSHA256,
 			Status:          string(types.ConfigImportBatchStatusValidating),
 			CreatedBy:       adminID,
-			SummaryJSON:     string(summaryJSON),
-			BaselineJSON:    string(baselineJSON),
+			SummaryJSON:     model.ConfigImportSummaryJSON(summaryJSON),
+			BaselineJSON:    model.ConfigImportBaselineJSON(baselineJSON),
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -249,6 +250,14 @@ func GetConfigImportBatch(ctx context.Context, batchID int64) (*dto.ConfigImport
 		Items:                    make([]dto.ConfigImportItemDetail, 0, len(items)),
 		Bindings:                 make([]dto.ConfigImportBindingDetail, 0, len(bindings)),
 		Issues:                   make([]dto.ConfigImportIssueDetail, 0, len(issues)),
+		ChannelModelSnapshots:    []types.ConfigImportChannelModelSnapshotDiff{},
+	}
+	var storedSummary configImportBatchSummaryStorage
+	if err := common.UnmarshalJsonStr(string(batch.SummaryJSON), &storedSummary); err != nil {
+		return nil, fmt.Errorf("decode config import batch %d summary: %w", batch.ID, err)
+	}
+	if storedSummary.ChannelModelSnapshots != nil {
+		detail.ChannelModelSnapshots = storedSummary.ChannelModelSnapshots
 	}
 	for index := range items {
 		detail.Items = append(detail.Items, dto.ConfigImportItemDetail{
@@ -420,7 +429,7 @@ func configImportEntityCounts(entities types.ConfigImportEntities) types.ConfigI
 
 func configImportBatchSummary(batch *model.ConfigImportBatch, issues []model.ConfigImportIssue) (dto.ConfigImportBatchSummary, error) {
 	var stored configImportBatchSummaryStorage
-	if err := common.UnmarshalJsonStr(batch.SummaryJSON, &stored); err != nil {
+	if err := common.UnmarshalJsonStr(string(batch.SummaryJSON), &stored); err != nil {
 		return dto.ConfigImportBatchSummary{}, fmt.Errorf("decode config import batch %d summary: %w", batch.ID, err)
 	}
 	return dto.ConfigImportBatchSummary{

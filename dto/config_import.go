@@ -168,9 +168,10 @@ type ConfigImportIssueDetail struct {
 // deliberately omits the raw upload and its derived preview.
 type ConfigImportBatchDetail struct {
 	ConfigImportBatchSummary
-	Items    []ConfigImportItemDetail    `json:"items"`
-	Bindings []ConfigImportBindingDetail `json:"bindings"`
-	Issues   []ConfigImportIssueDetail   `json:"issues"`
+	Items                 []ConfigImportItemDetail                     `json:"items"`
+	Bindings              []ConfigImportBindingDetail                  `json:"bindings"`
+	Issues                []ConfigImportIssueDetail                    `json:"issues"`
+	ChannelModelSnapshots []types.ConfigImportChannelModelSnapshotDiff `json:"channel_model_snapshots"`
 }
 
 type ConfigImportBindingDetail struct {

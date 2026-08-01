@@ -268,6 +268,9 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	if err := migrateConfigImportBindingChannelIndex(); err != nil {
+		return err
+	}
 	// Extend cost rule and route target business keys with cost_variant_key
 	// before AutoMigrate runs, so the new column is present, backfilled, and
 	// the old three-column unique index is replaced by the four-column one.
@@ -353,6 +356,9 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := migrateConfigImportBindingChannelIndex(); err != nil {
+		return err
+	}
 
 	// Extend cost rule and route target business keys with cost_variant_key
 	// before AutoMigrate runs. The fast path still needs this because it
@@ -728,6 +734,22 @@ PRIMARY KEY (` + "`id`" + `)
 		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// migrateConfigImportBindingChannelIndex removes the legacy one-channel-per-line
+// constraint. Snapshot imports may bind multiple source lines to one channel;
+// the publish transaction unions those lines before replacing the model list.
+func migrateConfigImportBindingChannelIndex() error {
+	if DB == nil || !DB.Migrator().HasTable(&ConfigImportBinding{}) {
+		return nil
+	}
+	if !DB.Migrator().HasIndex(&ConfigImportBinding{}, "idx_config_import_binding_channel") {
+		return nil
+	}
+	if err := DB.Migrator().DropIndex(&ConfigImportBinding{}, "idx_config_import_binding_channel"); err != nil {
+		return fmt.Errorf("drop legacy idx_config_import_binding_channel: %w", err)
 	}
 	return nil
 }

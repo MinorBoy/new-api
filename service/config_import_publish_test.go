@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.T) {
@@ -91,6 +93,131 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	after, err := CaptureConfigImportBaseline(model.DB, batch.ID)
 	require.NoError(t, err)
 	assert.Equal(t, after.Hash, audit.AfterSHA256)
+}
+
+func TestPublishConfigImportBatchReplacesBoundChannelModelSnapshot(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptionMap
+		common.OptionMapRWMutex.Unlock()
+	})
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}, &model.Option{},
+		&model.RoutingPolicy{}, &model.RouteTarget{}, &model.ConfigImportPublishAudit{},
+	))
+	existingMapping := `{"canonical-keep":"upstream-keep","canonical-old":"upstream-old"}`
+	channel := &model.Channel{
+		Type: 1, Name: "supplier", Group: "default", Status: common.ChannelStatusEnabled,
+		Models: "canonical-keep,upstream-keep,canonical-old,upstream-old", Key: "key", ModelMapping: &existingMapping,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, channel.UpdateAbilities(model.DB))
+	oldRule := &model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "upstream-old", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1, ConfigJSON: `{}`,
+	}
+	require.NoError(t, model.DB.Create(oldRule).Error)
+	oldTarget := &model.RouteTarget{
+		PolicyID: 999, ChannelID: channel.Id, Name: "old-target", UpstreamModel: "upstream-old",
+		CostVariantKey: "default", Constraints: `{}`, Enabled: true,
+	}
+	require.NoError(t, model.DB.Create(oldTarget).Error)
+
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-keep")
+	var importedRoute model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "route_blueprints").First(&importedRoute).Error)
+	var skippedBlueprint types.ConfigImportRouteBlueprint
+	require.NoError(t, common.UnmarshalJsonStr(importedRoute.CanonicalJSON, &skippedBlueprint))
+	skippedBlueprint.MergeMode = types.ConfigImportRouteMergeModeSkip
+	encodedRoute, err := common.Marshal(skippedBlueprint)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&importedRoute).Update("canonical_json", string(encodedRoute)).Error)
+	for _, mapping := range []types.ConfigImportModelMapping{
+		{
+			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-keep"},
+			CanonicalModel:                  "canonical-keep", ClientModel: "canonical-keep", LineRef: "line-a", UpstreamModel: "upstream-keep", SKURef: "sku-a",
+		},
+		{
+			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-new"},
+			CanonicalModel:                  "canonical-new", ClientModel: "canonical-new", LineRef: "line-a", UpstreamModel: "upstream-new", SKURef: "sku-a",
+		},
+	} {
+		encoded, err := common.Marshal(mapping)
+		require.NoError(t, err)
+		require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+			BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+			CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+		}).Error)
+	}
+
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
+
+	var savedChannel model.Channel
+	require.NoError(t, model.DB.First(&savedChannel, channel.Id).Error)
+	assert.Equal(t, "canonical-keep,canonical-new,upstream-keep,upstream-new", savedChannel.Models)
+	var savedMapping map[string]string
+	require.NoError(t, common.UnmarshalJsonStr(savedChannel.GetModelMapping(), &savedMapping))
+	assert.Equal(t, map[string]string{
+		"canonical-keep": "upstream-keep",
+		"canonical-new":  "upstream-new",
+	}, savedMapping)
+	var abilities []model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ?", channel.Id).Order("model ASC").Find(&abilities).Error)
+	require.Len(t, abilities, 4)
+	assert.Equal(t, []string{"canonical-keep", "canonical-new", "upstream-keep", "upstream-new"}, []string{
+		abilities[0].Model, abilities[1].Model, abilities[2].Model, abilities[3].Model,
+	})
+	require.NoError(t, model.DB.First(oldTarget, oldTarget.ID).Error)
+	assert.False(t, oldTarget.Enabled)
+	require.NoError(t, model.DB.First(oldRule, oldRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleRetired), oldRule.Status)
+	assert.NotNil(t, oldRule.EffectiveTo)
+}
+
+func TestPublishConfigImportModelSnapshotRollsBackWithTransaction(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	existingMapping := `{"canonical-old":"upstream-old"}`
+	channel := &model.Channel{Type: 1, Name: "supplier", Group: "default", Models: "canonical-old,upstream-old", Key: "key", ModelMapping: &existingMapping}
+	require.NoError(t, model.DB.Create(channel).Error)
+	oldRule := &model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "upstream-old", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1, ConfigJSON: `{}`,
+	}
+	require.NoError(t, model.DB.Create(oldRule).Error)
+	oldTarget := &model.RouteTarget{PolicyID: 999, ChannelID: channel.Id, Name: "old-target", UpstreamModel: "upstream-old", CostVariantKey: "default", Constraints: `{}`, Enabled: true}
+	require.NoError(t, model.DB.Create(oldTarget).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-new")
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-new"},
+		CanonicalModel:                  "canonical-new", LineRef: "line-a", UpstreamModel: "upstream-new",
+	}
+	encoded, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	item := model.ConfigImportItem{BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID, CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew)}
+	require.NoError(t, model.DB.Create(&item).Error)
+
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		require.NoError(t, publishConfigImportModelMappings(tx, []model.ConfigImportItem{item}, &ConfigImportRefreshKeys{}))
+		return errors.New("force rollback")
+	})
+	require.ErrorContains(t, err, "force rollback")
+
+	var savedChannel model.Channel
+	require.NoError(t, model.DB.First(&savedChannel, channel.Id).Error)
+	assert.Equal(t, "canonical-old,upstream-old", savedChannel.Models)
+	assert.JSONEq(t, existingMapping, savedChannel.GetModelMapping())
+	require.NoError(t, model.DB.First(oldRule, oldRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleActive), oldRule.Status)
+	require.NoError(t, model.DB.First(oldTarget, oldTarget.ID).Error)
+	assert.True(t, oldTarget.Enabled)
 }
 
 func TestConfigImportRouteRowsAssignsStablePrioritiesForImplicitTargets(t *testing.T) {
@@ -429,20 +556,34 @@ func TestPublishConfigImportBatchIgnoresUnrelatedActiveCostRule(t *testing.T) {
 	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
 	require.NoError(t, model.DB.Create(channel).Error)
 	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
-	_, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-keep"},
+		CanonicalModel:                  "vendor-video", LineRef: "line-a", UpstreamModel: "vendor-video",
+	}
+	mappingJSON, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+		CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
 	require.NoError(t, err)
 
 	var item model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&item).Error)
 	var rule model.ChannelModelCostRule
 	require.NoError(t, model.DB.First(&rule, *item.MaterializedID).Error)
-	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{ChannelID: channel.Id, BillableUpstreamModel: "unrelated-model", CostVariantKey: "default", Version: 1, Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`}).Error)
+	unrelatedRule := &model.ChannelModelCostRule{ChannelID: channel.Id, BillableUpstreamModel: "unrelated-model", CostVariantKey: "default", Version: 1, Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`}
+	require.NoError(t, model.DB.Create(unrelatedRule).Error)
 
 	err = PublishConfigImportBatch(context.Background(), batch.ID, 42)
 	require.NoError(t, err)
 	var loaded model.ChannelModelCostRule
 	require.NoError(t, model.DB.First(&loaded, rule.ID).Error)
 	assert.Equal(t, string(types.CostRuleActive), loaded.Status)
+	var unrelatedLoaded model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&unrelatedLoaded, unrelatedRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleActive), unrelatedLoaded.Status)
 	var loadedBatch model.ConfigImportBatch
 	require.NoError(t, model.DB.First(&loadedBatch, batch.ID).Error)
 	assert.Equal(t, string(types.ConfigImportBatchStatusPublished), loadedBatch.Status)
@@ -469,13 +610,54 @@ func TestPublishConfigImportBatchRejectsChangedAffectedCostRule(t *testing.T) {
 	assert.Equal(t, "STALE_BASE_VERSION", schemaErr.Code)
 }
 
+func TestPublishConfigImportBatchRejectsChangedAffectedChannelSnapshot(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
+	existingMapping := `{"canonical-keep":"upstream-keep"}`
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "canonical-keep,upstream-keep", Key: "key", ModelMapping: &existingMapping}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-keep")
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-keep"},
+		CanonicalModel:                  "canonical-keep", LineRef: "line-a", UpstreamModel: "upstream-keep",
+	}
+	encoded, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+		CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("models", "canonical-keep,upstream-keep,concurrent-model").Error)
+
+	err = PublishConfigImportBatch(context.Background(), batch.ID, 42)
+	require.ErrorIs(t, err, ErrConfigImportStale)
+	var schemaErr *ConfigImportSchemaError
+	require.ErrorAs(t, err, &schemaErr)
+	assert.Equal(t, "STALE_BASE_VERSION", schemaErr.Code)
+	var savedChannel model.Channel
+	require.NoError(t, model.DB.First(&savedChannel, channel.Id).Error)
+	assert.Equal(t, "canonical-keep,upstream-keep,concurrent-model", savedChannel.Models)
+}
+
 func TestPublishConfigImportBatchActivatesDraftAndAudits(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
 	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
 	require.NoError(t, model.DB.Create(channel).Error)
 	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
-	_, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-keep"},
+		CanonicalModel:                  "vendor-video", LineRef: "line-a", UpstreamModel: "vendor-video",
+	}
+	mappingJSON, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+		CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
 	require.NoError(t, err)
 	err = PublishConfigImportBatch(context.Background(), batch.ID, 42)
 	require.NoError(t, err)

@@ -38,7 +38,7 @@ func TestConfigImportMigrationUsesTextForCanonicalJSON(t *testing.T) {
 	assert.Contains(t, strings.ToUpper(itemDDL.SQL), "`CANONICAL_JSON` TEXT")
 }
 
-func TestConfigImportMigrationCreatesBatchChannelUniqueIndex(t *testing.T) {
+func TestConfigImportMigrationAllowsOneChannelAcrossMultipleLines(t *testing.T) {
 	prepareConfigImportDB(t)
 
 	type indexRow struct {
@@ -49,11 +49,19 @@ func TestConfigImportMigrationCreatesBatchChannelUniqueIndex(t *testing.T) {
 	require.NoError(t, DB.Raw(`PRAGMA index_list('config_import_bindings')`).Scan(&indexes).Error)
 	for _, index := range indexes {
 		if index.Name == "idx_config_import_binding_channel" {
-			assert.Equal(t, 1, index.Unique)
-			return
+			t.Fatalf("legacy unique index still exists: %+v", index)
 		}
 	}
-	t.Fatal("missing idx_config_import_binding_channel")
+}
+
+func TestConfigImportMigrationDropsLegacyBatchChannelUniqueIndex(t *testing.T) {
+	prepareConfigImportDB(t)
+	require.NoError(t, DB.Exec("CREATE UNIQUE INDEX idx_config_import_binding_channel ON config_import_bindings(batch_id, channel_id)").Error)
+	require.True(t, DB.Migrator().HasIndex(&ConfigImportBinding{}, "idx_config_import_binding_channel"))
+
+	require.NoError(t, migrateConfigImportBindingChannelIndex())
+	assert.False(t, DB.Migrator().HasIndex(&ConfigImportBinding{}, "idx_config_import_binding_channel"))
+	require.NoError(t, migrateConfigImportBindingChannelIndex())
 }
 
 func TestConfigImportMigrationConfiguredDatabases(t *testing.T) {
@@ -131,5 +139,5 @@ func testConfigImportMigrationContracts(t *testing.T, db *gorm.DB, _ common.Data
 
 	channelID := 99
 	require.NoError(t, db.Create(&ConfigImportBinding{BatchID: batch.ID, LineRef: "line-a", Action: "bind", ChannelID: &channelID}).Error)
-	require.Error(t, db.Create(&ConfigImportBinding{BatchID: batch.ID, LineRef: "line-b", Action: "bind", ChannelID: &channelID}).Error)
+	require.NoError(t, db.Create(&ConfigImportBinding{BatchID: batch.ID, LineRef: "line-b", Action: "bind", ChannelID: &channelID}).Error)
 }

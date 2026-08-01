@@ -212,7 +212,7 @@ func TestConfigImportBindingSingleRequestReappliesSkipAfterEarlierBind(t *testin
 	assert.Empty(t, route.ExclusionReason)
 }
 
-func TestConfigImportBindingMapsDatabaseChannelUniquenessConflict(t *testing.T) {
+func TestConfigImportBindingAllowsOneChannelAcrossMultipleLines(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t,
 		configImportBindingLineFixture{lineRef: "line-one", channelRef: "supplier", channelType: constant.ChannelTypeOpenAI, models: []string{"gpt-test"}},
@@ -224,15 +224,17 @@ func TestConfigImportBindingMapsDatabaseChannelUniquenessConflict(t *testing.T) 
 			LineRef: "line-one", Action: types.ConfigImportBindingActionBind, ChannelID: &channelID,
 		}, 42)
 	}))
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
+	require.NoError(t, model.DB.Transaction(func(tx *gorm.DB) error {
 		return saveConfigImportBinding(tx, batch.ID, dto.ConfigImportBindingInput{
 			LineRef: "line-two", Action: types.ConfigImportBindingActionBind, ChannelID: &channelID,
 		}, 42)
-	})
-	require.ErrorContains(t, err, "BINDING_CHANNEL_LINE_CONFLICT")
+	}))
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ConfigImportBinding{}).Where("batch_id = ? AND channel_id = ?", batch.ID, channelID).Count(&count).Error)
+	assert.Equal(t, int64(2), count)
 }
 
-func TestConfigImportBindingRejectsProviderTypeAndModelMismatches(t *testing.T) {
+func TestConfigImportBindingRejectsProviderTypeButAllowsSnapshotModels(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
 		lineRef: "line-openai", channelRef: "supplier-openai", channelType: constant.ChannelTypeOpenAI,
@@ -251,7 +253,7 @@ func TestConfigImportBindingRejectsProviderTypeAndModelMismatches(t *testing.T) 
 	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
 		LineRef: "line-openai", Action: types.ConfigImportBindingActionBind, ChannelID: &wrongModel.Id,
 	}})
-	require.ErrorContains(t, err, "BINDING_CHANNEL_MODEL")
+	require.NoError(t, err)
 }
 
 func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(t *testing.T) {
@@ -283,7 +285,7 @@ func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(
 	require.NotNil(t, binding.CredentialsConfirmedAt)
 }
 
-func TestConfigImportBindingCreateAddsImportedUpstreamModels(t *testing.T) {
+func TestConfigImportBindingCreateDefersModelReplacementUntilPublish(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
 		lineRef: "line-openai", channelRef: "supplier-openai", channelType: constant.ChannelTypeOpenAI,
@@ -301,14 +303,14 @@ func TestConfigImportBindingCreateAddsImportedUpstreamModels(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, model.DB.First(channel, channel.Id).Error)
-	assert.Equal(t, "existing-model,gpt-test", channel.Models)
-	var ability model.Ability
-	require.NoError(t, model.DB.Where(&model.Ability{
+	assert.Equal(t, "existing-model", channel.Models)
+	var abilityCount int64
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where(&model.Ability{
 		ChannelId: channel.Id,
 		Group:     "default",
 		Model:     "gpt-test",
-	}).First(&ability).Error)
-	assert.False(t, ability.Enabled)
+	}).Count(&abilityCount).Error)
+	assert.Zero(t, abilityCount)
 }
 
 func TestConfigImportBindingRecoversUnpersistedCreatedChannel(t *testing.T) {
@@ -330,7 +332,7 @@ func TestConfigImportBindingRecoversUnpersistedCreatedChannel(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, model.DB.First(channel, channel.Id).Error)
-	assert.Equal(t, "existing-model,gpt-test", channel.Models)
+	assert.Equal(t, "existing-model", channel.Models)
 	var binding model.ConfigImportBinding
 	require.NoError(t, model.DB.Where("batch_id = ? AND line_ref = ?", batch.ID, "line-openai").First(&binding).Error)
 	assert.Equal(t, string(types.ConfigImportBindingActionCreate), binding.Action)
@@ -353,7 +355,7 @@ func TestConfigImportBindingDoesNotRecoverExistingDisabledChannel(t *testing.T) 
 		{LineRef: "line-openai", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id, CredentialsConfirmed: true},
 	})
 
-	require.ErrorContains(t, err, "BINDING_CHANNEL_MODEL")
+	require.NoError(t, err)
 	require.NoError(t, model.DB.First(channel, channel.Id).Error)
 	assert.Equal(t, "existing-model", channel.Models)
 }
@@ -436,7 +438,7 @@ func createConfigImportBindingBatch(t *testing.T, lines ...configImportBindingLi
 	batch := model.ConfigImportBatch{
 		SchemaVersion: 1, TemplateVersion: "test", SourceSHA256: strings.Repeat("a", 64),
 		PayloadSHA256: strings.Repeat("b", 64), Status: string(types.ConfigImportBatchStatusBinding),
-		CreatedBy: 42, SummaryJSON: string(summaryJSON), BaselineJSON: "{}",
+		CreatedBy: 42, SummaryJSON: model.ConfigImportSummaryJSON(summaryJSON), BaselineJSON: "{}",
 	}
 	require.NoError(t, model.DB.Create(&batch).Error)
 

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -8,8 +9,53 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
+
+func TestConfigImportSnapshotJSONUsesUnlimitedDatabaseText(t *testing.T) {
+	parsed, err := schema.Parse(&ConfigImportBatch{}, &sync.Map{}, schema.NamingStrategy{})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name      string
+		dialector gorm.Dialector
+		want      string
+	}{
+		{
+			name: "mysql",
+			dialector: mysql.New(mysql.Config{
+				DSN:                       "gorm:gorm@tcp(127.0.0.1:9910)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+				SkipInitializeWithVersion: true,
+			}),
+			want: "longtext",
+		},
+		{
+			name:      "postgresql",
+			dialector: postgres.New(postgres.Config{DSN: "host=127.0.0.1 user=gorm dbname=gorm sslmode=disable"}),
+			want:      "text",
+		},
+		{
+			name:      "sqlite",
+			dialector: sqlite.Open(":memory:"),
+			want:      "text",
+		},
+	}
+
+	for _, fieldName := range []string{"SummaryJSON", "BaselineJSON"} {
+		field := parsed.LookUpField(fieldName)
+		require.NotNil(t, field)
+		for _, tt := range tests {
+			t.Run(fieldName+"/"+tt.name, func(t *testing.T) {
+				db, err := gorm.Open(tt.dialector, &gorm.Config{DisableAutomaticPing: true})
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, db.Migrator().FullDataTypeOf(field).SQL)
+			})
+		}
+	}
+}
 
 func prepareConfigImportDB(t *testing.T) {
 	t.Helper()
@@ -162,14 +208,14 @@ func TestConfigImportBindingLineRefIsUniqueWithinBatch(t *testing.T) {
 	}).Error)
 }
 
-func TestConfigImportBindingChannelIsUniqueWithinBatchWhileSkipsRemainAllowed(t *testing.T) {
+func TestConfigImportBindingChannelMayBeSharedAcrossLinesWhileLineRefsStayUnique(t *testing.T) {
 	prepareConfigImportDB(t)
 	batch := createConfigImportBatch(t, "payload-sha256-channel-unique")
 	channelID := 41
 	require.NoError(t, DB.Create(&ConfigImportBinding{
 		BatchID: batch.ID, LineRef: "line-one", ChannelID: &channelID,
 	}).Error)
-	require.Error(t, DB.Create(&ConfigImportBinding{
+	require.NoError(t, DB.Create(&ConfigImportBinding{
 		BatchID: batch.ID, LineRef: "line-two", ChannelID: &channelID,
 	}).Error)
 	require.NoError(t, DB.Create(&ConfigImportBinding{

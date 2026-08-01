@@ -5889,6 +5889,11 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Channel model snapshot": "Instantané des modèles de canal",
+    "Review added, retained, and retired models for every bound channel.": "Vérifiez les modèles ajoutés, conservés et retirés pour chaque canal associé.",
+    "{{count}} models will be retired": "{{count}} modèles seront retirés",
+    "No models will be retired by this import.": "Aucun modèle ne sera retiré par cet import.",
+    "Models to retire": "Modèles à retirer"
   }
 }

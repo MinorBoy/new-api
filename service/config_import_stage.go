@@ -113,40 +113,7 @@ func UpdateConfigImportBindings(
 			if input.Action == types.ConfigImportBindingActionCreate && channel.Status != common.ChannelStatusManuallyDisabled {
 				return configImportError("BINDING_NEW_CHANNEL_STATUS", "new channel %d must be manually disabled", channel.Id)
 			}
-			if input.Action == types.ConfigImportBindingActionCreate {
-				declaredModels := make(map[string]struct{}, len(channel.GetModels()))
-				for _, modelName := range channel.GetModels() {
-					if modelName = strings.TrimSpace(modelName); modelName != "" {
-						declaredModels[modelName] = struct{}{}
-					}
-				}
-				var missingModels []string
-				for _, modelName := range catalog.models[input.LineRef] {
-					modelName = strings.TrimSpace(modelName)
-					if modelName == "" {
-						continue
-					}
-					if _, found := declaredModels[modelName]; found {
-						continue
-					}
-					declaredModels[modelName] = struct{}{}
-					missingModels = append(missingModels, modelName)
-				}
-				if len(missingModels) > 0 {
-					channel.Models = strings.Trim(strings.TrimSpace(channel.Models), ",")
-					if channel.Models != "" {
-						channel.Models += ","
-					}
-					channel.Models += strings.Join(missingModels, ",")
-					if err := tx.Model(channel).Update("models", channel.Models).Error; err != nil {
-						return err
-					}
-					if err := channel.UpdateAbilities(tx); err != nil {
-						return err
-					}
-				}
-			}
-			if err := rejectConfigImportChannelLineConflict(tx, batchID, input.LineRef, channel.Id); err != nil {
+			if err := rejectConfigImportChannelCapabilityConflict(tx, batchID, catalog, line, channel); err != nil {
 				return err
 			}
 			if err := validateConfigImportBindingChannel(catalog, line, channel); err != nil {
@@ -291,17 +258,6 @@ func validateConfigImportBindingChannel(
 	if len(requiredModels) == 0 {
 		return configImportError("BINDING_CHANNEL_MODEL", "line_ref %q has no declared upstream models", line.LineRef)
 	}
-	declaredModels := make(map[string]struct{}, len(channel.GetModels()))
-	for _, modelName := range channel.GetModels() {
-		if modelName = strings.TrimSpace(modelName); modelName != "" {
-			declaredModels[modelName] = struct{}{}
-		}
-	}
-	for _, modelName := range requiredModels {
-		if _, found := declaredModels[modelName]; !found {
-			return configImportError("BINDING_CHANNEL_MODEL", "channel %d does not declare model %q for line_ref %q", channel.Id, modelName, line.LineRef)
-		}
-	}
 	if err := validateConfigImportLineCapability(line, channel); err != nil {
 		return err
 	}
@@ -341,16 +297,31 @@ func validateConfigImportLineCapability(line types.ConfigImportChannelLine, chan
 	return nil
 }
 
-func rejectConfigImportChannelLineConflict(tx *gorm.DB, batchID int64, lineRef string, channelID int) error {
-	var count int64
-	if err := tx.Model(&model.ConfigImportBinding{}).
-		Where("batch_id = ? AND channel_id = ? AND line_ref <> ? AND action IN ?", batchID, channelID, lineRef,
-			[]string{string(types.ConfigImportBindingActionBind), string(types.ConfigImportBindingActionCreate)}).
-		Count(&count).Error; err != nil {
+func rejectConfigImportChannelCapabilityConflict(
+	tx *gorm.DB,
+	batchID int64,
+	catalog *configImportBindingCatalog,
+	line types.ConfigImportChannelLine,
+	channel *model.Channel,
+) error {
+	var existingBindings []model.ConfigImportBinding
+	if err := tx.Where("batch_id = ? AND channel_id = ? AND line_ref <> ? AND action IN ?", batchID, channel.Id, line.LineRef,
+		[]string{string(types.ConfigImportBindingActionBind), string(types.ConfigImportBindingActionCreate)}).
+		Order("line_ref ASC").Find(&existingBindings).Error; err != nil {
 		return err
 	}
-	if count > 0 {
-		return configImportError("BINDING_CHANNEL_LINE_CONFLICT", "channel %d is already bound to another line in batch %d", channelID, batchID)
+	for _, binding := range existingBindings {
+		existingLine, found := catalog.lines[binding.LineRef]
+		if !found {
+			continue
+		}
+		if channel.Type == constant.ChannelTypeSecure && strings.HasPrefix(line.LineRef, "secure-") && strings.HasPrefix(existingLine.LineRef, "secure-") {
+			return configImportError("BINDING_CHANNEL_LINE_CONFLICT", "channel %d cannot combine Secure capability lines %q and %q", channel.Id, existingLine.LineRef, line.LineRef)
+		}
+		if channel.Type == constant.ChannelTypeMegaByAI && line.SupportsRealPerson != nil && existingLine.SupportsRealPerson != nil &&
+			*line.SupportsRealPerson != *existingLine.SupportsRealPerson {
+			return configImportError("BINDING_CHANNEL_LINE_CONFLICT", "channel %d cannot combine MegaByAI real-person capability lines %q and %q", channel.Id, existingLine.LineRef, line.LineRef)
+		}
 	}
 	return nil
 }
@@ -386,11 +357,10 @@ func saveConfigImportBindingWithSkipState(
 	var existing model.ConfigImportBinding
 	err := tx.Where("batch_id = ? AND line_ref = ?", batchID, input.LineRef).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err := tx.Create(&model.ConfigImportBinding{
+		return tx.Create(&model.ConfigImportBinding{
 			BatchID: batchID, LineRef: input.LineRef, Action: string(input.Action), ChannelID: channelID,
 			CredentialsConfirmedBy: confirmedBy, CredentialsConfirmedAt: confirmedAt, SkipStateJSON: skipStateJSON,
 		}).Error
-		return mapConfigImportBindingChannelConflict(err)
 	}
 	if err != nil {
 		return err
@@ -398,7 +368,7 @@ func saveConfigImportBindingWithSkipState(
 	if input.Action == types.ConfigImportBindingActionSkip && skipStateJSON == "" {
 		skipStateJSON = existing.SkipStateJSON
 	}
-	err = tx.Model(&existing).Updates(map[string]any{
+	return tx.Model(&existing).Updates(map[string]any{
 		"action":                   string(input.Action),
 		"channel_id":               channelID,
 		"credentials_confirmed_by": confirmedBy,
@@ -406,7 +376,6 @@ func saveConfigImportBindingWithSkipState(
 		"skip_state_json":          skipStateJSON,
 		"updated_at":               common.GetTimestamp(),
 	}).Error
-	return mapConfigImportBindingChannelConflict(err)
 }
 
 func excludeConfigImportLineDependents(
@@ -554,19 +523,6 @@ func configImportSkippedItemStatesByID(owners []configImportSkipOwner) map[int64
 		}
 	}
 	return states
-}
-
-func mapConfigImportBindingChannelConflict(err error) error {
-	if err == nil {
-		return nil
-	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "idx_config_import_binding_channel") ||
-		strings.Contains(message, "config_import_bindings.batch_id, config_import_bindings.channel_id") ||
-		strings.Contains(message, "config_import_bindings(batch_id,channel_id)") {
-		return configImportError("BINDING_CHANNEL_LINE_CONFLICT", "channel is already bound to another line in this batch")
-	}
-	return err
 }
 
 func configImportItemDependsOnLine(
@@ -1267,6 +1223,7 @@ func applyConfigImportVariantBinding(tx *gorm.DB, items []model.ConfigImportItem
 // The hash covers only active configuration that this batch will publish.
 type ConfigImportBaseline struct {
 	Hash            string            `json:"hash"`
+	Channels        map[string]string `json:"channels"`
 	CostRules       map[string]string `json:"cost_rules"`
 	Options         map[string]string `json:"options"`
 	ModelMappings   map[string]string `json:"model_mappings"`
@@ -1300,8 +1257,14 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 	if err != nil {
 		return nil, err
 	}
+	for _, channelID := range lineChannels {
+		if channelID > 0 && scope.modelMappings[channelID] == nil {
+			scope.modelMappings[channelID] = make(map[string]struct{})
+		}
+	}
 	for _, item := range items {
-		if item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+		if item.State == string(types.ConfigImportItemStateExcluded) ||
+			item.State == string(types.ConfigImportItemStateUnchanged) && item.EntityType != "model_mappings" {
 			continue
 		}
 		switch item.EntityType {
@@ -1363,6 +1326,7 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 		return nil, err
 	}
 	baseline := &ConfigImportBaseline{
+		Channels:        map[string]string{},
 		CostRules:       map[string]string{},
 		Options:         map[string]string{},
 		ModelMappings:   map[string]string{},
@@ -1439,7 +1403,7 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 		}
 		sort.Ints(channelIDs)
 		var channels []model.Channel
-		if err := db.Where("id IN ?", channelIDs).Order("id ASC").Find(&channels).Error; err != nil {
+		if err := model.LockChannelsForUpdate(db).Where("id IN ?", channelIDs).Order("id ASC").Find(&channels).Error; err != nil {
 			return nil, err
 		}
 		for _, channel := range channels {
@@ -1449,6 +1413,28 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 					return nil, configImportError("BASELINE_MODEL_MAPPING_JSON", "channel %d has invalid model mapping", channel.Id)
 				}
 			}
+			models := make([]string, 0)
+			seenModels := make(map[string]struct{})
+			for _, modelName := range channel.GetModels() {
+				modelName = strings.TrimSpace(modelName)
+				if modelName == "" {
+					continue
+				}
+				if _, exists := seenModels[modelName]; exists {
+					continue
+				}
+				seenModels[modelName] = struct{}{}
+				models = append(models, modelName)
+			}
+			sort.Strings(models)
+			encoded, err := common.Marshal(struct {
+				Models       []string          `json:"models"`
+				ModelMapping map[string]string `json:"model_mapping"`
+			}{Models: models, ModelMapping: mapping})
+			if err != nil {
+				return nil, err
+			}
+			baseline.Channels[fmt.Sprintf("%d", channel.Id)] = string(encoded)
 			modelNames := make([]string, 0, len(scope.modelMappings[channel.Id]))
 			for modelName := range scope.modelMappings[channel.Id] {
 				modelNames = append(modelNames, modelName)
@@ -1507,11 +1493,12 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 		}
 	}
 	encoded, err := common.Marshal(struct {
+		Channels        map[string]string `json:"channels"`
 		CostRules       map[string]string `json:"cost_rules"`
 		Options         map[string]string `json:"options"`
 		ModelMappings   map[string]string `json:"model_mappings"`
 		RoutingPolicies map[string]string `json:"routing_policies"`
-	}{baseline.CostRules, baseline.Options, baseline.ModelMappings, baseline.RoutingPolicies})
+	}{baseline.Channels, baseline.CostRules, baseline.Options, baseline.ModelMappings, baseline.RoutingPolicies})
 	if err != nil {
 		return nil, err
 	}
@@ -1666,8 +1653,21 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 		} else if ready {
 			nextStatus = types.ConfigImportBatchStatusReady
 		}
+		channelModelSnapshots, err := configImportChannelModelSnapshotDiffs(tx, items)
+		if err != nil {
+			return err
+		}
+		var storedSummary configImportBatchSummaryStorage
+		if err := common.UnmarshalJsonStr(string(batch.SummaryJSON), &storedSummary); err != nil {
+			return err
+		}
+		storedSummary.ChannelModelSnapshots = channelModelSnapshots
+		summaryJSON, err := common.Marshal(storedSummary)
+		if err != nil {
+			return err
+		}
 		updates := map[string]any{
-			"status": string(nextStatus), "baseline_json": string(baselineJSON), "updated_at": common.GetTimestamp(),
+			"status": string(nextStatus), "baseline_json": string(baselineJSON), "summary_json": string(summaryJSON), "updated_at": common.GetTimestamp(),
 		}
 		if types.ConfigImportBatchStatus(batch.Status) == types.ConfigImportBatchStatusPublishFailed {
 			updates["failure_code"] = ""
@@ -1679,6 +1679,139 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 		return nil, err
 	}
 	return GetConfigImportBatch(ctx, batchID)
+}
+
+type configImportChannelModelSnapshotTarget struct {
+	Models   map[string]struct{}
+	Mapping  map[string]string
+	LineRefs map[string]struct{}
+}
+
+func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigImportItem) (map[int]configImportChannelModelSnapshotTarget, error) {
+	lineChannels, err := configImportPublishedLineChannels(db, items)
+	if err != nil {
+		return nil, err
+	}
+	targetsByChannel := make(map[int]configImportChannelModelSnapshotTarget)
+	for lineRef, channelID := range lineChannels {
+		if channelID <= 0 {
+			continue
+		}
+		target, exists := targetsByChannel[channelID]
+		if !exists {
+			target = configImportChannelModelSnapshotTarget{
+				Models: make(map[string]struct{}), Mapping: make(map[string]string), LineRefs: make(map[string]struct{}),
+			}
+		}
+		target.LineRefs[lineRef] = struct{}{}
+		targetsByChannel[channelID] = target
+	}
+	for _, item := range items {
+		if item.EntityType != "model_mappings" || item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		var mapping types.ConfigImportModelMapping
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
+			return nil, err
+		}
+		channelID := lineChannels[mapping.LineRef]
+		if channelID <= 0 {
+			continue
+		}
+		target, exists := targetsByChannel[channelID]
+		if !exists {
+			target = configImportChannelModelSnapshotTarget{
+				Models: make(map[string]struct{}), Mapping: make(map[string]string), LineRefs: make(map[string]struct{}),
+			}
+		}
+		canonicalModel := configImportRuntimeCanonicalModel(mapping.CanonicalModel)
+		upstreamModel := strings.TrimSpace(mapping.UpstreamModel)
+		if canonicalModel == "" || upstreamModel == "" {
+			continue
+		}
+		if existing, found := target.Mapping[canonicalModel]; found && existing != upstreamModel {
+			return nil, configImportError("MODEL_SNAPSHOT_MAPPING_CONFLICT", "channel %d maps model %q to both %q and %q", channelID, canonicalModel, existing, upstreamModel)
+		}
+		target.Mapping[canonicalModel] = upstreamModel
+		target.Models[canonicalModel] = struct{}{}
+		target.Models[upstreamModel] = struct{}{}
+		target.LineRefs[mapping.LineRef] = struct{}{}
+		targetsByChannel[channelID] = target
+	}
+	return targetsByChannel, nil
+}
+
+func configImportCurrentChannelModels(channel *model.Channel) (map[string]struct{}, error) {
+	currentModels := make(map[string]struct{})
+	for _, modelName := range channel.GetModels() {
+		if modelName = strings.TrimSpace(modelName); modelName != "" {
+			currentModels[modelName] = struct{}{}
+		}
+	}
+	if raw := strings.TrimSpace(channel.GetModelMapping()); raw != "" {
+		currentMapping := make(map[string]string)
+		if err := common.UnmarshalJsonStr(raw, &currentMapping); err != nil {
+			return nil, configImportError("MODEL_SNAPSHOT_MAPPING_JSON", "channel %d has invalid model mapping", channel.Id)
+		}
+		for canonicalModel, upstreamModel := range currentMapping {
+			if canonicalModel = strings.TrimSpace(canonicalModel); canonicalModel != "" {
+				currentModels[canonicalModel] = struct{}{}
+			}
+			if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+				currentModels[upstreamModel] = struct{}{}
+			}
+		}
+	}
+	return currentModels, nil
+}
+
+func configImportChannelModelSnapshotDiffs(db *gorm.DB, items []model.ConfigImportItem) ([]types.ConfigImportChannelModelSnapshotDiff, error) {
+	targetsByChannel, err := configImportChannelModelSnapshotTargets(db, items)
+	if err != nil {
+		return nil, err
+	}
+	channelIDs := make([]int, 0, len(targetsByChannel))
+	for channelID := range targetsByChannel {
+		channelIDs = append(channelIDs, channelID)
+	}
+	sort.Ints(channelIDs)
+	diffs := make([]types.ConfigImportChannelModelSnapshotDiff, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		var channel model.Channel
+		if err := db.Where("id = ?", channelID).First(&channel).Error; err != nil {
+			return nil, err
+		}
+		currentModels, err := configImportCurrentChannelModels(&channel)
+		if err != nil {
+			return nil, err
+		}
+		target := targetsByChannel[channelID]
+		diff := types.ConfigImportChannelModelSnapshotDiff{
+			ChannelID: channelID, ChannelName: channel.Name,
+			LineRefs: []string{}, AddedModels: []string{}, RetainedModels: []string{}, RemovedModels: []string{},
+		}
+		for lineRef := range target.LineRefs {
+			diff.LineRefs = append(diff.LineRefs, lineRef)
+		}
+		for modelName := range target.Models {
+			if _, exists := currentModels[modelName]; exists {
+				diff.RetainedModels = append(diff.RetainedModels, modelName)
+			} else {
+				diff.AddedModels = append(diff.AddedModels, modelName)
+			}
+		}
+		for modelName := range currentModels {
+			if _, exists := target.Models[modelName]; !exists {
+				diff.RemovedModels = append(diff.RemovedModels, modelName)
+			}
+		}
+		sort.Strings(diff.LineRefs)
+		sort.Strings(diff.AddedModels)
+		sort.Strings(diff.RetainedModels)
+		sort.Strings(diff.RemovedModels)
+		diffs = append(diffs, diff)
+	}
+	return diffs, nil
 }
 
 // StageConfigImport is retained as a concise alias for API/controller code.

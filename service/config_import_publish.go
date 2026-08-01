@@ -96,7 +96,7 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 			return ErrConfigImportNotReady
 		}
 		var baseline ConfigImportBaseline
-		if err := common.UnmarshalJsonStr(batch.BaselineJSON, &baseline); err != nil {
+		if err := common.UnmarshalJsonStr(string(batch.BaselineJSON), &baseline); err != nil {
 			return err
 		}
 		current, err := CaptureConfigImportBaseline(tx, batchID)
@@ -137,10 +137,10 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		if err := publishConfigImportSaleOptions(tx, items, &refresh); err != nil {
 			return err
 		}
-		if err := publishConfigImportModelMappings(tx, items, &refresh); err != nil {
+		if err := publishConfigImportRoutes(tx, items, &refresh); err != nil {
 			return err
 		}
-		if err := publishConfigImportRoutes(tx, items, &refresh); err != nil {
+		if err := publishConfigImportModelMappings(tx, items, &refresh); err != nil {
 			return err
 		}
 		after, err := CaptureConfigImportBaseline(tx, batchID)
@@ -251,6 +251,49 @@ func RetryConfigImportBatchCache(ctx context.Context, batchID int64, adminID int
 
 func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRefreshKeys, error) {
 	keys := ConfigImportRefreshKeys{}
+	var batch model.ConfigImportBatch
+	if err := db.Select("summary_json").Where("id = ?", batchID).First(&batch).Error; err != nil {
+		return keys, err
+	}
+	var storedSummary configImportBatchSummaryStorage
+	if strings.TrimSpace(string(batch.SummaryJSON)) != "" {
+		if err := common.UnmarshalJsonStr(string(batch.SummaryJSON), &storedSummary); err != nil {
+			return keys, err
+		}
+	}
+	for _, snapshot := range storedSummary.ChannelModelSnapshots {
+		keys.ChannelIDs = appendConfigImportRefreshInt(keys.ChannelIDs, snapshot.ChannelID)
+		if len(snapshot.RemovedModels) == 0 {
+			continue
+		}
+		if db.Migrator().HasTable(&model.ChannelModelCostRule{}) {
+			var rules []model.ChannelModelCostRule
+			if err := db.Where("channel_id = ? AND billable_upstream_model IN ? AND status = ?", snapshot.ChannelID, snapshot.RemovedModels, types.CostRuleRetired).
+				Order("billable_upstream_model ASC, cost_variant_key ASC, id ASC").Find(&rules).Error; err != nil {
+				return keys, err
+			}
+			for _, rule := range rules {
+				keys.CostModelKeys = appendConfigImportRefreshString(keys.CostModelKeys, fmt.Sprintf("%d|%s|%s", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey))
+			}
+		}
+		if db.Migrator().HasTable(&model.RoutingPolicy{}) && db.Migrator().HasTable(&model.RouteTarget{}) {
+			var policyIDs []int
+			if err := db.Model(&model.RouteTarget{}).
+				Where("channel_id = ? AND upstream_model IN ?", snapshot.ChannelID, snapshot.RemovedModels).
+				Distinct("policy_id").Pluck("policy_id", &policyIDs).Error; err != nil {
+				return keys, err
+			}
+			if len(policyIDs) > 0 {
+				var policies []model.RoutingPolicy
+				if err := db.Where("id IN ?", policyIDs).Order("id ASC").Find(&policies).Error; err != nil {
+					return keys, err
+				}
+				for _, policy := range policies {
+					keys.RoutingPolicyKeys = appendConfigImportRefreshRoutingKey(keys.RoutingPolicyKeys, model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model})
+				}
+			}
+		}
+	}
 	var items []model.ConfigImportItem
 	if err := db.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
 		return keys, err
@@ -260,7 +303,8 @@ func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRe
 		return keys, err
 	}
 	for _, item := range items {
-		if item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+		if item.State == string(types.ConfigImportItemStateExcluded) ||
+			item.State == string(types.ConfigImportItemStateUnchanged) && item.EntityType != "model_mappings" {
 			continue
 		}
 		switch item.EntityType {
@@ -415,75 +459,49 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 	if !tx.Migrator().HasTable(&model.Channel{}) {
 		return nil
 	}
-	lineChannels, err := configImportPublishedLineChannels(tx, items)
+	targetsByChannel, err := configImportChannelModelSnapshotTargets(tx, items)
 	if err != nil {
 		return err
 	}
-	mappingsByChannel := make(map[int]map[string]string)
-	for _, item := range items {
-		if item.EntityType != "model_mappings" || item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
-			continue
-		}
-		var mapping types.ConfigImportModelMapping
-		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
-			return err
-		}
-		channelID := lineChannels[mapping.LineRef]
-		if channelID <= 0 {
-			return configImportError("PUBLISH_LINE_UNBOUND", "model mapping %q references unbound line %q", item.BusinessID, mapping.LineRef)
-		}
-		if mappingsByChannel[channelID] == nil {
-			mappingsByChannel[channelID] = make(map[string]string)
-		}
-		mappingsByChannel[channelID][configImportRuntimeCanonicalModel(mapping.CanonicalModel)] = mapping.UpstreamModel
-	}
-	channelIDs := make([]int, 0, len(mappingsByChannel))
-	for channelID := range mappingsByChannel {
+	channelIDs := make([]int, 0, len(targetsByChannel))
+	for channelID := range targetsByChannel {
 		channelIDs = append(channelIDs, channelID)
 	}
 	sort.Ints(channelIDs)
 	hasAbilityTable := tx.Migrator().HasTable(&model.Ability{})
+	hasCostRuleTable := tx.Migrator().HasTable(&model.ChannelModelCostRule{})
+	hasRoutingTables := tx.Migrator().HasTable(&model.RoutingPolicy{}) && tx.Migrator().HasTable(&model.RouteTarget{})
 	for _, channelID := range channelIDs {
 		var channel model.Channel
 		if err := tx.Where("id = ?", channelID).First(&channel).Error; err != nil {
 			return err
 		}
-		mapping := make(map[string]string)
-		if strings.TrimSpace(channel.GetModelMapping()) != "" {
-			if err := common.UnmarshalJsonStr(channel.GetModelMapping(), &mapping); err != nil {
-				return configImportError("PUBLISH_MODEL_MAPPING", "channel %d has invalid existing model mapping", channelID)
-			}
-		}
-		canonicalModels := make([]string, 0, len(mappingsByChannel[channelID]))
-		for origin := range mappingsByChannel[channelID] {
-			canonicalModels = append(canonicalModels, origin)
-		}
-		sort.Strings(canonicalModels)
-		declaredModels := make(map[string]struct{}, len(channel.GetModels())+len(canonicalModels))
-		for _, modelName := range channel.GetModels() {
-			if modelName = strings.TrimSpace(modelName); modelName != "" {
-				declaredModels[modelName] = struct{}{}
-			}
-		}
-		for _, origin := range canonicalModels {
-			upstream := mappingsByChannel[channelID][origin]
-			mapping[origin] = upstream
-			if _, exists := declaredModels[origin]; exists {
-				continue
-			}
-			channel.Models = strings.Trim(strings.TrimSpace(channel.Models), ",")
-			if channel.Models != "" {
-				channel.Models += ","
-			}
-			channel.Models += origin
-			declaredModels[origin] = struct{}{}
-		}
-		encoded, err := common.Marshal(mapping)
+		currentModels, err := configImportCurrentChannelModels(&channel)
 		if err != nil {
 			return err
 		}
+		target := targetsByChannel[channelID]
+		modelNames := make([]string, 0, len(target.Models))
+		removedModels := make([]string, 0)
+		for modelName := range target.Models {
+			modelNames = append(modelNames, modelName)
+		}
+		for modelName := range currentModels {
+			if _, retained := target.Models[modelName]; !retained {
+				removedModels = append(removedModels, modelName)
+			}
+		}
+		sort.Strings(modelNames)
+		sort.Strings(removedModels)
+		encoded, err := common.Marshal(target.Mapping)
+		if err != nil {
+			return err
+		}
+		channel.Models = strings.Join(modelNames, ",")
+		mappingJSON := string(encoded)
+		channel.ModelMapping = &mappingJSON
 		if err := tx.Model(&model.Channel{}).Where("id = ?", channelID).Updates(map[string]any{
-			"model_mapping": string(encoded),
+			"model_mapping": mappingJSON,
 			"models":        channel.Models,
 		}).Error; err != nil {
 			return err
@@ -493,7 +511,54 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 				return err
 			}
 		}
-		refresh.ChannelIDs = append(refresh.ChannelIDs, channelID)
+		if len(removedModels) > 0 && hasCostRuleTable {
+			var activeRules []model.ChannelModelCostRule
+			if err := tx.Where("channel_id = ? AND billable_upstream_model IN ? AND status = ?", channelID, removedModels, types.CostRuleActive).
+				Order("billable_upstream_model ASC, cost_variant_key ASC, id ASC").Find(&activeRules).Error; err != nil {
+				return err
+			}
+			if len(activeRules) > 0 {
+				now := common.GetTimestamp()
+				ruleIDs := make([]int64, 0, len(activeRules))
+				for _, rule := range activeRules {
+					ruleIDs = append(ruleIDs, rule.ID)
+					refresh.CostModelKeys = appendConfigImportRefreshString(refresh.CostModelKeys, fmt.Sprintf("%d|%s|%s", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey))
+				}
+				if err := tx.Model(&model.ChannelModelCostRule{}).Where("id IN ? AND status = ?", ruleIDs, types.CostRuleActive).Updates(map[string]any{
+					"status": string(types.CostRuleRetired), "effective_to": now, "updated_at": now,
+				}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if len(removedModels) > 0 && hasRoutingTables {
+			var routeTargets []model.RouteTarget
+			if err := tx.Where("channel_id = ? AND upstream_model IN ? AND enabled = ?", channelID, removedModels, true).
+				Order("policy_id ASC, id ASC").Find(&routeTargets).Error; err != nil {
+				return err
+			}
+			if len(routeTargets) > 0 {
+				targetIDs := make([]int, 0, len(routeTargets))
+				policyIDs := make([]int, 0, len(routeTargets))
+				for _, routeTarget := range routeTargets {
+					targetIDs = append(targetIDs, routeTarget.ID)
+					policyIDs = appendConfigImportRefreshInt(policyIDs, routeTarget.PolicyID)
+				}
+				if err := tx.Model(&model.RouteTarget{}).Where("id IN ?", targetIDs).Updates(map[string]any{
+					"enabled": false, "updated_at": common.GetTimestamp(),
+				}).Error; err != nil {
+					return err
+				}
+				var policies []model.RoutingPolicy
+				if err := tx.Where("id IN ?", policyIDs).Order("id ASC").Find(&policies).Error; err != nil {
+					return err
+				}
+				for _, policy := range policies {
+					refresh.RoutingPolicyKeys = appendConfigImportRefreshRoutingKey(refresh.RoutingPolicyKeys, model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model})
+				}
+			}
+		}
+		refresh.ChannelIDs = appendConfigImportRefreshInt(refresh.ChannelIDs, channelID)
 	}
 	return nil
 }

@@ -365,6 +365,22 @@ export const channelFormSchema = z
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
 
+const OMEGA_AI_CHANNEL_TYPE = 208
+
+export function getStatusOnChannelTypeChange(
+  previousType: number,
+  nextType: number,
+  currentStatus: number
+): number {
+  if (
+    previousType !== OMEGA_AI_CHANNEL_TYPE &&
+    nextType === OMEGA_AI_CHANNEL_TYPE
+  ) {
+    return CHANNEL_STATUS.MANUAL_DISABLED
+  }
+  return currentStatus
+}
+
 // ============================================================================
 // Default Form Values
 // ============================================================================

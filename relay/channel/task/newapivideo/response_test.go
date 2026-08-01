@@ -178,6 +178,25 @@ func TestParseTaskResultIgnoresCompletedAtForInProgress(t *testing.T) {
 	assert.Empty(t, result.Url)
 }
 
+func TestParseTaskResultClampsProgressToValidPercentage(t *testing.T) {
+	tests := []struct {
+		name     string
+		progress string
+		want     string
+	}{
+		{name: "negative", progress: "-5", want: "0%"},
+		{name: "over hundred", progress: "150%", want: "100%"},
+		{name: "decimal", progress: "12.5", want: "12.5%"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"code":"success","data":{"status":"IN_PROGRESS","progress":"` + tt.progress + `"}}`))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, result.Progress)
+		})
+	}
+}
+
 func TestParseTaskResultURLPrecedence(t *testing.T) {
 	tests := []struct {
 		name string

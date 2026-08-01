@@ -369,8 +369,14 @@ func mapUpstreamTaskStatus(status string) (model.TaskStatus, error) {
 func normalizedProgress(progress string, status model.TaskStatus) string {
 	progress = strings.TrimSpace(progress)
 	if progress != "" && progress != "%" {
-		if !strings.HasSuffix(progress, "%") {
-			progress += "%"
+		raw := strings.TrimSuffix(progress, "%")
+		if value, err := decimal.NewFromString(strings.TrimSpace(raw)); err == nil {
+			if value.IsNegative() {
+				value = decimal.Zero
+			} else if value.GreaterThan(decimal.NewFromInt(100)) {
+				value = decimal.NewFromInt(100)
+			}
+			return value.String() + "%"
 		}
 		return progress
 	}

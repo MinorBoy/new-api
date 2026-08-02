@@ -54,6 +54,19 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 		BillingClamp:            parsed.BillingClamp,
 	}
 	if parsed.Nested.Duration != nil {
+		result.DurationPresent = true
+		if duration, numberErr := parsed.Nested.Duration.Int64(); numberErr == nil && duration > 0 && duration <= relaycommon.MaxTaskDurationSeconds {
+			result.DurationSeconds = int(duration)
+		}
+	}
+	result.ResolutionPresent = strings.TrimSpace(parsed.Nested.Resolution) != ""
+	if parsed.Nested.FramesPerSecond != nil {
+		result.FramesPerSecondPresent = true
+		if frameRate, numberErr := parsed.Nested.FramesPerSecond.Int64(); numberErr == nil && frameRate > 0 && frameRate <= 240 {
+			result.FramesPerSecond = int(frameRate)
+		}
+	}
+	if parsed.Nested.Duration != nil {
 		duration := strings.TrimSpace(parsed.Nested.Duration.String())
 		value, durationErr := decimal.NewFromString(duration)
 		if durationErr == nil && !value.IsNegative() &&

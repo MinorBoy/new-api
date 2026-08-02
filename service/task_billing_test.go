@@ -1232,6 +1232,32 @@ func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
 	assert.Equal(t, int64(0), countLogs(t))
 }
 
+func TestSettle_SeedanceDurationBillingSkipsTokenSettlement(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, tokenID, channelID = 34, 34, 34
+	const initQuota, preConsumed, tokenRemain = 10000, 4000, 7000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-seedance-duration", tokenRemain)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	setDurationBillingContext(task)
+	task.PrivateData.BillingContext.UsageProfile = model.TaskUsageProfileSeedance
+	task.PrivateData.BillingContext.PerCallBilling = false
+	task.PrivateData.BillingContext.Resolution = "720p"
+	result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
+	require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+	settleTaskBillingOnComplete(ctx, &mockAdaptor{adjustReturn: 2000}, task, result)
+
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, preConsumed, task.Quota)
+	assert.Equal(t, 129600, task.PrivateData.BillingContext.BillingTokens)
+	assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+	assert.Equal(t, int64(0), countLogs(t))
+}
+
 func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()

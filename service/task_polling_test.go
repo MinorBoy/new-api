@@ -447,6 +447,29 @@ func TestUpdateVideoSingleTaskDetailedWrapperPreservesBodyAndResultURL(t *testin
 	assert.Equal(t, []string{"upstream_detailed"}, adaptor.fetchedTaskIDs())
 }
 
+func TestSeedanceTaskPollingPersistsLocallyCalculatedUsage(t *testing.T) {
+	truncate(t)
+	task := seedPollingTask(t, 0, "task_public_seedance_usage", "upstream_seedance_usage")
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+	}
+	require.NoError(t, task.Update())
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+		Url:    "https://x/video.mp4",
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	require.NotNil(t, stored.PrivateData.BillingContext)
+	assert.Equal(t, model.TaskUsageSourceLocalCalculated, stored.PrivateData.BillingContext.UsageSource)
+	assert.Equal(t, 108000, stored.PrivateData.BillingContext.BillingTokens)
+}
+
 func TestTaskPollingCostSettlesOnlyOnTerminalCASWinner(t *testing.T) {
 	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
 	config.ChargeEvent = types.CostChargeTaskSucceeded
@@ -493,6 +516,34 @@ func TestTaskPollingCostMissingAuthoritativeMeterFailsSettlement(t *testing.T) {
 	attempt := loadCostAttempt(t, handle.AttemptID)
 	assert.Equal(t, string(types.CostAttemptSettlementFailed), attempt.Status)
 	assert.Nil(t, attempt.CostNanoUSD)
+}
+
+func TestSeedanceLocalUsageDoesNotBecomeSupplierTokenMeter(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	task.Platform = constant.TaskPlatform("kling")
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "30%"
+	task.PrivateData.UpstreamTaskID = "upstream-cost-local-usage"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+		Url:    "https://x/video.mp4",
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettlementFailed), attempt.Status)
+	assert.Nil(t, attempt.CostNanoUSD)
+	assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+	assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
 }
 
 func TestUpdateVideoSingleTaskDirectInProgressIgnoresCompletedAt(t *testing.T) {

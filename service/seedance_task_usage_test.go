@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,4 +102,68 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 			assert.Equal(t, tt.want, usage)
 		})
 	}
+}
+
+func TestNormalizeSeedanceTaskUsage(t *testing.T) {
+	t.Run("calculates missing usage", func(t *testing.T) {
+		task := &model.Task{
+			Status: model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+				UsageProfile:             model.TaskUsageProfileSeedance,
+				RequestedDurationSeconds: 5,
+				Resolution:               "720p",
+			}},
+		}
+		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
+
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.True(t, result.CompletionTokensPresent)
+		assert.Equal(t, 108000, result.TotalTokens)
+		assert.True(t, result.TotalTokensPresent)
+		assert.Equal(t, model.TaskUsageSourceLocalCalculated, result.UsageSource)
+		assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+		assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
+	})
+
+	t.Run("preserves authoritative usage", func(t *testing.T) {
+		task := &model.Task{
+			Status: model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+				UsageProfile:             model.TaskUsageProfileSeedance,
+				RequestedDurationSeconds: 5,
+				Resolution:               "720p",
+			}},
+		}
+		result := &relaycommon.TaskInfo{
+			Status:                  string(model.TaskStatusSuccess),
+			CompletionTokens:        108900,
+			CompletionTokensPresent: true,
+			TotalTokens:             108900,
+			TotalTokensPresent:      true,
+		}
+
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+		assert.Equal(t, 108900, result.CompletionTokens)
+		assert.Equal(t, 108900, result.TotalTokens)
+		assert.Equal(t, model.TaskUsageSourceUpstream, result.UsageSource)
+		assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
+		assert.Equal(t, 108900, task.PrivateData.BillingContext.BillingTokens)
+	})
+
+	t.Run("ignores non Seedance profile", func(t *testing.T) {
+		task := &model.Task{
+			Status:      model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{RequestedDurationSeconds: 5, Resolution: "720p"}},
+		}
+		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
+
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+		assert.False(t, result.CompletionTokensPresent)
+		assert.Empty(t, result.UsageSource)
+		assert.Empty(t, task.PrivateData.BillingContext.UsageSource)
+	})
 }

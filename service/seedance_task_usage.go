@@ -25,6 +25,46 @@ type SeedanceTaskUsage struct {
 	TotalTokens      int
 }
 
+func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) error {
+	if task == nil || result == nil || model.TaskStatus(result.Status) != model.TaskStatusSuccess {
+		return nil
+	}
+	billingContext := task.PrivateData.BillingContext
+	if billingContext == nil || billingContext.UsageProfile != model.TaskUsageProfileSeedance {
+		return nil
+	}
+
+	if result.BillingClamp == nil &&
+		result.CompletionTokensPresent && result.TotalTokensPresent &&
+		result.CompletionTokens > 0 && result.TotalTokens >= result.CompletionTokens &&
+		result.CompletionTokens <= relaycommon.MaxTokensLimit && result.TotalTokens <= relaycommon.MaxTokensLimit {
+		result.UsageSource = model.TaskUsageSourceUpstream
+		billingContext.UsageSource = model.TaskUsageSourceUpstream
+		billingContext.BillingTokens = result.CompletionTokens
+		return nil
+	}
+
+	usage, err := CalculateSeedanceTaskUsage(billingContext, SeedanceTerminalFacts{
+		DurationSeconds:        result.DurationSeconds,
+		DurationPresent:        result.DurationPresent,
+		Resolution:             result.Resolution,
+		ResolutionPresent:      result.ResolutionPresent,
+		FramesPerSecond:        result.FramesPerSecond,
+		FramesPerSecondPresent: result.FramesPerSecondPresent,
+	})
+	if err != nil {
+		return err
+	}
+	result.CompletionTokens = usage.CompletionTokens
+	result.TotalTokens = usage.TotalTokens
+	result.CompletionTokensPresent = true
+	result.TotalTokensPresent = true
+	result.UsageSource = model.TaskUsageSourceLocalCalculated
+	billingContext.UsageSource = model.TaskUsageSourceLocalCalculated
+	billingContext.BillingTokens = usage.CompletionTokens
+	return nil
+}
+
 func CalculateSeedanceTaskUsage(billingContext *model.TaskBillingContext, terminal SeedanceTerminalFacts) (SeedanceTaskUsage, error) {
 	if billingContext == nil {
 		return SeedanceTaskUsage{}, fmt.Errorf("billing context is unavailable")

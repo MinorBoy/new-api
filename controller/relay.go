@@ -700,7 +700,7 @@ func RelayTask(c *gin.Context) {
 				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
 		}
 
-		shouldRetryRequest := shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry())
+		shouldRetryRequest := shouldRetryTaskRelay(c, channel.Type, taskErr, common.RetryTimes-retryParam.GetRetry())
 		if shouldRetryRequest && common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
 			retryParam.ExcludeChannel(channel.Id)
 		}
@@ -856,8 +856,11 @@ func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 	c.JSON(taskErr.StatusCode, taskErr)
 }
 
-func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskError, retryTimes int) bool {
+func shouldRetryTaskRelay(c *gin.Context, channelType int, taskErr *taskdto.TaskError, retryTimes int) bool {
 	if taskErr == nil {
+		return false
+	}
+	if channelType == constant.ChannelTypeClmmMall {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {

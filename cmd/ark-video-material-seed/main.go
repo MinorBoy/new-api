@@ -64,6 +64,7 @@ type channelDefinition struct {
 	Type        int
 	Models      []string
 	SecureGroup dto.SecureVideoGroup
+	Enabled     bool
 }
 
 type importedCostConfig struct {
@@ -481,7 +482,10 @@ func seedChannels(upstreamURL string) (map[string]int, error) {
 		}
 		channel.Type = definition.Type
 		channel.Key = "matrix-local-key-" + lineRef
-		channel.Status = common.ChannelStatusEnabled
+		channel.Status = common.ChannelStatusManuallyDisabled
+		if definition.Enabled {
+			channel.Status = common.ChannelStatusEnabled
+		}
 		channel.Name = name
 		channel.BaseURL = common.GetPointer(upstreamURL)
 		channel.Models = strings.Join(definition.Models, ",")
@@ -772,6 +776,16 @@ func loadChannelDefinitions(document types.ConfigImportDocument) (map[string]cha
 		}
 		modelSets[mapping.LineRef][canonical] = struct{}{}
 		modelSets[mapping.LineRef][mapping.UpstreamModel] = struct{}{}
+	}
+	for _, blueprint := range document.Entities.RouteBlueprints {
+		for _, target := range blueprint.Targets {
+			definition, ok := definitions[target.LineRef]
+			if !ok {
+				continue
+			}
+			definition.Enabled = true
+			definitions[target.LineRef] = definition
+		}
 	}
 
 	for lineRef, definition := range definitions {

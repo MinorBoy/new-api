@@ -519,9 +519,45 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 		variants[variant] = struct{}{}
 	}
 
+	type capabilityPolicyKey struct {
+		groupName string
+		model     string
+	}
+	capabilityPolicies := make(map[capabilityPolicyKey]struct{})
+	var routingTargets []struct {
+		ChannelID      int
+		OriginModel    string
+		UpstreamModel  string
+		CostVariantKey string
+	}
+	if model.DB.Migrator().HasTable(&model.RouteTarget{}) && model.DB.Migrator().HasTable(&model.RoutingPolicy{}) {
+		var enabledPolicies []struct {
+			GroupName string
+			Model     string
+		}
+		if err := model.DB.Model(&model.RoutingPolicy{}).
+			Select("group_name", "model").Where("enabled = ?", true).Find(&enabledPolicies).Error; err != nil {
+			return nil, err
+		}
+		for _, policy := range enabledPolicies {
+			capabilityPolicies[capabilityPolicyKey{groupName: policy.GroupName, model: policy.Model}] = struct{}{}
+		}
+		if err := model.DB.Table("route_targets").
+			Select("route_targets.channel_id, routing_policies.model AS origin_model, route_targets.upstream_model, route_targets.cost_variant_key").
+			Joins("JOIN routing_policies ON routing_policies.id = route_targets.policy_id").
+			Where("route_targets.enabled = ? AND routing_policies.enabled = ?", true, true).
+			Order("route_targets.channel_id ASC, route_targets.upstream_model ASC, route_targets.cost_variant_key ASC, route_targets.id ASC").
+			Scan(&routingTargets).Error; err != nil {
+			return nil, err
+		}
+	}
+
 	results := make([]CostCoverageResult, 0, len(abilities)+len(activeRules))
 	seen := make(map[costCoverageKey]struct{}, len(abilities))
 	for _, ability := range abilities {
+		if _, ok := capabilityPolicies[capabilityPolicyKey{groupName: ability.Group, model: ability.Model}]; ok {
+			continue
+		}
 		channel, err := model.GetChannelById(ability.ChannelId, false)
 		if err != nil {
 			return nil, err
@@ -576,22 +612,6 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 		}
 	}
 
-	var routingTargets []struct {
-		ChannelID      int
-		OriginModel    string
-		UpstreamModel  string
-		CostVariantKey string
-	}
-	if model.DB.Migrator().HasTable(&model.RouteTarget{}) && model.DB.Migrator().HasTable(&model.RoutingPolicy{}) {
-		if err := model.DB.Table("route_targets").
-			Select("route_targets.channel_id, routing_policies.model AS origin_model, route_targets.upstream_model, route_targets.cost_variant_key").
-			Joins("JOIN routing_policies ON routing_policies.id = route_targets.policy_id").
-			Where("route_targets.enabled = ? AND routing_policies.enabled = ?", true, true).
-			Order("route_targets.channel_id ASC, route_targets.upstream_model ASC, route_targets.cost_variant_key ASC, route_targets.id ASC").
-			Scan(&routingTargets).Error; err != nil {
-			return nil, err
-		}
-	}
 	for _, target := range routingTargets {
 		variant, err := types.NormalizeCostVariantKey(target.CostVariantKey)
 		if err != nil {

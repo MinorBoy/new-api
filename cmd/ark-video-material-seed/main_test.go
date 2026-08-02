@@ -189,6 +189,8 @@ func TestLoadChannelDefinitionsPreservesImportedProviderTypesAndModels(t *testin
 	require.NoError(t, err)
 	require.Equal(t, constant.ChannelTypeFourSToken, definitions["channel-4stoken"].Type)
 	require.Equal(t, constant.ChannelTypeClmmMall, definitions["channel-clmm"].Type)
+	require.True(t, definitions["channel-4stoken"].Enabled)
+	require.False(t, definitions["channel-8yes"].Enabled)
 	require.Contains(t, definitions["channel-4stoken"].Models, "4sdance_fast431")
 	require.Contains(t, definitions["channel-paipu"].Models, "lec-seedance-videos-standard")
 	require.NotContains(t, definitions["channel-4stoken"].Models, modelroutingCanonicalModels())

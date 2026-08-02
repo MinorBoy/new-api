@@ -177,9 +177,46 @@ func TestCheckAuthoritativeCostCoverageIncludesEnabledRoutingTargetVariant(t *te
 	for _, result := range results {
 		coveredByVariant[result.CostVariantKey] = result.Covered
 	}
-	assert.True(t, coveredByVariant[string(types.DefaultCostVariantKey)])
+	assert.NotContains(t, coveredByVariant, string(types.DefaultCostVariantKey))
 	assert.Contains(t, coveredByVariant, "480p")
 	assert.False(t, coveredByVariant["480p"])
+}
+
+func TestCheckAuthoritativeCostCoverageUsesRoutingTargetsInsteadOfCanonicalAbility(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	})
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "matrix", Model: "canonical-model", ChannelId: 7, Enabled: true,
+	}).Error)
+	rule := costRuleWithVariant(t, "720p", 1, types.CostRuleActive, "0.2")
+	rule.BillableUpstreamModel = "provider-model"
+	require.NoError(t, model.DB.Create(&rule).Error)
+	policy := model.RoutingPolicy{
+		GroupName: "matrix", Model: "canonical-model", Enabled: true,
+		DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9",
+	}
+	require.NoError(t, model.DB.Create(&policy).Error)
+	require.NoError(t, model.DB.Create(&model.RouteTarget{
+		PolicyID: policy.ID, ChannelID: 7, Name: "provider route", UpstreamModel: "provider-model",
+		CostVariantKey: "720p", TargetPriority: 1, Constraints: "{}", Enabled: true,
+	}).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "canonical-model", results[0].OriginModel)
+	assert.Equal(t, "provider-model", results[0].PredictedUpstreamModel)
+	assert.Equal(t, "720p", results[0].CostVariantKey)
+	assert.True(t, results[0].Covered)
 }
 
 func TestListCostRulesFiltersByVariant(t *testing.T) {

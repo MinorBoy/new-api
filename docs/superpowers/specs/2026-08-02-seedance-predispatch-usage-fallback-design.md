@@ -38,14 +38,15 @@
 
 ## 数据契约
 
-`TaskBillingContext` 增加两个可选整数事实：
+`TaskBillingContext` 增加一个快照版本和两个可选整数事实：
 
+- `UsageSnapshotVersion`：提交前 usage 快照契约版本；本设计写入版本 `1`；
 - `UsageCompletionTokens`：当前锁定的用户侧输出视频 token；
 - `UsageTotalTokens`：当前锁定的用户侧总 token，包含需要计入 usage 的参考视频输入 token。
 
 对应的临时字段在 `TaskRelayInfo` 中保存，用于上游请求尚未返回、任务记录尚未创建时传递提交前计算结果。`persistSubmittedTask` 在上游接受任务后把这两个值复制到 `TaskBillingContext`。提交时它们保存本地兜底值；终态归一化后，它们被更新为最终选定的用户侧 usage，无论最终来源是上游还是本地。
 
-两个字段必须同时存在、均为正数、`UsageTotalTokens >= UsageCompletionTokens`，并且不超过 `relaycommon.MaxTokensLimit`。字段缺失表示历史任务或数据损坏，不能把单个残留字段当成有效快照。
+两个 token 字段必须同时存在、均为正数、`UsageTotalTokens >= UsageCompletionTokens`，并且不超过 `relaycommon.MaxTokensLimit`。`UsageSnapshotVersion=0` 表示历史任务，继续尽力恢复；版本 `1` 但 token 对缺失或非法表示新契约数据损坏，不能把单个残留字段当成有效快照。
 
 现有字段继续承担原有职责：
 
@@ -60,7 +61,7 @@
 3. 使用现有 `CalculateSeedanceTaskUsage` 和空终态事实，根据已验证请求快照计算本地 usage。
 4. 校验 completion、total 的正数关系和 token 上限，把结果写入 `TaskRelayInfo`。
 5. 只有上述步骤全部成功后才执行 `DoRequest` 调用供应商。
-6. 上游接受任务后，`persistSubmittedTask` 把本地 token 对与其他计费事实一起持久化。
+6. 上游接受任务后，`persistSubmittedTask` 把本地 token 对与 `UsageSnapshotVersion=1`、其他计费事实一起持久化。
 
 提交前计算失败按原因分类：用户输入或媒体非法时返回 400；元数据服务不可用时返回 503；内部画像或模型配置缺失时返回 500。所有这些失败都发生在供应商调用之前，不产生上游成本。
 
@@ -80,11 +81,11 @@
 
 ## 异常与历史兼容
 
-对于带 `UsageProfile=seedance` 的新任务，如果上游 usage 非法、终态重算失败且提交前本地 token 对也缺失或非法，轮询不得提交一个缺少 usage 的成功终态。系统保持已有预扣和供应商成本状态，不退款，记录带任务 ID、请求 ID 和渠道 ID 的高优先级管理员告警，并让终态处理返回可重试的内部错误。
+对于带 `UsageProfile=seedance` 且 `UsageSnapshotVersion=1` 的新任务，如果上游 usage 非法、终态重算失败且提交前本地 token 对也缺失或非法，轮询不得提交一个缺少 usage 的成功终态。系统保持已有预扣和供应商成本状态，不退款，记录带任务 ID、请求 ID 和渠道 ID 的高优先级管理员告警，并让终态处理返回可重试的内部错误。
 
 该异常只应由数据库损坏、旧节点写入不完整数据或程序缺陷触发。正常的新任务会在调用上游之前通过本地 token 对门禁。
 
-历史任务没有本地 token 对时继续执行既有尽力恢复逻辑：合法上游 usage 优先，其次使用已有可信计费上下文计算。仍无法恢复时不伪造 token，不根据价格反推 usage，也不自动退款。
+`UsageSnapshotVersion=0` 的历史任务没有本地 token 对时继续执行既有尽力恢复逻辑：合法上游 usage 优先，其次使用已有可信计费上下文计算。仍无法恢复时不伪造 token，不根据价格反推 usage，也不自动退款。
 
 ## 公共响应
 

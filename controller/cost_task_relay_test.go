@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -164,6 +165,48 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, int64(2500), task.PrivateData.BillingContext.InputVideoDurationMS)
 	assert.Equal(t, string(types.CostModePerDuration), task.PrivateData.BillingContext.UpstreamCostMode)
+}
+
+func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *testing.T) {
+	setupControllerTaskCostDB(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	c.Set("task_resolution", "720p")
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          12,
+		OriginModelName: "doubao-seedance-2-0-260128",
+		PriceData: types.PriceData{
+			BillingMode:              billing_setting.BillingModeRatio,
+			Quota:                    100,
+			UsePrice:                 true,
+			RequestedDurationSeconds: 5,
+		},
+		CostAttempt: &types.CostAttemptHandle{CostMode: types.CostModePerRequest},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 73, ChannelType: constant.ChannelTypeNewAPIVideo},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			PublicTaskID:          "task-seedance-profile",
+			UsageCompletionTokens: 108000,
+			UsageTotalTokens:      172800,
+		},
+	}
+	result := &relay.TaskSubmitResult{
+		UpstreamTaskID: "upstream-task",
+		TaskData:       []byte(`{"id":"upstream-task","status":"queued"}`),
+		Platform:       constant.TaskPlatform("task-test"),
+		Quota:          100,
+	}
+
+	require.NoError(t, persistSubmittedTask(c, relayInfo, result))
+
+	var task model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task-seedance-profile").First(&task).Error)
+	require.NotNil(t, task.PrivateData.BillingContext)
+	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
+	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
+	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
+	assert.False(t, task.PrivateData.BillingContext.PerCallBilling)
+	assert.Equal(t, string(types.CostModePerRequest), task.PrivateData.BillingContext.UpstreamCostMode)
 }
 
 func TestHandleTaskCostCoverageFailureExcludesChannelAndRetries(t *testing.T) {

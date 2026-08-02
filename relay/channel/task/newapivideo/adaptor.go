@@ -298,6 +298,7 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
 	}
 	profile := a.activeProfile()
+	persistMappedResolutionIfOmitted(c, info)
 	if profile.omegaRequest != nil {
 		state, err := getRequestState(c)
 		if err != nil || state.ARK == nil {
@@ -421,11 +422,11 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 	if state.ARK == nil {
 		return nil
 	}
+	upstreamModel := ""
+	if info != nil {
+		upstreamModel = info.UpstreamModelName
+	}
 	if !common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
-		upstreamModel := ""
-		if info != nil {
-			upstreamModel = info.UpstreamModelName
-		}
 		var validationErr error
 		if profile.textRequest != nil && profile.textRequest.enforceModelResolutionSuffix {
 			validationErr = validateTextVideoRequest(*state.ARK, *profile.textRequest, upstreamModel)
@@ -455,6 +456,26 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		}
 	}
 	return nil
+}
+
+func persistMappedResolutionIfOmitted(c *gin.Context, info *relaycommon.RelayInfo) {
+	if common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+		return
+	}
+	state, err := getRequestState(c)
+	if err != nil || state.ARK == nil || state.ARK.Resolution != nil {
+		return
+	}
+	upstreamModel := ""
+	if info != nil {
+		upstreamModel = info.UpstreamModelName
+		if upstreamModel == "" {
+			upstreamModel = info.OriginModelName
+		}
+	}
+	if resolution, ok := mappedResolutionTier(upstreamModel); ok {
+		c.Set("task_resolution", resolution)
+	}
 }
 
 func routingDurationSeconds(c *gin.Context) int {

@@ -2,6 +2,7 @@ package doubao
 
 import (
 	"bytes"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -81,12 +82,12 @@ type responseTask struct {
 	Content struct {
 		VideoURL string `json:"video_url"`
 	} `json:"content"`
-	Seed            int    `json:"seed"`
-	Resolution      string `json:"resolution"`
-	Duration        int    `json:"duration"`
-	Ratio           string `json:"ratio"`
-	FramesPerSecond int    `json:"framespersecond"`
-	ServiceTier     string `json:"service_tier"`
+	Seed            int         `json:"seed"`
+	Resolution      string      `json:"resolution"`
+	Duration        json.Number `json:"duration"`
+	Ratio           string      `json:"ratio"`
+	FramesPerSecond json.Number `json:"framespersecond"`
+	ServiceTier     string      `json:"service_tier"`
 	Tools           []struct {
 		Type string `json:"type"`
 	} `json:"tools"`
@@ -115,6 +116,8 @@ type TaskAdaptor struct {
 	apiKey      string
 	baseURL     string
 }
+
+const defaultSeedanceDurationSeconds = 5
 
 func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
 	return taskcommon.TaskCostCapabilities(types.CostMeterUpstreamUsage)
@@ -298,6 +301,28 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		return service.TaskErrorWrapperLocal(fmt.Errorf("draft is not supported by %s", modelName), "invalid_request", http.StatusBadRequest)
 	}
 	return nil
+}
+
+func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.RelayInfo) (int, *taskdto.TaskError) {
+	request, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return 0, service.TaskErrorWrapperLocal(err, "invalid_duration", http.StatusBadRequest)
+	}
+
+	duration := request.Duration
+	if duration == 0 && strings.TrimSpace(request.Seconds) != "" {
+		duration, err = strconv.Atoi(strings.TrimSpace(request.Seconds))
+		if err != nil {
+			return 0, service.TaskErrorWrapperLocal(fmt.Errorf("duration must be an integer"), "invalid_duration", http.StatusBadRequest)
+		}
+	}
+	if duration == 0 || duration == -1 {
+		return defaultSeedanceDurationSeconds, nil
+	}
+	if duration < 1 || duration > relaycommon.MaxTaskDurationSeconds {
+		return 0, service.TaskErrorWrapperLocal(fmt.Errorf("duration must be positive and bounded"), "invalid_duration", http.StatusBadRequest)
+	}
+	return duration, nil
 }
 
 func metadataStringDefault(metadata map[string]interface{}, key, fallback string) string {
@@ -552,11 +577,28 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		taskResult.Progress = "100%"
 		taskResult.Url = resTask.Content.VideoURL
 		taskResult.Resolution = resTask.Resolution
+		taskResult.ResolutionPresent = strings.TrimSpace(resTask.Resolution) != ""
+		duration := gjson.GetBytes(respBody, "duration")
+		if duration.Exists() {
+			taskResult.DurationPresent = true
+			if value, parseErr := strconv.Atoi(strings.TrimSpace(duration.Raw)); parseErr == nil && value > 0 && value <= relaycommon.MaxTaskDurationSeconds {
+				taskResult.DurationSeconds = value
+			}
+		}
+		framesPerSecond := gjson.GetBytes(respBody, "framespersecond")
+		if framesPerSecond.Exists() {
+			taskResult.FramesPerSecondPresent = true
+			if value, parseErr := strconv.Atoi(strings.TrimSpace(framesPerSecond.Raw)); parseErr == nil && value > 0 && value <= 240 {
+				taskResult.FramesPerSecond = value
+			}
+		}
 		// 解析 usage 信息用于按倍率计费
 		taskResult.CompletionTokens = resTask.Usage.CompletionTokens
 		taskResult.TotalTokens = resTask.Usage.TotalTokens
 		completionTokens := gjson.GetBytes(respBody, "usage.completion_tokens")
 		taskResult.CompletionTokensPresent = completionTokens.Exists() && completionTokens.Type == gjson.Number
+		totalTokens := gjson.GetBytes(respBody, "usage.total_tokens")
+		taskResult.TotalTokensPresent = totalTokens.Exists() && totalTokens.Type == gjson.Number
 	case "failed", "expired", "cancelled":
 		taskResult.Status = model.TaskStatusFailure
 		taskResult.Progress = "100%"

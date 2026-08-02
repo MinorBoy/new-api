@@ -251,6 +251,34 @@ func TestLucenValidateBillingRequestRejectsMappedResolutionBeforeBuild(t *testin
 	assert.Equal(t, "InvalidParameter.resolution", validationErr.Code)
 }
 
+func TestLucenUsesMappedResolutionWhenARKResolutionIsOmitted(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client","content":[{"type":"text","text":"text"}],"duration":5}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-1080p-token"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor := NewLucenTaskAdaptor()
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	require.Nil(t, adaptor.ValidateBillingRequest(c, info))
+
+	assert.Equal(t, "1080p", c.GetString("task_resolution"))
+}
+
+func TestEightYesUsesMappedResolutionWhenARKResolutionIsOmitted(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client","content":[{"type":"text","text":"text"}],"duration":5}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-2.0-4k"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor := NewEightYesTaskAdaptor()
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	require.Nil(t, adaptor.ValidateBillingRequest(c, info))
+
+	assert.Equal(t, "4k", c.GetString("task_resolution"))
+}
+
 func TestLucenUsesRoutingDurationForOmittedDurationBilling(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client","content":[{"type":"text","text":"text"}]}`))

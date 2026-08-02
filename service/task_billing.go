@@ -223,6 +223,9 @@ func asyncTaskCostMeter(attempt *model.CostAccountingAttempt, result *relaycommo
 	if result.CostMeter != nil {
 		meter = *result.CostMeter
 	}
+	if result.UsageSource == model.TaskUsageSourceLocalCalculated {
+		return meter
+	}
 	if types.CostMeterSource(attempt.MeterSource) != types.CostMeterUpstreamUsage ||
 		(!result.CompletionTokensPresent && !result.TotalTokensPresent) {
 		return meter

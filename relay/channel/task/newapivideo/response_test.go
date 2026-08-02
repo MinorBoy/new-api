@@ -65,6 +65,38 @@ func TestParseTaskResultDetailedReport(t *testing.T) {
 	assert.Nil(t, result.BillingClamp)
 }
 
+func TestParseTaskResultExposesTerminalUsageFacts(t *testing.T) {
+	valid, err := (&TaskAdaptor{}).ParseTaskResult([]byte(detailedSuccessBody))
+	require.NoError(t, err)
+	assert.Equal(t, 5, valid.DurationSeconds)
+	assert.True(t, valid.DurationPresent)
+	assert.Equal(t, "720p", valid.Resolution)
+	assert.True(t, valid.ResolutionPresent)
+	assert.Equal(t, 24, valid.FramesPerSecond)
+	assert.True(t, valid.FramesPerSecondPresent)
+
+	invalid, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"status":"succeeded",
+		"metadata":{"url":"https://x/v.mp4"},
+		"duration":5.5,
+		"resolution":"unsupported",
+		"framespersecond":241
+	}`))
+	require.NoError(t, err)
+	assert.Zero(t, invalid.DurationSeconds)
+	assert.True(t, invalid.DurationPresent)
+	assert.Equal(t, "unsupported", invalid.Resolution)
+	assert.True(t, invalid.ResolutionPresent)
+	assert.Zero(t, invalid.FramesPerSecond)
+	assert.True(t, invalid.FramesPerSecondPresent)
+
+	absent, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"status":"succeeded","metadata":{"url":"https://x/v.mp4"}}`))
+	require.NoError(t, err)
+	assert.False(t, absent.DurationPresent)
+	assert.False(t, absent.ResolutionPresent)
+	assert.False(t, absent.FramesPerSecondPresent)
+}
+
 func TestParseTaskResultProvidesAuthoritativeDurationCostMeter(t *testing.T) {
 	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(detailedSuccessBody))
 

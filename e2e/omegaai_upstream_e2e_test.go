@@ -78,6 +78,7 @@ type omegaAIE2EEnvironment struct {
 func setupOmegaAIE2E(t *testing.T, pollResponses ...string) *omegaAIE2EEnvironment {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &omegaAIE2EMock{pollResponses: pollResponses}
 	server := httptest.NewServer(mock)
 	t.Cleanup(server.Close)

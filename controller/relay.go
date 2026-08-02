@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -790,6 +791,24 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 	if relayInfo.CostAttempt != nil {
 		upstreamCostMode = string(relayInfo.CostAttempt.CostMode)
 	}
+	usageProfile := ""
+	if seedancepricing.Family(relayInfo.OriginModelName) != "" {
+		usageProfile = model.TaskUsageProfileSeedance
+	}
+	usageSnapshotVersion := 0
+	usageCompletionTokens := 0
+	usageTotalTokens := 0
+	if usageProfile == model.TaskUsageProfileSeedance {
+		if relayInfo.TaskRelayInfo == nil || !service.IsValidSeedanceUsage(
+			int64(relayInfo.TaskRelayInfo.UsageCompletionTokens),
+			int64(relayInfo.TaskRelayInfo.UsageTotalTokens),
+		) {
+			return errors.New("submitted Seedance task is missing its usage snapshot")
+		}
+		usageSnapshotVersion = model.TaskUsageSnapshotVersion1
+		usageCompletionTokens = relayInfo.TaskRelayInfo.UsageCompletionTokens
+		usageTotalTokens = relayInfo.TaskRelayInfo.UsageTotalTokens
+	}
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		BillingMode:              relayInfo.PriceData.BillingMode,
 		DurationPrice:            relayInfo.PriceData.DurationPrice,
@@ -809,9 +828,13 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		Resolution:               c.GetString("task_resolution"),
 		InputVideoDurationMS:     inputVideoDurationMS,
 		UpstreamCostMode:         upstreamCostMode,
-		PerCallBilling: common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
+		UsageProfile:             usageProfile,
+		UsageSnapshotVersion:     usageSnapshotVersion,
+		UsageCompletionTokens:    usageCompletionTokens,
+		UsageTotalTokens:         usageTotalTokens,
+		PerCallBilling: usageProfile == "" && (common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
 			relayInfo.PriceData.UsePrice ||
-			relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration,
+			relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration),
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

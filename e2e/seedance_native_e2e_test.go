@@ -74,6 +74,12 @@ func (seedanceE2EVideoMetadataClient) Metadata(context.Context, string) (videome
 	return videometa.Metadata{DurationMS: 5000}, nil
 }
 
+func setupSeedanceE2EVideoMetadata(t *testing.T) {
+	t.Helper()
+	service.SetVideoMetadataClient(seedanceE2EVideoMetadataClient{})
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+}
+
 func (m *mockDimensioServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	m.mu.Lock()
@@ -406,8 +412,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
 					Mul(decimal.NewFromFloat(durationMultiplier)))
 				setupSeedanceE2EDB(t)
-				service.SetVideoMetadataClient(seedanceE2EVideoMetadataClient{})
-				t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+				setupSeedanceE2EVideoMetadata(t)
 				mock := &mockDimensioServer{terminalResponse: terminalCase.response}
 				mockServer := httptest.NewServer(mock)
 				t.Cleanup(mockServer.Close)
@@ -586,6 +591,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 
 func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &mockArkServer{}
 	mockServer := httptest.NewServer(mock)
 	t.Cleanup(mockServer.Close)
@@ -771,6 +777,7 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 
 func TestSeedanceNativeFailedTaskResponseAndRefundE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &mockArkServer{
 		taskID:           failedUpstreamTaskID,
 		terminalResponse: failedUpstreamTaskResponse,
@@ -876,6 +883,7 @@ func TestSeedanceNativeFailedTaskResponseAndRefundE2E(t *testing.T) {
 
 func TestSeedanceNativeUpstreamErrorUsesARKEnvelopeE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &mockArkServer{
 		submitStatus: http.StatusInternalServerError,
 		submitResponse: `{
@@ -921,6 +929,7 @@ func TestSeedanceNativeUpstreamErrorUsesARKEnvelopeE2E(t *testing.T) {
 
 func TestSeedanceNativeRetriesNextChannelWithARKResponseE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	channelA := &mockArkServer{
 		submitStatus: http.StatusInternalServerError,
 		submitResponse: `{
@@ -976,6 +985,7 @@ func TestSeedanceNativeRetriesNextChannelWithARKResponseE2E(t *testing.T) {
 
 func TestSeedanceNativeReturnsLastARKErrorAfterAllChannelsFailE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	channelA := &mockArkServer{
 		submitStatus:   http.StatusInternalServerError,
 		submitResponse: `{"error":{"code":"InternalServiceError","message":"channel A unavailable"}}`,
@@ -1031,6 +1041,7 @@ func TestSeedanceNativeReturnsLastARKErrorAfterAllChannelsFailE2E(t *testing.T) 
 
 func TestSeedanceNativeNetworkTimeoutUsesARKEnvelopeE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	releaseUpstream := make(chan struct{})
 	timeoutServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		<-releaseUpstream

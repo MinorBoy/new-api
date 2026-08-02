@@ -77,6 +77,8 @@ git commit -m "feat: add Seedance terminal usage calculation"
 
 **文件：**
 - 修改：relay/relay_task.go:230-290,449-479
+- 修改：relay/channel/task/doubao/adaptor.go
+- 修改：relay/channel/task/doubao/adaptor_test.go
 - 修改：relay/relay_task_usage_inputs_test.go
 - 修改：controller/relay.go:769-815
 - 修改：controller/cost_task_relay_test.go
@@ -101,7 +103,7 @@ for _, costMode := range []types.CostMode{"", types.CostModeFree, types.CostMode
 
 - [ ] **步骤 3：实现提交门禁和持久化**
 
-RelayTaskSubmit 完成请求校验及 EstimateBilling 后，对 Seedance 任务统一调用 TaskDurationEstimator 保存 RequestedDurationSeconds，校验 seedancepricing.Profile，并在存在参考视频时调用去掉 costMode 参数的 prepareSeedanceUsageInputs。按时长价格继续使用同一快照，不重复读取元数据。
+RelayTaskSubmit 完成请求校验及 EstimateBilling 后，对 Seedance 任务统一调用 TaskDurationEstimator 保存 RequestedDurationSeconds，校验 seedancepricing.Profile，并在存在参考视频时调用去掉 costMode 参数的 prepareSeedanceUsageInputs。Doubao 原生适配器补齐该接口：显式正整数使用已验证值，省略时长和 `duration=-1` 智能时长保存 5 秒的确定性回退快照；终态返回合法实际时长时仍由终态事实优先。按时长价格继续使用同一快照，不重复读取元数据。
 
 persistSubmittedTask 按模型族写入 UsageProfile。Seedance 的 PerCallBilling 恒为 false；非 Seedance 保留 TaskPricePatches/UsePrice 旧语义。BillingModePerDuration 由结算阶段单独识别。
 
@@ -253,3 +255,74 @@ git add e2e/seedance_material_matrix_e2e_test.go
 git commit -m "test: require Seedance terminal usage across matrix"
 ~~~
 
+### 任务七：补齐原生 Doubao 和既有 E2E fixture 兼容
+
+**文件：**
+- 修改：relay/channel/task/doubao/adaptor.go
+- 修改：relay/channel/task/doubao/adaptor_test.go
+- 修改：e2e/fourstoken_upstream_e2e_test.go
+- 修改：e2e/lucen_upstream_e2e_test.go
+- 修改：e2e/newapi_video_upstream_e2e_test.go
+- 修改：e2e/omegaai_upstream_e2e_test.go
+- 修改：e2e/paipu_upstream_e2e_test.go
+- 修改：e2e/seedance_billing_matrix_e2e_test.go
+- 修改：e2e/seedance_capability_routing_e2e_test.go
+- 修改：e2e/seedance_native_e2e_test.go
+
+- [x] **步骤 1：先写 Doubao 时长估算与终态事实失败测试**
+
+覆盖显式时长、原生省略时长、`duration=-1` 智能时长，以及成功响应中的时长、分辨率、帧率和 token presence。非法或缺失终态事实必须保留 presence 语义并回退提交快照。
+
+- [x] **步骤 2：实现 Doubao 契约**
+
+实现 `TaskDurationEstimator`，只读取 `ValidateRequestAndSetAction` 已存入上下文的请求状态；省略和智能时长使用 5 秒提交快照，避免终态事实缺失时无法生成 usage。`ParseTaskResult` 暴露合法终态事实，供共享核心优先使用实际输出时长。
+
+- [x] **步骤 3：补齐旧多模态 E2E 的确定性元数据依赖**
+
+FourSToken、Lucen、NewAPIVideo、OmegaAI、Paipu、能力路由和原生 Doubao 生命周期 setup 显式安装确定性视频元数据 client，并在 cleanup 恢复。Seedance 计费矩阵的 metadata client 从既有 URL fixture 读取每段时长，使网关与 mock 上游使用同一测试事实，同时保留上游拒绝非法官方范围并触发退款的既有覆盖。生产提交门禁不降级，旧 fixture 只补齐新契约要求的外部依赖。
+
+- [x] **步骤 4：运行完整相关回归**
+
+~~~bash
+go test ./relay/channel/task/doubao -count=1
+go test ./e2e -run 'TestFourSToken|TestLucen|TestNewAPIVideo|TestOmegaAI|TestSeedanceBilling' -count=1
+go test ./relay/channel/task/taskcommon ./relay/channel/task/newapivideo ./relay/channel/task/doubao ./service ./relay ./controller ./e2e -count=1
+go vet ./relay/channel/task/taskcommon ./relay/channel/task/newapivideo ./relay/channel/task/doubao ./service ./relay ./controller ./e2e
+git diff --check
+~~~
+
+### 任务八：修复独立审阅发现的 usage 强保证边界
+
+**文件：**
+- 修改：relay/channel/task/newapivideo/adaptor.go
+- 修改：relay/channel/task/newapivideo/adaptor_test.go
+- 修改：relay/channel/task/newapivideo/native.go
+- 修改：relay/relay_task.go
+- 修改：service/seedance_task_usage.go
+- 修改：relay/seedance_task.go
+- 修改：relay/relay_task_seedance_test.go
+- 修改：e2e/paipu_upstream_e2e_test.go
+- 修改：e2e/seedance_capability_routing_e2e_test.go
+- 修改：e2e/seedance_material_matrix_e2e_test.go
+
+- [x] **步骤 1：先写失败回归测试**
+
+覆盖 Paipu 成功响应缺少 usage 和终态分辨率时的 1080p/4k 精确 token、聚合参考视频时长超过共享上限时上游未被调用、超限上游 usage 不得覆盖已经本地结算的公共 usage，以及能力路由默认分辨率和传统模型映射分辨率必须进入可信快照。测试均先确认因既有缺口失败。
+
+- [x] **步骤 2：持久化可信分辨率并收紧提交门禁**
+
+`newapivideo` 在 ARK 请求语义验证后把规范化请求分辨率写入共享上下文；能力路由使用已验证路由事实覆盖请求默认值，传统模型映射在客户端省略分辨率时从映射后的模型名恢复声明的 480p/720p/1080p/4k 档位。该回填在 provider-specific 分支前统一执行，覆盖 Lucen、8yes 等提前返回路径。提交阶段持久化最终规范化值到 `TaskBillingContext.Resolution`。参考视频元数据聚合结果在上游发送前校验正数和 `MaxTaskDurationSeconds` 上限，越界请求以 400 拒绝。
+
+- [x] **步骤 3：统一权威 usage 判定**
+
+轮询结算和公共任务响应复用同一个上游 usage 信任边界，同时检查正数、字段关系和 `MaxTokensLimit`。任务已标记 `local_calculated` 时，公共响应继续使用共享本地计算核心，不再被原始上游载荷中的无效 usage 覆盖。
+
+- [x] **步骤 4：完成全仓验证和独立复审**
+
+全仓测试、相关范围静态检查和差异格式检查均通过；独立复审未发现 Critical、Important 或 Minor 问题。
+
+~~~bash
+go test ./... -count=1
+go vet ./relay/channel/task/taskcommon ./relay/channel/task/newapivideo ./relay/channel/task/doubao ./service ./relay ./controller ./e2e
+git diff --check
+~~~

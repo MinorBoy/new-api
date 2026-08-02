@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -605,6 +606,16 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 	taskResult.Reason = sanitizeTaskPollingText(taskResult.Reason, privateTaskID)
 	taskResult.ErrorCode = sanitizeTaskPollingText(taskResult.ErrorCode, privateTaskID)
+	if model.TaskStatus(taskResult.Status) == model.TaskStatusSuccess {
+		if err := NormalizeSeedanceTaskUsage(task, taskResult); err != nil {
+			logger.LogError(ctx, fmt.Sprintf(
+				"Seedance task usage normalization failed: task_id=%s channel_id=%d cost_request_id=%d error=%s",
+				task.TaskID, task.ChannelId, task.PrivateData.CostRequestID,
+				sanitizeTaskPollingText(err.Error(), privateTaskID),
+			))
+			return fmt.Errorf("normalize Seedance task usage for task %s: %s", task.TaskID, sanitizeTaskPollingText(err.Error(), privateTaskID))
+		}
+	}
 
 	task.Data = redactVideoResponseBody(responseBody)
 
@@ -662,7 +673,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if taskResult.Progress != "" {
 		task.Progress = taskResult.Progress
 	}
-
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
 	if isDone && snap.Status != task.Status {
 		if err := preparePolledTaskCostSettlement(ctx, adaptor, task, taskResult); err != nil {
@@ -727,7 +737,16 @@ func preparePolledTaskCostSettlement(ctx context.Context, adaptor TaskPollingAda
 	if model.TaskStatus(result.Status) == model.TaskStatusSuccess {
 		normalizer, ok := adaptor.(taskCostMeterNormalizer)
 		if ok {
-			meter, err := normalizer.NormalizeTaskCostMeter(task, result)
+			normalizerResult := result
+			if result.UsageSource == model.TaskUsageSourceLocalCalculated {
+				resultCopy := *result
+				resultCopy.CompletionTokens = 0
+				resultCopy.TotalTokens = 0
+				resultCopy.CompletionTokensPresent = false
+				resultCopy.TotalTokensPresent = false
+				normalizerResult = &resultCopy
+			}
+			meter, err := normalizer.NormalizeTaskCostMeter(task, normalizerResult)
 			if err != nil {
 				logger.LogWarn(ctx, fmt.Sprintf("normalize task cost meter failed: task_id=%s cost_request_id=%d error=%v", task.TaskID, task.PrivateData.CostRequestID, err))
 			} else {
@@ -777,10 +796,15 @@ func truncateBase64(s string) string {
 //  2. 权威 completion_tokens（或兼容回退 total_tokens）→ 按 token 重算
 //  3. 都不满足 → 保持预扣额度不变
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
-	// 0. 按次计费的任务不做差额结算
-	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
-		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
-		return
+	if bc := task.PrivateData.BillingContext; bc != nil {
+		if bc.BillingMode == billing_setting.BillingModePerDuration {
+			logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按时长计费，跳过 token 差额结算", task.TaskID))
+			return
+		}
+		if bc.PerCallBilling {
+			logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
+			return
+		}
 	}
 	// 1. 优先让 adaptor 决定最终额度
 	actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult)

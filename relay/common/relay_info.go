@@ -867,7 +867,9 @@ type TaskRelayInfo struct {
 	PublicTaskID string
 	// InputVideoDurationMS is the aggregate duration of reference videos used to
 	// calculate Ark-compatible terminal usage without retaining their URLs.
-	InputVideoDurationMS int64
+	InputVideoDurationMS  int64
+	UsageCompletionTokens int
+	UsageTotalTokens      int
 
 	ConsumeQuota bool
 
@@ -973,6 +975,12 @@ type TaskInfo struct {
 	Resolution              string               `json:"resolution,omitempty"`
 	CompletionTokensPresent bool                 `json:"-"`
 	TotalTokensPresent      bool                 `json:"-"`
+	DurationSeconds         int                  `json:"-"`
+	DurationPresent         bool                 `json:"-"`
+	ResolutionPresent       bool                 `json:"-"`
+	FramesPerSecond         int                  `json:"-"`
+	FramesPerSecondPresent  bool                 `json:"-"`
+	UsageSource             string               `json:"-"`
 	BillingClamp            *common.QuotaClamp   `json:"-"`
 	CostMeter               *hosttypes.CostMeter `json:"-"`
 }

@@ -874,6 +874,33 @@ func TestSeedanceTaskResponseCalculatesUsageForPerDurationUpstream(t *testing.T)
 	assert.Len(t, usage, 2)
 }
 
+func TestSeedanceTaskResponseCalculatesUsageForPerTokenUpstream(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_token_usage",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			UsageProfile:             model.TaskUsageProfileSeedance,
+			RequestedDurationSeconds: 5,
+			Resolution:               "720p",
+			UpstreamCostMode:         string(types.CostModePerToken),
+		}},
+		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 108000, usage["total_tokens"])
+	assert.NotContains(t, response, "usage_source")
+}
+
 func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
 	task := &model.Task{
 		TaskID:     "task_public_reference_usage",
@@ -954,7 +981,7 @@ func TestSeedanceTaskResponsePreservesAuthoritativeUsage(t *testing.T) {
 	assert.EqualValues(t, 108900, usage["total_tokens"])
 }
 
-func TestSeedanceTaskResponseDoesNotCalculateUsageWithoutTrustedInputs(t *testing.T) {
+func TestSeedanceTaskResponseHandlesUntrustedInputs(t *testing.T) {
 	tests := []struct {
 		name          string
 		status        model.TaskStatus
@@ -962,27 +989,31 @@ func TestSeedanceTaskResponseDoesNotCalculateUsageWithoutTrustedInputs(t *testin
 		hasVideoInput bool
 		inputDuration int64
 		data          string
+		wantTokens    int
 	}{
 		{name: "per token upstream", status: model.TaskStatusSuccess, costMode: types.CostModePerToken},
 		{name: "failed task", status: model.TaskStatusFailure, costMode: types.CostModePerDuration},
 		{name: "historical reference video without duration", status: model.TaskStatusSuccess, costMode: types.CostModePerDuration, hasVideoInput: true},
 		{
-			name:     "fractional upstream duration",
-			status:   model.TaskStatusSuccess,
-			costMode: types.CostModePerDuration,
-			data:     strings.Replace(newAPIVideoDetailedZeroUsage, `"duration":5`, `"duration":5.5`, 1),
+			name:       "fractional upstream duration",
+			status:     model.TaskStatusSuccess,
+			costMode:   types.CostModePerDuration,
+			data:       strings.Replace(newAPIVideoDetailedZeroUsage, `"duration":5`, `"duration":5.5`, 1),
+			wantTokens: 108000,
 		},
 		{
-			name:     "excessive upstream frame rate",
-			status:   model.TaskStatusSuccess,
-			costMode: types.CostModePerDuration,
-			data:     strings.Replace(newAPIVideoDetailedZeroUsage, `"framespersecond":24`, `"framespersecond":241`, 1),
+			name:       "excessive upstream frame rate",
+			status:     model.TaskStatusSuccess,
+			costMode:   types.CostModePerDuration,
+			data:       strings.Replace(newAPIVideoDetailedZeroUsage, `"framespersecond":24`, `"framespersecond":241`, 1),
+			wantTokens: 108000,
 		},
 		{
-			name:     "overflowing upstream duration",
-			status:   model.TaskStatusSuccess,
-			costMode: types.CostModePerDuration,
-			data:     strings.Replace(newAPIVideoDetailedZeroUsage, `"duration":5`, `"duration":18446744073709551617`, 1),
+			name:       "overflowing upstream duration",
+			status:     model.TaskStatusSuccess,
+			costMode:   types.CostModePerDuration,
+			data:       strings.Replace(newAPIVideoDetailedZeroUsage, `"duration":5`, `"duration":18446744073709551617`, 1),
+			wantTokens: 108000,
 		},
 	}
 	for _, tt := range tests {
@@ -1011,8 +1042,8 @@ func TestSeedanceTaskResponseDoesNotCalculateUsageWithoutTrustedInputs(t *testin
 			require.NoError(t, err)
 			usage, ok := response["usage"].(map[string]interface{})
 			require.True(t, ok)
-			assert.EqualValues(t, 0, usage["completion_tokens"])
-			assert.EqualValues(t, 0, usage["total_tokens"])
+			assert.EqualValues(t, tt.wantTokens, usage["completion_tokens"])
+			assert.EqualValues(t, tt.wantTokens, usage["total_tokens"])
 		})
 	}
 }

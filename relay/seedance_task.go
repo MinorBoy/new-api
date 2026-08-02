@@ -13,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -284,12 +283,11 @@ func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}
 	if billingContext == nil {
 		return
 	}
-	costMode := types.CostMode(billingContext.UpstreamCostMode)
-	if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
-		return
-	}
-	if billingContext.HasVideoInput && billingContext.InputVideoDurationMS <= 0 {
-		return
+	if billingContext.UsageProfile != model.TaskUsageProfileSeedance {
+		costMode := types.CostMode(billingContext.UpstreamCostMode)
+		if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
+			return
+		}
 	}
 
 	responseData, err := common.Marshal(response)
@@ -305,48 +303,31 @@ func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}
 		return
 	}
 
-	durationSeconds := int64(billingContext.RequestedDurationSeconds)
+	terminalFacts := service.SeedanceTerminalFacts{
+		Resolution:        output.Resolution,
+		ResolutionPresent: strings.TrimSpace(output.Resolution) != "",
+	}
 	if output.Duration != nil {
+		terminalFacts.DurationPresent = true
 		value, ok := boundedSeedanceResponseInteger(output.Duration, relaycommon.MaxTaskDurationSeconds)
-		if !ok {
-			return
+		if ok {
+			terminalFacts.DurationSeconds = int(value)
 		}
-		durationSeconds = value
 	}
-	if durationSeconds <= 0 || durationSeconds > relaycommon.MaxTaskDurationSeconds {
-		return
-	}
-	resolution := strings.TrimSpace(output.Resolution)
-	if resolution == "" {
-		resolution = billingContext.Resolution
-	}
-	profile, ok := seedancepricing.Profile(resolution)
-	if !ok {
-		return
-	}
-	frameRate := profile.FrameRateNum
 	if output.FramesPerSecond != nil {
+		terminalFacts.FramesPerSecondPresent = true
 		value, ok := boundedSeedanceResponseInteger(output.FramesPerSecond, 240)
-		if !ok {
-			return
+		if ok {
+			terminalFacts.FramesPerSecond = int(value)
 		}
-		frameRate = value
 	}
-	facts := service.ProfitRoutingFacts{
-		OutputDurationSeconds: int(durationSeconds),
-		InputDurationMS:       billingContext.InputVideoDurationMS,
-		Width:                 profile.Width,
-		Height:                profile.Height,
-		FrameRateNum:          frameRate,
-		FrameRateDen:          1,
-	}
-	_, completionTokens, totalTokens, err := service.EstimateSeedanceTokens(facts)
+	usage, err := service.CalculateSeedanceTaskUsage(billingContext, terminalFacts)
 	if err != nil {
 		return
 	}
 	response["usage"] = map[string]interface{}{
-		"completion_tokens": completionTokens,
-		"total_tokens":      totalTokens,
+		"completion_tokens": usage.CompletionTokens,
+		"total_tokens":      usage.TotalTokens,
 	}
 }
 

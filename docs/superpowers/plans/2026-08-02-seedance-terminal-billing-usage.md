@@ -290,3 +290,39 @@ go test ./relay/channel/task/taskcommon ./relay/channel/task/newapivideo ./relay
 go vet ./relay/channel/task/taskcommon ./relay/channel/task/newapivideo ./relay/channel/task/doubao ./service ./relay ./controller ./e2e
 git diff --check
 ~~~
+
+### 任务八：修复独立审阅发现的 usage 强保证边界
+
+**文件：**
+- 修改：relay/channel/task/newapivideo/adaptor.go
+- 修改：relay/channel/task/newapivideo/adaptor_test.go
+- 修改：relay/channel/task/newapivideo/native.go
+- 修改：relay/relay_task.go
+- 修改：service/seedance_task_usage.go
+- 修改：relay/seedance_task.go
+- 修改：relay/relay_task_seedance_test.go
+- 修改：e2e/paipu_upstream_e2e_test.go
+- 修改：e2e/seedance_capability_routing_e2e_test.go
+- 修改：e2e/seedance_material_matrix_e2e_test.go
+
+- [x] **步骤 1：先写失败回归测试**
+
+覆盖 Paipu 成功响应缺少 usage 和终态分辨率时的 1080p/4k 精确 token、聚合参考视频时长超过共享上限时上游未被调用、超限上游 usage 不得覆盖已经本地结算的公共 usage，以及能力路由默认分辨率和传统模型映射分辨率必须进入可信快照。测试均先确认因既有缺口失败。
+
+- [x] **步骤 2：持久化可信分辨率并收紧提交门禁**
+
+`newapivideo` 在 ARK 请求语义验证后把规范化请求分辨率写入共享上下文；能力路由使用已验证路由事实覆盖请求默认值，传统模型映射在客户端省略分辨率时从映射后的模型名恢复声明的 480p/720p/1080p/4k 档位。该回填在 provider-specific 分支前统一执行，覆盖 Lucen、8yes 等提前返回路径。提交阶段持久化最终规范化值到 `TaskBillingContext.Resolution`。参考视频元数据聚合结果在上游发送前校验正数和 `MaxTaskDurationSeconds` 上限，越界请求以 400 拒绝。
+
+- [x] **步骤 3：统一权威 usage 判定**
+
+轮询结算和公共任务响应复用同一个上游 usage 信任边界，同时检查正数、字段关系和 `MaxTokensLimit`。任务已标记 `local_calculated` 时，公共响应继续使用共享本地计算核心，不再被原始上游载荷中的无效 usage 覆盖。
+
+- [x] **步骤 4：完成全仓验证和独立复审**
+
+全仓测试、相关范围静态检查和差异格式检查均通过；独立复审未发现 Critical、Important 或 Minor 问题。
+
+~~~bash
+go test ./... -count=1
+go vet ./relay/channel/task/taskcommon ./relay/channel/task/newapivideo ./relay/channel/task/doubao ./service ./relay ./controller ./e2e
+git diff --check
+~~~

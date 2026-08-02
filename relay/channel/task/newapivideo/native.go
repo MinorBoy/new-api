@@ -85,6 +85,11 @@ func validateARKRequest(c *gin.Context, info *relaycommon.RelayInfo, body []byte
 	}
 
 	prompt := arkPrompt(request.Content)
+	resolution := "720p"
+	if request.Resolution != nil {
+		resolution = strings.ToLower(strings.TrimSpace(*request.Resolution))
+	}
+	c.Set("task_resolution", resolution)
 	state := requestState{ARK: &request}
 	if request.Duration != nil {
 		duration := decimal.NewFromInt(int64(*request.Duration))
@@ -313,16 +318,24 @@ func validateMappedResolution(requested, upstreamModel string) error {
 	if requested == "" {
 		return nil
 	}
-	normalized := strings.ToLower(upstreamModel)
-	for _, candidate := range []string{"480p", "720p", "1080p"} {
+	required, ok := mappedResolutionTier(upstreamModel)
+	if !ok {
+		return fmt.Errorf("mapped model %s does not declare a resolution tier", upstreamModel)
+	}
+	if !strings.EqualFold(requested, required) {
+		return fmt.Errorf("resolution %s does not match mapped model %s", requested, upstreamModel)
+	}
+	return nil
+}
+
+func mappedResolutionTier(upstreamModel string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(upstreamModel))
+	for _, candidate := range []string{"480p", "720p", "1080p", "4k"} {
 		if strings.Contains(normalized, candidate) {
-			if !strings.EqualFold(requested, candidate) {
-				return fmt.Errorf("resolution %s does not match mapped model %s", requested, upstreamModel)
-			}
-			return nil
+			return candidate, true
 		}
 	}
-	return fmt.Errorf("mapped model %s does not declare a resolution tier", upstreamModel)
+	return "", false
 }
 
 func optionalStringValue(value *string) string {

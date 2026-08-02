@@ -241,9 +241,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 			return nil, taskErr
 		}
 		info.PriceData.RequestedDurationSeconds = requestedSeconds
-		if _, ok := seedancepricing.Profile(c.GetString("task_resolution")); !ok {
+		resolution := c.GetString("task_resolution")
+		if info.Routing != nil && strings.TrimSpace(info.Routing.Facts.OutputResolution) != "" {
+			resolution = info.Routing.Facts.OutputResolution
+		}
+		resolutionProfile, ok := seedancepricing.Profile(resolution)
+		if !ok {
 			return nil, service.TaskErrorWrapperLocal(errors.New("unsupported Seedance resolution"), "video_usage_resolution_unsupported", http.StatusBadRequest)
 		}
+		c.Set("task_resolution", resolutionProfile.Name)
 		hasVideoInput := c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
 		if retryParam != nil && retryParam.RoutingInput != nil && retryParam.RoutingInput.ReferenceVideos > 0 {
 			hasVideoInput = true
@@ -499,6 +505,13 @@ func prepareSeedanceUsageInputs(ctx context.Context, retryParam *service.RetryPa
 			code = "invalid_reference_video"
 		}
 		return service.TaskErrorWrapperLocal(err, code, statusCode)
+	}
+	if metadata.TotalDurationMS <= 0 || metadata.TotalDurationMS > int64(relaycommon.MaxTaskDurationSeconds)*1000 {
+		return service.TaskErrorWrapperLocal(
+			fmt.Errorf("reference video duration must be between 1 ms and %d seconds", relaycommon.MaxTaskDurationSeconds),
+			"invalid_reference_video",
+			http.StatusBadRequest,
+		)
 	}
 	info.TaskRelayInfo.InputVideoDurationMS = metadata.TotalDurationMS
 	return nil

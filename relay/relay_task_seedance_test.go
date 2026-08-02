@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -979,6 +980,46 @@ func TestSeedanceTaskResponsePreservesAuthoritativeUsage(t *testing.T) {
 	require.True(t, ok)
 	assert.EqualValues(t, 108900, usage["completion_tokens"])
 	assert.EqualValues(t, 108900, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseReplacesOverLimitUpstreamUsageWithSettledUsage(t *testing.T) {
+	overLimit := relaycommon.MaxTokensLimit + 1
+	data := strings.Replace(
+		newAPIVideoDetailedZeroUsage,
+		`"usage":{"completion_tokens":0,"total_tokens":0}`,
+		fmt.Sprintf(`"usage":{"completion_tokens":%d,"total_tokens":%d}`, overLimit, overLimit),
+		1,
+	)
+	task := &model.Task{
+		TaskID:     "task_public_over_limit_usage",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:     model.TaskStatusSuccess,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			UsageProfile:             model.TaskUsageProfileSeedance,
+			RequestedDurationSeconds: 5,
+			Resolution:               "720p",
+		}},
+		Data: json.RawMessage(data),
+	}
+	result := &relaycommon.TaskInfo{
+		Status:                  string(model.TaskStatusSuccess),
+		CompletionTokens:        overLimit,
+		CompletionTokensPresent: true,
+		TotalTokens:             overLimit,
+		TotalTokensPresent:      true,
+	}
+	require.NoError(t, service.NormalizeSeedanceTaskUsage(task, result))
+	require.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+	require.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, task.PrivateData.BillingContext.BillingTokens, usage["completion_tokens"])
+	assert.EqualValues(t, task.PrivateData.BillingContext.BillingTokens, usage["total_tokens"])
 }
 
 func TestSeedanceTaskResponseHandlesUntrustedInputs(t *testing.T) {

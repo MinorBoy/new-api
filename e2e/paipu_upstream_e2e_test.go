@@ -13,7 +13,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -107,6 +109,14 @@ type paipuE2EEnvironment struct {
 	mock   *paipuE2EMock
 }
 
+type paipuE2EVideoMetadataClient struct {
+	durationMS int64
+}
+
+func (c paipuE2EVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	return videometa.Metadata{DurationMS: c.durationMS}, nil
+}
+
 func setupPaipuE2E(t *testing.T, pollResponses ...string) *paipuE2EEnvironment {
 	t.Helper()
 	setupSeedanceE2EDB(t)
@@ -195,6 +205,62 @@ func TestPaipuARKMultimodalLifecycleE2E(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(list))
 	assertPaipuE2EPublicBody(t, list)
 	assert.Contains(t, string(list), publicID)
+}
+
+func TestPaipuMissingUsageUsesValidatedResolutionE2E(t *testing.T) {
+	tests := []struct {
+		resolution string
+		wantTokens int
+	}{
+		{resolution: "1080p", wantTokens: 243000},
+		{resolution: "4k", wantTokens: 972000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.resolution, func(t *testing.T) {
+			env := setupPaipuE2E(t, `{"task_id":"paipu-private","status":"completed","data":[{"url":"https://assets.example/paipu.mp4"}]}`)
+			requestBody := fmt.Sprintf(`{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"validated resolution fallback"}],"duration":5,"resolution":%q}`, tt.resolution)
+
+			status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
+			require.Equal(t, http.StatusOK, status, string(submit))
+			var submitted struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, common.Unmarshal(submit, &submitted))
+			require.NotEmpty(t, submitted.ID)
+
+			task := pollNewAPIVideoTask(t, submitted.ID)
+			require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+			require.NotNil(t, task.PrivateData.BillingContext)
+			assert.Equal(t, tt.resolution, task.PrivateData.BillingContext.Resolution)
+			assert.Equal(t, tt.wantTokens, task.PrivateData.BillingContext.BillingTokens)
+
+			status, body := performJSONRequest(t, env.engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+submitted.ID, "Bearer e2e-1", "")
+			require.Equal(t, http.StatusOK, status, string(body))
+			var response struct {
+				Usage struct {
+					CompletionTokens int `json:"completion_tokens"`
+					TotalTokens      int `json:"total_tokens"`
+				} `json:"usage"`
+			}
+			require.NoError(t, common.Unmarshal(body, &response))
+			assert.Equal(t, tt.wantTokens, response.Usage.CompletionTokens)
+			assert.Equal(t, tt.wantTokens, response.Usage.TotalTokens)
+		})
+	}
+}
+
+func TestPaipuRejectsOverlongReferenceVideoBeforeUpstreamE2E(t *testing.T) {
+	env := setupPaipuE2E(t)
+	service.SetVideoMetadataClient(paipuE2EVideoMetadataClient{
+		durationMS: int64(relaycommon.MaxTaskDurationSeconds)*1000 + 1,
+	})
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"overlong reference"},{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/overlong.mp4"}}],"duration":5,"resolution":"720p"}`
+
+	status, body := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
+
+	assert.Equal(t, http.StatusBadRequest, status, string(body))
+	assert.Contains(t, string(body), `"code":"invalid_reference_video"`)
+	assert.Empty(t, env.mock.snapshot())
 }
 
 func TestPaipuRejectsProtocolViolationsBeforeUpstreamAndPreConsumeE2E(t *testing.T) {

@@ -350,6 +350,36 @@ func TestSeedanceCapabilityRoutingMatrixE2E(t *testing.T) {
 	}
 }
 
+func TestSeedanceCapabilityRoutingPersistsDefaultResolutionE2E(t *testing.T) {
+	env := setupSeedanceCapabilityRoutingE2E(t)
+	env.standardRequest.Defaults = modelrouting.Defaults{
+		OutputResolution: "1080p",
+		DurationSeconds:  15,
+		AspectRatio:      "9:16",
+	}
+	_, err := service.SaveRoutingPolicy(env.standardPolicy, env.standardRequest)
+	require.NoError(t, err)
+	body, err := common.Marshal(map[string]any{
+		"model":    modelrouting.Seedance20,
+		"duration": 15,
+		"ratio":    "9:16",
+		"content": []map[string]any{{
+			"type": "text",
+			"text": "capability defaults must become trusted usage facts",
+		}},
+	})
+	require.NoError(t, err)
+
+	status, response := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", string(body))
+
+	require.Equal(t, http.StatusOK, status, string(response))
+	var task model.Task
+	require.NoError(t, model.DB.Order("id DESC").First(&task).Error)
+	require.NotNil(t, task.PrivateData.BillingContext)
+	assert.Equal(t, "1080p", task.PrivateData.BillingContext.Resolution)
+	assert.Equal(t, 15, task.PrivateData.BillingContext.RequestedDurationSeconds)
+}
+
 func TestSeedanceCapabilityRoutingRetryExcludesFailedChannelE2E(t *testing.T) {
 	env := setupSeedanceCapabilityRoutingE2E(t)
 	backup := capabilityTarget(capabilityChannelA, "bb-seedance2.0-1080p-pro-backup", 50, []string{"1080p"}, discreteDuration(15), []string{"9:16"}, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, false)

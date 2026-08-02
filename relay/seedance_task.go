@@ -265,21 +265,23 @@ func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}
 	if task == nil || task.Status != model.TaskStatusSuccess || response == nil {
 		return
 	}
-	if rawUsage, exists := response["usage"]; exists {
+	billingContext := task.PrivateData.BillingContext
+	preferLocalUsage := billingContext != nil && billingContext.UsageSource == model.TaskUsageSourceLocalCalculated
+	if rawUsage, exists := response["usage"]; exists && !preferLocalUsage {
 		usageData, err := common.Marshal(rawUsage)
 		if err == nil {
 			var usage struct {
-				CompletionTokens int64 `json:"completion_tokens"`
-				TotalTokens      int64 `json:"total_tokens"`
+				CompletionTokens *int64 `json:"completion_tokens"`
+				TotalTokens      *int64 `json:"total_tokens"`
 			}
 			if common.Unmarshal(usageData, &usage) == nil &&
-				usage.CompletionTokens > 0 && usage.TotalTokens >= usage.CompletionTokens {
+				usage.CompletionTokens != nil && usage.TotalTokens != nil &&
+				service.IsValidSeedanceUpstreamUsage(*usage.CompletionTokens, *usage.TotalTokens) {
 				return
 			}
 		}
 	}
 
-	billingContext := task.PrivateData.BillingContext
 	if billingContext == nil {
 		return
 	}

@@ -4639,7 +4639,7 @@
     "Select display mode": "表示モードを選択",
     "Select end time": "終了時間を選択",
     "Select from presets or type custom identifier.": "プリセットから選択するか、カスタム識別子を入力してください。",
-    "Select from the 24 documented Paipu /v1/videos models": "Paipu が文書化している 24 個の /v1/videos モデルから選択",
+    "Import Paipu models from channel configuration or add verified mappings manually": "チャネル設定から Paipu モデルをインポートするか、検証済みのモデルマッピングを手動で追加してください",
     "Select granularity": "粒度を選択",
     "Select groups (leave empty to keep current)": "グループを選択 (現在の設定を維持するには空のままにしてください)",
     "Select interface density": "インターフェイスの密度を選択",

@@ -1,5 +1,7 @@
 # 派普 Seedance 渠道实施计划
 
+> **协议更新说明：** Paipu 的请求编码、动态模型目录和创建重试语义已由 `2026-08-02-paipu-protocol-update-design.md` 与 `2026-08-02-paipu-protocol-update.md` 替代。本文仍保留最初接入背景和共享 Ark 生命周期设计，但旧的纯文本请求方言、24 模型静态目录及自动重试假设不再有效。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 新增派普 Seedance task-only 渠道，使现有 Ark SDK 可通过创建、单查和列表接口调用派普的 24 个 `/v1/videos` 模型，并在上游契约尚未补齐时只开放可验证的文生能力。

@@ -205,7 +205,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			expectedLogCount := int64(2)
 			expectedRefundLogCount := 1
 			if target.CostMode == types.CostModePerRequest ||
-				(target.ChannelType == constant.ChannelTypeFourSToken && target.CostMode == types.CostModePerDuration) {
+				((target.ChannelType == constant.ChannelTypeFourSToken || target.ChannelType == constant.ChannelTypePaipu) && target.CostMode == types.CostModePerDuration) {
 				expectedLogCount = 1
 				expectedRefundLogCount = 0
 			}
@@ -250,8 +250,8 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	}
 
 	if checked == len(targets) {
-		require.Equal(t, 26, accepted)
-		require.Equal(t, 72, contractBlocks)
+		require.Equal(t, 58, accepted)
+		require.Equal(t, 40, contractBlocks)
 		require.Equal(t, map[string]int{"431": 22, "900": 4, "903": 1, "933": 71}, env.materialSeen)
 	}
 }

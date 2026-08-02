@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,10 +27,12 @@ const (
 )
 
 type paipuE2EMock struct {
-	mu            sync.Mutex
-	requests      []mockArkRequest
-	pollResponses []string
-	pollIndex     int
+	mu             sync.Mutex
+	requests       []mockArkRequest
+	pollResponses  []string
+	pollIndex      int
+	submitStatus   int
+	submitResponse string
 }
 
 func (m *paipuE2EMock) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -42,6 +45,13 @@ func (m *paipuE2EMock) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	response := ""
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/videos":
+		if m.submitStatus != 0 {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(m.submitStatus)
+			_, _ = writer.Write([]byte(m.submitResponse))
+			m.mu.Unlock()
+			return
+		}
 		response = `{"task_id":"` + paipuE2EUpstreamTaskID + `","status":"queued"}`
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/videos/"+paipuE2EUpstreamTaskID:
 		if len(m.pollResponses) > 0 {
@@ -58,6 +68,30 @@ func (m *paipuE2EMock) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	_, _ = writer.Write([]byte(response))
+}
+
+func (m *paipuE2EMock) submitCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, request := range m.requests {
+		if request.Method == http.MethodPost && request.Path == "/v1/videos" {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *paipuE2EMock) pollRequests() []mockArkRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var polls []mockArkRequest
+	for _, request := range m.requests {
+		if request.Method == http.MethodGet {
+			polls = append(polls, request)
+		}
+	}
+	return polls
 }
 
 func (m *paipuE2EMock) snapshot() []mockArkRequest {
@@ -83,7 +117,7 @@ func setupPaipuE2E(t *testing.T, pollResponses ...string) *paipuE2EEnvironment {
 
 	channel, err := model.GetChannelById(e2eChannelID, true)
 	require.NoError(t, err)
-	mapping := `{"doubao-seedance-2-0-260128":"lec-gongteng-seedance-2-0-720p"}`
+	mapping := `{"doubao-seedance-2-0-260128":"imported-paipu-model"}`
 	channel.Type = constant.ChannelTypePaipu
 	channel.Key = "mock-paipu-key"
 	channel.Models = "doubao-seedance-2-0-260128"
@@ -103,12 +137,23 @@ func setupPaipuE2E(t *testing.T, pollResponses ...string) *paipuE2EEnvironment {
 	return &paipuE2EEnvironment{engine: seedanceE2ERouter(), mock: mock}
 }
 
-func TestPaipuARKLifecycleAndTextRequestE2E(t *testing.T) {
+func setupPaipuE2ENoRetry(t *testing.T, submitStatus int, submitResponse string) *paipuE2EEnvironment {
+	t.Helper()
+	env := setupPaipuE2E(t)
+	env.mock.submitStatus = submitStatus
+	env.mock.submitResponse = submitResponse
+	previousRetryTimes := common.RetryTimes
+	common.RetryTimes = 3
+	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
+	return env
+}
+
+func TestPaipuARKMultimodalLifecycleE2E(t *testing.T) {
 	env := setupPaipuE2E(t,
 		`{"task_id":"paipu-private","status":"in_progress","progress":50}`,
 		`{"task_id":"paipu-private","status":"completed","data":[{"url":"https://assets.example/paipu.mp4"}]}`,
 	)
-	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"paipu text acceptance"}],"duration":8,"ratio":"16:9","resolution":"720p"}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"paipu multimodal acceptance"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.png"}},{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.4.4/ref.mp4"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"data:audio/wav;base64,UklGRg=="}}],"duration":8,"ratio":"16:9","resolution":"720p"}`
 
 	status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
@@ -124,7 +169,15 @@ func TestPaipuARKLifecycleAndTextRequestE2E(t *testing.T) {
 	assert.Equal(t, http.MethodPost, requests[0].Method)
 	assert.Equal(t, "/v1/videos", requests[0].Path)
 	assert.Equal(t, "Bearer mock-paipu-key", requests[0].Authorization)
-	assert.JSONEq(t, `{"model":"lec-gongteng-seedance-2-0-720p","prompt":"paipu text acceptance","duration":8,"ratio":"16:9","resolution":"720p"}`, string(requests[0].Body))
+	assert.JSONEq(t, `{
+		"model":"imported-paipu-model","prompt":"paipu multimodal acceptance",
+		"duration":8,"aspect_ratio":"16:9","resolution":"720p",
+		"images":["https://8.8.8.8/ref.png"],
+		"videos":["https://8.8.4.4/ref.mp4"],
+		"audios":["data:audio/wav;base64,UklGRg=="]
+	}`, string(requests[0].Body))
+	assert.NotContains(t, string(requests[0].Body), `"ratio"`)
+	assert.NotContains(t, string(requests[0].Body), `"content"`)
 
 	task := pollNewAPIVideoTask(t, publicID)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), task.Status)
@@ -143,25 +196,44 @@ func TestPaipuARKLifecycleAndTextRequestE2E(t *testing.T) {
 	assert.Contains(t, string(list), publicID)
 }
 
-func TestPaipuRejectsReferenceMediaBeforeUpstreamAndPreConsumeE2E(t *testing.T) {
-	env := setupPaipuE2E(t)
-	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"media is unsupported"},{"type":"image_url","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8}`
+func TestPaipuRejectsProtocolViolationsBeforeUpstreamAndPreConsumeE2E(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "ten images", body: paipuTenImageE2EBody()},
+		{name: "first frame", body: `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"t"},{"type":"image_url","role":"first_frame","image_url":{"url":"https://8.8.8.8/f.png"}}],"duration":8}`},
+		{name: "private url", body: `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"t"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://192.168.1.1/ref.png"}}],"duration":8}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupPaipuE2E(t)
+			var beforeTasks int64
+			var beforeUser model.User
+			require.NoError(t, model.DB.Model(&model.Task{}).Count(&beforeTasks).Error)
+			require.NoError(t, model.DB.First(&beforeUser, e2eUserID).Error)
+			status, body := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", tt.body)
+			assert.Equal(t, http.StatusBadRequest, status, string(body))
+			assert.Contains(t, string(body), `"code":"InvalidParameter.content"`)
+			assert.Empty(t, env.mock.snapshot())
+			var afterTasks int64
+			var afterUser model.User
+			require.NoError(t, model.DB.Model(&model.Task{}).Count(&afterTasks).Error)
+			require.NoError(t, model.DB.First(&afterUser, e2eUserID).Error)
+			assert.Equal(t, beforeTasks, afterTasks)
+			assert.Equal(t, beforeUser.Quota, afterUser.Quota)
+			assert.Equal(t, beforeUser.UsedQuota, afterUser.UsedQuota)
+		})
+	}
+}
 
-	var beforeTasks int64
-	var beforeUser model.User
-	require.NoError(t, model.DB.Model(&model.Task{}).Count(&beforeTasks).Error)
-	require.NoError(t, model.DB.First(&beforeUser, e2eUserID).Error)
-	status, body := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
-	assert.Equal(t, http.StatusBadRequest, status, string(body))
-	assert.Contains(t, string(body), `"code":"InvalidParameter.content"`)
-	assert.Empty(t, env.mock.snapshot())
-	var afterTasks int64
-	var afterUser model.User
-	require.NoError(t, model.DB.Model(&model.Task{}).Count(&afterTasks).Error)
-	require.NoError(t, model.DB.First(&afterUser, e2eUserID).Error)
-	assert.Equal(t, beforeTasks, afterTasks)
-	assert.Equal(t, beforeUser.Quota, afterUser.Quota)
-	assert.Equal(t, beforeUser.UsedQuota, afterUser.UsedQuota)
+func paipuTenImageE2EBody() string {
+	items := `[{"type":"text","text":"too many images"}`
+	for i := 0; i < 10; i++ {
+		items += fmt.Sprintf(`,{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.%d/ref-%d.png"}}`, i%250+1, i)
+	}
+	items += "]"
+	return fmt.Sprintf(`{"model":"doubao-seedance-2-0-260128","content":%s,"duration":8}`, items)
 }
 
 func TestPaipuFailedTaskRefundsE2E(t *testing.T) {
@@ -211,6 +283,27 @@ func TestPaipuFailedTaskRefundsE2E(t *testing.T) {
 	assert.Equal(t, preConsumedQuota, refundLog.Quota)
 }
 
+func TestPaipuSubmitDoesNotRetryOnUpstreamError(t *testing.T) {
+	tests := []struct {
+		name           string
+		submitStatus   int
+		submitResponse string
+	}{
+		{name: "429 too many requests", submitStatus: http.StatusTooManyRequests, submitResponse: `{"error":{"code":"rate_limited","message":"slow down"}}`},
+		{name: "500 server error", submitStatus: http.StatusInternalServerError, submitResponse: `{"error":{"code":"provider_error","message":"upstream failure"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupPaipuE2ENoRetry(t, tt.submitStatus, tt.submitResponse)
+			requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"no retry submit"}],"duration":8}`
+			status, body := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
+			assert.Equal(t, tt.submitStatus, status, string(body))
+			assert.Equal(t, 1, env.mock.submitCount())
+			assert.Empty(t, env.mock.pollRequests())
+		})
+	}
+}
+
 func assertPaipuE2ESucceededTask(t *testing.T, body []byte, publicID string) {
 	t.Helper()
 	assertPaipuE2EPublicBody(t, body)
@@ -225,7 +318,7 @@ func assertPaipuE2ESucceededTask(t *testing.T, body []byte, publicID string) {
 func assertPaipuE2EPublicBody(t *testing.T, body []byte) {
 	t.Helper()
 	for _, privateValue := range []string{
-		paipuE2EUpstreamTaskID, "lec-gongteng-seedance-2-0-720p", "mock-paipu-key",
+		paipuE2EUpstreamTaskID, "imported-paipu-model", "mock-paipu-key",
 		"user_id", "channel_id", `"group"`, `"quota"`, `"platform"`, `"properties"`, "upstream_model_name",
 	} {
 		assert.NotContains(t, string(body), privateValue)

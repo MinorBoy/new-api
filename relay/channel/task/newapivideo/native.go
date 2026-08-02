@@ -242,7 +242,16 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "image_url.url must be a valid HTTP URL"}
 			}
 			switch strings.TrimSpace(item.Role) {
-			case "", "first_frame":
+			case "":
+				if profile.untypedImagesAreReferences {
+					referenceImageCount++
+				} else {
+					firstCount++
+					if firstIndex == -1 {
+						firstIndex = index
+					}
+				}
+			case "first_frame":
 				firstCount++
 				if firstIndex == -1 {
 					firstIndex = index
@@ -257,12 +266,12 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 			}
 		case "video_url":
 			videoCount++
-			if item.VideoURL == nil || !validMediaURL(item.VideoURL.URL, profile) || item.ImageURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || strings.TrimSpace(item.Role) != "reference_video" {
+			if item.VideoURL == nil || !validMediaURL(item.VideoURL.URL, profile) || item.ImageURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || !validReferenceMediaRole(item.Role, "reference_video", profile) {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "video content requires a valid URL and reference_video role"}
 			}
 		case "audio_url":
 			audioCount++
-			if item.AudioURL == nil || !validMediaURL(item.AudioURL.URL, profile) || item.ImageURL != nil || item.VideoURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || strings.TrimSpace(item.Role) != "reference_audio" {
+			if item.AudioURL == nil || !validMediaURL(item.AudioURL.URL, profile) || item.ImageURL != nil || item.VideoURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Text) != "" || !validReferenceMediaRole(item.Role, "reference_audio", profile) {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "audio content requires a valid URL and reference_audio role"}
 			}
 		case "draft_task":
@@ -278,7 +287,7 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if imageCount > 9 || videoCount > 3 || audioCount > 3 {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "reference media count exceeds Seedance 2.0 limits"}
 	}
-	if audioCount > 0 && imageCount == 0 && videoCount == 0 {
+	if audioCount > 0 && imageCount == 0 && videoCount == 0 && !profile.allowAudioWithoutVisual {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "audio input requires an image or video"}
 	}
 	singleFrameIsReference := profile.singleFrameImagesAreReferences && firstCount == 1 && lastCount == 0
@@ -359,6 +368,14 @@ func validMediaURL(value string, profile protocolProfile) bool {
 		ApplyIPFilterForDomain: true,
 	}
 	return protection.ValidateURL(media.Value) == nil
+}
+
+func validReferenceMediaRole(role, expected string, profile protocolProfile) bool {
+	trimmed := strings.TrimSpace(role)
+	if trimmed == expected {
+		return true
+	}
+	return profile.allowEmptyReferenceMediaRoles && trimmed == ""
 }
 
 func marshalUpstreamRequest(request upstreamRequest) ([]byte, error) {

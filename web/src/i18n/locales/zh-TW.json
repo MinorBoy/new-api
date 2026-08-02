@@ -4639,7 +4639,7 @@
     "Select display mode": "選擇顯示模式",
     "Select end time": "選擇結束時間",
     "Select from presets or type custom identifier.": "從預設中選擇或輸入自訂標識符。",
-    "Select from the 24 documented Paipu /v1/videos models": "從 Paipu 文件中的 24 個 /v1/videos 模型中選擇",
+    "Import Paipu models from channel configuration or add verified mappings manually": "從渠道設定匯入 Paipu 模型，或手動新增已驗證的模型對應",
     "Select granularity": "選擇粒度",
     "Select groups (leave empty to keep current)": "選擇分組（留空以保持目前設定）",
     "Select interface density": "選擇介面密度",

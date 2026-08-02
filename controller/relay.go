@@ -860,7 +860,8 @@ func shouldRetryTaskRelay(c *gin.Context, channelType int, taskErr *taskdto.Task
 	if taskErr == nil {
 		return false
 	}
-	if channelType == constant.ChannelTypeClmmMall {
+	if channelType == constant.ChannelTypeClmmMall || channelType == constant.ChannelTypePaipu {
+		// These task creation APIs are non-idempotent and must never be submitted twice.
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {

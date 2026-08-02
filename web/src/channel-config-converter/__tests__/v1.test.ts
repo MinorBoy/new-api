@@ -171,6 +171,14 @@ test('v1 document decodes compact reference limits into route target constraints
     videos: 0,
     audios: 0,
   })
+  assert.equal(paipuTarget.upstream_model, 'lec-seedance-2-0')
+
+  const paipuCost = result.document.entities.cost_rule_drafts.find(
+    (cost) => cost.business_id === 'COST-PAIPU-R14-720-REQ'
+  )
+  assert.ok(paipuCost)
+  assert.equal(paipuCost.upstream_model, 'lec-seedance-2-0')
+  assert.equal(paipuCost.cost_mode, 'per_request')
 })
 
 test('v1 document rejects an unresolved legacy reference limit', async () => {

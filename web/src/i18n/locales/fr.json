@@ -4639,7 +4639,7 @@
     "Select display mode": "Sélectionner le mode d'affichage",
     "Select end time": "Sélectionner l'heure de fin",
     "Select from presets or type custom identifier.": "Sélectionner parmi les préréglages ou saisir un identifiant personnalisé.",
-    "Select from the 24 documented Paipu /v1/videos models": "Sélectionnez parmi les 24 modèles /v1/videos documentés de Paipu",
+    "Import Paipu models from channel configuration or add verified mappings manually": "Importez les modèles Paipu depuis la configuration des canaux ou ajoutez manuellement des mappages vérifiés",
     "Select granularity": "Sélectionner la granularité",
     "Select groups (leave empty to keep current)": "Sélectionner les groupes (laisser vide pour conserver les groupes actuels)",
     "Select interface density": "Sélectionner la densité de l'interface",

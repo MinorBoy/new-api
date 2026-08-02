@@ -243,6 +243,13 @@ func parseModelControls(modelName string) (modelControls, error) {
 	return controls, nil
 }
 
+// ValidateRouteModel verifies the mapped model grammar without constructing an
+// upstream request. Routing-policy validation uses the same parser as submit.
+func ValidateRouteModel(modelName string) error {
+	_, err := parseModelControls(strings.TrimSpace(modelName))
+	return err
+}
+
 func validateUnsupportedArkFields(request arkRequest) error {
 	if request.Watermark != nil || request.GenerateAudio != nil || request.Draft != nil || request.Tools != nil ||
 		request.Seed != nil || request.CameraFixed != nil || request.Frames != nil || request.Priority != nil ||

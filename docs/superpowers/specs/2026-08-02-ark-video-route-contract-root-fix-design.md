@@ -1,102 +1,102 @@
-# ARK Video Route Contract Root Fix Design
+# ARK 视频路由合约根因修复设计
 
-## Goal
+## 目标
 
-Prevent imported Seedance route declarations from selecting an upstream task adaptor that will reject the same request under its verified provider protocol. Keep provider behavior fail-closed: capabilities without protocol evidence remain unavailable instead of being implemented by guessing request fields.
+防止导入的 Seedance 路由声明选择到会按已验证的提供商协议拒绝同一请求的上游任务适配器。保持提供商行为为"失败即关闭"（fail-closed）：在缺乏协议证据时，能力保持不可用，而不是靠猜测请求字段来实现。
 
-## Root Causes
+## 根因
 
-1. Imported `reference_limits` are independent maxima, but the material-matrix E2E submitted every maximum at once. Values such as `933` therefore became 15 simultaneous media inputs even where the provider contract has a lower combined limit.
-2. Routing matches only resolution, duration, input mode, independent media counts, and real-person support. It cannot represent combined media limits or provider-specific model and group rules.
-3. Configuration import validates schema and routing shape, but does not compare a route target with the selected channel adaptor's verified contract.
-4. Several imported rows conflict with verified contracts:
-   - Cangyuan and Paipu are text-only until real multimodal protocol evidence exists.
-   - CLMM does not accept audio or 1080p and its imported model names do not satisfy the verified CLMM model contract.
-   - Dimensio imports unsupported direct model names and 480p/4K targets.
-   - Secure groups have different input modes, minimum media, combined limits, duration ranges, and model/resolution matrices.
-   - 4stoken is encoded as OpenAI type `1` in the legacy source despite having a dedicated type `209`.
-   - 8yes has unresolved material limits and no verified task adaptor or cost rules.
-5. Expected-rejection branches in the E2E allowed incompatible route declarations to look accepted at the suite level.
+1. 导入的 `reference_limits` 是相互独立的最大值，但素材矩阵 E2E 一次性提交了全部最大值。因此像 `933` 这样的值即使提供商合约有更低的组合上限，也会变成 15 路同时的媒体输入。
+2. 路由仅匹配分辨率、时长、输入模式、独立媒体数量和真人支持。它无法表达组合媒体上限或提供商特有的模型与分组规则。
+3. 配置导入校验了 schema 和路由形态，但不会将路由目标与所选渠道适配器的已验证合约做比较。
+4. 若干导入行与已验证合约冲突：
+   - Cangyuan 和 Paipu 在出现真实的多模态协议证据之前仅支持文本。
+   - CLMM 不接受音频或 1080p，且其导入的模型名不满足已验证的 CLMM 模型合约。
+   - Dimensio 导入了不受支持的直连模型名以及 480p/4K 目标。
+   - Secure 分组有不同的输入模式、最小媒体数、组合上限、时长范围以及模型/分辨率矩阵。
+   - 4stoken 在旧数据源中被编码为 OpenAI 类型 `1`，尽管它有专属类型 `209`。
+   - 8yes 的素材上限尚未解决，且没有已验证的任务适配器或成本规则。
+5. E2E 中"预期拒绝"分支允许不兼容的路由声明在套件层面看起来是通过的。
 
-## Authority And Safety Boundary
+## 权威与安全边界
 
-The verified provider adaptor contract is authoritative for runtime behavior. Imported configuration may narrow that contract, but may not widen it. Missing protocol evidence is treated as unsupported.
+已验证的提供商适配器合约对运行时行为具有权威性。导入的配置可以收窄该合约，但不能放宽它。缺少协议证据一律视为不支持。
 
-This change does not add guessed Cangyuan, Paipu, CLMM, Dimensio, Secure, or 8yes request fields. Upstream HTTP remains mocked in E2E, while route selection, adaptor conversion, task persistence, billing, logging, and cost accounting use production code.
+本次变更不会为 Cangyuan、Paipu、CLMM、Dimensio、Secure 或 8yes 添加猜测出来的请求字段。上游 HTTP 在 E2E 中仍然保持 mock，而路由选择、适配器转换、任务持久化、计费、日志和成本核算均使用生产代码。
 
-## Architecture
+## 架构
 
-### Static Channel Route Contract
+### 静态渠道路由合约
 
-Add a small provider-neutral route contract in `types` and a lookup callback in `service`, following the existing cost-capability lookup pattern. Relay owns channel-specific protocol knowledge and registers the lookup implementation during startup and tests.
+在 `service` 中新增一个接收渠道与路由目标的校验回调。relay 拥有各渠道特有的协议知识，并在启动和测试期间注册校验实现，从而避免 service 依赖具体适配器。
 
-The contract validates a concrete route target against:
+该合约针对以下内容校验具体路由目标：
 
-- channel type and channel settings;
-- mapped upstream model;
-- output resolutions and duration bounds;
-- declared input modes and reference minima/maxima;
-- provider-specific combined material constraints.
+- 渠道类型与渠道设置；
+- 映射后的上游模型；
+- 输出分辨率与时长边界；
+- 声明的输入模式与参考最小值/最大值；
+- 提供商特有的组合素材约束。
 
-Validation returns stable issue codes and messages suitable for configuration import and routing policy APIs. A missing contract for ordinary channels preserves current behavior. Dedicated Seedance task channels must return an explicit contract.
+校验返回稳定的问题编码与消息，适用于配置导入和路由策略 API。普通渠道缺少合约时保持现有行为不变。专属 Seedance 任务渠道必须返回明确的合约。
 
-### Publish And Policy Gates
+### 发布与策略门禁
 
-`SaveRoutingPolicy` validates every target through the registered contract before persistence. Config import publishing uses the same path-independent validator while creating route rows. Incompatible targets remain disabled and publishing reports a deterministic conflict instead of creating a route that fails only after client submission.
+`SaveRoutingPolicy` 在持久化之前，通过已注册的合约校验每一个目标。配置导入发布在创建路由行时使用同一条路径无关的校验器。不兼容的目标保持禁用状态，发布时报告确定性的冲突，而不是创建一条只在客户端提交后才失败的路由。
 
-Legacy normalization maps `CH-4STOKEN` from type `1` to dedicated type `209` at the config-import boundary. No equivalent guess is made for 8yes; its unresolved rows remain non-publishable.
+旧数据归一化在配置导入边界处把 `CH-4STOKEN` 从类型 `1` 映射到专属类型 `209`。对 8yes 不做等价的猜测；其未解决的行保持不可发布。
 
-### Runtime Defense
+### 运行时防御
 
-Adaptor request validation remains in place as defense in depth. The route contract and adaptor tests are table-driven from the same documented rules so drift is detected. Runtime routing must return `no_compatible_route` for facts outside a target's declared and provider-verified intersection rather than selecting a known-incompatible channel.
+适配器请求校验仍保留作为纵深防御。路由合约与适配器测试均以相同的文档化规则作为表驱动测试的输入，从而检测漂移。运行时路由对于落在目标声明与提供商已验证范围交集之外的事实，必须返回 `no_compatible_route`，而不是选择已知不兼容的渠道。
 
-### E2E Matrix Semantics
+### E2E 矩阵语义
 
-Each imported target receives a provider-valid representative request. Material codes are covered as declared boundaries, not automatically combined into one payload:
+每个导入目标都会收到一个经提供商验证的代表性请求。素材编码按声明的边界单独覆盖，而不是自动合并进同一个载荷：
 
-- text baseline;
-- image maximum where supported;
-- video maximum where supported;
-- audio maximum where supported;
-- documented legal combined boundary;
-- one-over-boundary negative cases for shared constraints.
+- 文本基线；
+- 支持情况下的图片上限；
+- 支持情况下的视频上限；
+- 支持情况下的音频上限；
+- 文档化的合法组合边界；
+- 对共享约束的越界一单位的反例。
 
-Targets that conflict statically with the verified channel protocol are asserted as blocked configuration findings. They do not produce tasks, usage logs, or cost attempts. Valid targets complete submit, polling, settlement, logs, and cost accounting.
+与已验证渠道协议在静态层面冲突的目标，被断言为被阻止的配置发现项。它们不产生任务、用量日志或成本尝试。有效目标完整走通提交、轮询、结算、日志与成本核算。
 
-## Provider Rules
+## 提供商规则
 
-- 4stoken: dedicated type `209`; current ARK content protocol and imported models remain available.
-- Lucen: current ARK generation profile and mapped resolution checks remain available.
-- MegaByAI: current 9/3/3 individual bounds and documented media-duration checks remain available.
-- Cangyuan: text input only; media maxima must be zero.
-- Paipu: text input only; mapped resolution suffix must agree with route resolution.
-- CLMM: no audio, only 480p/720p, 5-15 seconds for ordinary models, maximum 9 images, 3 videos, and 12 combined; mapped model must satisfy the verified prefix/control grammar.
-- Dimensio: only registered models, 720p generally, and 1080p only for `jimeng-video-seedance-2.0-vip`; maximum 9 images, 3 videos, 3 audios, and 12 combined.
-- Secure discount: at least one image, no strict last-frame mode, video+audio maximum 3, 4-15 seconds, and model/resolution matrix enforced.
-- Secure overseas: maximum 12 combined media, 4-15 seconds, and model/resolution matrix enforced. Reference-video total duration remains runtime metadata validation.
-- Secure enterprise: `video-2.0-pro`, 720p, 5-15 seconds, and no strict last-frame mode.
-- 8yes: blocked until channel type, material limits, upstream protocol, and cost rules are verified.
+- 4stoken：专属类型 `209`；现有 ARK 内容协议与导入的模型保持可用。
+- Lucen：现有 ARK 生成画像与映射分辨率校验保持可用。
+- MegaByAI：现有 9/3/3 单项边界与文档化的媒体-时长校验保持可用。
+- Cangyuan：仅文本输入；媒体上限必须为零。
+- Paipu：仅文本输入；映射分辨率后缀必须与路由分辨率一致。
+- CLMM：无音频，仅 480p/720p，普通模型 5-15 秒，图片最多 9 张、视频最多 3 个、合计最多 12 个；映射模型必须满足已验证的前缀/控制语法。
+- Dimensio：仅已注册模型，通常为 720p，仅 `jimeng-video-seedance-2.0-vip` 支持 1080p；图片最多 9 张、视频最多 3 个、音频最多 3 个、合计最多 12 个。
+- Secure 折扣：至少一张图片，无严格尾帧模式，视频+音频合计最多 3 个，4-15 秒，并强制模型/分辨率矩阵。
+- Secure 海外：合计最多 12 个媒体，4-15 秒，并强制模型/分辨率矩阵。参考视频总时长仍作为运行时元数据校验。
+- Secure 企业：`video-2.0-pro`、720p、5-15 秒，无严格尾帧模式。
+- 8yes：在渠道类型、素材上限、上游协议与成本规则得到验证之前保持阻止。
 
-## Data And Compatibility
+## 数据与兼容性
 
-No database migration is required. Existing routing constraint JSON remains readable. Validation is applied when policies are created, updated, enabled, or imported. Existing persisted enabled routes are not silently rewritten; an audit reports incompatible rows so administrators can disable or repair them explicitly.
+无需数据库迁移。现有路由约束 JSON 保持可读。校验在策略被创建、更新、启用或导入时应用。已持久化的启用路由不会被静默改写；审计会报告不兼容行，以便管理员显式禁用或修复。
 
-All database operations continue to support SQLite, MySQL, and PostgreSQL through GORM.
+所有数据库操作继续通过 GORM 支持 SQLite、MySQL 和 PostgreSQL。
 
-## Tests
+## 测试
 
-1. Contract unit tests cover every affected channel and exact issue codes.
-2. Routing policy tests prove incompatible targets fail before persistence.
-3. Config import tests prove legacy 4stoken normalization and incompatible target blocking.
-4. Adaptor parity tests prove accepted contract representatives pass adaptor validation.
-5. Material matrix E2E removes expected provider rejection branches, records blocked configuration separately, and completes all valid targets through task, usage, quota, and cost tables.
-6. Persistent MySQL seed is rerun and the report records valid successes, blocked targets, material coverage, costs, and zero placeholder prices.
+1. 合约单元测试覆盖每个受影响渠道与精确的问题编码。
+2. 路由策略测试证明不兼容目标在持久化之前即失败。
+3. 配置导入测试证明旧 4stoken 归一化与不兼容目标阻止。
+4. 适配器对等测试证明通过合约的代表请求能通过适配器校验。
+5. 素材矩阵 E2E 移除预期的提供商拒绝分支，单独记录被阻止的配置，并让所有有效目标完整走通任务、用量、配额与成本表。
+6. 重新运行持久化 MySQL seed，报告记录有效成功数、被阻止目标、素材覆盖、成本与零占位价格。
 
-## Acceptance
+## 验收
 
-- No route target known to violate a verified channel protocol is enabled.
-- No E2E success count includes an expected adaptor rejection.
-- No unsupported multimodal behavior is fabricated.
-- Every successful task has one settled cost attempt using the imported CNY rule and selected variant.
-- Provider HTTP is the only mocked boundary.
-- Focused tests, the full Seedance E2E set, `git diff --check`, and relevant Go package tests pass before commit.
+- 没有已知违反已验证渠道协议的路由目标被启用。
+- E2E 成功计数中不含任何预期的适配器拒绝。
+- 不虚构任何不支持的多模态行为。
+- 每个成功任务都有一个使用导入的 CNY 规则与所选变体的已结算成本尝试。
+- 提供商 HTTP 是唯一被 mock 的边界。
+- 提交前通过聚焦测试、完整 Seedance E2E 集合、`git diff --check` 与相关 Go 包测试。

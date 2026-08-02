@@ -37,6 +37,7 @@ type PrepareCostAttemptInput struct {
 	BillableUpstreamModel     string
 	RequestPath               string
 	TaskPlatform              constant.TaskPlatform
+	CostVariantKey            string
 	RequestMeter              *types.CostMeter
 	CostProfitRecheckSnapshot *types.CostProfitRecheckSnapshot
 }
@@ -62,6 +63,10 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 	input.RequestID = strings.TrimSpace(input.RequestID)
 	input.BillableUpstreamModel = strings.TrimSpace(input.BillableUpstreamModel)
 	input.PredictedUpstreamModel = strings.TrimSpace(input.PredictedUpstreamModel)
+	costVariantKey, err := types.NormalizeCostVariantKey(input.CostVariantKey)
+	if err != nil {
+		return nil, err
+	}
 	if input.RequestID == "" || len(input.RequestID) > 64 {
 		return nil, errors.New("cost request ID is invalid")
 	}
@@ -132,6 +137,7 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		BillableUpstreamModel:  input.BillableUpstreamModel,
 		BillableRequestCount:   1,
 		RequestMeterJSON:       requestMeterJSON,
+		CostVariantKey:         costVariantKey,
 	}
 	runtimeMinimumExpectedMarginBPS := 0
 	validateRule := func(lockedRule *model.ChannelModelCostRule) error {

@@ -66,11 +66,15 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 	}
 	requestCtx := context.Background()
 	channelName := ""
+	costVariantKey := string(types.DefaultCostVariantKey)
 	if c != nil && c.Request != nil {
 		requestCtx = c.Request.Context()
 	}
 	if c != nil {
 		channelName = c.GetString(string(constant.ContextKeyChannelName))
+	}
+	if info.ChannelMeta != nil && info.ChannelMeta.Routing != nil {
+		costVariantKey = info.ChannelMeta.Routing.CostVariantKey
 	}
 	handle, err := service.PrepareCostAttempt(requestCtx, service.PrepareCostAttemptInput{
 		RequestID:                 info.RequestId,
@@ -89,6 +93,7 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		PredictedUpstreamModel:    info.PredictedUpstreamModel,
 		BillableUpstreamModel:     info.BillableUpstreamModel,
 		RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
+		CostVariantKey:            costVariantKey,
 		CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
 	})
 	if err != nil {

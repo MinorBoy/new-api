@@ -101,6 +101,22 @@ func TestPrepareCostAttemptUsesSelectedRoutingCostVariant(t *testing.T) {
 	assert.Equal(t, "720p", attempt.CostVariantKey)
 }
 
+func TestPrepareCostAttemptUsesExplicitVariantWithoutProfitSnapshot(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	rule480 := seedActiveAttemptRuleWithVariant(t, "480p", types.CostModePerRequest, normalizedPerRequestConfig(t, "0.1"))
+	rule720 := seedActiveAttemptRuleWithVariant(t, "720p", types.CostModePerRequest, normalizedPerRequestConfig(t, "0.2"))
+
+	input := preparedAttemptInput()
+	input.CostVariantKey = "720p"
+	handle, err := PrepareCostAttempt(context.Background(), input)
+
+	require.NoError(t, err)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, rule720.ID, attempt.RuleID)
+	assert.NotEqual(t, rule480.ID, attempt.RuleID)
+	assert.Equal(t, "720p", attempt.CostVariantKey)
+}
+
 func TestRecheckSelectedChannelProfitDoesNotFallbackAcrossCostVariants(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))

@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -139,6 +140,32 @@ func TestSaveRoutingPolicyRejectsInvalidCostVariantKey(t *testing.T) {
 	var serviceErr *service.RoutingPolicyServiceError
 	require.ErrorAs(t, err, &serviceErr)
 	assert.Equal(t, "targets.0.cost_variant_key", serviceErr.Field)
+}
+
+func TestSaveRoutingPolicyRejectsIncompatibleChannelContract(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	previousValidator := service.RouteTargetContractValidator
+	service.RouteTargetContractValidator = func(channel *model.Channel, target modelrouting.Target) error {
+		assert.Equal(t, 11, channel.Id)
+		assert.Equal(t, "provider-standard", target.UpstreamModel)
+		return errors.New("provider route contract rejected the target")
+	}
+	t.Cleanup(func() { service.RouteTargetContractValidator = previousValidator })
+
+	_, err := service.SaveRoutingPolicy(0, validRoutingPolicyWriteRequest())
+
+	assertRoutingPolicyServiceError(t, err, "incompatible_channel_contract", nil)
+	var serviceErr *service.RoutingPolicyServiceError
+	require.ErrorAs(t, err, &serviceErr)
+	assert.Equal(t, "targets.0.constraints", serviceErr.Field)
+	assert.Contains(t, serviceErr.Error(), "provider route contract rejected")
+	var policyCount int64
+	require.NoError(t, model.DB.Model(&model.RoutingPolicy{}).Count(&policyCount).Error)
+	assert.Zero(t, policyCount)
+	var targetCount int64
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).Count(&targetCount).Error)
+	assert.Zero(t, targetCount)
 }
 
 func routingPolicyWriteRequestForTest(view *service.RoutingPolicyView) service.RoutingPolicyWriteRequest {

@@ -21,6 +21,8 @@ type configImportBindingLineFixture struct {
 	channelRef         string
 	channelType        int
 	models             []string
+	protocol           string
+	providerHint       string
 	supportsRealPerson *bool
 }
 
@@ -256,6 +258,44 @@ func TestConfigImportBindingRejectsProviderTypeButAllowsSnapshotModels(t *testin
 	require.NoError(t, err)
 }
 
+func TestConfigImportBindingNormalizesLegacyFourSTokenType(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "channel-4stoken", channelRef: "CH-4STOKEN", channelType: constant.ChannelTypeOpenAI,
+		models: []string{"4sdance933"}, protocol: "task", providerHint: "4stoken",
+	})
+	channel := &model.Channel{
+		Type: constant.ChannelTypeFourSToken, Name: "4stoken", Models: "4sdance933",
+		Group: "default", Key: "key",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-4stoken", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+
+	require.NoError(t, err)
+}
+
+func TestConfigImportBindingRejectsTaskProtocolOnOpenAIChannel(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "channel-8yes", channelRef: "CH-8YES", channelType: constant.ChannelTypeOpenAI,
+		models: []string{"seedance-2.0"}, protocol: "task", providerHint: "8yes",
+	})
+	channel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI, Name: "8yes", Models: "seedance-2.0",
+		Group: "default", Key: "key",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-8yes", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+
+	require.ErrorContains(t, err, "BINDING_CHANNEL_PROTOCOL")
+}
+
 func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
@@ -456,10 +496,18 @@ func createConfigImportBindingBatch(t *testing.T, lines ...configImportBindingLi
 		})
 	}
 	for _, fixture := range lines {
+		protocol := fixture.protocol
+		if protocol == "" {
+			protocol = "test"
+		}
+		providerHint := fixture.providerHint
+		if providerHint == "" {
+			providerHint = "test"
+		}
 		persistConfigImportBindingItem(t, batch.ID, "channel_lines", fixture.lineRef, types.ConfigImportChannelLine{
 			ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: fixture.lineRef},
 			LineRef:                         fixture.lineRef, ChannelRef: fixture.channelRef, DisplayName: fixture.lineRef,
-			ProviderTypeHint: "test", Region: "test", Protocol: "test", StatusProposal: "disabled",
+			ProviderTypeHint: providerHint, Region: "test", Protocol: protocol, StatusProposal: "disabled",
 			SupportsRealPerson: fixture.supportsRealPerson,
 		})
 		for index, upstreamModel := range fixture.models {

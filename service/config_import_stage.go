@@ -253,7 +253,11 @@ func validateConfigImportBindingChannel(
 	if !found || master.BusinessID != line.ChannelRef || master.ChannelType == nil {
 		return configImportError("BINDING_BUSINESS_IDENTITY", "line_ref %q does not have a typed channel identity", line.LineRef)
 	}
-	if channel.Type != *master.ChannelType {
+	expectedType := normalizedConfigImportBindingChannelType(line.ChannelRef, *master.ChannelType)
+	if strings.EqualFold(strings.TrimSpace(line.Protocol), "task") && !isConfigImportTaskChannelType(channel.Type) {
+		return configImportError("BINDING_CHANNEL_PROTOCOL", "channel %d type does not support task protocol for line_ref %q", channel.Id, line.LineRef)
+	}
+	if channel.Type != expectedType {
 		return configImportError("BINDING_CHANNEL_TYPE", "channel %d type does not match line_ref %q", channel.Id, line.LineRef)
 	}
 	requiredModels := catalog.models[line.LineRef]
@@ -264,6 +268,37 @@ func validateConfigImportBindingChannel(
 		return err
 	}
 	return nil
+}
+
+func normalizedConfigImportBindingChannelType(channelRef string, sourceType int) int {
+	if channelRef == "CH-4STOKEN" && sourceType == constant.ChannelTypeOpenAI {
+		return constant.ChannelTypeFourSToken
+	}
+	return sourceType
+}
+
+func isConfigImportTaskChannelType(channelType int) bool {
+	switch channelType {
+	case constant.ChannelTypeVolcEngine,
+		constant.ChannelTypeKling,
+		constant.ChannelTypeJimeng,
+		constant.ChannelTypeVidu,
+		constant.ChannelTypeDoubaoVideo,
+		constant.ChannelTypeSora,
+		constant.ChannelTypeDimensio,
+		constant.ChannelTypeNewAPIVideo,
+		constant.ChannelTypeClmmMall,
+		constant.ChannelTypeLucen,
+		constant.ChannelTypeMegaByAI,
+		constant.ChannelTypeCangyuan,
+		constant.ChannelTypePaipu,
+		constant.ChannelTypeSecure,
+		constant.ChannelTypeOmegaAI,
+		constant.ChannelTypeFourSToken:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateConfigImportLineCapability(line types.ConfigImportChannelLine, channel *model.Channel) error {

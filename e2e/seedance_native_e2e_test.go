@@ -49,6 +49,7 @@ type mockArkRequest struct {
 	Method        string
 	Path          string
 	Authorization string
+	ContentType   string
 	Body          []byte
 }
 

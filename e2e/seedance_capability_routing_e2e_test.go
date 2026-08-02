@@ -56,13 +56,14 @@ func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Req
 	body, _ := io.ReadAll(r.Body)
 	m.mu.Lock()
 	m.requests = append(m.requests, mockArkRequest{
-		Method: r.Method, Path: r.URL.Path, Authorization: r.Header.Get("Authorization"), Body: append([]byte(nil), body...),
+		Method: r.Method, Path: r.URL.Path, Authorization: r.Header.Get("Authorization"),
+		ContentType: r.Header.Get("Content-Type"), Body: append([]byte(nil), body...),
 	})
 	m.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	switch {
-	case r.Method == http.MethodPost && r.URL.Path == "/v1/video/generations":
+	case r.Method == http.MethodPost && isVideoSubmitPath(r.URL.Path):
 		if m.submitStatus != 0 {
 			w.WriteHeader(m.submitStatus)
 		}
@@ -71,10 +72,25 @@ func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Req
 			response = `{"id":"upstream-task","task_id":"upstream-task","object":"video","status":"queued","progress":0}`
 		}
 		_, _ = w.Write([]byte(response))
-	case r.Method == http.MethodGet && r.URL.Path == "/v1/video/generations/upstream-task":
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/video/generations/"):
 		_, _ = w.Write([]byte(newAPIVideoPollingResponse))
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/task/"):
+		_, _ = w.Write([]byte(newAPIVideoPollingResponse))
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/tasks/"):
+		_, _ = w.Write([]byte(`{"task_id":"upstream-task","status":"succeeded","progress":100,"result":{"url":"https://example.com/video.mp4"}}`))
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/"):
+		_, _ = w.Write([]byte(`{"task_id":"upstream-task","status":"completed","progress":100,"video_url":"https://example.com/video.mp4"}`))
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func isVideoSubmitPath(path string) bool {
+	switch path {
+	case "/v1/video/generations", "/v1/videos/generations", "/v1/videos", "/api/generate-video":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -328,6 +328,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 					billingSource = service.BillingSourceWallet
 				}
 				var requestMeter *types.CostMeter
+				costVariantKey := string(types.DefaultCostVariantKey)
+				if info.ChannelMeta != nil && info.ChannelMeta.Routing != nil {
+					costVariantKey = info.ChannelMeta.Routing.CostVariantKey
+				}
 				if info.PriceData.RequestedDurationSeconds > 0 {
 					duration := strconv.Itoa(info.PriceData.RequestedDurationSeconds)
 					requestMeter = &types.CostMeter{
@@ -363,6 +367,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 					BillableUpstreamModel:     info.BillableUpstreamModel,
 					RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
 					TaskPlatform:              platform,
+					CostVariantKey:            costVariantKey,
 					RequestMeter:              requestMeter,
 					CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
 				})

@@ -111,6 +111,7 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 		TargetsByChannel: make(map[int][]modelrouting.Target),
 	}
 	rows := make([]model.RouteTarget, 0, len(request.Targets))
+	channelsByID := make(map[int]*model.Channel)
 	for index, target := range request.Targets {
 		if target.ChannelID <= 0 {
 			return nil, newRoutingPolicyServiceError("invalid_channel", fmt.Sprintf("targets.%d.channel_id", index), "channel is invalid")
@@ -131,7 +132,7 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 			return nil, newRoutingPolicyServiceError("invalid_cost_variant_key", fmt.Sprintf("targets.%d.cost_variant_key", index), err.Error())
 		}
 		targetID := -(index + 1)
-		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], modelrouting.Target{
+		contractTarget := modelrouting.Target{
 			ID:                       targetID,
 			PolicyID:                 id,
 			ChannelID:                target.ChannelID,
@@ -142,7 +143,21 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 			Enabled:                  target.Enabled,
 			Constraints:              target.Constraints,
-		})
+		}
+		if target.Enabled && RouteTargetContractValidator != nil {
+			channel := channelsByID[target.ChannelID]
+			if channel == nil {
+				channel = &model.Channel{}
+				if err := model.DB.Where("id = ?", target.ChannelID).First(channel).Error; err != nil {
+					return nil, newRoutingPolicyServiceError("invalid_channel", fmt.Sprintf("targets.%d.channel_id", index), "channel is unavailable")
+				}
+				channelsByID[target.ChannelID] = channel
+			}
+			if err := RouteTargetContractValidator(channel, contractTarget); err != nil {
+				return nil, newRoutingPolicyServiceError("incompatible_channel_contract", fmt.Sprintf("targets.%d.constraints", index), err.Error())
+			}
+		}
+		snapshot.TargetsByChannel[target.ChannelID] = append(snapshot.TargetsByChannel[target.ChannelID], contractTarget)
 		encoded, err := common.Marshal(target.Constraints)
 		if err != nil {
 			return nil, newRoutingPolicyServiceError("routing_policy_error", fmt.Sprintf("targets.%d.constraints", index), err.Error())

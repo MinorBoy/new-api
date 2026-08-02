@@ -28,8 +28,8 @@ func (c *taskUsageMetadataClient) Metadata(_ context.Context, _ string) (videome
 	return videometa.Metadata{DurationMS: c.durationMS}, nil
 }
 
-func TestPrepareSeedanceUsageInputsStoresAggregateDurationForNonTokenCostModes(t *testing.T) {
-	for _, costMode := range []types.CostMode{types.CostModePerRequest, types.CostModePerDuration} {
+func TestPrepareSeedanceUsageInputsStoresAggregateDurationForEveryCostMode(t *testing.T) {
+	for _, costMode := range []types.CostMode{"", types.CostModeFree, types.CostModePerToken, types.CostModePerRequest, types.CostModePerDuration} {
 		t.Run(string(costMode), func(t *testing.T) {
 			client := &taskUsageMetadataClient{durationMS: 2500}
 			service.SetVideoMetadataClient(client)
@@ -42,32 +42,11 @@ func TestPrepareSeedanceUsageInputsStoresAggregateDurationForNonTokenCostModes(t
 				TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 			}
 
-			taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info, costMode)
+			taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info)
 
 			require.Nil(t, taskErr)
 			assert.Equal(t, int64(5000), info.TaskRelayInfo.InputVideoDurationMS)
 			assert.Equal(t, int32(2), client.calls.Load())
-		})
-	}
-}
-
-func TestPrepareSeedanceUsageInputsSkipsModesThatCannotUseLocalFallback(t *testing.T) {
-	for _, costMode := range []types.CostMode{"", types.CostModePerToken, types.CostModeFree} {
-		t.Run(string(costMode), func(t *testing.T) {
-			client := &taskUsageMetadataClient{durationMS: 2500}
-			service.SetVideoMetadataClient(client)
-			t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
-			retryParam := &service.RetryParam{RoutingInput: &modelrouting.FactsInput{
-				ReferenceVideos:    1,
-				ReferenceVideoURLs: []string{"https://assets.example/a.mp4"},
-			}}
-			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
-
-			taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info, costMode)
-
-			require.Nil(t, taskErr)
-			assert.Zero(t, info.TaskRelayInfo.InputVideoDurationMS)
-			assert.Zero(t, client.calls.Load())
 		})
 	}
 }
@@ -80,7 +59,7 @@ func TestPrepareSeedanceUsageInputsSkipsRequestsWithoutReferenceVideo(t *testing
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 
-	taskErr := prepareSeedanceUsageInputs(t.Context(), &service.RetryParam{}, info, types.CostModePerRequest)
+	taskErr := prepareSeedanceUsageInputs(t.Context(), &service.RetryParam{}, info)
 
 	require.Nil(t, taskErr)
 	assert.Zero(t, info.TaskRelayInfo.InputVideoDurationMS)
@@ -99,7 +78,7 @@ func TestPrepareSeedanceUsageInputsRejectsInvalidMedia(t *testing.T) {
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 
-	taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info, types.CostModePerRequest)
+	taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info)
 
 	require.NotNil(t, taskErr)
 	assert.Equal(t, 400, taskErr.StatusCode)
@@ -118,7 +97,7 @@ func TestPrepareSeedanceUsageInputsFailsClosedWhenMetadataUnavailable(t *testing
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 
-	taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info, types.CostModePerDuration)
+	taskErr := prepareSeedanceUsageInputs(t.Context(), retryParam, info)
 
 	require.NotNil(t, taskErr)
 	assert.Equal(t, 503, taskErr.StatusCode)

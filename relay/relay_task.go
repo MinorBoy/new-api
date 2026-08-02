@@ -230,6 +230,33 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 			info.PriceData.AddOtherRatio(k, v)
 		}
 	}
+	seedanceTask := seedancepricing.Family(info.OriginModelName) != ""
+	if seedanceTask {
+		estimator, ok := adaptor.(channel.TaskDurationEstimator)
+		if !ok {
+			return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task adaptor %s does not expose Seedance duration", adaptor.GetChannelName()), "video_usage_context_unavailable", http.StatusInternalServerError)
+		}
+		requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
+		if taskErr != nil {
+			return nil, taskErr
+		}
+		info.PriceData.RequestedDurationSeconds = requestedSeconds
+		if _, ok := seedancepricing.Profile(c.GetString("task_resolution")); !ok {
+			return nil, service.TaskErrorWrapperLocal(errors.New("unsupported Seedance resolution"), "video_usage_resolution_unsupported", http.StatusBadRequest)
+		}
+		hasVideoInput := c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
+		if retryParam != nil && retryParam.RoutingInput != nil && retryParam.RoutingInput.ReferenceVideos > 0 {
+			hasVideoInput = true
+		}
+		if hasVideoInput {
+			if retryParam == nil || retryParam.RoutingInput == nil || retryParam.RoutingInput.ReferenceVideos == 0 {
+				return nil, service.TaskErrorWrapperLocal(errors.New("reference video usage facts are unavailable"), "video_usage_context_unavailable", http.StatusInternalServerError)
+			}
+			if taskErr := prepareSeedanceUsageInputs(c.Request.Context(), retryParam, info); taskErr != nil {
+				return nil, taskErr
+			}
+		}
+	}
 
 	// 6. per_duration delegates requested duration extraction to the adaptor and
 	// calculates the charge centrally. Legacy task billing remains unchanged.
@@ -238,19 +265,18 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 		if !ok {
 			return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task adaptor %s does not support duration billing", adaptor.GetChannelName()), "duration_billing_not_supported", http.StatusBadRequest)
 		}
-		requestedSeconds, taskErr := estimator.EstimateDurationSeconds(c, info)
-		if taskErr != nil {
-			return nil, taskErr
+		requestedSeconds := info.PriceData.RequestedDurationSeconds
+		if !seedanceTask {
+			var taskErr *dto.TaskError
+			requestedSeconds, taskErr = estimator.EstimateDurationSeconds(c, info)
+			if taskErr != nil {
+				return nil, taskErr
+			}
 		}
-		if seedancepricing.Family(info.OriginModelName) != "" {
+		if seedanceTask {
 			hasVideoInput := c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
 			if retryParam != nil && retryParam.RoutingInput != nil && retryParam.RoutingInput.ReferenceVideos > 0 {
 				hasVideoInput = true
-			}
-			if hasVideoInput {
-				if taskErr := prepareSeedanceUsageInputs(c.Request.Context(), retryParam, info, types.CostModePerDuration); taskErr != nil {
-					return nil, taskErr
-				}
 			}
 			inputDurationMS := int64(0)
 			if info.TaskRelayInfo != nil {
@@ -380,8 +406,6 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 						return nil, service.TaskErrorWrapperLocal(err, "cost_accounting_failed", http.StatusInternalServerError)
 					}
 					logger.LogWarn(c, fmt.Sprintf("skip task cost tracking: request_id=%s task_id=%s channel_id=%d error=%v", info.RequestId, info.PublicTaskID, info.ChannelId, err))
-				} else if taskErr := prepareSeedanceUsageInputs(c.Request.Context(), retryParam, info, handle.CostMode); taskErr != nil {
-					return nil, taskErr
 				} else if err := service.AuthorizeCostDispatch(c.Request.Context(), handle); err != nil {
 					if mode == types.CostAccountingStrict {
 						return nil, service.TaskErrorWrapperLocal(err, "cost_dispatch_authorization_failed", http.StatusInternalServerError)
@@ -446,16 +470,17 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 	}, nil
 }
 
-func prepareSeedanceUsageInputs(ctx context.Context, retryParam *service.RetryParam, info *relaycommon.RelayInfo, costMode types.CostMode) *dto.TaskError {
-	if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
-		return nil
-	}
-	if retryParam == nil {
+func prepareSeedanceUsageInputs(ctx context.Context, retryParam *service.RetryParam, info *relaycommon.RelayInfo) *dto.TaskError {
+	if retryParam == nil || retryParam.RoutingInput == nil || retryParam.RoutingInput.ReferenceVideos == 0 {
 		return nil
 	}
 	metadataState := retryParam.ProfitRoutingState()
 	if metadataState == nil {
-		return nil
+		return service.TaskErrorWrapperLocal(
+			errors.New("reference video metadata state is unavailable"),
+			"video_usage_context_unavailable",
+			http.StatusInternalServerError,
+		)
 	}
 	if info == nil || info.TaskRelayInfo == nil {
 		return service.TaskErrorWrapperLocal(

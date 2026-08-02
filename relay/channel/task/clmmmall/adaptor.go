@@ -233,6 +233,12 @@ func (a *TaskAdaptor) ParseTaskError(_ []byte, statusCode int) *dto.TaskError {
 	case http.StatusTooManyRequests:
 		message := "CLMM Mall rate limit exceeded"
 		return &dto.TaskError{Code: "rate_limit_exceeded", Message: message, StatusCode: http.StatusTooManyRequests, Error: errors.New(message)}
+	case http.StatusPaymentRequired:
+		message := "CLMM Mall balance is insufficient"
+		return &dto.TaskError{Code: "insufficient_quota", Message: message, StatusCode: http.StatusPaymentRequired, Error: errors.New(message)}
+	case http.StatusForbidden:
+		message := "CLMM Mall permission denied"
+		return &dto.TaskError{Code: "permission_denied", Message: message, StatusCode: http.StatusForbidden, Error: errors.New(message)}
 	default:
 		message := "CLMM Mall upstream request failed"
 		return &dto.TaskError{Code: "upstream_error", Message: message, StatusCode: http.StatusBadGateway, Error: errors.New(message)}

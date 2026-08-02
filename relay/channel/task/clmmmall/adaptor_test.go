@@ -217,6 +217,22 @@ func TestTaskAdaptorParseTaskErrorUsesStableMappings(t *testing.T) {
 			code:           "rate_limit_exceeded",
 			message:        "CLMM Mall rate limit exceeded",
 		},
+		{
+			name:           "insufficient balance",
+			responseStatus: http.StatusPaymentRequired,
+			taskStatus:     http.StatusPaymentRequired,
+			body:           `{"error":{"message":"private balance diagnostic"}}`,
+			code:           "insufficient_quota",
+			message:        "CLMM Mall balance is insufficient",
+		},
+		{
+			name:           "permission denied",
+			responseStatus: http.StatusForbidden,
+			taskStatus:     http.StatusForbidden,
+			body:           `{"error":{"message":"private permission diagnostic"}}`,
+			code:           "permission_denied",
+			message:        "CLMM Mall permission denied",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -243,7 +259,7 @@ func TestTaskAdaptorParseTaskErrorUsesStableMappings(t *testing.T) {
 		})
 	}
 
-	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTeapot, http.StatusInternalServerError} {
+	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusTeapot, http.StatusInternalServerError} {
 		gatewayErr := adaptor.ParseTaskError([]byte(`{"message":"secret upstream diagnostic token=abc"}`), statusCode)
 		require.NotNil(t, gatewayErr)
 		assert.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)

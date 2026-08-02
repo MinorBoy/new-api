@@ -125,6 +125,7 @@ type TaskPrivateData struct {
 }
 
 const (
+	TaskUsageSnapshotVersion1      = 1
 	TaskUsageProfileSeedance       = "seedance"
 	TaskUsageSourceUpstream        = "upstream"
 	TaskUsageSourceLocalCalculated = "local_calculated"
@@ -149,6 +150,9 @@ type TaskBillingContext struct {
 	ServiceTier              string               `json:"service_tier,omitempty"`
 	Resolution               string               `json:"resolution,omitempty"`
 	BillingTokens            int                  `json:"billing_tokens,omitempty"`
+	UsageSnapshotVersion     int                  `json:"usage_snapshot_version,omitempty"`
+	UsageCompletionTokens    int                  `json:"usage_completion_tokens,omitempty"`
+	UsageTotalTokens         int                  `json:"usage_total_tokens,omitempty"`
 	InputVideoDurationMS     int64                `json:"input_video_duration_ms,omitempty"`
 	UpstreamCostMode         string               `json:"upstream_cost_mode,omitempty"`
 	PerCallBilling           bool                 `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算

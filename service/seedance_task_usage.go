@@ -25,13 +25,28 @@ type SeedanceTaskUsage struct {
 	TotalTokens      int
 }
 
-// IsValidSeedanceUpstreamUsage applies the shared trust boundary used by
-// settlement and public task responses.
-func IsValidSeedanceUpstreamUsage(completionTokens, totalTokens int64) bool {
+func IsValidSeedanceUsage(completionTokens, totalTokens int64) bool {
 	return completionTokens > 0 &&
 		totalTokens >= completionTokens &&
 		completionTokens <= int64(relaycommon.MaxTokensLimit) &&
 		totalTokens <= int64(relaycommon.MaxTokensLimit)
+}
+
+// IsValidSeedanceUpstreamUsage applies the shared trust boundary used by
+// settlement and public task responses.
+func IsValidSeedanceUpstreamUsage(completionTokens, totalTokens int64) bool {
+	return IsValidSeedanceUsage(completionTokens, totalTokens)
+}
+
+func PersistedSeedanceTaskUsage(bc *model.TaskBillingContext) (SeedanceTaskUsage, bool) {
+	if bc == nil || bc.UsageSnapshotVersion != model.TaskUsageSnapshotVersion1 ||
+		!IsValidSeedanceUsage(int64(bc.UsageCompletionTokens), int64(bc.UsageTotalTokens)) {
+		return SeedanceTaskUsage{}, false
+	}
+	return SeedanceTaskUsage{
+		CompletionTokens: bc.UsageCompletionTokens,
+		TotalTokens:      bc.UsageTotalTokens,
+	}, true
 }
 
 func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) error {

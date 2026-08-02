@@ -104,6 +104,70 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 	}
 }
 
+func TestPersistedSeedanceTaskUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		bc   *model.TaskBillingContext
+		want SeedanceTaskUsage
+		ok   bool
+	}{
+		{
+			name: "version one snapshot",
+			bc: &model.TaskBillingContext{
+				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+				UsageCompletionTokens: 108000,
+				UsageTotalTokens:      172800,
+			},
+			want: SeedanceTaskUsage{CompletionTokens: 108000, TotalTokens: 172800},
+			ok:   true,
+		},
+		{
+			name: "legacy version",
+			bc: &model.TaskBillingContext{
+				UsageCompletionTokens: 108000,
+				UsageTotalTokens:      108000,
+			},
+		},
+		{
+			name: "partial snapshot",
+			bc: &model.TaskBillingContext{
+				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+				UsageCompletionTokens: 108000,
+			},
+		},
+		{
+			name: "invalid relation",
+			bc: &model.TaskBillingContext{
+				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+				UsageCompletionTokens: 108000,
+				UsageTotalTokens:      100000,
+			},
+		},
+		{
+			name: "zero values",
+			bc: &model.TaskBillingContext{
+				UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+			},
+		},
+		{
+			name: "over limit",
+			bc: &model.TaskBillingContext{
+				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+				UsageCompletionTokens: relaycommon.MaxTokensLimit + 1,
+				UsageTotalTokens:      relaycommon.MaxTokensLimit + 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := PersistedSeedanceTaskUsage(tt.bc)
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 	t.Run("calculates missing usage", func(t *testing.T) {
 		task := &model.Task{

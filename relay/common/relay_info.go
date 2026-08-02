@@ -867,7 +867,9 @@ type TaskRelayInfo struct {
 	PublicTaskID string
 	// InputVideoDurationMS is the aggregate duration of reference videos used to
 	// calculate Ark-compatible terminal usage without retaining their URLs.
-	InputVideoDurationMS int64
+	InputVideoDurationMS  int64
+	UsageCompletionTokens int
+	UsageTotalTokens      int
 
 	ConsumeQuota bool
 

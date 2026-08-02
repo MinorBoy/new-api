@@ -231,6 +231,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 		}
 	}
 	seedanceTask := seedancepricing.Family(info.OriginModelName) != ""
+	seedanceHasVideoInput := false
 	if seedanceTask {
 		estimator, ok := adaptor.(channel.TaskDurationEstimator)
 		if !ok {
@@ -250,17 +251,20 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 			return nil, service.TaskErrorWrapperLocal(errors.New("unsupported Seedance resolution"), "video_usage_resolution_unsupported", http.StatusBadRequest)
 		}
 		c.Set("task_resolution", resolutionProfile.Name)
-		hasVideoInput := c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
+		seedanceHasVideoInput = c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
 		if retryParam != nil && retryParam.RoutingInput != nil && retryParam.RoutingInput.ReferenceVideos > 0 {
-			hasVideoInput = true
+			seedanceHasVideoInput = true
 		}
-		if hasVideoInput {
+		if seedanceHasVideoInput {
 			if retryParam == nil || retryParam.RoutingInput == nil || retryParam.RoutingInput.ReferenceVideos == 0 {
 				return nil, service.TaskErrorWrapperLocal(errors.New("reference video usage facts are unavailable"), "video_usage_context_unavailable", http.StatusInternalServerError)
 			}
 			if taskErr := prepareSeedanceUsageInputs(c.Request.Context(), retryParam, info); taskErr != nil {
 				return nil, taskErr
 			}
+		}
+		if err := prepareSeedanceUsageSnapshot(info, requestedSeconds, resolutionProfile.Name, seedanceHasVideoInput); err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "video_usage_context_unavailable", http.StatusInternalServerError)
 		}
 	}
 
@@ -280,15 +284,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 			}
 		}
 		if seedanceTask {
-			hasVideoInput := c.GetBool(string(constant.ContextKeyTaskVideoHasInput))
-			if retryParam != nil && retryParam.RoutingInput != nil && retryParam.RoutingInput.ReferenceVideos > 0 {
-				hasVideoInput = true
-			}
 			inputDurationMS := int64(0)
 			if info.TaskRelayInfo != nil {
 				inputDurationMS = info.TaskRelayInfo.InputVideoDurationMS
 			}
-			if err := applySeedanceDurationPricing(&info.PriceData, info.OriginModelName, c.GetString("task_resolution"), hasVideoInput, inputDurationMS, requestedSeconds); err != nil {
+			if err := applySeedanceDurationPricing(&info.PriceData, info.OriginModelName, c.GetString("task_resolution"), seedanceHasVideoInput, inputDurationMS, requestedSeconds); err != nil {
 				return nil, service.TaskErrorWrapperLocal(err, "duration_billing_error", http.StatusBadRequest)
 			}
 		}
@@ -474,6 +474,28 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func prepareSeedanceUsageSnapshot(info *relaycommon.RelayInfo, requestedSeconds int, resolution string, hasVideoInput bool) error {
+	if info == nil || info.TaskRelayInfo == nil {
+		return errors.New("task relay info is unavailable")
+	}
+	usage, err := service.CalculateSeedanceTaskUsage(&model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: requestedSeconds,
+		Resolution:               resolution,
+		HasVideoInput:            hasVideoInput,
+		InputVideoDurationMS:     info.TaskRelayInfo.InputVideoDurationMS,
+	}, service.SeedanceTerminalFacts{})
+	if err != nil {
+		return err
+	}
+	if !service.IsValidSeedanceUsage(int64(usage.CompletionTokens), int64(usage.TotalTokens)) {
+		return errors.New("calculated Seedance usage is invalid")
+	}
+	info.TaskRelayInfo.UsageCompletionTokens = usage.CompletionTokens
+	info.TaskRelayInfo.UsageTotalTokens = usage.TotalTokens
+	return nil
 }
 
 func prepareSeedanceUsageInputs(ctx context.Context, retryParam *service.RetryParam, info *relaycommon.RelayInfo) *dto.TaskError {

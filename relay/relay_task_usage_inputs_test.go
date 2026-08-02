@@ -28,6 +28,64 @@ func (c *taskUsageMetadataClient) Metadata(_ context.Context, _ string) (videome
 	return videometa.Metadata{DurationMS: c.durationMS}, nil
 }
 
+func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
+	tests := []struct {
+		name                 string
+		inputVideoDurationMS int64
+		resolution           string
+		hasVideoInput        bool
+		wantCompletionTokens int
+		wantTotalTokens      int
+		wantErr              string
+	}{
+		{
+			name:                 "text or image input",
+			resolution:           "720p",
+			wantCompletionTokens: 108000,
+			wantTotalTokens:      108000,
+		},
+		{
+			name:                 "reference video input",
+			inputVideoDurationMS: 3000,
+			resolution:           "720p",
+			hasVideoInput:        true,
+			wantCompletionTokens: 108000,
+			wantTotalTokens:      172800,
+		},
+		{
+			name:          "missing reference video duration",
+			resolution:    "720p",
+			hasVideoInput: true,
+			wantErr:       "reference video duration is unavailable",
+		},
+		{
+			name:       "unsupported resolution",
+			resolution: "bad",
+			wantErr:    "output resolution is unsupported",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				TaskRelayInfo: &relaycommon.TaskRelayInfo{
+					InputVideoDurationMS: test.inputVideoDurationMS,
+				},
+			}
+
+			err := prepareSeedanceUsageSnapshot(info, 5, test.resolution, test.hasVideoInput)
+
+			if test.wantErr != "" {
+				require.EqualError(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.wantCompletionTokens, info.TaskRelayInfo.UsageCompletionTokens)
+			assert.Equal(t, test.wantTotalTokens, info.TaskRelayInfo.UsageTotalTokens)
+		})
+	}
+}
+
 func TestPrepareSeedanceUsageInputsStoresAggregateDurationForEveryCostMode(t *testing.T) {
 	for _, costMode := range []types.CostMode{"", types.CostModeFree, types.CostModePerToken, types.CostModePerRequest, types.CostModePerDuration} {
 		t.Run(string(costMode), func(t *testing.T) {

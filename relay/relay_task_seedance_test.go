@@ -884,10 +884,12 @@ func TestSeedanceTaskResponseCalculatesUsageForPerTokenUpstream(t *testing.T) {
 		UpdatedAt:  222,
 		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
 		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
-			UsageProfile:             model.TaskUsageProfileSeedance,
-			RequestedDurationSeconds: 5,
-			Resolution:               "720p",
-			UpstreamCostMode:         string(types.CostModePerToken),
+			UsageProfile:          model.TaskUsageProfileSeedance,
+			UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+			UsageCompletionTokens: 108000,
+			UsageTotalTokens:      108000,
+			UsageSource:           model.TaskUsageSourceLocalCalculated,
+			UpstreamCostMode:      string(types.CostModePerToken),
 		}},
 		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
 	}
@@ -900,6 +902,37 @@ func TestSeedanceTaskResponseCalculatesUsageForPerTokenUpstream(t *testing.T) {
 	assert.EqualValues(t, 108000, usage["completion_tokens"])
 	assert.EqualValues(t, 108000, usage["total_tokens"])
 	assert.NotContains(t, response, "usage_source")
+}
+
+func TestSeedanceTaskResponseUsesPersistedFinalUsage(t *testing.T) {
+	task := &model.Task{
+		TaskID: "task_public_persisted_usage", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status: model.TaskStatusSuccess, Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+			UsageCompletionTokens: 108900, UsageTotalTokens: 109000, UsageSource: model.TaskUsageSourceUpstream,
+		}},
+		Data: json.RawMessage(`{"status":"succeeded","content":{"video_url":"https://x/video.mp4"}}`),
+	}
+	response, err := seedanceTaskResponse(task)
+	require.NoError(t, err)
+	usage := response["usage"].(map[string]interface{})
+	assert.EqualValues(t, 108900, usage["completion_tokens"])
+	assert.EqualValues(t, 109000, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseRejectsBrokenVersionedUsage(t *testing.T) {
+	task := &model.Task{
+		TaskID: "task_public_broken_usage", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status: model.TaskStatusSuccess, Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+			UsageSource: model.TaskUsageSourceLocalCalculated,
+		}},
+		Data: json.RawMessage(`{"status":"succeeded","content":{"video_url":"https://x/video.mp4"}}`),
+	}
+	_, err := seedanceTaskResponse(task)
+	require.ErrorContains(t, err, "Seedance terminal usage is unavailable")
 }
 
 func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
@@ -997,6 +1030,9 @@ func TestSeedanceTaskResponseReplacesOverLimitUpstreamUsageWithSettledUsage(t *t
 		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
 		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			UsageProfile:             model.TaskUsageProfileSeedance,
+			UsageSnapshotVersion:     model.TaskUsageSnapshotVersion1,
+			UsageCompletionTokens:    108000,
+			UsageTotalTokens:         108000,
 			RequestedDurationSeconds: 5,
 			Resolution:               "720p",
 		}},
@@ -1012,6 +1048,8 @@ func TestSeedanceTaskResponseReplacesOverLimitUpstreamUsageWithSettledUsage(t *t
 	require.NoError(t, service.NormalizeSeedanceTaskUsage(task, result))
 	require.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
 	require.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
+	require.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+	require.Equal(t, 108000, task.PrivateData.BillingContext.UsageTotalTokens)
 
 	response, err := seedanceTaskResponse(task)
 

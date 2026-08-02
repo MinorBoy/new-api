@@ -257,15 +257,32 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 			response["content"] = content
 		}
 	}
-	populateSeedanceTaskUsage(task, response)
+	if err := populateSeedanceTaskUsage(task, response); err != nil {
+		return nil, err
+	}
 	return response, nil
 }
 
-func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}) {
+func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}) error {
 	if task == nil || task.Status != model.TaskStatusSuccess || response == nil {
-		return
+		return nil
 	}
 	billingContext := task.PrivateData.BillingContext
+	if billingContext != nil && billingContext.UsageSnapshotVersion == model.TaskUsageSnapshotVersion1 {
+		if billingContext.UsageSource != model.TaskUsageSourceUpstream &&
+			billingContext.UsageSource != model.TaskUsageSourceLocalCalculated {
+			return errors.New("Seedance terminal usage is unavailable")
+		}
+		usage, ok := service.PersistedSeedanceTaskUsage(billingContext)
+		if !ok {
+			return errors.New("Seedance terminal usage is unavailable")
+		}
+		response["usage"] = map[string]interface{}{
+			"completion_tokens": usage.CompletionTokens,
+			"total_tokens":      usage.TotalTokens,
+		}
+		return nil
+	}
 	preferLocalUsage := billingContext != nil && billingContext.UsageSource == model.TaskUsageSourceLocalCalculated
 	if rawUsage, exists := response["usage"]; exists && !preferLocalUsage {
 		usageData, err := common.Marshal(rawUsage)
@@ -277,24 +294,24 @@ func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}
 			if common.Unmarshal(usageData, &usage) == nil &&
 				usage.CompletionTokens != nil && usage.TotalTokens != nil &&
 				service.IsValidSeedanceUpstreamUsage(*usage.CompletionTokens, *usage.TotalTokens) {
-				return
+				return nil
 			}
 		}
 	}
 
 	if billingContext == nil {
-		return
+		return nil
 	}
 	if billingContext.UsageProfile != model.TaskUsageProfileSeedance {
 		costMode := types.CostMode(billingContext.UpstreamCostMode)
 		if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
-			return
+			return nil
 		}
 	}
 
 	responseData, err := common.Marshal(response)
 	if err != nil {
-		return
+		return nil
 	}
 	var output struct {
 		Duration        *json.Number `json:"duration"`
@@ -302,7 +319,7 @@ func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}
 		FramesPerSecond *json.Number `json:"framespersecond"`
 	}
 	if common.Unmarshal(responseData, &output) != nil {
-		return
+		return nil
 	}
 
 	terminalFacts := service.SeedanceTerminalFacts{
@@ -325,12 +342,13 @@ func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}
 	}
 	usage, err := service.CalculateSeedanceTaskUsage(billingContext, terminalFacts)
 	if err != nil {
-		return
+		return nil
 	}
 	response["usage"] = map[string]interface{}{
 		"completion_tokens": usage.CompletionTokens,
 		"total_tokens":      usage.TotalTokens,
 	}
+	return nil
 }
 
 func boundedSeedanceResponseInteger(number *json.Number, maximum int64) (int64, bool) {

@@ -181,9 +181,13 @@ func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *
 			UsePrice:                 true,
 			RequestedDurationSeconds: 5,
 		},
-		CostAttempt:   &types.CostAttemptHandle{CostMode: types.CostModePerRequest},
-		ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: 73, ChannelType: constant.ChannelTypeNewAPIVideo},
-		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task-seedance-profile"},
+		CostAttempt: &types.CostAttemptHandle{CostMode: types.CostModePerRequest},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 73, ChannelType: constant.ChannelTypeNewAPIVideo},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			PublicTaskID:          "task-seedance-profile",
+			UsageCompletionTokens: 108000,
+			UsageTotalTokens:      172800,
+		},
 	}
 	result := &relay.TaskSubmitResult{
 		UpstreamTaskID: "upstream-task",
@@ -198,6 +202,9 @@ func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *
 	require.NoError(t, model.DB.Where("task_id = ?", "task-seedance-profile").First(&task).Error)
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
+	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
+	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
 	assert.False(t, task.PrivateData.BillingContext.PerCallBilling)
 	assert.Equal(t, string(types.CostModePerRequest), task.PrivateData.BillingContext.UpstreamCostMode)
 }

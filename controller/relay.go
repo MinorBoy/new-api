@@ -795,6 +795,20 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 	if seedancepricing.Family(relayInfo.OriginModelName) != "" {
 		usageProfile = model.TaskUsageProfileSeedance
 	}
+	usageSnapshotVersion := 0
+	usageCompletionTokens := 0
+	usageTotalTokens := 0
+	if usageProfile == model.TaskUsageProfileSeedance {
+		if relayInfo.TaskRelayInfo == nil || !service.IsValidSeedanceUsage(
+			int64(relayInfo.TaskRelayInfo.UsageCompletionTokens),
+			int64(relayInfo.TaskRelayInfo.UsageTotalTokens),
+		) {
+			return errors.New("submitted Seedance task is missing its usage snapshot")
+		}
+		usageSnapshotVersion = model.TaskUsageSnapshotVersion1
+		usageCompletionTokens = relayInfo.TaskRelayInfo.UsageCompletionTokens
+		usageTotalTokens = relayInfo.TaskRelayInfo.UsageTotalTokens
+	}
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		BillingMode:              relayInfo.PriceData.BillingMode,
 		DurationPrice:            relayInfo.PriceData.DurationPrice,
@@ -815,6 +829,9 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		InputVideoDurationMS:     inputVideoDurationMS,
 		UpstreamCostMode:         upstreamCostMode,
 		UsageProfile:             usageProfile,
+		UsageSnapshotVersion:     usageSnapshotVersion,
+		UsageCompletionTokens:    usageCompletionTokens,
+		UsageTotalTokens:         usageTotalTokens,
 		PerCallBilling: usageProfile == "" && (common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
 			relayInfo.PriceData.UsePrice ||
 			relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration),

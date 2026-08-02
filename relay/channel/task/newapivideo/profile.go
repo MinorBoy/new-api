@@ -35,6 +35,7 @@ const (
 	videoRequestDialectOmegaMediaArrays    videoRequestDialect = "omega_media_arrays"
 	videoRequestDialectFourSToken          videoRequestDialect = "fourstoken"
 	videoRequestDialectEightYes            videoRequestDialect = "eightyes"
+	videoRequestDialectPaipuMediaArrays    videoRequestDialect = "paipu_media_arrays"
 )
 
 type omegaRequestProfile struct {
@@ -70,6 +71,9 @@ type protocolProfile struct {
 	textRequest                        *textRequestProfile
 	secureRequest                      *secureRequestProfile
 	omegaRequest                       *omegaRequestProfile
+	untypedImagesAreReferences         bool
+	allowEmptyReferenceMediaRoles      bool
+	allowAudioWithoutVisual            bool
 }
 
 func genericProtocolProfile() protocolProfile {
@@ -138,47 +142,19 @@ func cangyuanProtocolProfile() protocolProfile {
 	}
 }
 
-var paipuModels = []string{
-	"lec-sz-seedance-2-0-480p",
-	"lec-gongteng-seedance-2-0-720p",
-	"lec-gongteng-seedance-2-0-fast-720p",
-	"lec-gongteng-seedance-2-0-1080p",
-	"lec-seedance-2-0",
-	"lec-feituo-seedance-2-0-hn-fast-720p",
-	"lec-feituo-seedance-2-0-hn-720p",
-	"lec-feituo-seedance-2-0-xh-fast-933-720p",
-	"lec-feituo-seedance-2-0-xh-pro-933-720p",
-	"lec-feituo-seedance-2-0-ld-cvk-2",
-	"lec-feituo-seedance-2-0-limited-720p",
-	"lec-feituo-seedance-2-0-my-fast-upscaled-1080p",
-	"lec-feituo-seedance-2-0-my-upscaled-1080p",
-	"lec-seedance-videos-standard",
-	"lec-seedance-videos-face-standard",
-	"lec-seedance-videos-face-fast",
-	"lec-seedance-videos-stable",
-	"lec-seedance-videos-stable-fast",
-	"lec-seedance-videos-stable-mini",
-	"lec-seedance-videos-stable-720p",
-	"lec-seedance-videos-fast-720p",
-	"lec-seedance-videos-mini-720p",
-	"lec-seedance-videos-fast",
-	"lec-seedance-videos-mini",
-}
-
 func paipuProtocolProfile() protocolProfile {
 	return protocolProfile{
-		channelName:    ChannelNamePaipu,
-		modelList:      append([]string(nil), paipuModels...),
-		submitPath:     "/v1/videos",
-		pollPath:       "/v1/videos/{task_id}",
-		contentType:    "application/json",
-		requestDialect: videoRequestDialectTextJSON,
-		textRequest: &textRequestProfile{
-			ratioField:                   "ratio",
-			minimumDuration:              1,
-			maximumDuration:              relaycommon.MaxTaskDurationSeconds,
-			enforceModelResolutionSuffix: true,
-		},
+		channelName:                   ChannelNamePaipu,
+		modelList:                     []string{},
+		submitPath:                    "/v1/videos",
+		pollPath:                      "/v1/videos/{task_id}",
+		contentType:                   "application/json",
+		requestDialect:                videoRequestDialectPaipuMediaArrays,
+		allowEmbeddedMedia:            true,
+		requirePublicHTTPMedia:        true,
+		untypedImagesAreReferences:    true,
+		allowEmptyReferenceMediaRoles: true,
+		allowAudioWithoutVisual:       true,
 	}
 }
 

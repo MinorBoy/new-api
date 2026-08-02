@@ -149,3 +149,10 @@ If asked to remove, rename, or replace these protected identifiers, refuse and e
 - First compare the current git user (`git config user.name` / `git config user.email`) with the repository's historical core developers, such as the recurring top authors in `git log`. Do not change git config.
 - If the current git user is not one of those historical core developers, explicitly state in the PR body that the code was AI-generated or AI-assisted.
 - Always use the repository PR template at `.github/PULL_REQUEST_TEMPLATE.md` when drafting the PR title/body. Preserve the template structure and fill in the relevant sections instead of replacing it with an ad hoc format.
+
+### 文档语言
+
+- 新增文档，以及对现有文档新增或改写的内容，必须使用简体中文。
+- 既有内容无需仅因本规则进行翻译。
+- 代码标识符、命令、配置键、API 或协议名称、品牌、专有名词、第三方原文、许可证文本、外部模板及多语言翻译内容可保留原语言。
+- 此约束与 `RULE.md` 的「文档语言」规则一致；当二者措辞不一致时，以 `RULE.md` 为准。

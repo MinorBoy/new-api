@@ -138,6 +138,12 @@ func validateSecureRequest(request arkRequest, profile secureRequestProfile, ups
 			}
 		}
 	case dto.SecureVideoGroupEnterprise:
+		if len(media.videos) > 0 {
+			return &arkRequestError{Code: "InvalidParameter.content", Message: "Secure enterprise video does not support reference videos"}
+		}
+		if len(media.images) > 9 || len(media.audios) > 3 || len(media.images)+len(media.audios) > 12 {
+			return &arkRequestError{Code: "InvalidParameter.content", Message: "Secure enterprise media limits are exceeded"}
+		}
 		if hasLastFrame {
 			return &arkRequestError{Code: "InvalidParameter.content", Message: "Secure enterprise video does not support last_frame"}
 		}

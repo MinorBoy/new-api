@@ -215,6 +215,7 @@ type DurationPriceProposal struct {
 
 type ConfigImportCostRuleDraft struct {
 	ConfigImportAuthoritativeEntity
+	Enabled                           *bool   `json:"enabled"`
 	LineRef                           string  `json:"line_ref"`
 	UpstreamModel                     string  `json:"upstream_model,omitempty"`
 	CostVariantKey                    string  `json:"cost_variant_key"`
@@ -261,22 +262,26 @@ type ConfigImportReferenceBounds struct {
 }
 
 type ConfigImportRouteTarget struct {
-	RouteTargetRef     string                       `json:"route_target_ref"`
-	LineRef            string                       `json:"line_ref"`
-	UpstreamModel      string                       `json:"upstream_model"`
-	SKURef             string                       `json:"sku_ref"`
-	CostVariantKey     string                       `json:"cost_variant_key"`
-	OutputResolutions  []string                     `json:"output_resolutions,omitempty"`
-	DurationValues     []int                        `json:"duration_values,omitempty"`
-	DurationMin        *int                         `json:"duration_min,omitempty"`
-	DurationMax        *int                         `json:"duration_max,omitempty"`
-	AspectRatios       []string                     `json:"aspect_ratios,omitempty"`
-	InputModes         []string                     `json:"input_modes,omitempty"`
-	ReferenceMinimums  *ConfigImportReferenceBounds `json:"reference_minimums,omitempty"`
-	ReferenceLimits    *ConfigImportReferenceBounds `json:"reference_limits,omitempty"`
-	SupportsRealPerson *bool                        `json:"supports_real_person,omitempty"`
-	Priority           *int                         `json:"priority,omitempty"`
-	Enabled            *bool                        `json:"enabled"`
+	RouteTargetRef                     string                       `json:"route_target_ref"`
+	LineRef                            string                       `json:"line_ref"`
+	UpstreamModel                      string                       `json:"upstream_model"`
+	SKURef                             string                       `json:"sku_ref"`
+	CostVariantKey                     string                       `json:"cost_variant_key"`
+	OutputResolutions                  []string                     `json:"output_resolutions,omitempty"`
+	DurationValues                     []int                        `json:"duration_values,omitempty"`
+	DurationMin                        *int                         `json:"duration_min,omitempty"`
+	DurationMax                        *int                         `json:"duration_max,omitempty"`
+	AspectRatios                       []string                     `json:"aspect_ratios,omitempty"`
+	InputModes                         []string                     `json:"input_modes,omitempty"`
+	ReferenceMinimums                  *ConfigImportReferenceBounds `json:"reference_minimums,omitempty"`
+	ReferenceLimits                    *ConfigImportReferenceBounds `json:"reference_limits,omitempty"`
+	ReferenceTotalMax                  *int                         `json:"reference_total_max,omitempty"`
+	ReferenceVideoAudioTotalMax        *int                         `json:"reference_video_audio_total_max,omitempty"`
+	ReferenceVideoTotalDurationSeconds *int                         `json:"reference_video_total_duration_seconds,omitempty"`
+	ReferenceModes                     []string                     `json:"reference_modes,omitempty"`
+	SupportsRealPerson                 *bool                        `json:"supports_real_person,omitempty"`
+	Priority                           *int                         `json:"priority,omitempty"`
+	Enabled                            *bool                        `json:"enabled"`
 }
 
 type ConfigImportRouteBlueprint struct {

@@ -25,7 +25,7 @@ func TestEvaluateGroupRoutingRejectsMalformedCachedSnapshot(t *testing.T) {
 		DurationSeconds: &duration, AspectRatio: &ratio,
 	}
 
-	_, err := evaluateGroupRouting("分组A", modelrouting.Seedance20, &input)
+	_, err := evaluateGroupRouting(&RetryParam{RoutingInput: &input}, "分组A", modelrouting.Seedance20)
 	var selectionErr *ChannelSelectionError
 	require.ErrorAs(t, err, &selectionErr)
 	assert.Equal(t, types.ErrorCodeRoutingPolicyError, selectionErr.Code)

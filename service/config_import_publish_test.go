@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -110,6 +112,12 @@ func TestPublishConfigImportBatchRecordsPostPublishCostCoverage(t *testing.T) {
 		&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{},
 		&model.ConfigImportIssue{}, &model.ConfigImportPublishAudit{},
 	))
+	unrelated := &model.Channel{
+		Type: 1, Name: "unrelated-unpriced", Group: "default", Status: common.ChannelStatusEnabled,
+		Models: "unrelated-unpriced-model", Key: "unrelated-key",
+	}
+	require.NoError(t, model.DB.Create(unrelated).Error)
+	require.NoError(t, unrelated.UpdateAbilities(model.DB))
 	channel := &model.Channel{
 		Type: 1, Name: "unpriced", Group: "default", Status: common.ChannelStatusEnabled,
 		Models: "unpriced-model", Key: "key",
@@ -125,7 +133,7 @@ func TestPublishConfigImportBatchRecordsPostPublishCostCoverage(t *testing.T) {
 	require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", batch.ID, "COST_COVERAGE_INCOMPLETE").First(&issue).Error)
 	assert.Equal(t, string(types.ConfigImportIssueSeverityWarning), issue.Severity)
 	assert.Equal(t, "open", issue.ResolutionStatus)
-	assert.Contains(t, issue.Message, "1")
+	assert.Equal(t, "Published configuration has 1 uncovered enabled channel model mappings.", issue.Message)
 }
 
 func TestPublishConfigImportBatchReplacesBoundChannelModelSnapshot(t *testing.T) {
@@ -318,6 +326,33 @@ func TestConfigImportRouteRowsRejectsMissingReferenceLimits(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reference limits")
+}
+
+func TestConfigImportRouteRowsPreservesAggregateReferenceConstraints(t *testing.T) {
+	total := 12
+	videoAudioTotal := 3
+	videoDuration := 15
+	blueprint := types.ConfigImportRouteBlueprint{
+		CanonicalModel: modelrouting.Seedance20,
+		Targets: []types.ConfigImportRouteTarget{{
+			RouteTargetRef: "aggregate-reference-limits", LineRef: "line-a", UpstreamModel: "model-a",
+			SKURef: "sku-a", CostVariantKey: "default",
+			ReferenceMinimums: configImportReferenceBounds(1, 0, 0), ReferenceLimits: configImportReferenceBounds(9, 3, 3),
+			ReferenceTotalMax: &total, ReferenceVideoAudioTotalMax: &videoAudioTotal,
+			ReferenceVideoTotalDurationSeconds: &videoDuration,
+			ReferenceModes:                     []string{"first_last_frames", "omni_reference"},
+		}},
+	}
+
+	_, targets, err := configImportRouteRows(map[string]int{"line-a": 21}, blueprint)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	var constraints modelrouting.Constraints
+	require.NoError(t, common.UnmarshalJsonStr(targets[0].Constraints, &constraints))
+	assert.Equal(t, &total, constraints.ReferenceTotalMax)
+	assert.Equal(t, &videoAudioTotal, constraints.ReferenceVideoAudioTotalMax)
+	assert.Equal(t, &videoDuration, constraints.ReferenceVideoTotalDurationSeconds)
+	assert.Equal(t, []string{"first_last_frames", "omni_reference"}, constraints.ReferenceModes)
 }
 
 func TestConfigImportRouteRowsPreservesExplicitPriorities(t *testing.T) {
@@ -662,6 +697,130 @@ func TestPublishConfigImportBatchIgnoresUnrelatedActiveCostRule(t *testing.T) {
 	var loadedBatch model.ConfigImportBatch
 	require.NoError(t, model.DB.First(&loadedBatch, batch.ID).Error)
 	assert.Equal(t, string(types.ConfigImportBatchStatusPublished), loadedBatch.Status)
+}
+
+func TestPublishConfigImportBatchRetiresCostRuleDisabledByImport(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	activeRule := &model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "vendor-video", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`,
+	}
+	require.NoError(t, model.DB.Create(activeRule).Error)
+	InvalidateCostCoverage(0, "", "")
+	t.Cleanup(func() { InvalidateCostCoverage(0, "", "") })
+	_, err := ActiveCostRule(channel.Id, "vendor-video", "default", false)
+	require.NoError(t, err)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-keep"},
+		CanonicalModel:                  "vendor-video", LineRef: "line-a", UpstreamModel: "vendor-video",
+	}
+	mappingJSON, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+		CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+
+	var costItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&costItem).Error)
+	var draft map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(costItem.CanonicalJSON, &draft))
+	draft["enabled"] = false
+	encoded, err := common.Marshal(draft)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&costItem).Update("canonical_json", string(encoded)).Error)
+
+	staged, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, staged.Status)
+	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
+
+	require.NoError(t, model.DB.First(activeRule, activeRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleRetired), activeRule.Status)
+	assert.NotNil(t, activeRule.EffectiveTo)
+	var activeCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where(
+		"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
+		channel.Id, "vendor-video", "default", types.CostRuleActive,
+	).Count(&activeCount).Error)
+	assert.Zero(t, activeCount)
+	_, err = ActiveCostRule(channel.Id, "vendor-video", "default", false)
+	require.Error(t, err)
+	refreshKeys, err := configImportRefreshKeysForBatch(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.Contains(t, refreshKeys.CostModelKeys, fmt.Sprintf("%d|vendor-video|default", channel.Id))
+}
+
+func TestPublishConfigImportBatchDoesNotRetireDisabledCostRuleOnSkippedLine(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	activeRule := &model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "vendor-video", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`,
+	}
+	require.NoError(t, model.DB.Create(activeRule).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var costItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&costItem).Error)
+	var draft map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(costItem.CanonicalJSON, &draft))
+	draft["enabled"] = false
+	encoded, err := common.Marshal(draft)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&costItem).Update("canonical_json", string(encoded)).Error)
+	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip,
+	}})
+	require.NoError(t, err)
+
+	staged, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, staged.Status)
+	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
+
+	require.NoError(t, model.DB.First(activeRule, activeRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleActive), activeRule.Status)
+}
+
+func TestPublishConfigImportBatchRejectsChangedDisabledCostRule(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	activeRule := &model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "vendor-video", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`,
+	}
+	require.NoError(t, model.DB.Create(activeRule).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var costItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&costItem).Error)
+	var draft map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(costItem.CanonicalJSON, &draft))
+	draft["enabled"] = false
+	encoded, err := common.Marshal(draft)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&costItem).Update("canonical_json", string(encoded)).Error)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(activeRule).Update("config_json", `{"changed":true}`).Error)
+
+	err = PublishConfigImportBatch(context.Background(), batch.ID, 42)
+	require.ErrorIs(t, err, ErrConfigImportStale)
+	require.NoError(t, model.DB.First(activeRule, activeRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleActive), activeRule.Status)
+	var savedBatch model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&savedBatch, batch.ID).Error)
+	assert.Equal(t, string(types.ConfigImportBatchStatusStaged), savedBatch.Status)
+	assert.Equal(t, "STALE_BASE_VERSION", savedBatch.FailureCode)
 }
 
 func TestPublishConfigImportBatchRejectsChangedAffectedCostRule(t *testing.T) {

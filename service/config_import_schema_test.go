@@ -324,6 +324,7 @@ func TestConfigImportSchemaRejectsNegativeDecimalFact(t *testing.T) {
 			"business_id":      "cost-one",
 			"entity_hash":      strings.Repeat("c", 64),
 			"source_ref":       "source-workbook",
+			"enabled":          true,
 			"line_ref":         "missing-line",
 			"cost_variant_key": "default",
 			"route_target_ref": "missing-target",
@@ -340,12 +341,25 @@ func TestConfigImportSchemaRejectsCostDraftWithoutUpstreamModel(t *testing.T) {
 	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
 	entities["cost_rule_drafts"] = []any{map[string]any{
 		"business_id": "cost-one", "entity_hash": strings.Repeat("2", 64), "source_ref": "source-workbook",
-		"line_ref": "line-one", "cost_variant_key": "default", "route_target_ref": "target-one",
+		"enabled": true, "line_ref": "line-one", "cost_variant_key": "default", "route_target_ref": "target-one",
 	}}
 
 	_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
 
 	requireCode(t, err, "SCHEMA_COST_UPSTREAM_MODEL")
+}
+
+func TestConfigImportSchemaRejectsCostDraftWithoutEnabledState(t *testing.T) {
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+	entities["cost_rule_drafts"] = []any{map[string]any{
+		"business_id": "cost-one", "entity_hash": strings.Repeat("2", 64), "source_ref": "source-workbook",
+		"line_ref": "line-one", "upstream_model": "model-one", "cost_variant_key": "default", "route_target_ref": "target-one",
+		"cost_mode": "per_request", "currency": "USD", "unit_price": "1",
+	}}
+
+	_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+	requireCode(t, err, "SCHEMA_COST_ENABLED")
 }
 
 func TestConfigImportSchemaRejectsUnsupportedRouteAppendMode(t *testing.T) {
@@ -370,7 +384,7 @@ func TestConfigImportSchemaRejectsNonCanonicalCostVariantKeys(t *testing.T) {
 			payload := configImportDocumentJSON(t, map[string]any{
 				"cost_rule_drafts": []any{map[string]any{
 					"business_id": "cost-one", "entity_hash": strings.Repeat("c", 64), "source_ref": "source-workbook",
-					"line_ref": "missing-line", "cost_variant_key": testCase.value, "route_target_ref": "missing-target",
+					"enabled": true, "line_ref": "missing-line", "cost_variant_key": testCase.value, "route_target_ref": "missing-target",
 				}},
 			})
 
@@ -521,7 +535,7 @@ func TestConfigImportSchemaAcceptsStructuredV2LineCostAndRoute(t *testing.T) {
 		}},
 		"cost_rule_drafts": []any{map[string]any{
 			"business_id": "cost-video", "entity_hash": strings.Repeat("2", 64), "source_ref": "source-workbook",
-			"line_ref": "line-main", "upstream_model": "video-v2", "cost_variant_key": "standard", "route_target_ref": "target-video",
+			"enabled": true, "line_ref": "line-main", "upstream_model": "video-v2", "cost_variant_key": "standard", "route_target_ref": "target-video",
 			"scenario": "text_to_video", "cost_mode": "per_request", "currency": "CNY", "unit_price": "3.000",
 			"billing_multiplier": "1", "purchase_discount_ratio": "1", "recharge_exchange_ratio": "1", "fee_rate": "0", "currency_to_usd_rate": "0.14",
 			"normalized_usd_unit_price": "0.420",

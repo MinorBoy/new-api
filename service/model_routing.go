@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,8 +40,8 @@ type groupRoutingResult struct {
 	Evaluation modelrouting.Evaluation
 }
 
-func evaluateGroupRouting(group, modelName string, input *modelrouting.FactsInput) (groupRoutingResult, error) {
-	if input == nil {
+func evaluateGroupRouting(param *RetryParam, group, modelName string) (groupRoutingResult, error) {
+	if param == nil || param.RoutingInput == nil {
 		return groupRoutingResult{}, nil
 	}
 	canonicalModel := modelrouting.NormalizeCanonicalModel(modelName)
@@ -54,7 +55,7 @@ func evaluateGroupRouting(group, modelName string, input *modelrouting.FactsInpu
 			Err: errors.New("routing policy cache is invalid"),
 		}
 	}
-	routingInput := *input
+	routingInput := *param.RoutingInput
 	routingInput.CanonicalModel = canonicalModel
 	facts, err := modelrouting.ResolveFacts(group, routingInput, snapshot.Defaults)
 	if err != nil {
@@ -62,9 +63,54 @@ func evaluateGroupRouting(group, modelName string, input *modelrouting.FactsInpu
 			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
 		}
 	}
+	metadataUnavailable := false
+	if facts.References.Videos > 0 {
+		requiresDuration := false
+		for _, targets := range snapshot.TargetsByChannel {
+			for _, target := range targets {
+				if target.Enabled && target.Constraints.ReferenceVideoTotalDurationSeconds != nil {
+					requiresDuration = true
+					break
+				}
+			}
+			if requiresDuration {
+				break
+			}
+		}
+		if requiresDuration {
+			metadataState := param.ProfitRoutingState()
+			if metadataState == nil {
+				metadataUnavailable = true
+			} else {
+				metadataCtx := context.Background()
+				if param.Ctx != nil {
+					metadataCtx = param.Ctx
+				}
+				metadata, metadataErr := metadataState.Metadata(metadataCtx)
+				if metadataErr != nil {
+					var typedErr *VideoMetadataError
+					if errors.As(metadataErr, &typedErr) && typedErr.Kind == VideoMetadataInvalidMedia {
+						return groupRoutingResult{}, &ChannelSelectionError{
+							Code: relaytypes.ErrorCodeInvalidRequest, StatusCode: http.StatusBadRequest,
+							Err: errors.New("input video is not supported"),
+						}
+					}
+					metadataUnavailable = true
+				} else {
+					facts.ReferenceVideoTotalDurationMS = &metadata.TotalDurationMS
+				}
+			}
+		}
+	}
 	evaluation := modelrouting.Evaluate(snapshot, facts)
 	result := groupRoutingResult{Capability: true, Snapshot: snapshot, Facts: facts, Evaluation: evaluation}
 	if len(evaluation.CompatibleByChannel) == 0 {
+		if metadataUnavailable {
+			return result, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+				Err: errors.New("reference video metadata is unavailable"),
+			}
+		}
 		return result, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
 			Err: errors.New("no compatible route supports this request"),
@@ -250,15 +296,15 @@ func profitFilterFacts(param *RetryParam, group string) (ProfitRoutingFacts, int
 		}
 	}
 	revenueNanoUSD, revenueErr := PreviewRoutingRevenue(param.Ctx, RoutingRevenuePreviewInput{
-		OriginModelName: param.ModelName,
-		Group:           group,
-		RequestPath:     param.RequestPath,
-		RelayMode:       common.GetContextKeyInt(param.Ctx, "relay_mode"),
-		DurationSeconds: &durationSeconds,
-		OutputResolution: resolution,
-		HasReferenceVideo: hasReferenceVideo,
+		OriginModelName:      param.ModelName,
+		Group:                group,
+		RequestPath:          param.RequestPath,
+		RelayMode:            common.GetContextKeyInt(param.Ctx, "relay_mode"),
+		DurationSeconds:      &durationSeconds,
+		OutputResolution:     resolution,
+		HasReferenceVideo:    hasReferenceVideo,
 		InputVideoDurationMS: inputDurationMS,
-		UserId:          common.GetContextKeyInt(param.Ctx, constant.ContextKeyUserId),
+		UserId:               common.GetContextKeyInt(param.Ctx, constant.ContextKeyUserId),
 	})
 	if revenueErr != nil {
 		return ProfitRoutingFacts{}, 0, false, revenueErr
@@ -389,7 +435,7 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 
 func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (*model.Channel, groupRoutingResult, error) {
 	routingModelName := modelrouting.NormalizeCanonicalModel(param.ModelName)
-	result, err := evaluateGroupRouting(group, routingModelName, param.RoutingInput)
+	result, err := evaluateGroupRouting(param, group, routingModelName)
 	if err != nil {
 		return nil, result, err
 	}
@@ -445,7 +491,7 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID int) (bool, error) {
 	clearRoutingDecision(param.Ctx)
 	routingModelName := modelrouting.NormalizeCanonicalModel(param.ModelName)
-	result, err := evaluateGroupRouting(group, routingModelName, param.RoutingInput)
+	result, err := evaluateGroupRouting(param, group, routingModelName)
 	if err != nil {
 		return false, err
 	}

@@ -35,6 +35,7 @@ func (e *ValidationError) Error() string {
 var allowedResolutions = []string{"480p", "720p", "1080p", "4k"}
 var allowedRatios = []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"}
 var allowedInputModes = []InputMode{InputModeText, InputModeFirstFrame, InputModeFirstLastFrames, InputModeOmniReference}
+var allowedReferenceModes = []string{"first_last_frames", "omni_reference", "agentic"}
 
 func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 	if !containsString(CanonicalModels, policy.CanonicalModel) {
@@ -127,6 +128,25 @@ func validateConstraints(constraints Constraints, maxDuration int) error {
 		minimums.Videos < 0 || minimums.Videos > limits.Videos ||
 		minimums.Audios < 0 || minimums.Audios > limits.Audios {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_minimums", "reference minimums are invalid")
+	}
+	if constraints.ReferenceTotalMax != nil && (*constraints.ReferenceTotalMax < 0 || *constraints.ReferenceTotalMax > limits.Images+limits.Videos+limits.Audios) {
+		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_total_max", "reference total maximum is invalid")
+	}
+	if constraints.ReferenceVideoAudioTotalMax != nil {
+		if *constraints.ReferenceVideoAudioTotalMax < 0 || *constraints.ReferenceVideoAudioTotalMax > limits.Videos+limits.Audios {
+			return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_video_audio_total_max", "reference video and audio total maximum is invalid")
+		}
+		if constraints.ReferenceTotalMax != nil && *constraints.ReferenceTotalMax > limits.Images+*constraints.ReferenceVideoAudioTotalMax {
+			return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_total_max", "reference aggregate maxima conflict")
+		}
+	}
+	if constraints.ReferenceVideoTotalDurationSeconds != nil && (*constraints.ReferenceVideoTotalDurationSeconds < 0 || (limits.Videos == 0 && *constraints.ReferenceVideoTotalDurationSeconds != 0)) {
+		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_video_total_duration_seconds", "reference video duration limit is invalid")
+	}
+	for _, mode := range constraints.ReferenceModes {
+		if !containsString(allowedReferenceModes, mode) {
+			return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_modes", "reference mode is invalid")
+		}
 	}
 	if len(representativeFactsInputs(constraints)) == 0 {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_minimums", "reference minimums cannot produce a supported input mode")

@@ -39,6 +39,39 @@ test('hashes equivalent entities identically despite object property order and a
   assert.equal(await hashEntity(first), await hashEntity(second))
 })
 
+test('hashes unordered contract arrays identically to the backend contract', async () => {
+  const first = {
+    business_id: 'route-a',
+    targets: [
+      {
+        route_target_ref: 'target-b',
+        aspect_ratios: ['1:1', '16:9'],
+        input_modes: ['text', 'omni_reference'],
+        duration_values: [10, 5],
+      },
+      { route_target_ref: 'target-a', input_modes: ['first_frame'] },
+    ],
+  }
+  const second = {
+    business_id: 'route-a',
+    targets: [
+      { route_target_ref: 'target-a', input_modes: ['first_frame'] },
+      {
+        route_target_ref: 'target-b',
+        aspect_ratios: ['16:9', '1:1'],
+        input_modes: ['omni_reference', 'text'],
+        duration_values: [5, 10],
+      },
+    ],
+  }
+
+  assert.equal(await hashEntity(first), await hashEntity(second))
+  assert.equal(
+    await hashEntity(first),
+    '45360db378a7815e4df79ad5f42da2788e80da8a57c26572c89ab3222497d2e4'
+  )
+})
+
 test('payload hashing ignores source bytes, generated metadata, issues, and previews while sorting entities by business ID', async () => {
   const first = {
     manifest: {
@@ -120,4 +153,50 @@ test('payload hashing follows the import contract by retaining entity hashes and
     await hashPayload(changedEntityHash)
   )
   assert.equal(await hashPayload(first), await hashPayload(changedMetadata))
+})
+
+test('payload hashing sorts typed route constraints but preserves reference mode order', async () => {
+  const route = {
+    business_id: 'route-a',
+    targets: [
+      {
+        route_target_ref: 'target-a',
+        line_ref: 'line-a',
+        sku_ref: 'sku-a',
+        input_modes: ['text', 'omni_reference'],
+        reference_modes: ['first_last_frames', 'agentic'],
+      },
+    ],
+  }
+  const reorderedInputModes = {
+    ...route,
+    targets: [
+      {
+        ...route.targets[0],
+        input_modes: ['omni_reference', 'text'],
+      },
+    ],
+  }
+  const reorderedReferenceModes = {
+    ...route,
+    targets: [
+      {
+        ...route.targets[0],
+        reference_modes: ['agentic', 'first_last_frames'],
+      },
+    ],
+  }
+
+  assert.equal(
+    await hashPayload({ entities: { route_blueprints: [route] } }),
+    await hashPayload({
+      entities: { route_blueprints: [reorderedInputModes] },
+    })
+  )
+  assert.notEqual(
+    await hashPayload({ entities: { route_blueprints: [route] } }),
+    await hashPayload({
+      entities: { route_blueprints: [reorderedReferenceModes] },
+    })
+  )
 })

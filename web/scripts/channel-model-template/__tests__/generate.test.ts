@@ -27,7 +27,7 @@ import { convertWorkbook } from '../../../src/channel-config-converter/conversio
 import { runGenerator } from '../generate'
 
 const sourcePath = fileURLToPath(
-  new URL('../__fixtures__/sd-source-v1.xlsx', import.meta.url)
+  new URL('../../../../docs/new-channels/sd收录.xlsx', import.meta.url)
 )
 const rulesPath = fileURLToPath(
   new URL('../conversion-rules.json', import.meta.url)

@@ -62,6 +62,10 @@ type ReferenceAudioDurationResolver interface {
 	ResolveMS(ctx context.Context, urls []string) (int64, error)
 }
 
+func NewReferenceAudioDurationResolver(client *http.Client, tempDir string) ReferenceAudioDurationResolver {
+	return &httpReferenceAudioDurationResolver{client: client, maxBytes: referenceAudioMaxBytes, tempDir: tempDir}
+}
+
 type httpReferenceAudioDurationResolver struct {
 	client   *http.Client
 	maxBytes int64

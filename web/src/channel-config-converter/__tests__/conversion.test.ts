@@ -42,7 +42,7 @@ test('converts the v1 fixture into a channel configuration import document', asy
 
   assert.equal(result.document.kind, 'new-api.channel-config-import')
   assert.equal(result.document.template_version, '1')
-  assert.equal(result.document.entities.channel_lines.length, 12)
+  assert.equal(result.document.entities.channel_lines.length, 14)
 })
 
 test('rejects invalid local workbook content during preflight', async () => {

@@ -31,9 +31,9 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 		resolution      string
 		resolutionRatio float64
 	}{
-		{name: "fast_vip_720p", upstreamModel: "jimeng-video-seedance-2.0-fast-vip", resolution: "720p", resolutionRatio: 1},
-		{name: "mini_720p", upstreamModel: "jimeng-video-seedance-2.0-mini", resolution: "720p", resolutionRatio: 1},
-		{name: "vip_1080p", upstreamModel: "jimeng-video-seedance-2.0-vip", resolution: "1080p", resolutionRatio: 2.5},
+		{name: "fast_vip_720p", upstreamModel: "jmg-video-seedance-2.0-fast-vip", resolution: "720p", resolutionRatio: 1},
+		{name: "mini_720p", upstreamModel: "jmg-video-seedance-2.0-mini", resolution: "720p", resolutionRatio: 1},
+		{name: "vip_1080p", upstreamModel: "jmg-video-seedance-2.0-vip", resolution: "1080p", resolutionRatio: 2.5},
 	}
 	terminalStates := []struct {
 		name          string

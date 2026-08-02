@@ -91,7 +91,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if req.Resolution == "" {
 		req.Resolution = "720p"
 	}
-	if req.Resolution != "720p" && req.Resolution != "1080p" {
+	if req.Resolution != "480p" && req.Resolution != "720p" && req.Resolution != "1080p" && req.Resolution != "4k" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by dimensio", req.Resolution), "invalid_resolution", http.StatusBadRequest)
 	}
 	req.Ratio = strings.ToLower(strings.TrimSpace(req.Ratio))
@@ -105,7 +105,11 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if !validRatios[req.Ratio] {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("ratio %s is not supported by dimensio", req.Ratio), "invalid_ratio", http.StatusBadRequest)
 	}
-	if _, err := ArkToDimensio(req); err != nil {
+	validationRequest := req
+	if info != nil && info.ChannelMeta != nil && info.UpstreamModelName != "" {
+		validationRequest.Model = info.UpstreamModelName
+	}
+	if _, err := ArkToDimensio(validationRequest); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
 	prompt := ""
@@ -155,8 +159,17 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 	if !common.StringsContains(ModelList, requestModel) {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("model %s is not supported by dimensio", requestModel), "invalid_model", http.StatusBadRequest)
 	}
-	if strings.EqualFold(strings.TrimSpace(c.GetString("task_resolution")), "1080p") && requestModel != "jimeng-video-seedance-2.0-vip" {
-		return service.TaskErrorWrapperLocal(fmt.Errorf("1080p is supported only by jimeng-video-seedance-2.0-vip"), "invalid_resolution", http.StatusBadRequest)
+	resolution := strings.ToLower(strings.TrimSpace(c.GetString("task_resolution")))
+	if strings.HasPrefix(requestModel, "jmg-") {
+		if resolution == "480p" || resolution == "4k" || (resolution == "1080p" && requestModel != "jmg-video-seedance-2.0-vip") {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, requestModel), "invalid_resolution", http.StatusBadRequest)
+		}
+	}
+	if (requestModel == "pxv-seedance-2.0-fast" || requestModel == "pxv-seedance-2.0-mini") && resolution != "480p" && resolution != "720p" {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, requestModel), "invalid_resolution", http.StatusBadRequest)
+	}
+	if requestModel == "pxv-seedance-2.0-standard" && resolution != "480p" && resolution != "720p" && resolution != "1080p" && resolution != "4k" {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, requestModel), "invalid_resolution", http.StatusBadRequest)
 	}
 	return nil
 }
@@ -181,12 +194,12 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if !ok {
 		return nil, fmt.Errorf("invalid ark request type")
 	}
+	if info != nil && info.ChannelMeta != nil && info.UpstreamModelName != "" {
+		req.Model = info.UpstreamModelName
+	}
 	dim, err := ArkToDimensio(req)
 	if err != nil {
 		return nil, errors.Wrap(err, "translate ARK to dimensio failed")
-	}
-	if info.UpstreamModelName != "" {
-		dim.Model = info.UpstreamModelName
 	}
 	body, err := MarshalDimensioRequest(dim)
 	if err != nil {

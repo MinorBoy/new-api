@@ -64,6 +64,9 @@ type Facts struct {
 	AspectRatio       string          `json:"aspect_ratio"`
 	References        ReferenceLimits `json:"references"`
 	RequireRealPerson bool            `json:"require_real_person"`
+	// ReferenceVideoTotalDurationMS is request-local routing input. It is excluded
+	// from audits and logs together with the reference video URLs used to resolve it.
+	ReferenceVideoTotalDurationMS *int64 `json:"-"`
 }
 
 type DurationConstraint struct {
@@ -79,13 +82,17 @@ type ReferenceLimits struct {
 }
 
 type Constraints struct {
-	OutputResolutions  []string           `json:"output_resolutions"`
-	Durations          DurationConstraint `json:"durations"`
-	AspectRatios       []string           `json:"aspect_ratios,omitempty"`
-	InputModes         []InputMode        `json:"input_modes,omitempty"`
-	ReferenceMinimums  ReferenceLimits    `json:"reference_minimums,omitempty"`
-	ReferenceLimits    ReferenceLimits    `json:"reference_limits"`
-	SupportsRealPerson *bool              `json:"supports_real_person"`
+	OutputResolutions                  []string           `json:"output_resolutions"`
+	Durations                          DurationConstraint `json:"durations"`
+	AspectRatios                       []string           `json:"aspect_ratios,omitempty"`
+	InputModes                         []InputMode        `json:"input_modes,omitempty"`
+	ReferenceMinimums                  ReferenceLimits    `json:"reference_minimums,omitempty"`
+	ReferenceLimits                    ReferenceLimits    `json:"reference_limits"`
+	ReferenceTotalMax                  *int               `json:"reference_total_max,omitempty"`
+	ReferenceVideoAudioTotalMax        *int               `json:"reference_video_audio_total_max,omitempty"`
+	ReferenceVideoTotalDurationSeconds *int               `json:"reference_video_total_duration_seconds,omitempty"`
+	ReferenceModes                     []string           `json:"reference_modes,omitempty"`
+	SupportsRealPerson                 *bool              `json:"supports_real_person"`
 }
 
 type Target struct {
@@ -113,14 +120,17 @@ type PolicySnapshot struct {
 type MismatchReason string
 
 const (
-	MismatchResolution      MismatchReason = "resolution"
-	MismatchDuration        MismatchReason = "duration"
-	MismatchAspectRatio     MismatchReason = "aspect_ratio"
-	MismatchInputMode       MismatchReason = "input_mode"
-	MismatchReferenceImages MismatchReason = "reference_images"
-	MismatchReferenceVideos MismatchReason = "reference_videos"
-	MismatchReferenceAudios MismatchReason = "reference_audios"
-	MismatchRealPerson      MismatchReason = "real_person"
+	MismatchResolution               MismatchReason = "resolution"
+	MismatchDuration                 MismatchReason = "duration"
+	MismatchAspectRatio              MismatchReason = "aspect_ratio"
+	MismatchInputMode                MismatchReason = "input_mode"
+	MismatchReferenceImages          MismatchReason = "reference_images"
+	MismatchReferenceVideos          MismatchReason = "reference_videos"
+	MismatchReferenceAudios          MismatchReason = "reference_audios"
+	MismatchReferenceTotal           MismatchReason = "reference_total"
+	MismatchReferenceVideoAudioTotal MismatchReason = "reference_video_audio_total"
+	MismatchReferenceVideoDuration   MismatchReason = "reference_video_duration"
+	MismatchRealPerson               MismatchReason = "real_person"
 )
 
 type Evaluation struct {

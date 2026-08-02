@@ -180,8 +180,10 @@ func setupSeedanceE2EDB(t *testing.T) {
 	model.LOG_DB = db
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.Token{}, &model.Channel{}, &model.Ability{}, &model.Task{}, &model.Log{}, &model.QuotaData{},
-		&model.SubscriptionPlan{}, &model.UserSubscription{},
+		&model.SubscriptionPlan{}, &model.UserSubscription{}, &model.RoutingPolicy{}, &model.RouteTarget{},
 	))
+	require.NoError(t, model.InitRoutingPolicyCache())
+	model.InitChannelCache()
 
 	originalRatios := ratio_setting.ModelRatio2JSONString()
 	ratio_setting.InitRatioSettings()
@@ -211,6 +213,10 @@ func setupSeedanceE2EDB(t *testing.T) {
 		model.CacheQuotaDataLock.Lock()
 		model.CacheQuotaData = originalQuotaDataCache
 		model.CacheQuotaDataLock.Unlock()
+		if model.DB != nil {
+			require.NoError(t, model.InitRoutingPolicyCache())
+			model.InitChannelCache()
+		}
 		if hadDSN {
 			_ = os.Setenv("SQL_DSN", originalDSN)
 		} else {
@@ -375,9 +381,9 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 		name, upstreamModel, resolution string
 		pricePerSecond                  float64
 	}{
-		{"fast_vip_720p", "jimeng-video-seedance-2.0-fast-vip", "720p", 0.48 / 7.3},
-		{"mini_720p", "jimeng-video-seedance-2.0-mini", "720p", 0.39 / 7.3},
-		{"vip_1080p", "jimeng-video-seedance-2.0-vip", "1080p", 0.62 / 7.3},
+		{"fast_vip_720p", "jmg-video-seedance-2.0-fast-vip", "720p", 0.48 / 7.3},
+		{"mini_720p", "jmg-video-seedance-2.0-mini", "720p", 0.39 / 7.3},
+		{"vip_1080p", "jmg-video-seedance-2.0-vip", "1080p", 0.62 / 7.3},
 	}
 	terminalCases := []struct {
 		name, response, arkStatus, errorCode, errorMessage string

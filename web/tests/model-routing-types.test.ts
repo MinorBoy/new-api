@@ -42,6 +42,10 @@ describe('model routing data contract', () => {
           input_modes: ['first_frame', 'omni_reference'],
           reference_minimums: { images: 1, videos: 0, audios: 0 },
           reference_limits: { images: 9, videos: 3, audios: 3 },
+          reference_total_max: 12,
+          reference_video_audio_total_max: 3,
+          reference_video_total_duration_seconds: 15,
+          reference_modes: ['first_last_frames', 'omni_reference'],
           supports_real_person: 'unknown',
         },
       ],
@@ -63,6 +67,17 @@ describe('model routing data contract', () => {
       videos: 0,
       audios: 0,
     })
+    expect(payload.targets[0]?.constraints.reference_total_max).toBe(12)
+    expect(
+      payload.targets[0]?.constraints.reference_video_audio_total_max
+    ).toBe(3)
+    expect(
+      payload.targets[0]?.constraints.reference_video_total_duration_seconds
+    ).toBe(15)
+    expect(payload.targets[0]?.constraints.reference_modes).toEqual([
+      'first_last_frames',
+      'omni_reference',
+    ])
     expect(payload.targets[0]?.constraints.supports_real_person).toBeNull()
   })
 
@@ -136,6 +151,7 @@ describe('model routing data contract', () => {
       ],
       reference_minimums: { images: 0, videos: 0, audios: 0 },
       reference_limits: { images: 4, videos: 3, audios: 1 },
+      reference_modes: [],
       supports_real_person: false,
     })
   })

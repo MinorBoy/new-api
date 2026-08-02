@@ -208,6 +208,20 @@ func TestValidatePolicyRejectsInvalidContracts(t *testing.T) {
 			expected: modelrouting.ValidationInvalidReferenceLimit,
 		},
 		{
+			name: "reference total exceeds individual maxima",
+			mutate: func(policy *modelrouting.PolicySnapshot) {
+				policy.TargetsByChannel[11][0].Constraints.ReferenceTotalMax = intPtr(16)
+			},
+			expected: modelrouting.ValidationInvalidReferenceLimit,
+		},
+		{
+			name: "video audio total exceeds individual maxima",
+			mutate: func(policy *modelrouting.PolicySnapshot) {
+				policy.TargetsByChannel[11][0].Constraints.ReferenceVideoAudioTotalMax = intPtr(7)
+			},
+			expected: modelrouting.ValidationInvalidReferenceLimit,
+		},
+		{
 			name: "enabled policy defaults are unsupported",
 			mutate: func(policy *modelrouting.PolicySnapshot) {
 				policy.Defaults.OutputResolution = "1080p"

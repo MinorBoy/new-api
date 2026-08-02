@@ -9,7 +9,8 @@
     "6": "CH-CANGYUANSUANLI",
     "7": "CH-DIMENSIO",
     "8": "CH-MEGABYAI",
-    "9": "CH-4STOKEN"
+    "9": "CH-4STOKEN",
+    "10": "CH-OMEGAAI"
   },
   "defaults": {
     "currency": "CNY",
@@ -20,26 +21,5 @@
     "groupRatio": "1"
   },
   "modelRules": {},
-  "overrides": {
-    "102": {
-      "nativePerRequest": "3",
-      "supportsRealPerson": true,
-      "upstreamModel": "videos-fast"
-    },
-    "103": {
-      "nativePerRequest": "4",
-      "supportsRealPerson": true,
-      "upstreamModel": "videos-fast"
-    },
-    "104": {
-      "nativePerRequest": "1.2",
-      "supportsRealPerson": false,
-      "upstreamModel": "videos-fast"
-    },
-    "105": {
-      "nativePerRequest": "1.6",
-      "supportsRealPerson": false,
-      "upstreamModel": "videos-fast"
-    }
-  }
+  "overrides": {}
 }

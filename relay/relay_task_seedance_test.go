@@ -107,7 +107,7 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	service.InitHttpClient()
 
 	const originModel = "client-seedance-vip"
-	const upstreamModel = "jimeng-video-seedance-2.0-vip"
+	const upstreamModel = "jmg-video-seedance-2.0-vip"
 	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
 		originModel: {
 			Price: 0.1, Unit: types.DurationUnitSecond,
@@ -147,7 +147,7 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeDimensio)
 	c.Set(string(constant.ContextKeyChannelBaseUrl), server.URL)
 	c.Set(string(constant.ContextKeyChannelKey), "mock-key")
-	c.Set("model_mapping", `{"client-seedance-vip":"jimeng-video-seedance-2.0-vip"}`)
+	c.Set("model_mapping", `{"client-seedance-vip":"jmg-video-seedance-2.0-vip"}`)
 
 	info := &relaycommon.RelayInfo{
 		OriginModelName: originModel,
@@ -282,7 +282,7 @@ func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {
 	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeDimensio)
 	c.Set(string(constant.ContextKeyChannelBaseUrl), server.URL)
 	c.Set(string(constant.ContextKeyChannelKey), "mock-key")
-	c.Set("model_mapping", `{"client-seedance-overflow":"jimeng-video-seedance-2.0-vip"}`)
+	c.Set("model_mapping", `{"client-seedance-overflow":"jmg-video-seedance-2.0-vip"}`)
 
 	info := &relaycommon.RelayInfo{
 		OriginModelName: originModel,

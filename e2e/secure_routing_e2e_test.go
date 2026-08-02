@@ -160,6 +160,7 @@ func setupSecureRoutingE2E(t *testing.T) *secureRoutingEnvironment {
 	model.InvalidatePricingCache()
 
 	minimum4, maximum15 := 4, 15
+	referenceTotal12, referenceVideoAudioTotal3, noReferenceVideoDuration := 12, 3, 0
 	discount := service.RouteTargetWriteRequest{
 		ChannelID: channelIDs[dto.SecureVideoGroupDiscount], Name: "Secure discount", UpstreamModel: "video-2.0-pro",
 		TargetPriority: 300, Enabled: true,
@@ -171,8 +172,10 @@ func setupSecureRoutingE2E(t *testing.T) *secureRoutingEnvironment {
 				modelrouting.InputModeFirstFrame,
 				modelrouting.InputModeOmniReference,
 			},
-			ReferenceMinimums: modelrouting.ReferenceLimits{Images: 1},
-			ReferenceLimits:   modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			ReferenceMinimums:           modelrouting.ReferenceLimits{Images: 1},
+			ReferenceLimits:             modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			ReferenceTotalMax:           &referenceTotal12,
+			ReferenceVideoAudioTotalMax: &referenceVideoAudioTotal3,
 		},
 	}
 	overseas := service.RouteTargetWriteRequest{
@@ -188,7 +191,8 @@ func setupSecureRoutingE2E(t *testing.T) *secureRoutingEnvironment {
 				modelrouting.InputModeFirstLastFrames,
 				modelrouting.InputModeOmniReference,
 			},
-			ReferenceLimits: modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			ReferenceLimits:   modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			ReferenceTotalMax: &referenceTotal12,
 		},
 	}
 	minimum5 := 5
@@ -204,9 +208,14 @@ func setupSecureRoutingE2E(t *testing.T) *secureRoutingEnvironment {
 				modelrouting.InputModeFirstFrame,
 				modelrouting.InputModeOmniReference,
 			},
-			ReferenceLimits: modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			ReferenceLimits:                    modelrouting.ReferenceLimits{Images: 9, Audios: 3},
+			ReferenceTotalMax:                  &referenceTotal12,
+			ReferenceVideoTotalDurationSeconds: &noReferenceVideoDuration,
 		},
 	}
+	previousRouteTargetContractValidator := service.RouteTargetContractValidator
+	service.RouteTargetContractValidator = relay.ValidateVideoRouteTargetContract
+	t.Cleanup(func() { service.RouteTargetContractValidator = previousRouteTargetContractValidator })
 	_, err = service.SaveRoutingPolicy(0, service.RoutingPolicyWriteRequest{
 		GroupName: secureRoutingGroup,
 		Model:     modelrouting.Seedance20,
@@ -266,13 +275,13 @@ func TestSecureRoutingUsesOnlyCapabilityMatchingGroupE2E(t *testing.T) {
 			wantGroup:  dto.SecureVideoGroupDiscount,
 		},
 		{
-			name: "video-only omni never uses discount",
+			name: "video-only omni uses overseas",
 			content: `[
 				{"type":"text","text":"video only"},
 				{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}}
 			]`,
 			resolution: "720p",
-			wantGroup:  dto.SecureVideoGroupEnterprise,
+			wantGroup:  dto.SecureVideoGroupOverseas,
 		},
 		{
 			name: "image omni prefers discount",

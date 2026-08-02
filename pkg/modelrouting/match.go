@@ -95,10 +95,29 @@ func Match(constraints Constraints, facts Facts) []MismatchReason {
 	if facts.References.Audios < constraints.ReferenceMinimums.Audios || facts.References.Audios > constraints.ReferenceLimits.Audios {
 		reasons = append(reasons, MismatchReferenceAudios)
 	}
+	if constraints.ReferenceVideoAudioTotalMax != nil && facts.References.Videos+facts.References.Audios > *constraints.ReferenceVideoAudioTotalMax {
+		reasons = append(reasons, MismatchReferenceVideoAudioTotal)
+	}
+	if constraints.ReferenceTotalMax != nil && facts.References.Images+facts.References.Videos+facts.References.Audios > *constraints.ReferenceTotalMax {
+		reasons = append(reasons, MismatchReferenceTotal)
+	}
+	if constraints.ReferenceVideoTotalDurationSeconds != nil && facts.References.Videos > 0 {
+		if facts.ReferenceVideoTotalDurationMS == nil || referenceVideoDurationExceeds(*facts.ReferenceVideoTotalDurationMS, *constraints.ReferenceVideoTotalDurationSeconds) {
+			reasons = append(reasons, MismatchReferenceVideoDuration)
+		}
+	}
 	if facts.RequireRealPerson && (constraints.SupportsRealPerson == nil || !*constraints.SupportsRealPerson) {
 		reasons = append(reasons, MismatchRealPerson)
 	}
 	return reasons
+}
+
+func referenceVideoDurationExceeds(durationMS int64, maxSeconds int) bool {
+	if durationMS < 0 {
+		return true
+	}
+	wholeSeconds := durationMS / 1000
+	return wholeSeconds > int64(maxSeconds) || wholeSeconds == int64(maxSeconds) && durationMS%1000 > 0
 }
 
 func containsInputMode(values []InputMode, expected InputMode) bool {

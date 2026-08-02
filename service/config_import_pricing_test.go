@@ -118,6 +118,87 @@ func TestConfigImportStageMergesIdenticalNoVideoAndWithVideoCostDrafts(t *testin
 	assert.Contains(t, []string{string(types.ConfigImportItemStateChanged), string(types.ConfigImportItemStateUnchanged)}, stagedItems[1].State)
 }
 
+func TestConfigImportStageMergesIdenticalCostDraftsWithSameScenario(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var original model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&original).Error)
+	var draft types.ConfigImportCostRuleDraft
+	require.NoError(t, common.UnmarshalJsonStr(original.CanonicalJSON, &draft))
+	draft.Scenario = "no_video"
+	encoded, err := common.Marshal(draft)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).Where("id = ?", original.ID).Update("canonical_json", string(encoded)).Error)
+
+	draft.BusinessID = "cost-no-video-duplicate"
+	encoded, err = common.Marshal(draft)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "cost_rule_drafts", BusinessID: draft.BusinessID, CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	for _, issue := range detail.Issues {
+		assert.NotEqual(t, "COST_VARIANT_AMBIGUOUS", issue.Code)
+	}
+
+	var rules []model.ChannelModelCostRule
+	require.NoError(t, model.DB.Where("source = ?", "config_import").Find(&rules).Error)
+	require.Len(t, rules, 1)
+
+	var stagedItems []model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").Order("business_id ASC").Find(&stagedItems).Error)
+	require.Len(t, stagedItems, 2)
+	assert.Equal(t, stagedItems[0].MaterializedID, stagedItems[1].MaterializedID)
+}
+
+func TestConfigImportStageRejectsDifferentCostDraftsWithSameVariantKey(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var original model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&original).Error)
+	var draft types.ConfigImportCostRuleDraft
+	require.NoError(t, common.UnmarshalJsonStr(original.CanonicalJSON, &draft))
+	draft.BusinessID = "cost-different-price"
+	draft.UnitPrice = stringPointer("0.75")
+	encoded, err := common.Marshal(draft)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "cost_rule_drafts", BusinessID: draft.BusinessID, CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	foundAmbiguity := false
+	for _, issue := range detail.Issues {
+		if issue.Code != "COST_VARIANT_AMBIGUOUS" || issue.BusinessID != draft.BusinessID {
+			continue
+		}
+		foundAmbiguity = true
+		assert.Equal(t, types.ConfigImportIssueSeverityWarning, issue.Severity)
+		assert.Equal(t, "multiple cost contracts share one channel/model/variant key", issue.Message)
+	}
+	assert.True(t, foundAmbiguity)
+
+	var rules []model.ChannelModelCostRule
+	require.NoError(t, model.DB.Where("source = ?", "config_import").Find(&rules).Error)
+	require.Len(t, rules, 1)
+
+	var conflict model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, draft.BusinessID).First(&conflict).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateConflict), conflict.State)
+	assert.Nil(t, conflict.MaterializedID)
+}
+
 func TestConfigImportPricingRecomputesDecimalsAndBlocksNegativeMargin(t *testing.T) {
 	proposal := types.ConfigImportSaleProposal{
 		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "sale-a"},
@@ -348,6 +429,33 @@ func TestConfigImportStagePersistsNegativeMarginWarningGate(t *testing.T) {
 	require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", batch.ID, "PRICING_NEGATIVE_MARGIN").First(&issue).Error)
 	assert.Equal(t, string(types.ConfigImportIssueSeverityWarning), issue.Severity)
 	assert.Equal(t, "open", issue.ResolutionStatus)
+}
+
+func TestConfigImportStageExcludesDisabledCostRuleDraft(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+
+	var item model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&item).Error)
+	var payload map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(item.CanonicalJSON, &payload))
+	payload["enabled"] = false
+	encoded, err := common.Marshal(payload)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&item).Update("canonical_json", string(encoded)).Error)
+
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.First(&item, item.ID).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateExcluded), item.State)
+	assert.Equal(t, "disabled by import document", item.ExclusionReason)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("channel_id = ?", channel.Id).Count(&count).Error)
+	assert.Zero(t, count)
 }
 
 func TestConfigImportStageResolutionAcceptsStructuredActions(t *testing.T) {
@@ -659,6 +767,35 @@ func TestConfigImportChannelModelSnapshotUnionsLinesBoundToOneChannel(t *testing
 		"canonical-a": {}, "upstream-a": {}, "canonical-b": {}, "upstream-b": {},
 	}, targets[channel.Id].Models)
 	assert.Equal(t, map[string]struct{}{"line-a": {}, "line-b": {}}, targets[channel.Id].LineRefs)
+}
+
+func TestConfigImportChannelModelSnapshotOmitsAmbiguousLegacyMapping(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "upstream-a")
+	for _, mapping := range []types.ConfigImportModelMapping{
+		{ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-a"}, CanonicalModel: "canonical-video", LineRef: "line-a", UpstreamModel: "upstream-a"},
+		{ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-b"}, CanonicalModel: "canonical-video", LineRef: "line-a", UpstreamModel: "upstream-b"},
+	} {
+		encoded, err := common.Marshal(mapping)
+		require.NoError(t, err)
+		require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+			BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
+			CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+		}).Error)
+	}
+	var items []model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ?", batch.ID).Find(&items).Error)
+
+	targets, err := configImportChannelModelSnapshotTargets(model.DB, items)
+	require.NoError(t, err)
+	require.Contains(t, targets, channel.Id)
+	assert.Equal(t, map[string]struct{}{
+		"canonical-video": {}, "upstream-a": {}, "upstream-b": {},
+	}, targets[channel.Id].Models)
+	assert.Empty(t, targets[channel.Id].Mapping)
 }
 
 func TestConfigImportChannelModelSnapshotIncludesBoundChannelWithNoEffectiveMappings(t *testing.T) {

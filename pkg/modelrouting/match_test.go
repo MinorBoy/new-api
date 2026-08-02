@@ -1,8 +1,10 @@
 package modelrouting_test
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,6 +217,48 @@ func TestMaterialPresetMatching(t *testing.T) {
 			assert.Equal(t, []modelrouting.MismatchReason{modelrouting.MismatchReferenceAudios}, modelrouting.Match(target.Constraints, overAudios))
 		})
 	}
+}
+
+func TestMatchAggregateReferenceLimits(t *testing.T) {
+	target := targetWithLimits(1, 11, 10, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3})
+	target.Constraints.ReferenceTotalMax = intPtr(12)
+	target.Constraints.ReferenceVideoAudioTotalMax = intPtr(3)
+
+	assert.Empty(t, modelrouting.Match(target.Constraints, matchingFacts(modelrouting.ReferenceLimits{Images: 9, Videos: 2, Audios: 1})))
+	assert.Equal(t, []modelrouting.MismatchReason{modelrouting.MismatchReferenceVideoAudioTotal}, modelrouting.Match(target.Constraints, matchingFacts(modelrouting.ReferenceLimits{Images: 8, Videos: 2, Audios: 2})))
+	target.Constraints.ReferenceVideoAudioTotalMax = nil
+	assert.Equal(t, []modelrouting.MismatchReason{modelrouting.MismatchReferenceTotal}, modelrouting.Match(target.Constraints, matchingFacts(modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 1})))
+}
+
+func TestMatchReferenceVideoTotalDuration(t *testing.T) {
+	target := targetWithLimits(1, 11, 10, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3})
+	target.Constraints.ReferenceVideoTotalDurationSeconds = intPtr(15)
+	facts := matchingFacts(modelrouting.ReferenceLimits{Videos: 1})
+
+	atLimit := int64(15_000)
+	facts.ReferenceVideoTotalDurationMS = &atLimit
+	assert.Empty(t, modelrouting.Match(target.Constraints, facts))
+
+	overLimit := int64(15_001)
+	facts.ReferenceVideoTotalDurationMS = &overLimit
+	assert.Equal(t, []modelrouting.MismatchReason{modelrouting.MismatchReferenceVideoDuration}, modelrouting.Match(target.Constraints, facts))
+
+	facts.ReferenceVideoTotalDurationMS = nil
+	assert.Equal(t, []modelrouting.MismatchReason{modelrouting.MismatchReferenceVideoDuration}, modelrouting.Match(target.Constraints, facts))
+
+	withoutVideo := matchingFacts(modelrouting.ReferenceLimits{})
+	assert.Empty(t, modelrouting.Match(target.Constraints, withoutVideo))
+}
+
+func TestReferenceVideoDurationIsExcludedFromPublicAuditJSON(t *testing.T) {
+	durationMS := int64(12_345)
+	payload, err := common.Marshal(modelrouting.Audit{
+		Facts: modelrouting.Facts{ReferenceVideoTotalDurationMS: &durationMS},
+	})
+
+	require.NoError(t, err)
+	assert.NotContains(t, strings.ToLower(string(payload)), "duration_ms")
+	assert.NotContains(t, string(payload), "12345")
 }
 
 func TestRealPersonMatchingRequiresExplicitSupportOnlyWhenRequested(t *testing.T) {

@@ -42,10 +42,16 @@ export const INPUT_MODES = [
   'first_last_frames',
   'omni_reference',
 ] as const
+export const REFERENCE_MODES = [
+  'first_last_frames',
+  'omni_reference',
+  'agentic',
+] as const
 
 const resolutionSchema = z.enum(OUTPUT_RESOLUTIONS)
 const aspectRatioSchema = z.enum(ASPECT_RATIOS)
 const inputModeSchema = z.enum(INPUT_MODES)
+const referenceModeSchema = z.enum(REFERENCE_MODES)
 const durationValueSchema = z
   .number()
   .int()
@@ -90,6 +96,9 @@ const referenceLimitsSchema = z.object({
 type ReferenceRange = {
   reference_minimums: z.infer<typeof referenceLimitsSchema>
   reference_limits: z.infer<typeof referenceLimitsSchema>
+  reference_total_max?: number | null
+  reference_video_audio_total_max?: number | null
+  reference_video_total_duration_seconds?: number | null
 }
 
 function validateReferenceRange(value: ReferenceRange, ctx: z.RefinementCtx) {
@@ -102,6 +111,42 @@ function validateReferenceRange(value: ReferenceRange, ctx: z.RefinementCtx) {
       path: ['reference_minimums', kind],
       message: 'Minimum cannot exceed maximum',
     })
+  }
+  const limits = value.reference_limits
+  if (
+    value.reference_total_max !== undefined &&
+    value.reference_total_max !== null &&
+    value.reference_total_max > limits.images + limits.videos + limits.audios
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reference_total_max'],
+      message: 'Total maximum exceeds the individual limits',
+    })
+  }
+  if (
+    value.reference_video_audio_total_max !== undefined &&
+    value.reference_video_audio_total_max !== null
+  ) {
+    if (value.reference_video_audio_total_max > limits.videos + limits.audios) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reference_video_audio_total_max'],
+        message: 'Video and audio maximum exceeds the individual limits',
+      })
+    }
+    if (
+      value.reference_total_max !== undefined &&
+      value.reference_total_max !== null &&
+      value.reference_total_max >
+        limits.images + value.reference_video_audio_total_max
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reference_total_max'],
+        message: 'Aggregate reference limits conflict',
+      })
+    }
   }
 }
 
@@ -146,6 +191,10 @@ export const routeTargetFormSchema = z
       .min(1, 'At least one input mode is required'),
     reference_minimums: referenceLimitsSchema,
     reference_limits: referenceLimitsSchema,
+    reference_total_max: z.number().int().min(0).nullable(),
+    reference_video_audio_total_max: z.number().int().min(0).nullable(),
+    reference_video_total_duration_seconds: z.number().int().min(0).nullable(),
+    reference_modes: z.array(referenceModeSchema),
     supports_real_person: z.enum(['unknown', 'yes', 'no']),
   })
   .superRefine(validateReferenceRange)
@@ -207,6 +256,20 @@ export const routeConstraintsApiSchema = z
       audios: 0,
     }),
     reference_limits: referenceLimitsSchema,
+    reference_total_max: z.number().int().min(0).nullable().optional(),
+    reference_video_audio_total_max: z
+      .number()
+      .int()
+      .min(0)
+      .nullable()
+      .optional(),
+    reference_video_total_duration_seconds: z
+      .number()
+      .int()
+      .min(0)
+      .nullable()
+      .optional(),
+    reference_modes: z.array(referenceModeSchema).default([]),
     supports_real_person: z.boolean().nullable(),
   })
   .superRefine(validateReferenceRange)
@@ -434,6 +497,10 @@ export function createEmptyTarget(): RouteTargetFormValues {
     input_modes: [...INPUT_MODES],
     reference_minimums: { images: 0, videos: 0, audios: 0 },
     reference_limits: { images: 9, videos: 3, audios: 3 },
+    reference_total_max: null,
+    reference_video_audio_total_max: null,
+    reference_video_total_duration_seconds: null,
+    reference_modes: [],
     supports_real_person: 'unknown',
   }
 }
@@ -471,6 +538,7 @@ function cloneTargetForm(
     input_modes: [...target.input_modes],
     reference_minimums: { ...target.reference_minimums },
     reference_limits: { ...target.reference_limits },
+    reference_modes: [...target.reference_modes],
   }
 }
 
@@ -517,6 +585,11 @@ export function toWriteRequest(
         input_modes: target.input_modes,
         reference_minimums: target.reference_minimums,
         reference_limits: target.reference_limits,
+        reference_total_max: target.reference_total_max,
+        reference_video_audio_total_max: target.reference_video_audio_total_max,
+        reference_video_total_duration_seconds:
+          target.reference_video_total_duration_seconds,
+        reference_modes: target.reference_modes,
         supports_real_person:
           target.supports_real_person === 'unknown'
             ? null
@@ -568,6 +641,12 @@ export function fromPolicyResponse(
         input_modes: target.constraints.input_modes,
         reference_minimums: target.constraints.reference_minimums,
         reference_limits: target.constraints.reference_limits,
+        reference_total_max: target.constraints.reference_total_max ?? null,
+        reference_video_audio_total_max:
+          target.constraints.reference_video_audio_total_max ?? null,
+        reference_video_total_duration_seconds:
+          target.constraints.reference_video_total_duration_seconds ?? null,
+        reference_modes: target.constraints.reference_modes,
         supports_real_person: supportsRealPersonForm,
       }
     }),

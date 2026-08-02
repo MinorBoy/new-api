@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,27 +39,38 @@ import (
 )
 
 const (
-	seedGroup       = "ark-sdk-material-matrix-local"
-	seedUsername    = "ark_sdk_matrix_user"
-	seedPassword    = "local-seed-password"
-	seedToken       = "arkmatrixlocal"
-	seedTokenName   = "ARK SDK material matrix local seed"
-	seedChannelName = "ark-sdk-matrix-mock-"
+	seedGroup        = "ark-sdk-material-matrix-local"
+	seedUsername     = "ark_sdk_matrix_user"
+	seedPassword     = "local-seed-password"
+	seedToken        = "arkmatrixlocal"
+	seedTokenName    = "ARK SDK material matrix local seed"
+	seedChannelName  = "ark-sdk-matrix-mock-"
+	seedAssetBaseURL = "http://cdn.openai.com/ark-matrix"
 )
 
 type matrixTarget struct {
-	CaseID         string
-	RouteTargetRef string
-	LineRef        string
-	Provider       string
-	RuntimeModel   string
-	UpstreamModel  string
-	Resolution     string
-	Duration       int
-	CostVariantKey string
-	Minimums       modelrouting.ReferenceLimits
-	References     modelrouting.ReferenceLimits
-	ChannelType    int
+	CaseID                             string
+	RouteTargetRef                     string
+	LineRef                            string
+	Provider                           string
+	RuntimeModel                       string
+	UpstreamModel                      string
+	Resolution                         string
+	Duration                           int
+	Durations                          modelrouting.DurationConstraint
+	CostVariantKey                     string
+	CostEnabled                        bool
+	Minimums                           modelrouting.ReferenceLimits
+	References                         modelrouting.ReferenceLimits
+	RequestRefs                        modelrouting.ReferenceLimits
+	ReferenceTotalMax                  *int
+	ReferenceVideoAudioTotalMax        *int
+	ReferenceVideoTotalDurationSeconds *int
+	AspectRatios                       []string
+	InputModes                         []modelrouting.InputMode
+	ReferenceModes                     []string
+	SupportsRealPerson                 *bool
+	ChannelType                        int
 }
 
 type channelDefinition struct {
@@ -76,6 +89,7 @@ type seedResult struct {
 	TotalTargets      int
 	AcceptedTasks     int
 	ContractBlocks    int
+	DisabledPricing   int
 	CommonLogs        int64
 	TaskRows          int64
 	QuotaDataRows     int64
@@ -99,18 +113,6 @@ type mockVideoRequest struct {
 	Path          string
 	Authorization string
 	Body          []byte
-}
-
-type localMetadataClient struct{}
-
-func (localMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
-	return videometa.Metadata{DurationMS: 5_000}, nil
-}
-
-type localReferenceAudioResolver struct{}
-
-func (localReferenceAudioResolver) ResolveMS(context.Context, []string) (int64, error) {
-	return 5_000, nil
 }
 
 func main() {
@@ -146,6 +148,24 @@ func run() error {
 	mock := &mockVideoServer{models: make(map[string]string)}
 	server := httptest.NewServer(mock)
 	defer server.Close()
+	assetClient, err := fixtureAssetClient(server)
+	if err != nil {
+		return err
+	}
+	metadataFetcher := videometa.NewFetcher(videometa.FetcherOptions{
+		Client: assetClient, Cache: videometa.NewCache(64), TempDir: os.TempDir(),
+	})
+	const metadataToken = "ark-sdk-matrix-metadata"
+	metadataServer := httptest.NewServer(videometa.NewServer(videometa.ServerOptions{
+		Token: metadataToken, MaxConcurrency: 8, Metadata: metadataFetcher.Metadata,
+	}))
+	defer metadataServer.Close()
+	service.SetVideoMetadataClient(service.NewHTTPVideoMetadataClient(
+		metadataServer.URL, metadataToken, metadataServer.Client(), videometa.MaxVideoBytes,
+	))
+	defer service.SetVideoMetadataClient(nil)
+	service.SetReferenceAudioDurationResolver(service.NewReferenceAudioDurationResolver(assetClient, os.TempDir()))
+	defer service.SetReferenceAudioDurationResolver(nil)
 
 	user, token, err := seedUserAndToken()
 	if err != nil {
@@ -178,9 +198,14 @@ func run() error {
 	materialLimits := make(map[string]int)
 	createdTasks := make([]string, 0, len(targets))
 	contractBlocks := 0
+	disabledPricing := 0
 
 	for _, target := range targets {
 		materialLimits[fmt.Sprintf("%d%d%d", target.References.Images, target.References.Videos, target.References.Audios)]++
+		if !target.CostEnabled {
+			disabledPricing++
+			continue
+		}
 		channelID := channelIDs[target.LineRef]
 		if channelID == 0 {
 			return fmt.Errorf("missing mock channel for line %q", target.LineRef)
@@ -196,7 +221,7 @@ func run() error {
 		}
 		policyIDs[target.RuntimeModel] = policyID
 
-		status, body := performJSONRequest(engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer "+seedToken, requestBody(target))
+		status, body := performJSONRequest(engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer "+seedToken, requestBody(target, seedAssetBaseURL))
 		if status != http.StatusOK {
 			return fmt.Errorf("%s: submit failed with HTTP %d: %s", target.CaseID, status, strings.TrimSpace(string(body)))
 		}
@@ -225,7 +250,7 @@ func run() error {
 	}
 
 	model.SaveQuotaDataCache()
-	result, err := summarizeResult(user.Id, token.Id, len(targets), contractBlocks, createdTasks, materialLimits, mock.count())
+	result, err := summarizeResult(user.Id, token.Id, len(targets), contractBlocks, disabledPricing, createdTasks, materialLimits, mock.count())
 	if err != nil {
 		return err
 	}
@@ -240,8 +265,6 @@ func initResources() error {
 	logger.SetupLogger()
 	ratio_setting.InitRatioSettings()
 	service.InitHttpClient()
-	service.SetVideoMetadataClient(localMetadataClient{})
-	service.SetReferenceAudioDurationResolver(localReferenceAudioResolver{})
 	service.SetRoutingRevenuePreview(func(_ context.Context, input service.RoutingRevenuePreviewInput) (int64, string, error) {
 		return relayhelper.PreviewRoutingRevenueWithSeedanceInput(input.OriginModelName, input.Group, input.RequestPath, input.RelayMode, input.DurationSeconds, input.UserId, input.OutputResolution, input.HasReferenceVideo, input.InputVideoDurationMS)
 	})
@@ -332,21 +355,11 @@ func cleanupSeedData(userID, tokenID int, channelIDs map[string]int) error {
 			return err
 		}
 
-		attemptQuery := tx.Model(&model.CostAccountingAttempt{})
-		switch {
-		case len(costRequestIDs) > 0 && len(channelIDList) > 0:
-			attemptQuery = attemptQuery.Where("cost_request_id IN ? OR channel_id IN ?", costRequestIDs, channelIDList)
-		case len(costRequestIDs) > 0:
-			attemptQuery = attemptQuery.Where("cost_request_id IN ?", costRequestIDs)
-		case len(channelIDList) > 0:
-			attemptQuery = attemptQuery.Where("channel_id IN ?", channelIDList)
-		default:
-			attemptQuery = nil
-		}
-
 		var attemptIDs []int64
-		if attemptQuery != nil {
-			if err := attemptQuery.Pluck("id", &attemptIDs).Error; err != nil {
+		if len(costRequestIDs) > 0 {
+			if err := tx.Model(&model.CostAccountingAttempt{}).
+				Where("cost_request_id IN ?", costRequestIDs).
+				Pluck("id", &attemptIDs).Error; err != nil {
 				return err
 			}
 		}
@@ -390,11 +403,6 @@ func cleanupSeedData(userID, tokenID int, channelIDs map[string]int) error {
 		if err := tx.Model(&model.Token{}).Where("id = ?", tokenID).Update("used_quota", 0).Error; err != nil {
 			return err
 		}
-		if len(channelIDList) > 0 {
-			if err := tx.Model(&model.Channel{}).Where("id IN ?", channelIDList).Update("used_quota", 0).Error; err != nil {
-				return err
-			}
-		}
 		return nil
 	}); err != nil {
 		return err
@@ -423,18 +431,6 @@ func seedRuntimeSettings() error {
 		return err
 	}
 
-	modelRatios := ratio_setting.GetModelRatioCopy()
-	for _, modelName := range modelrouting.CanonicalModels {
-		modelRatios[modelName] = 0.1
-	}
-	encodedModelRatios, err := common.Marshal(modelRatios)
-	if err != nil {
-		return err
-	}
-	if err := ratio_setting.UpdateModelRatioByJSONString(string(encodedModelRatios)); err != nil {
-		return err
-	}
-
 	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
 	if err := config.UpdateConfigFromMap(costConfig, map[string]string{
 		cost_setting.KeyMode:                     string(types.CostAccountingTracking),
@@ -444,6 +440,8 @@ func seedRuntimeSettings() error {
 	}
 	cost_setting.UpdateAndSync()
 	return model.UpdateOptionsBulk(map[string]string{
+		"UserUsableGroups": string(encodedGroups),
+		"GroupRatio":       string(encodedGroupRatios),
 		cost_setting.ConfigName + "." + cost_setting.KeyMode:                     string(types.CostAccountingTracking),
 		cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS: "0",
 	})
@@ -514,13 +512,18 @@ func seedCostRules(targets []matrixTarget, channelIDs map[string]int) error {
 	if err != nil {
 		return err
 	}
-	now := common.GetTimestamp()
 	seen := make(map[string]struct{})
 	for _, target := range targets {
 		channelID := channelIDs[target.LineRef]
 		ruleDraft, ok := findImportedCostRule(document, target.RouteTargetRef)
 		if !ok {
 			return fmt.Errorf("missing imported cost rule for %q", target.RouteTargetRef)
+		}
+		if ruleDraft.Enabled == nil {
+			return fmt.Errorf("imported cost rule %q is missing enabled state", ruleDraft.BusinessID)
+		}
+		if !*ruleDraft.Enabled {
+			continue
 		}
 		config, err := importedCostRuleConfig(ruleDraft)
 		if err != nil {
@@ -537,33 +540,37 @@ func seedCostRules(targets []matrixTarget, channelIDs map[string]int) error {
 				continue
 			}
 			seen[key] = struct{}{}
-			configJSON, err := common.Marshal(config.value)
-			if err != nil {
-				return err
-			}
 			var existing model.ChannelModelCostRule
 			err = model.DB.Where(
 				"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
 				channelID, target.UpstreamModel, variant, types.CostRuleActive,
 			).First(&existing).Error
-			if err == nil {
-				if err := model.DB.Model(&existing).Updates(map[string]any{
-					"cost_mode": string(config.mode), "schema_version": 1, "config_json": string(configJSON), "updated_at": now,
-				}).Error; err != nil {
-					return err
-				}
-				continue
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%s: published active cost rule is missing", target.CaseID)
 			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
+			if err != nil {
 				return err
 			}
-			if err := model.DB.Create(&model.ChannelModelCostRule{
-				ChannelID: channelID, BillableUpstreamModel: target.UpstreamModel, CostVariantKey: variant,
-				Version: 1, Status: string(types.CostRuleActive), CostMode: string(config.mode),
-				SchemaVersion: 1, ConfigJSON: string(configJSON), Source: "local_seed", CreatedBy: 1, ActivatedBy: 1,
-				EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
-			}).Error; err != nil {
+			if existing.Source != "config_import" {
+				return fmt.Errorf("%s: active cost rule source is %q, expected config_import", target.CaseID, existing.Source)
+			}
+			if existing.CostMode != string(config.mode) || existing.SchemaVersion != 1 {
+				return fmt.Errorf("%s: published active cost rule contract does not match import", target.CaseID)
+			}
+			var existingConfig types.CostRuleConfigV1
+			if err := common.UnmarshalJsonStr(existing.ConfigJSON, &existingConfig); err != nil {
+				return fmt.Errorf("%s: decode published active cost rule: %w", target.CaseID, err)
+			}
+			existingJSON, err := common.Marshal(existingConfig)
+			if err != nil {
 				return err
+			}
+			expectedJSON, err := common.Marshal(config.value)
+			if err != nil {
+				return err
+			}
+			if string(existingJSON) != string(expectedJSON) {
+				return fmt.Errorf("%s: published active cost rule price does not match import", target.CaseID)
 			}
 		}
 	}
@@ -588,14 +595,17 @@ func saveSingleTargetPolicy(policyID int, target matrixTarget, channelID int) (i
 			TargetPriority: 100,
 			Enabled:        true,
 			Constraints: modelrouting.Constraints{
-				OutputResolutions: []string{target.Resolution},
-				Durations: modelrouting.DurationConstraint{
-					Min: common.GetPointer(target.Duration),
-					Max: common.GetPointer(target.Duration),
-				},
-				AspectRatios:      []string{"16:9"},
-				ReferenceMinimums: target.Minimums,
-				ReferenceLimits:   target.References,
+				OutputResolutions:                  []string{target.Resolution},
+				Durations:                          target.Durations,
+				AspectRatios:                       target.AspectRatios,
+				InputModes:                         target.InputModes,
+				ReferenceMinimums:                  target.Minimums,
+				ReferenceLimits:                    target.References,
+				ReferenceTotalMax:                  target.ReferenceTotalMax,
+				ReferenceVideoAudioTotalMax:        target.ReferenceVideoAudioTotalMax,
+				ReferenceVideoTotalDurationSeconds: target.ReferenceVideoTotalDurationSeconds,
+				ReferenceModes:                     target.ReferenceModes,
+				SupportsRealPerson:                 target.SupportsRealPerson,
 			},
 		}},
 	})
@@ -642,24 +652,44 @@ func performJSONRequest(handler http.Handler, method, path, authorization, body 
 	return recorder.Code, recorder.Body.Bytes()
 }
 
-func requestBody(target matrixTarget) string {
+func requestBody(target matrixTarget, assetBaseURL string) string {
 	content := []map[string]any{{"type": "text", "text": "ARK SDK material matrix local seed " + target.CaseID}}
-	for index := 0; index < target.References.Images; index++ {
+	requestMode := modelrouting.InputModeOmniReference
+	if len(target.InputModes) > 0 {
+		requestMode = target.InputModes[0]
+		for _, mode := range target.InputModes {
+			if mode == modelrouting.InputModeOmniReference {
+				requestMode = mode
+				break
+			}
+		}
+	}
+	for index := 0; index < target.RequestRefs.Images; index++ {
+		role := "reference_image"
+		if requestMode == modelrouting.InputModeFirstFrame {
+			role = "first_frame"
+		} else if requestMode == modelrouting.InputModeFirstLastFrames {
+			if index == 0 {
+				role = "first_frame"
+			} else {
+				role = "last_frame"
+			}
+		}
 		content = append(content, map[string]any{
-			"type": "image_url", "role": "reference_image",
+			"type": "image_url", "role": role,
 			"image_url": map[string]any{"url": fmt.Sprintf("https://cdn.openai.com/ark-matrix/%s/image-%02d.png", target.Provider, index+1)},
 		})
 	}
-	for index := 0; index < target.References.Videos; index++ {
+	for index := 0; index < target.RequestRefs.Videos; index++ {
 		content = append(content, map[string]any{
 			"type": "video_url", "role": "reference_video",
-			"video_url": map[string]any{"url": fmt.Sprintf("https://cdn.openai.com/ark-matrix/%s/video-%02d.mp4", target.Provider, index+1)},
+			"video_url": map[string]any{"url": fmt.Sprintf("%s/sample.mp4?provider=%s&index=%d", assetBaseURL, target.Provider, index+1)},
 		})
 	}
-	for index := 0; index < target.References.Audios; index++ {
+	for index := 0; index < target.RequestRefs.Audios; index++ {
 		content = append(content, map[string]any{
 			"type": "audio_url", "role": "reference_audio",
-			"audio_url": map[string]any{"url": fmt.Sprintf("https://cdn.openai.com/ark-matrix/%s/audio-%02d.mp3", target.Provider, index+1)},
+			"audio_url": map[string]any{"url": fmt.Sprintf("%s/audio.wav?provider=%s&index=%d", assetBaseURL, target.Provider, index+1)},
 		})
 	}
 	body, err := common.Marshal(map[string]any{
@@ -670,6 +700,61 @@ func requestBody(target matrixTarget) string {
 		panic(err)
 	}
 	return string(body)
+}
+
+func matrixRequestReferences(minimums, limits modelrouting.ReferenceLimits, totalMax, videoAudioMax *int) modelrouting.ReferenceLimits {
+	result := limits
+	shrinkVideoAudio := func(maximum int) {
+		for result.Videos+result.Audios > maximum {
+			switch {
+			case result.Audios > minimums.Audios && result.Audios >= result.Videos:
+				result.Audios--
+			case result.Videos > minimums.Videos:
+				result.Videos--
+			case result.Audios > minimums.Audios:
+				result.Audios--
+			default:
+				return
+			}
+		}
+	}
+	if videoAudioMax != nil {
+		shrinkVideoAudio(*videoAudioMax)
+	}
+	if totalMax != nil {
+		availableForVideoAudio := *totalMax - result.Images
+		minimumVideoAudio := minimums.Videos + minimums.Audios
+		if availableForVideoAudio < minimumVideoAudio {
+			availableForVideoAudio = minimumVideoAudio
+		}
+		shrinkVideoAudio(availableForVideoAudio)
+		for result.Images+result.Videos+result.Audios > *totalMax && result.Images > minimums.Images {
+			result.Images--
+		}
+	}
+	return result
+}
+
+func matrixRequestReferencesForInputModes(requestReferences, limits modelrouting.ReferenceLimits, inputModes []modelrouting.InputMode) modelrouting.ReferenceLimits {
+	if len(inputModes) == 0 {
+		return requestReferences
+	}
+	for _, mode := range inputModes {
+		if mode == modelrouting.InputModeOmniReference {
+			return requestReferences
+		}
+	}
+	for _, mode := range inputModes {
+		if mode == modelrouting.InputModeFirstLastFrames && limits.Images >= 2 {
+			return modelrouting.ReferenceLimits{Images: 2}
+		}
+	}
+	for _, mode := range inputModes {
+		if mode == modelrouting.InputModeFirstFrame && limits.Images >= 1 {
+			return modelrouting.ReferenceLimits{Images: 1}
+		}
+	}
+	return modelrouting.ReferenceLimits{}
 }
 
 func loadTargets(path string) ([]matrixTarget, error) {
@@ -686,6 +771,10 @@ func loadTargets(path string) ([]matrixTarget, error) {
 		lines[line.LineRef] = line
 	}
 	targets := make([]matrixTarget, 0)
+	costRules := make(map[string]types.ConfigImportCostRuleDraft, len(document.Entities.CostRuleDrafts))
+	for _, draft := range document.Entities.CostRuleDrafts {
+		costRules[draft.RouteTargetRef] = draft
+	}
 	for _, blueprint := range document.Entities.RouteBlueprints {
 		runtimeModel := runtimeModel(blueprint.CanonicalModel)
 		if runtimeModel == "" {
@@ -722,15 +811,47 @@ func loadTargets(path string) ([]matrixTarget, error) {
 				Videos: *target.ReferenceLimits.Videos,
 				Audios: *target.ReferenceLimits.Audios,
 			}
+			draft, ok := costRules[target.RouteTargetRef]
+			if !ok || draft.Enabled == nil {
+				return nil, fmt.Errorf("%s: cost rule enabled state is missing", target.RouteTargetRef)
+			}
 			duration := 10
+			durations := modelrouting.DurationConstraint{Values: append([]int(nil), target.DurationValues...), Min: target.DurationMin, Max: target.DurationMax}
+			if len(target.DurationValues) > 0 {
+				duration = target.DurationValues[0]
+			}
 			if target.DurationMin != nil {
 				duration = *target.DurationMin
 			}
+			if len(durations.Values) == 0 && durations.Min == nil && durations.Max == nil {
+				durations.Min = common.GetPointer(duration)
+				durations.Max = common.GetPointer(duration)
+			}
+			aspectRatios := make([]string, 0, len(target.AspectRatios))
+			for _, value := range target.AspectRatios {
+				if normalized := strings.ToLower(strings.TrimSpace(value)); normalized != "" {
+					aspectRatios = append(aspectRatios, normalized)
+				}
+			}
+			if len(aspectRatios) == 0 {
+				aspectRatios = []string{"16:9"}
+			}
+			inputModes := make([]modelrouting.InputMode, 0, len(target.InputModes))
+			for _, value := range target.InputModes {
+				inputModes = append(inputModes, modelrouting.InputMode(strings.ToLower(strings.TrimSpace(value))))
+			}
+			requestReferences := matrixRequestReferences(minimums, references, target.ReferenceTotalMax, target.ReferenceVideoAudioTotalMax)
+			requestReferences = matrixRequestReferencesForInputModes(requestReferences, references, inputModes)
 			targets = append(targets, matrixTarget{
 				CaseID: fmt.Sprintf("%s/%s/%d%d%d", target.RouteTargetRef, target.OutputResolutions[0], references.Images, references.Videos, references.Audios), RouteTargetRef: target.RouteTargetRef,
 				LineRef: target.LineRef, Provider: line.ProviderTypeHint, RuntimeModel: runtimeModel,
 				UpstreamModel: target.UpstreamModel, Resolution: strings.ToLower(target.OutputResolutions[0]),
-				Duration: duration, CostVariantKey: target.CostVariantKey, Minimums: minimums, References: references, ChannelType: definition.Type,
+				Duration: duration, Durations: durations, CostVariantKey: target.CostVariantKey, CostEnabled: *draft.Enabled,
+				Minimums: minimums, References: references, RequestRefs: requestReferences,
+				ReferenceTotalMax: target.ReferenceTotalMax, ReferenceVideoAudioTotalMax: target.ReferenceVideoAudioTotalMax,
+				ReferenceVideoTotalDurationSeconds: target.ReferenceVideoTotalDurationSeconds,
+				AspectRatios:                       aspectRatios, InputModes: inputModes, ReferenceModes: append([]string(nil), target.ReferenceModes...),
+				SupportsRealPerson: target.SupportsRealPerson, ChannelType: definition.Type,
 			})
 		}
 	}
@@ -915,6 +1036,45 @@ func materialDistribution(targets []matrixTarget) map[string]int {
 }
 
 func (m *mockVideoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/ark-matrix/sample.mp4" {
+		var data []byte
+		var err error
+		for _, path := range []string{"e2e/testdata/sample.mp4", "../../e2e/testdata/sample.mp4"} {
+			data, err = os.ReadFile(path)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			http.Error(w, "video fixture unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(data)
+			return
+		}
+		if r.Method == http.MethodHead {
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path == "/ark-matrix/audio.wav" {
+		data := fixturePCM16WAV(1_000)
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(data)
+			return
+		}
+		if r.Method == http.MethodHead {
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	m.mu.Lock()
 	m.requests = append(m.requests, mockVideoRequest{
@@ -945,10 +1105,15 @@ func (m *mockVideoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(m.pollingResponse(taskID))
 		return
 	}
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/tasks/") {
+		taskID := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+		_, _ = w.Write(m.pollingResponse(taskID))
+		return
+	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/tasks/") {
 		taskID := strings.TrimPrefix(r.URL.Path, "/v1/videos/tasks/")
 		response, _ := common.Marshal(map[string]any{
-			"task_id": taskID, "status": "succeeded", "progress": 100,
+			"task_id": taskID, "status": "completed", "progress": 100,
 			"result": map[string]any{"url": "https://example.com/video.mp4"},
 		})
 		_, _ = w.Write(response)
@@ -965,9 +1130,57 @@ func (m *mockVideoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+func fixturePCM16WAV(durationMS int) []byte {
+	const sampleRate = 8_000
+	const channels = 1
+	const bitsPerSample = 16
+	sampleCount := sampleRate * durationMS / 1_000
+	dataSize := sampleCount * channels * bitsPerSample / 8
+	buffer := bytes.NewBuffer(make([]byte, 0, 44+dataSize))
+	buffer.WriteString("RIFF")
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(36+dataSize))
+	buffer.WriteString("WAVEfmt ")
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(channels))
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(sampleRate*channels*bitsPerSample/8))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(channels*bitsPerSample/8))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(bitsPerSample))
+	buffer.WriteString("data")
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(dataSize))
+	buffer.Write(make([]byte, dataSize))
+	return buffer.Bytes()
+}
+
+type fixtureAssetTransport struct {
+	base   http.RoundTripper
+	target *url.URL
+}
+
+func (t fixtureAssetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.URL.Scheme = t.target.Scheme
+	clone.URL.Host = t.target.Host
+	clone.Host = t.target.Host
+	return t.base.RoundTrip(clone)
+}
+
+func fixtureAssetClient(server *httptest.Server) (*http.Client, error) {
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		return nil, err
+	}
+	base := server.Client().Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &http.Client{Transport: fixtureAssetTransport{base: base, target: target}}, nil
+}
+
 func isMockVideoSubmitPath(path string) bool {
 	switch path {
-	case "/v1/video/generations", "/v1/videos/generations", "/v1/videos", "/api/generate-video":
+	case "/v1/video/generations", "/v1/videos/generations", "/v1/videos", "/v1/media/generate", "/api/generate-video":
 		return true
 	default:
 		return false
@@ -1013,7 +1226,7 @@ func (m *mockVideoServer) count() int {
 	return len(m.requests)
 }
 
-func summarizeResult(userID, tokenID, totalTargets, contractBlocks int, taskIDs []string, materialLimits map[string]int, upstreamCalls int) (seedResult, error) {
+func summarizeResult(userID, tokenID, totalTargets, contractBlocks, disabledPricing int, taskIDs []string, materialLimits map[string]int, upstreamCalls int) (seedResult, error) {
 	var commonLogs int64
 	if err := model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", userID).Count(&commonLogs).Error; err != nil {
 		return seedResult{}, err
@@ -1037,7 +1250,7 @@ func summarizeResult(userID, tokenID, totalTargets, contractBlocks int, taskIDs 
 		return seedResult{}, err
 	}
 	return seedResult{
-		TotalTargets: totalTargets, AcceptedTasks: len(taskIDs), ContractBlocks: contractBlocks,
+		TotalTargets: totalTargets, AcceptedTasks: len(taskIDs), ContractBlocks: contractBlocks, DisabledPricing: disabledPricing,
 		CommonLogs: commonLogs, TaskRows: taskRows, QuotaDataRows: quotaDataRows,
 		CostRequests: costRequests, CostAttempts: costAttempts, MaterialLimits: materialLimits,
 		MockUpstreamCalls: upstreamCalls, UserID: userID, TokenID: tokenID,
@@ -1047,7 +1260,7 @@ func summarizeResult(userID, tokenID, totalTargets, contractBlocks int, taskIDs 
 func printResult(result seedResult) {
 	fmt.Println("ARK SDK video material matrix seed completed")
 	fmt.Printf("user: %s (id=%d), token: %s (id=%d), group: %s\n", seedUsername, result.UserID, seedToken, result.TokenID, seedGroup)
-	fmt.Printf("targets: %d, accepted tasks: %d, contract blocks before submit: %d\n", result.TotalTargets, result.AcceptedTasks, result.ContractBlocks)
+	fmt.Printf("targets: %d, accepted tasks: %d, contract blocks before submit: %d, disabled pricing drafts: %d\n", result.TotalTargets, result.AcceptedTasks, result.ContractBlocks, result.DisabledPricing)
 	fmt.Printf("task rows: %d, usage logs for user: %d, quota_data rows: %d\n", result.TaskRows, result.CommonLogs, result.QuotaDataRows)
 	fmt.Printf("cost accounting requests: %d, attempts: %d, mock upstream calls: %d\n", result.CostRequests, result.CostAttempts, result.MockUpstreamCalls)
 	fmt.Printf("material limits: 431=%d, 900=%d, 903=%d, 933=%d\n", result.MaterialLimits["431"], result.MaterialLimits["900"], result.MaterialLimits["903"], result.MaterialLimits["933"])

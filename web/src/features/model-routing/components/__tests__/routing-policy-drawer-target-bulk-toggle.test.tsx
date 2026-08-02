@@ -110,6 +110,7 @@ function createPolicy(targetEnabled: boolean[]): RoutingPolicy {
         input_modes: ['text'],
         reference_minimums: { images: 0, videos: 0, audios: 0 },
         reference_limits: { images: 9, videos: 3, audios: 3 },
+        reference_modes: [],
         supports_real_person: null,
       },
     })),

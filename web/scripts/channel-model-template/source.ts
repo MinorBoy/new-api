@@ -21,7 +21,7 @@ import fs from 'node:fs/promises'
 import ExcelJS from 'exceljs'
 
 export const CHANNEL_HEADERS = ['渠道', '名称', '链接', 'Base Url'] as const
-export const SD_HEADERS = [
+const SD_LEGACY_HEADERS = [
   '渠道',
   '充值汇率',
   '手续费',
@@ -53,6 +53,47 @@ export const SD_HEADERS = [
   '已测',
   '售价',
   '利润',
+  '备注',
+] as const
+export const SD_HEADERS = [
+  '渠道',
+  '充值汇率',
+  '手续费',
+  '计费倍率',
+  '付费模式',
+  '模型ID',
+  '版本',
+  '计费',
+  '元/秒',
+  '元/次',
+  '元/1M',
+  '参考图数',
+  '参考视频数',
+  '参考音频数',
+  '最大素材数',
+  '视频音频合计上限',
+  '参考视频总时长上限 秒',
+  '最小参考图数',
+  '清晰度',
+  '超分',
+  '时长范围',
+  '比例',
+  '视频输入',
+  '过真人脸',
+  '素材库',
+  'NSFW',
+  '协议',
+  '状态',
+  '并发数',
+  '折扣 秒 无V',
+  '折扣 秒 含V',
+  '折扣 M 无V',
+  '折扣 M 含V',
+  '接入',
+  '已测',
+  '售价',
+  '利润',
+  '上游模型分组',
   '备注',
 ] as const
 export const OFFICIAL_PRICE_HEADERS = [
@@ -106,6 +147,9 @@ function cellValue(value: unknown): SourceValue {
     const text = value.text
     return typeof text === 'string' ? text : null
   }
+  if (typeof value === 'object' && value !== null && 'result' in value) {
+    return cellValue(value.result)
+  }
   return null
 }
 
@@ -143,7 +187,8 @@ function readHeaders(
     return matchedColumn
   })
   if (columns.some((column) => column === 0)) {
-    throw new Error(`${name} header mismatch`)
+    const missing = headers.filter((_, index) => columns[index] === 0)
+    throw new Error(`${name} header mismatch; missing=${missing.join(',')}`)
   }
   return columns
 }
@@ -152,7 +197,8 @@ function readRecords(
   sheet: ExcelJS.Worksheet,
   headers: readonly string[],
   columns: readonly number[],
-  headerRow: number
+  headerRow: number,
+  blankCheckColumns: readonly number[] = columns
 ): SourceRecord[] {
   const records: SourceRecord[] = []
   for (
@@ -161,12 +207,15 @@ function readRecords(
     rowNumber += 1
   ) {
     const row = sheet.getRow(rowNumber)
-    if (rowIsBlank(row, columns)) continue
+    if (rowIsBlank(row, blankCheckColumns)) continue
     const fields = Object.fromEntries(
-      headers.map((header, index) => [
-        header,
-        cellValue(row.getCell(columns[index]!).value),
-      ])
+      headers.map((header, index) => {
+        const column = columns[index]
+        if (column === undefined) {
+          throw new Error(`Missing column for ${header}`)
+        }
+        return [header, cellValue(row.getCell(column).value)]
+      })
     )
     records.push({
       fields,
@@ -219,7 +268,12 @@ export async function readSourceWorkbook(
     throw new Error('source worksheets are unavailable')
   }
   const channelColumns = readHeaders(channel, 2, CHANNEL_HEADERS, 'channel')
-  const modelColumns = readHeaders(models, 2, SD_HEADERS, 'sd')
+  const structuredSource = Array.from(
+    { length: models.columnCount },
+    (_, index) => cellText(cellValue(models.getRow(2).getCell(index + 1).value))
+  ).includes('参考图数')
+  const modelHeaders = structuredSource ? SD_HEADERS : SD_LEGACY_HEADERS
+  const modelColumns = readHeaders(models, 2, modelHeaders, 'sd')
   const officialPriceColumns = readHeaders(
     officialPrices,
     6,
@@ -228,7 +282,13 @@ export async function readSourceWorkbook(
   )
   return {
     channels: readRecords(channel, CHANNEL_HEADERS, channelColumns, 2),
-    models: readRecords(models, SD_HEADERS, modelColumns, 2),
+    models: readRecords(
+      models,
+      modelHeaders,
+      modelColumns,
+      2,
+      modelColumns.slice(0, 11)
+    ),
     officialPrices: readRecords(
       officialPrices,
       OFFICIAL_PRICE_HEADERS,

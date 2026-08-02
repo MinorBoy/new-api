@@ -26,6 +26,33 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			target: videoContractTarget("4sdance933", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 		},
 		{
+			name: "8yes accepts resolution encoded by mapped model", channelType: constant.ChannelTypeEightYes,
+			target: videoContractTarget("videos-mini-480p", []string{"480p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+		{
+			name: "8yes rejects resolution conflicting with mapped model", channelType: constant.ChannelTypeEightYes,
+			target:   videoContractTarget("videos-mini-480p", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+			wantCode: "route_contract_resolution",
+		},
+		{
+			name: "megabyai accepts 480p", channelType: constant.ChannelTypeMegaByAI,
+			target: videoContractTarget("videos-mini", []string{"480p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+		{
+			name: "megabyai accepts 720p", channelType: constant.ChannelTypeMegaByAI,
+			target: videoContractTarget("videos-standard", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+		{
+			name: "megabyai rejects 1080p", channelType: constant.ChannelTypeMegaByAI,
+			target:   videoContractTarget("videos-standard", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+			wantCode: "route_contract_resolution",
+		},
+		{
+			name: "megabyai rejects 4k", channelType: constant.ChannelTypeMegaByAI,
+			target:   videoContractTarget("videos-standard", []string{"4k"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+			wantCode: "route_contract_resolution",
+		},
+		{
 			name: "cangyuan rejects a route that advertises media", channelType: constant.ChannelTypeCangyuan,
 			target:   videoContractTarget("seedance-2.0", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 			wantCode: "route_contract_input_mode",
@@ -97,8 +124,8 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_references",
 		},
 		{
-			name: "clmm rejects combined maxima above twelve", channelType: constant.ChannelTypeClmmMall,
-			target:   videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 1}),
+			name: "clmm rejects aggregate maximum above fifteen", channelType: constant.ChannelTypeClmmMall,
+			target:   videoContractTargetWithTotal("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, 16),
 			wantCode: "route_contract_references",
 		},
 		{
@@ -118,8 +145,16 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 		},
 		{
 			name: "dimensio rejects combined maxima above twelve", channelType: constant.ChannelTypeDimensio,
-			target:   videoContractTarget("jimeng-video-seedance-2.0-vip", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+			target:   videoContractTarget("jmg-video-seedance-2.0-vip", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 			wantCode: "route_contract_references",
+		},
+		{
+			name: "dimensio accepts the real jmg model id", channelType: constant.ChannelTypeDimensio,
+			target: videoContractTargetWithTotal("jmg-video-seedance-2.0-vip", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, 12),
+		},
+		{
+			name: "dimensio accepts the real pxv 2160p model id", channelType: constant.ChannelTypeDimensio,
+			target: videoContractTarget("pxv-seedance-2.0-standard", []string{"4k"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 		},
 		{
 			name: "dimensio rejects unknown imported model", channelType: constant.ChannelTypeDimensio,
@@ -128,7 +163,7 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 		},
 		{
 			name: "dimensio limits 1080p to vip", channelType: constant.ChannelTypeDimensio,
-			target:   videoContractTarget("jimeng-video-seedance-2.0-fast-vip", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
+			target:   videoContractTarget("jmg-video-seedance-2.0-fast-vip", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
 			wantCode: "route_contract_resolution",
 		},
 		{
@@ -148,6 +183,12 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			settings: relaydto.ChannelOtherSettings{SecureVideoGroup: relaydto.SecureVideoGroupEnterprise},
 			target:   videoContractTarget("video-2.0-pro", []string{"720p"}, 4, 15, []modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
 			wantCode: "route_contract_duration",
+		},
+		{
+			name: "secure enterprise rejects reference video capability", channelType: constant.ChannelTypeSecure,
+			settings: relaydto.ChannelOtherSettings{SecureVideoGroup: relaydto.SecureVideoGroupEnterprise},
+			target:   videoContractTarget("video-2.0-pro", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 1, Audios: 3}),
+			wantCode: "route_contract_references",
 		},
 		{
 			name: "secure fast rejects 1080p", channelType: constant.ChannelTypeSecure,
@@ -176,6 +217,12 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 
 func videoContractTarget(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits modelrouting.ReferenceLimits) modelrouting.Target {
 	return videoContractTargetWithMinimums(modelName, resolutions, minDuration, maxDuration, inputModes, limits, modelrouting.ReferenceLimits{})
+}
+
+func videoContractTargetWithTotal(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits modelrouting.ReferenceLimits, total int) modelrouting.Target {
+	target := videoContractTarget(modelName, resolutions, minDuration, maxDuration, inputModes, limits)
+	target.Constraints.ReferenceTotalMax = common.GetPointer(total)
+	return target
 }
 
 func videoContractTargetWithMinimums(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits, minimums modelrouting.ReferenceLimits) modelrouting.Target {

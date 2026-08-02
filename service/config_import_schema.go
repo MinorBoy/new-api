@@ -418,6 +418,9 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		if err := validateConfigImportAuthoritativeEntity(&draft.ConfigImportAuthoritativeEntity, "cost_rule_drafts", index, businessIDs); err != nil {
 			return err
 		}
+		if draft.Enabled == nil {
+			return configImportError("SCHEMA_COST_ENABLED", "cost_rule_drafts[%d].enabled is required", index)
+		}
 		if err := validateConfigImportEntityHash("cost_rule_drafts", index, draft, draft.EntityHash); err != nil {
 			return err
 		}
@@ -611,6 +614,32 @@ func validateConfigImportRouteTarget(target *types.ConfigImportRouteTarget, blue
 			if *value < 0 {
 				return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference bounds cannot be negative", blueprintIndex, targetIndex)
 			}
+		}
+	}
+	limits := target.ReferenceLimits
+	if target.ReferenceTotalMax != nil {
+		if *target.ReferenceTotalMax < 0 || *target.ReferenceTotalMax > *limits.Images+*limits.Videos+*limits.Audios {
+			return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference_total_max is invalid", blueprintIndex, targetIndex)
+		}
+	}
+	if target.ReferenceVideoAudioTotalMax != nil {
+		if *target.ReferenceVideoAudioTotalMax < 0 || *target.ReferenceVideoAudioTotalMax > *limits.Videos+*limits.Audios {
+			return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference_video_audio_total_max is invalid", blueprintIndex, targetIndex)
+		}
+		if target.ReferenceTotalMax != nil && *target.ReferenceTotalMax > *limits.Images+*target.ReferenceVideoAudioTotalMax {
+			return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] aggregate reference limits conflict", blueprintIndex, targetIndex)
+		}
+	}
+	if target.ReferenceVideoTotalDurationSeconds != nil {
+		if *target.ReferenceVideoTotalDurationSeconds < 0 || (*limits.Videos == 0 && *target.ReferenceVideoTotalDurationSeconds != 0) {
+			return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference_video_total_duration_seconds is invalid", blueprintIndex, targetIndex)
+		}
+	}
+	for _, mode := range target.ReferenceModes {
+		switch mode {
+		case "first_last_frames", "omni_reference", "agentic":
+		default:
+			return configImportError("SCHEMA_ROUTE_REFERENCE", "route_blueprints[%d].targets[%d] reference_modes contains an invalid value", blueprintIndex, targetIndex)
 		}
 	}
 	return nil

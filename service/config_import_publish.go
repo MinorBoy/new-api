@@ -105,9 +105,6 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 			return err
 		}
 		if baseline.Hash == "" || current.Hash != baseline.Hash {
-			_ = tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
-				"status": string(types.ConfigImportBatchStatusStaged), "failure_code": "STALE_BASE_VERSION", "failure_message": "active configuration changed since staging", "updated_at": common.GetTimestamp(),
-			})
 			return ErrConfigImportStale
 		}
 		updated, err := model.UpdateConfigImportBatchStatus(tx, batchID, types.ConfigImportBatchStatusReady, types.ConfigImportBatchStatusPublishing)
@@ -120,6 +117,9 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		publishStarted = true
 		var items []model.ConfigImportItem
 		if err := tx.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		if err := publishConfigImportDisabledCostRules(tx, items, &refresh); err != nil {
 			return err
 		}
 		for _, item := range items {
@@ -157,6 +157,12 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		}).Error
 	})
 	if err != nil {
+		if errors.Is(err, ErrConfigImportStale) {
+			if markErr := markConfigImportStale(ctx, batchID); markErr != nil {
+				return fmt.Errorf("%w: failed to persist stale batch status: %v", err, markErr)
+			}
+			return err
+		}
 		if publishStarted {
 			if markErr := markConfigImportPublishFailed(ctx, batchID, err); markErr != nil {
 				common.SysError(fmt.Sprintf("failed to mark config import batch %d as publish_failed: %v", batchID, markErr))
@@ -170,8 +176,62 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		}
 		return fmt.Errorf("published but cache refresh failed: %w", err)
 	}
-	if err := recordPostPublishCostCoverage(ctx, batchID); err != nil {
+	if err := recordPostPublishCostCoverage(ctx, batchID, refresh); err != nil {
 		common.SysError(fmt.Sprintf("failed to record post-publish cost coverage for batch %d: %v", batchID, err))
+	}
+	return nil
+}
+
+func markConfigImportStale(ctx context.Context, batchID int64) error {
+	now := common.GetTimestamp()
+	return model.DB.WithContext(ctx).Model(&model.ConfigImportBatch{}).
+		Where("id = ? AND status = ?", batchID, types.ConfigImportBatchStatusReady).
+		Updates(map[string]any{
+			"status":          string(types.ConfigImportBatchStatusStaged),
+			"failure_code":    "STALE_BASE_VERSION",
+			"failure_message": "active configuration changed since staging",
+			"updated_at":      now,
+		}).Error
+}
+
+func publishConfigImportDisabledCostRules(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {
+	if !tx.Migrator().HasTable(&model.ChannelModelCostRule{}) {
+		return nil
+	}
+	lineChannels, err := configImportPublishedLineChannels(tx, items)
+	if err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	for _, item := range items {
+		disabled, err := configImportDisabledCostRuleRetiresActive(item)
+		if err != nil {
+			return err
+		}
+		if !disabled {
+			continue
+		}
+		var draft types.ConfigImportCostRuleDraft
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+			return err
+		}
+		channelID := lineChannels[draft.LineRef]
+		if channelID <= 0 {
+			return configImportError("PUBLISH_LINE_UNBOUND", "disabled cost rule %q references unbound line %q", item.BusinessID, draft.LineRef)
+		}
+		result := tx.Model(&model.ChannelModelCostRule{}).Where(
+			"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
+			channelID, draft.UpstreamModel, draft.CostVariantKey, types.CostRuleActive,
+		).Updates(map[string]any{
+			"status": string(types.CostRuleRetired), "effective_to": now, "updated_at": now,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		refresh.CostModelKeys = appendConfigImportRefreshString(
+			refresh.CostModelKeys,
+			fmt.Sprintf("%d|%s|%s", channelID, draft.UpstreamModel, draft.CostVariantKey),
+		)
 	}
 	return nil
 }
@@ -180,7 +240,7 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 // import visible on the import batch itself. It is deliberately best-effort:
 // publication has already committed, so a coverage-check persistence failure
 // must not report the committed import as failed.
-func recordPostPublishCostCoverage(ctx context.Context, batchID int64) error {
+func recordPostPublishCostCoverage(ctx context.Context, batchID int64, refresh ConfigImportRefreshKeys) error {
 	if !model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
 		return nil
 	}
@@ -188,9 +248,25 @@ func recordPostPublishCostCoverage(ctx context.Context, batchID int64) error {
 	if err != nil {
 		return err
 	}
+	affectedChannels := make(map[int]struct{}, len(refresh.ChannelIDs)+len(refresh.CostModelKeys))
+	for _, channelID := range refresh.ChannelIDs {
+		if channelID > 0 {
+			affectedChannels[channelID] = struct{}{}
+		}
+	}
+	for _, key := range refresh.CostModelKeys {
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		channelID := 0
+		if _, err := fmt.Sscanf(parts[0], "%d", &channelID); err == nil && channelID > 0 {
+			affectedChannels[channelID] = struct{}{}
+		}
+	}
 	uncovered := 0
 	for _, item := range coverage {
-		if !item.Covered {
+		if _, affected := affectedChannels[item.ChannelID]; affected && !item.Covered {
 			uncovered++
 		}
 	}
@@ -357,12 +433,26 @@ func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRe
 		return keys, err
 	}
 	for _, item := range items {
-		if item.State == string(types.ConfigImportItemStateExcluded) ||
+		disabledCost, err := configImportDisabledCostRuleRetiresActive(item)
+		if err != nil {
+			return keys, err
+		}
+		if item.State == string(types.ConfigImportItemStateExcluded) && !disabledCost ||
 			item.State == string(types.ConfigImportItemStateUnchanged) && item.EntityType != "model_mappings" {
 			continue
 		}
 		switch item.EntityType {
 		case "cost_rule_drafts":
+			if disabledCost {
+				var draft types.ConfigImportCostRuleDraft
+				if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+					return keys, err
+				}
+				if channelID := lineChannels[draft.LineRef]; channelID > 0 {
+					keys.CostModelKeys = appendConfigImportRefreshString(keys.CostModelKeys, fmt.Sprintf("%d|%s|%s", channelID, draft.UpstreamModel, draft.CostVariantKey))
+				}
+				continue
+			}
 			if item.MaterializedID == nil || !db.Migrator().HasTable(&model.ChannelModelCostRule{}) {
 				continue
 			}
@@ -788,12 +878,16 @@ func configImportRouteRowsWithPriorityOverrides(lineChannels map[string]int, blu
 			return policy, nil, configImportError("PUBLISH_ROUTE_REFERENCE", "route target %q reference limits are invalid: %v", target.RouteTargetRef, err)
 		}
 		constraints := modelrouting.Constraints{
-			OutputResolutions:  target.OutputResolutions,
-			Durations:          modelrouting.DurationConstraint{Values: target.DurationValues, Min: target.DurationMin, Max: target.DurationMax},
-			AspectRatios:       target.AspectRatios,
-			ReferenceMinimums:  referenceMinimums,
-			ReferenceLimits:    referenceLimits,
-			SupportsRealPerson: target.SupportsRealPerson,
+			OutputResolutions:                  target.OutputResolutions,
+			Durations:                          modelrouting.DurationConstraint{Values: target.DurationValues, Min: target.DurationMin, Max: target.DurationMax},
+			AspectRatios:                       target.AspectRatios,
+			ReferenceMinimums:                  referenceMinimums,
+			ReferenceLimits:                    referenceLimits,
+			ReferenceTotalMax:                  target.ReferenceTotalMax,
+			ReferenceVideoAudioTotalMax:        target.ReferenceVideoAudioTotalMax,
+			ReferenceVideoTotalDurationSeconds: target.ReferenceVideoTotalDurationSeconds,
+			ReferenceModes:                     target.ReferenceModes,
+			SupportsRealPerson:                 target.SupportsRealPerson,
 		}
 		for _, mode := range target.InputModes {
 			constraints.InputModes = append(constraints.InputModes, modelrouting.InputMode(mode))

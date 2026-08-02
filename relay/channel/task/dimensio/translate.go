@@ -74,7 +74,7 @@ func ArkToDimensio(ark ArkRequest) (DimensioRequest, error) {
 	if err := validateUnsupportedFields(ark); err != nil {
 		return DimensioRequest{}, err
 	}
-	if err := validateArkContentRoles(ark.Content); err != nil {
+	if err := validateArkContentRoles(ark.Content, ark.Model); err != nil {
 		return DimensioRequest{}, err
 	}
 
@@ -147,7 +147,7 @@ func deriveFunctionMode(content []ArkContent) string {
 	return "first_last_frames"
 }
 
-func validateArkContentRoles(content []ArkContent) error {
+func validateArkContentRoles(content []ArkContent, modelName string) error {
 	images, first, last, references, videos, audios := 0, 0, 0, 0, 0, 0
 	for _, item := range content {
 		switch item.Type {
@@ -188,8 +188,12 @@ func validateArkContentRoles(content []ArkContent) error {
 	if audios > 3 {
 		return fmt.Errorf("too many audios: dimensio allows at most 3 (audio_file_1..3)")
 	}
-	if images+videos+audios > 12 {
-		return fmt.Errorf("too many media items: dimensio allows at most 12 total")
+	totalLimit := 12
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "pxv-") {
+		totalLimit = 15
+	}
+	if images+videos+audios > totalLimit {
+		return fmt.Errorf("too many media items: dimensio allows at most %d total", totalLimit)
 	}
 	if audios > 0 && images == 0 && videos == 0 {
 		return fmt.Errorf("audio input requires an image or video")

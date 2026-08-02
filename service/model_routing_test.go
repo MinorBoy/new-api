@@ -478,6 +478,170 @@ func (unavailableVideoMetadataClient) Metadata(context.Context, string) (videome
 	return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataUnavailable}
 }
 
+type routingDurationMetadataClient struct {
+	calls      int
+	durationMS int64
+	err        error
+}
+
+func (c *routingDurationMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	c.calls++
+	if c.err != nil {
+		return videometa.Metadata{}, c.err
+	}
+	return videometa.Metadata{DurationMS: c.durationMS, Width: 1280, Height: 720, FrameRateNum: 24, FrameRateDen: 1, Container: "mp4"}, nil
+}
+
+func TestCapabilityRoutingEnforcesReferenceVideoTotalDuration(t *testing.T) {
+	tests := []struct {
+		name       string
+		durationMS int64
+		wantCode   relaytypes.ErrorCode
+		wantStatus int
+	}{
+		{name: "exact limit", durationMS: 15_000},
+		{name: "one millisecond over limit", durationMS: 15_001, wantCode: relaytypes.ErrorCodeNoCompatibleRoute, wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prepareCapabilitySelectionTest(t)
+			seedRoutingCandidate(t, 11, "duration", "分组A", modelrouting.Seedance20, true)
+			request := capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "duration-model", "1080p")
+			request.Targets[0].Constraints.ReferenceVideoTotalDurationSeconds = serviceIntPtr(15)
+			_, err := service.SaveRoutingPolicy(0, request)
+			require.NoError(t, err)
+
+			client := &routingDurationMetadataClient{durationMS: tt.durationMS}
+			service.SetVideoMetadataClient(client)
+			t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+			input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+			input.ReferenceVideos = 1
+			input.ReferenceVideoURLs = []string{"https://assets.example/input.mp4?signature=secret"}
+
+			channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+				Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+				RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+			})
+
+			assert.Equal(t, 1, client.calls)
+			if tt.wantCode == "" {
+				require.NoError(t, err)
+				require.NotNil(t, channel)
+				assert.Equal(t, 11, channel.Id)
+				return
+			}
+			assert.Nil(t, channel)
+			var selectionErr *service.ChannelSelectionError
+			require.ErrorAs(t, err, &selectionErr)
+			assert.Equal(t, tt.wantCode, selectionErr.Code)
+			assert.Equal(t, tt.wantStatus, selectionErr.StatusCode)
+			require.Len(t, selectionErr.Diagnostics, 1)
+			assert.Equal(t, 1, selectionErr.Diagnostics[0].MismatchCounts[modelrouting.MismatchReferenceVideoDuration])
+			assert.NotContains(t, selectionErr.Error(), "assets.example")
+			assert.NotContains(t, selectionErr.Error(), "secret")
+		})
+	}
+}
+
+func TestCapabilityRoutingLoadsMetadataOnlyForDurationConstrainedTargets(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	seedRoutingCandidate(t, 11, "unconstrained", "分组A", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "request-model", "1080p"))
+	require.NoError(t, err)
+
+	client := &routingDurationMetadataClient{err: &service.VideoMetadataError{Kind: service.VideoMetadataUnavailable}}
+	service.SetVideoMetadataClient(client)
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	input.ReferenceVideos = 1
+	input.ReferenceVideoURLs = []string{"https://assets.example/unavailable.mp4?signature=secret"}
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 11, channel.Id)
+	assert.Zero(t, client.calls)
+}
+
+func TestCapabilityRoutingKeepsUnconstrainedTargetsWhenVideoMetadataIsUnavailable(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	seedRoutingCandidate(t, 11, "duration", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "unconstrained", "分组A", modelrouting.Seedance20, true)
+	request := multiTargetPolicyRequest("分组A", modelrouting.Seedance20, "1080p", []policyTarget{
+		{ChannelID: 11, UpstreamModel: "duration-model"},
+		{ChannelID: 12, UpstreamModel: "unconstrained-model"},
+	})
+	request.Targets[0].Constraints.ReferenceVideoTotalDurationSeconds = serviceIntPtr(15)
+	_, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+
+	client := &routingDurationMetadataClient{err: &service.VideoMetadataError{Kind: service.VideoMetadataUnavailable}}
+	service.SetVideoMetadataClient(client)
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+	input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+	input.ReferenceVideos = 1
+	input.ReferenceVideoURLs = []string{"https://assets.example/unavailable.mp4?signature=secret"}
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+	assert.Equal(t, 1, client.calls)
+}
+
+func TestCapabilityRoutingFailsClosedWhenRequiredVideoMetadataIsUnavailable(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       service.VideoMetadataErrorKind
+		wantCode   relaytypes.ErrorCode
+		wantStatus int
+	}{
+		{name: "invalid media", kind: service.VideoMetadataInvalidMedia, wantCode: relaytypes.ErrorCodeInvalidRequest, wantStatus: http.StatusBadRequest},
+		{name: "metadata unavailable", kind: service.VideoMetadataUnavailable, wantCode: relaytypes.ErrorCodeCompatibleChannelUnavailable, wantStatus: http.StatusServiceUnavailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prepareCapabilitySelectionTest(t)
+			seedRoutingCandidate(t, 11, "duration", "分组A", modelrouting.Seedance20, true)
+			request := capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "duration-model", "1080p")
+			request.Targets[0].Constraints.ReferenceVideoTotalDurationSeconds = serviceIntPtr(15)
+			_, err := service.SaveRoutingPolicy(0, request)
+			require.NoError(t, err)
+
+			client := &routingDurationMetadataClient{err: &service.VideoMetadataError{Kind: tt.kind}}
+			service.SetVideoMetadataClient(client)
+			t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+			input := seedanceFactsInput(modelrouting.Seedance20, "1080p", 10, "16:9")
+			input.ReferenceVideos = 1
+			input.ReferenceVideoURLs = []string{"https://assets.example/failure.mp4?signature=secret"}
+
+			channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+				Ctx: capabilitySelectionContext(), TokenGroup: "分组A", ModelName: modelrouting.Seedance20,
+				RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+			})
+
+			assert.Nil(t, channel)
+			assert.Equal(t, 1, client.calls)
+			var selectionErr *service.ChannelSelectionError
+			require.ErrorAs(t, err, &selectionErr)
+			assert.Equal(t, tt.wantCode, selectionErr.Code)
+			assert.Equal(t, tt.wantStatus, selectionErr.StatusCode)
+			assert.NotContains(t, selectionErr.Error(), "assets.example")
+			assert.NotContains(t, selectionErr.Error(), "secret")
+		})
+	}
+}
+
 // TestProfitRoutingNoOpOutsideStrictMode asserts the filter is inert when cost
 // accounting is disabled: both channels remain selectable even though one carries a
 // cost that would fail the margin gate under strict mode.

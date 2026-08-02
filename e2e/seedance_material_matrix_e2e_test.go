@@ -1,11 +1,14 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	apidto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/videometa"
@@ -22,7 +26,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -31,50 +34,112 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const importedMaterialMatrixGroup = "ark-sdk-material-matrix"
+const importedMaterialMatrixGroup = "default"
+const importedMaterialMatrixAssetBaseURL = "http://cdn.openai.com/ark-matrix"
 
 type importedMaterialMatrixTarget struct {
-	CaseID         string
-	RouteTargetRef string
-	LineRef        string
-	ChannelRef     string
-	Provider       string
-	CanonicalModel string
-	RuntimeModel   string
-	UpstreamModel  string
-	Resolution     string
-	Duration       int
-	CostVariantKey string
-	Minimums       modelrouting.ReferenceLimits
-	References     modelrouting.ReferenceLimits
-	ChannelType    int
-	ExpectedPath   string
-	CostMode       types.CostMode
-	CostConfig     types.CostRuleConfigV1
+	CaseID                             string
+	RouteTargetRef                     string
+	LineRef                            string
+	ChannelRef                         string
+	Provider                           string
+	CanonicalModel                     string
+	RuntimeModel                       string
+	UpstreamModel                      string
+	Resolution                         string
+	Duration                           int
+	Durations                          modelrouting.DurationConstraint
+	CostVariantKey                     string
+	Minimums                           modelrouting.ReferenceLimits
+	References                         modelrouting.ReferenceLimits
+	RequestRefs                        modelrouting.ReferenceLimits
+	ReferenceTotalMax                  *int
+	ReferenceVideoAudioTotalMax        *int
+	ReferenceVideoTotalDurationSeconds *int
+	AspectRatio                        string
+	AspectRatios                       []string
+	InputModes                         []modelrouting.InputMode
+	ReferenceModes                     []string
+	SupportsRealPerson                 *bool
+	ChannelType                        int
+	ExpectedPath                       string
+	CostEnabled                        bool
+	CostMode                           types.CostMode
+	CostConfig                         types.CostRuleConfigV1
+}
+
+func TestImportedMaterialMatrixRequestReferencesRespectAggregateLimits(t *testing.T) {
+	tests := []struct {
+		name          string
+		minimums      modelrouting.ReferenceLimits
+		limits        modelrouting.ReferenceLimits
+		totalMax      *int
+		videoAudioMax *int
+		want          modelrouting.ReferenceLimits
+	}{
+		{
+			name: "933 with both aggregate limits", limits: modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			totalMax: common.GetPointer(12), videoAudioMax: common.GetPointer(3),
+			want: modelrouting.ReferenceLimits{Images: 9, Videos: 2, Audios: 1},
+		},
+		{
+			name: "933 with total limit", limits: modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			totalMax: common.GetPointer(12),
+			want:     modelrouting.ReferenceLimits{Images: 9, Videos: 2, Audios: 1},
+		},
+		{
+			name: "minimums are preserved", minimums: modelrouting.ReferenceLimits{Images: 1, Videos: 1, Audios: 1},
+			limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 3}, totalMax: common.GetPointer(4),
+			want: modelrouting.ReferenceLimits{Images: 2, Videos: 1, Audios: 1},
+		},
+		{
+			name: "independent limits unchanged", limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1},
+			want: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := importedMaterialMatrixRequestReferences(tt.minimums, tt.limits, tt.totalMax, tt.videoAudioMax)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
 
 type importedMaterialMatrixEnv struct {
-	engine       http.Handler
-	mock         *capabilityRecordingServer
-	channelIDs   map[string]int
-	policyIDs    map[string]int
-	materialSeen map[string]int
+	engine           http.Handler
+	mock             *capabilityRecordingServer
+	channelIDs       map[string]int
+	policyIDs        map[string]int
+	publishedTargets map[string]model.RouteTarget
+	materialSeen     map[string]int
+	assetBaseURL     string
 }
 
 func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	silenceSeedanceBillingLogs(t)
 	targets := loadImportedMaterialMatrixTargets(t)
 	env := setupImportedMaterialMatrixE2E(t, targets)
-	require.Len(t, targets, 98)
+	require.Len(t, targets, 147)
 	checked := 0
 	accepted := 0
 	contractBlocks := 0
+	disabledPricingDrafts := 0
 
 	for _, target := range targets {
 		t.Run(target.CaseID, func(t *testing.T) {
 			checked++
 			env.materialSeen[fmt.Sprintf("%d%d%d", target.References.Images, target.References.Videos, target.References.Audios)]++
 			service.ClearChannelAffinityCacheAll()
+			publishedTarget, ok := env.publishedTargets[target.RouteTargetRef]
+			require.True(t, ok, target.CaseID)
+			require.Equal(t, env.channelIDs[target.LineRef], publishedTarget.ChannelID, target.CaseID)
+			require.Equal(t, target.UpstreamModel, publishedTarget.UpstreamModel, target.CaseID)
+			require.Equal(t, target.CostVariantKey, publishedTarget.CostVariantKey, target.CaseID)
+			var publishedConstraints modelrouting.Constraints
+			require.NoError(t, common.UnmarshalJsonStr(publishedTarget.Constraints, &publishedConstraints), target.CaseID)
+			require.Equal(t, target.References, publishedConstraints.ReferenceLimits, target.CaseID)
+			require.Equal(t, target.Minimums, publishedConstraints.ReferenceMinimums, target.CaseID)
 			request := service.RoutingPolicyWriteRequest{
 				GroupName: importedMaterialMatrixGroup,
 				Model:     target.RuntimeModel,
@@ -85,33 +150,48 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 					AspectRatio:      "16:9",
 				},
 				Targets: []service.RouteTargetWriteRequest{{
-					ChannelID:      env.channelIDs[target.LineRef],
-					Name:           target.UpstreamModel,
-					UpstreamModel:  target.UpstreamModel,
-					CostVariantKey: target.CostVariantKey,
-					TargetPriority: 100,
+					ChannelID:      publishedTarget.ChannelID,
+					Name:           publishedTarget.Name,
+					UpstreamModel:  publishedTarget.UpstreamModel,
+					CostVariantKey: publishedTarget.CostVariantKey,
+					TargetPriority: publishedTarget.TargetPriority,
 					Enabled:        true,
-					Constraints: modelrouting.Constraints{
-						OutputResolutions: []string{target.Resolution},
-						Durations: modelrouting.DurationConstraint{
-							Min: common.GetPointer(target.Duration),
-							Max: common.GetPointer(target.Duration),
-						},
-						AspectRatios:      []string{"16:9"},
-						ReferenceMinimums: target.Minimums,
-						ReferenceLimits:   target.References,
-					},
+					Constraints:    publishedConstraints,
 				}},
 			}
+			before := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
+				User: &model.User{Id: e2eUserID}, Token: &model.Token{Id: 1},
+				Channel: &model.Channel{Id: env.channelIDs[target.LineRef]},
+			})
+			costBefore := importedMaterialMatrixCostSnapshot(t)
+			requestsBefore := env.mock.snapshot()
 			var channel model.Channel
 			require.NoError(t, model.DB.Where("id = ?", env.channelIDs[target.LineRef]).First(&channel).Error, target.CaseID)
 			require.Equal(t, target.ChannelType, channel.Type, target.CaseID)
+			if !target.CostEnabled {
+				disabledPricingDrafts++
+				var costRuleCount int64
+				require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where(
+					"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
+					channel.Id, target.UpstreamModel, target.CostVariantKey, types.CostRuleActive,
+				).Count(&costRuleCount).Error, target.CaseID)
+				require.Zero(t, costRuleCount, target.CaseID)
+				after := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
+					User: &model.User{Id: e2eUserID}, Token: &model.Token{Id: 1},
+					Channel: &model.Channel{Id: env.channelIDs[target.LineRef]},
+				})
+				require.Zero(t, after.delta(before), target.CaseID)
+				require.Equal(t, costBefore, importedMaterialMatrixCostSnapshot(t), target.CaseID)
+				require.Equal(t, requestsBefore, env.mock.snapshot(), target.CaseID)
+				return
+			}
 			var costRule model.ChannelModelCostRule
 			require.NoError(t, model.DB.Where(
 				"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
 				channel.Id, target.UpstreamModel, target.CostVariantKey, types.CostRuleActive,
 			).First(&costRule).Error, target.CaseID)
 			require.Equal(t, string(target.CostMode), costRule.CostMode, target.CaseID)
+			require.Equal(t, "config_import", costRule.Source, target.CaseID)
 			var costConfig types.CostRuleConfigV1
 			require.NoError(t, common.UnmarshalJsonStr(costRule.ConfigJSON, &costConfig), target.CaseID)
 			require.Equal(t, target.CostConfig.Currency, costConfig.Currency, target.CaseID)
@@ -122,13 +202,6 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.CostConfig.CompletionPerMillion, costConfig.CompletionPerMillion, target.CaseID)
 			require.Equal(t, target.CostConfig.TotalPerMillion, costConfig.TotalPerMillion, target.CaseID)
 			require.Equal(t, target.CostConfig.NormalizedUSDPrices, costConfig.NormalizedUSDPrices, target.CaseID)
-
-			before := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
-				User: &model.User{Id: e2eUserID}, Token: &model.Token{Id: 1},
-				Channel: &model.Channel{Id: env.channelIDs[target.LineRef]},
-			})
-			costBefore := importedMaterialMatrixCostSnapshot(t)
-			requestsBefore := env.mock.snapshot()
 
 			view, err := service.SaveRoutingPolicy(env.policyIDs[target.RuntimeModel], request)
 			if err != nil {
@@ -149,7 +222,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			env.policyIDs[target.RuntimeModel] = view.ID
 			accepted++
 
-			body := importedMaterialMatrixRequestBody(t, target)
+			body := importedMaterialMatrixRequestBody(t, target, env.assetBaseURL)
 			status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e", body)
 			require.Equal(t, http.StatusOK, status, "%s: %s", target.CaseID, submit)
 
@@ -182,6 +255,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.UpstreamModel, task.PrivateData.Routing.UpstreamModel, target.CaseID)
 			require.Equal(t, target.CostVariantKey, task.PrivateData.Routing.CostVariantKey, target.CaseID)
 			require.Positive(t, task.Quota, target.CaseID)
+			preConsumedQuota := task.Quota
 
 			summary := service.RunTaskPollingOnce(context.Background(), nil)
 			require.Equal(t, 1, summary.UnfinishedTasks, target.CaseID)
@@ -202,15 +276,20 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			delta := after.delta(before)
 			require.Equal(t, int64(1), delta.TaskCount, target.CaseID)
 			require.Equal(t, 1, delta.UserRequestCount, target.CaseID)
-			expectedLogCount := int64(2)
-			expectedRefundLogCount := 1
-			if target.CostMode == types.CostModePerRequest ||
-				((target.ChannelType == constant.ChannelTypeFourSToken || target.ChannelType == constant.ChannelTypePaipu) && target.CostMode == types.CostModePerDuration) {
-				expectedLogCount = 1
-				expectedRefundLogCount = 0
+			quotaDelta := task.Quota - preConsumedQuota
+			expectedLogCount := int64(1)
+			expectedConsumeLogCount := 1
+			expectedRefundLogCount := 0
+			if quotaDelta != 0 {
+				expectedLogCount = 2
+			}
+			if quotaDelta > 0 {
+				expectedConsumeLogCount = 2
+			} else if quotaDelta < 0 {
+				expectedRefundLogCount = 1
 			}
 			require.Equal(t, expectedLogCount, delta.LogCount, target.CaseID)
-			require.Equal(t, 1, delta.ConsumeLogCount, target.CaseID)
+			require.Equal(t, expectedConsumeLogCount, delta.ConsumeLogCount, target.CaseID)
 			require.Equal(t, expectedRefundLogCount, delta.RefundLogCount, target.CaseID)
 			require.Equal(t, task.Quota, delta.UserUsedQuota, target.CaseID)
 			require.Equal(t, int64(task.Quota), delta.ChannelUsedQuota, target.CaseID)
@@ -250,28 +329,42 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	}
 
 	if checked == len(targets) {
-		require.Equal(t, 58, accepted)
-		require.Equal(t, 40, contractBlocks)
-		require.Equal(t, map[string]int{"431": 22, "900": 4, "903": 1, "933": 71}, env.materialSeen)
+		require.Equal(t, 110, accepted)
+		require.Equal(t, 36, contractBlocks)
+		require.Equal(t, 1, disabledPricingDrafts)
+		require.Equal(t, map[string]int{"431": 38, "900": 6, "903": 4, "933": 99}, env.materialSeen)
 	}
 }
 
 func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatrixTarget) *importedMaterialMatrixEnv {
 	t.Helper()
 	setupSeedanceE2EDB(t)
-	service.SetVideoMetadataClient(materialMatrixVideoMetadataClient{})
-	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
-	service.SetReferenceAudioDurationResolver(materialMatrixReferenceAudioResolver{})
-	t.Cleanup(func() { service.SetReferenceAudioDurationResolver(nil) })
 	require.NoError(t, model.DB.AutoMigrate(
 		&model.RoutingPolicy{}, &model.RouteTarget{}, &model.ChannelModelCostRule{},
 		&model.CostAccountingRequest{}, &model.CostAccountingAttempt{}, &model.CostAccountingAudit{},
+		&model.ConfigImportBatch{}, &model.ConfigImportItem{}, &model.ConfigImportBinding{},
+		&model.ConfigImportIssue{}, &model.ConfigImportResolution{}, &model.ConfigImportPublishAudit{}, &model.Option{},
 	))
 	require.NoError(t, model.InitRoutingPolicyCache())
 	t.Cleanup(func() {
 		if model.DB != nil {
 			require.NoError(t, model.InitRoutingPolicyCache())
 		}
+	})
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptionMap
+		common.OptionMapRWMutex.Unlock()
+	})
+	billingConfig := config.GlobalConfig.Get("billing_setting")
+	originalBillingConfig, err := config.ConfigToMap(billingConfig)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(billingConfig, originalBillingConfig))
 	})
 	originalCostRuntime := cost_setting.Runtime()
 	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
@@ -300,10 +393,6 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 		RemainQuota: 2_000_000_000, UnlimitedQuota: true, Group: importedMaterialMatrixGroup,
 	}).Error)
 
-	originalUsableGroups := setting.UserUsableGroups2JSONString()
-	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"`+importedMaterialMatrixGroup+`":"ARK SDK material matrix"}`))
-	t.Cleanup(func() { require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups)) })
-
 	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
 	groupRatios := ratio_setting.GetGroupRatioCopy()
 	groupRatios[importedMaterialMatrixGroup] = 1
@@ -312,26 +401,20 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(encodedGroupRatios)))
 	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios)) })
 
-	originalRatios := ratio_setting.GetModelRatioCopy()
-	ratios := ratio_setting.GetModelRatioCopy()
-	for _, modelName := range modelrouting.CanonicalModels {
-		ratios[modelName] = 0.1
-	}
-	encodedRatios, err := common.Marshal(ratios)
-	require.NoError(t, err)
-	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encodedRatios)))
-	t.Cleanup(func() {
-		encoded, encodeErr := common.Marshal(originalRatios)
-		require.NoError(t, encodeErr)
-		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
-	})
-
 	mock := &capabilityRecordingServer{}
-	server := httptestNewServer(t, mock)
+	server := httptestNewServer(t, importedMaterialMatrixAssetHandler(mock))
+	assetClient := importedMaterialMatrixAssetClient(t, server)
+	metadataFetcher := videometa.NewFetcher(videometa.FetcherOptions{Client: assetClient, Cache: videometa.NewCache(64), TempDir: t.TempDir()})
+	const metadataToken = "material-matrix-metadata"
+	metadataServer := httptestNewServer(t, videometa.NewServer(videometa.ServerOptions{
+		Token: metadataToken, MaxConcurrency: 8, Metadata: metadataFetcher.Metadata,
+	}))
+	service.SetVideoMetadataClient(service.NewHTTPVideoMetadataClient(metadataServer.URL, metadataToken, metadataServer.Client(), videometa.MaxVideoBytes))
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
+	service.SetReferenceAudioDurationResolver(service.NewReferenceAudioDurationResolver(assetClient, t.TempDir()))
+	t.Cleanup(func() { service.SetReferenceAudioDurationResolver(nil) })
 	document := loadImportedMaterialMatrixDocument(t)
 	channelIDs := seedImportedMaterialMatrixChannels(t, server.URL, document)
-	seedImportedMaterialMatrixCostRules(t, targets, channelIDs)
-	model.InitChannelCache()
 
 	previousGetTaskAdaptorFunc := service.GetTaskAdaptorFunc
 	previousCostCapabilityLookup := service.CostCapabilityLookup
@@ -347,13 +430,57 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 		service.RouteTargetContractValidator = previousRouteTargetContractValidator
 	})
 
+	payload, err := os.ReadFile(filepath.Join("testdata", "channel-config-v1.json"))
+	require.NoError(t, err)
+	batch, created, err := service.CreateConfigImportBatch(context.Background(), 1, bytes.NewReader(payload))
+	require.NoError(t, err)
+	require.True(t, created)
+	bindings := make([]apidto.ConfigImportBindingInput, 0, len(document.Entities.ChannelLines))
+	for _, line := range document.Entities.ChannelLines {
+		channelID := channelIDs[line.LineRef]
+		require.Positive(t, channelID, line.LineRef)
+		bindings = append(bindings, apidto.ConfigImportBindingInput{
+			LineRef: line.LineRef, Action: types.ConfigImportBindingActionBind,
+			ChannelID: &channelID, CredentialsConfirmed: true,
+		})
+	}
+	_, err = service.UpdateConfigImportBindings(context.Background(), 1, batch.ID, bindings)
+	require.NoError(t, err)
+	staged, err := service.StageConfigImportBatch(context.Background(), 1, batch.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ConfigImportBatchStatusReady, staged.Status)
+	require.NoError(t, service.PublishConfigImportBatch(context.Background(), batch.ID, 1))
+	var publishedBatch model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&publishedBatch, batch.ID).Error)
+	require.Equal(t, string(types.ConfigImportBatchStatusPublished), publishedBatch.Status)
+	var activeRuleCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
+		Where("source = ? AND status = ?", "config_import", types.CostRuleActive).
+		Count(&activeRuleCount).Error)
+	require.EqualValues(t, 146, activeRuleCount)
+
+	policyIDs := make(map[string]int)
+	var policies []model.RoutingPolicy
+	require.NoError(t, model.DB.Where("group_name = ?", importedMaterialMatrixGroup).Find(&policies).Error)
+	for _, policy := range policies {
+		policyIDs[policy.Model] = policy.ID
+	}
+	publishedTargets := make(map[string]model.RouteTarget, len(targets))
+	var routeTargets []model.RouteTarget
+	require.NoError(t, model.DB.Find(&routeTargets).Error)
+	for _, routeTarget := range routeTargets {
+		publishedTargets[routeTarget.Name] = routeTarget
+	}
+	require.Len(t, publishedTargets, len(targets))
+	model.InitChannelCache()
+
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	router.SetRelayRouter(engine)
 	router.SetVideoRouter(engine)
 	return &importedMaterialMatrixEnv{
 		engine: engine, mock: mock, channelIDs: channelIDs,
-		policyIDs: map[string]int{}, materialSeen: map[string]int{},
+		policyIDs: policyIDs, publishedTargets: publishedTargets, materialSeen: map[string]int{}, assetBaseURL: importedMaterialMatrixAssetBaseURL,
 	}
 }
 
@@ -450,29 +577,6 @@ func importedMaterialChannelModels(t *testing.T, document types.ConfigImportDocu
 	return models
 }
 
-func seedImportedMaterialMatrixCostRules(t *testing.T, targets []importedMaterialMatrixTarget, channelIDs map[string]int) {
-	t.Helper()
-	now := time.Now().Unix()
-	seen := make(map[string]struct{})
-	for _, target := range targets {
-		key := fmt.Sprintf("%d\x00%s\x00%s", channelIDs[target.LineRef], target.UpstreamModel, target.CostVariantKey)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		configJSON, err := common.Marshal(target.CostConfig)
-		require.NoError(t, err, target.CaseID)
-		rule := &model.ChannelModelCostRule{
-			ChannelID: channelIDs[target.LineRef], BillableUpstreamModel: target.UpstreamModel,
-			CostVariantKey: target.CostVariantKey, Version: 1, Status: string(types.CostRuleActive),
-			CostMode: string(target.CostMode), SchemaVersion: 1, ConfigJSON: string(configJSON),
-			Source: "e2e_import", CreatedBy: 1, ActivatedBy: 1, EffectiveFrom: &now,
-			CreatedAt: now, UpdatedAt: now,
-		}
-		require.NoError(t, model.DB.Create(rule).Error, target.CaseID)
-	}
-}
-
 func loadImportedMaterialMatrixTargets(t *testing.T) []importedMaterialMatrixTarget {
 	t.Helper()
 	document := loadImportedMaterialMatrixDocument(t)
@@ -496,15 +600,48 @@ func loadImportedMaterialMatrixTargets(t *testing.T) []importedMaterialMatrixTar
 				minimums = importedMaterialMatrixReferenceLimits(t, target.ReferenceMinimums, target.RouteTargetRef)
 			}
 			references := importedMaterialMatrixReferenceLimits(t, target.ReferenceLimits, target.RouteTargetRef)
+			requestReferences := importedMaterialMatrixRequestReferences(
+				minimums, references, target.ReferenceTotalMax, target.ReferenceVideoAudioTotalMax,
+			)
 			require.NotEmpty(t, target.OutputResolutions, target.RouteTargetRef)
 			duration := 10
-			if target.DurationMin != nil {
+			durations := modelrouting.DurationConstraint{
+				Values: append([]int(nil), target.DurationValues...), Min: target.DurationMin, Max: target.DurationMax,
+			}
+			if len(target.DurationValues) > 0 {
+				duration = target.DurationValues[0]
+			} else if target.DurationMin != nil {
 				duration = *target.DurationMin
 			}
+			if len(durations.Values) == 0 && durations.Min == nil && durations.Max == nil {
+				durations.Min = common.GetPointer(duration)
+				durations.Max = common.GetPointer(duration)
+			}
+			aspectRatios := make([]string, 0, len(target.AspectRatios))
+			aspectRatio := "16:9"
+			for _, value := range target.AspectRatios {
+				normalized := strings.ToLower(strings.TrimSpace(value))
+				if normalized == "" {
+					continue
+				}
+				aspectRatios = append(aspectRatios, normalized)
+				if normalized == "16:9" || len(aspectRatios) == 1 && aspectRatio == "16:9" {
+					aspectRatio = normalized
+				}
+			}
+			if len(aspectRatios) == 0 {
+				aspectRatios = []string{aspectRatio}
+			}
+			inputModes := make([]modelrouting.InputMode, 0, len(target.InputModes))
+			for _, value := range target.InputModes {
+				inputModes = append(inputModes, modelrouting.InputMode(strings.ToLower(strings.TrimSpace(value))))
+			}
+			requestReferences = importedMaterialMatrixApplyInputMode(requestReferences, references, inputModes)
 			line, ok := lines[target.LineRef]
 			require.True(t, ok, target.LineRef)
 			draft, ok := costRules[target.RouteTargetRef]
 			require.True(t, ok, target.RouteTargetRef)
+			require.NotNil(t, draft.Enabled, target.RouteTargetRef)
 			costMode, costConfig := importedMaterialCostRuleConfig(t, draft)
 			channelType := importedMaterialChannelType(t, document, target.LineRef)
 			targets = append(targets, importedMaterialMatrixTarget{
@@ -512,8 +649,13 @@ func loadImportedMaterialMatrixTargets(t *testing.T) []importedMaterialMatrixTar
 				RouteTargetRef: target.RouteTargetRef,
 				LineRef:        target.LineRef, ChannelRef: line.ChannelRef, Provider: line.ProviderTypeHint,
 				CanonicalModel: blueprint.CanonicalModel, RuntimeModel: runtimeModel, UpstreamModel: target.UpstreamModel,
-				Resolution: strings.ToLower(target.OutputResolutions[0]), Duration: duration,
-				CostVariantKey: target.CostVariantKey, Minimums: minimums, References: references, ChannelType: channelType,
+				Resolution: strings.ToLower(target.OutputResolutions[0]), Duration: duration, Durations: durations,
+				CostVariantKey: target.CostVariantKey, Minimums: minimums, References: references, RequestRefs: requestReferences,
+				ReferenceTotalMax: target.ReferenceTotalMax, ReferenceVideoAudioTotalMax: target.ReferenceVideoAudioTotalMax,
+				ReferenceVideoTotalDurationSeconds: target.ReferenceVideoTotalDurationSeconds,
+				AspectRatio:                        aspectRatio, AspectRatios: aspectRatios, InputModes: inputModes,
+				ReferenceModes: append([]string(nil), target.ReferenceModes...), SupportsRealPerson: target.SupportsRealPerson,
+				ChannelType: channelType, CostEnabled: *draft.Enabled,
 				ExpectedPath: importedMaterialSubmitPath(channelType, target.LineRef), CostMode: costMode, CostConfig: costConfig,
 			})
 		}
@@ -582,6 +724,8 @@ func importedMaterialSubmitPath(channelType int, lineRef string) string {
 		return "/v1/video/generations"
 	case constant.ChannelTypeEightYes:
 		return "/v1/videos"
+	case constant.ChannelTypeOmegaAI:
+		return "/v1/media/generate"
 	case constant.ChannelTypeSecure:
 		if lineRef == "secure-discount" || lineRef == "secure-overseas" {
 			return "/api/generate-video"
@@ -605,18 +749,6 @@ func importedMaterialMatrixCostSnapshot(t *testing.T) importedMaterialMatrixCost
 	require.NoError(t, model.DB.Model(&model.CostAccountingAttempt{}).Count(&snapshot.Attempts).Error)
 	require.NoError(t, model.DB.Model(&model.CostAccountingAudit{}).Count(&snapshot.Audits).Error)
 	return snapshot
-}
-
-type materialMatrixVideoMetadataClient struct{}
-
-func (materialMatrixVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
-	return videometa.Metadata{DurationMS: 5000}, nil
-}
-
-type materialMatrixReferenceAudioResolver struct{}
-
-func (materialMatrixReferenceAudioResolver) ResolveMS(context.Context, []string) (int64, error) {
-	return 5000, nil
 }
 
 func loadImportedMaterialMatrixDocument(t *testing.T) types.ConfigImportDocument {
@@ -649,33 +781,201 @@ func importedMaterialMatrixReferenceLimits(t *testing.T, bounds *types.ConfigImp
 	return modelrouting.ReferenceLimits{Images: *bounds.Images, Videos: *bounds.Videos, Audios: *bounds.Audios}
 }
 
-func importedMaterialMatrixRequestBody(t *testing.T, target importedMaterialMatrixTarget) string {
+func importedMaterialMatrixRequestReferences(
+	minimums modelrouting.ReferenceLimits,
+	limits modelrouting.ReferenceLimits,
+	totalMax *int,
+	videoAudioMax *int,
+) modelrouting.ReferenceLimits {
+	result := limits
+	shrinkVideoAudio := func(maximum int) {
+		for result.Videos+result.Audios > maximum {
+			switch {
+			case result.Audios > minimums.Audios && result.Audios >= result.Videos:
+				result.Audios--
+			case result.Videos > minimums.Videos:
+				result.Videos--
+			case result.Audios > minimums.Audios:
+				result.Audios--
+			default:
+				return
+			}
+		}
+	}
+	if videoAudioMax != nil {
+		shrinkVideoAudio(*videoAudioMax)
+	}
+	if totalMax != nil {
+		availableForVideoAudio := *totalMax - result.Images
+		minimumVideoAudio := minimums.Videos + minimums.Audios
+		if availableForVideoAudio < minimumVideoAudio {
+			availableForVideoAudio = minimumVideoAudio
+		}
+		shrinkVideoAudio(availableForVideoAudio)
+		for result.Images+result.Videos+result.Audios > *totalMax && result.Images > minimums.Images {
+			result.Images--
+		}
+	}
+	return result
+}
+
+func importedMaterialMatrixApplyInputMode(
+	requestReferences modelrouting.ReferenceLimits,
+	limits modelrouting.ReferenceLimits,
+	inputModes []modelrouting.InputMode,
+) modelrouting.ReferenceLimits {
+	if len(inputModes) == 0 {
+		return requestReferences
+	}
+	for _, mode := range inputModes {
+		if mode == modelrouting.InputModeOmniReference {
+			return requestReferences
+		}
+	}
+	for _, mode := range inputModes {
+		if mode == modelrouting.InputModeFirstLastFrames && limits.Images >= 2 {
+			return modelrouting.ReferenceLimits{Images: 2}
+		}
+	}
+	for _, mode := range inputModes {
+		if mode == modelrouting.InputModeFirstFrame && limits.Images >= 1 {
+			return modelrouting.ReferenceLimits{Images: 1}
+		}
+	}
+	return modelrouting.ReferenceLimits{}
+}
+
+func importedMaterialMatrixRequestBody(t *testing.T, target importedMaterialMatrixTarget, assetBaseURL string) string {
 	t.Helper()
 	content := []map[string]any{{"type": "text", "text": "ARK SDK material matrix acceptance " + target.CaseID}}
-	for index := 0; index < target.References.Images; index++ {
+	requestMode := modelrouting.InputModeOmniReference
+	if len(target.InputModes) > 0 {
+		requestMode = target.InputModes[0]
+		for _, mode := range target.InputModes {
+			if mode == modelrouting.InputModeOmniReference {
+				requestMode = mode
+				break
+			}
+		}
+	}
+	for index := 0; index < target.RequestRefs.Images; index++ {
+		role := "reference_image"
+		if requestMode == modelrouting.InputModeFirstFrame {
+			role = "first_frame"
+		} else if requestMode == modelrouting.InputModeFirstLastFrames {
+			if index == 0 {
+				role = "first_frame"
+			} else {
+				role = "last_frame"
+			}
+		}
 		content = append(content, map[string]any{
-			"type": "image_url", "role": "reference_image",
+			"type": "image_url", "role": role,
 			"image_url": map[string]any{"url": fmt.Sprintf("https://cdn.openai.com/ark-matrix/%s/image-%02d.png", target.Provider, index+1)},
 		})
 	}
-	for index := 0; index < target.References.Videos; index++ {
+	for index := 0; index < target.RequestRefs.Videos; index++ {
 		content = append(content, map[string]any{
 			"type": "video_url", "role": "reference_video",
-			"video_url": map[string]any{"url": fmt.Sprintf("https://cdn.openai.com/ark-matrix/%s/video-%02d.mp4", target.Provider, index+1)},
+			"video_url": map[string]any{"url": fmt.Sprintf("%s/sample.mp4?provider=%s&index=%d", assetBaseURL, target.Provider, index+1)},
 		})
 	}
-	for index := 0; index < target.References.Audios; index++ {
+	for index := 0; index < target.RequestRefs.Audios; index++ {
 		content = append(content, map[string]any{
 			"type": "audio_url", "role": "reference_audio",
-			"audio_url": map[string]any{"url": fmt.Sprintf("https://cdn.openai.com/ark-matrix/%s/audio-%02d.mp3", target.Provider, index+1)},
+			"audio_url": map[string]any{"url": fmt.Sprintf("%s/audio.wav?provider=%s&index=%d", assetBaseURL, target.Provider, index+1)},
 		})
 	}
 	body, err := common.Marshal(map[string]any{
 		"model": target.RuntimeModel, "content": content, "resolution": target.Resolution,
-		"duration": target.Duration, "ratio": "16:9",
+		"duration": target.Duration, "ratio": target.AspectRatio,
 	})
 	require.NoError(t, err)
 	return string(body)
+}
+
+func importedMaterialMatrixAssetHandler(upstream http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ark-matrix/sample.mp4":
+			data, err := os.ReadFile(filepath.Join("testdata", "sample.mp4"))
+			if err != nil {
+				http.Error(w, "video fixture unavailable", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+			if r.Method == http.MethodGet {
+				_, _ = w.Write(data)
+				return
+			}
+			if r.Method == http.MethodHead {
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case "/ark-matrix/audio.wav":
+			data := importedMaterialMatrixPCM16WAV(1_000)
+			w.Header().Set("Content-Type", "audio/wav")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+			if r.Method == http.MethodGet {
+				_, _ = w.Write(data)
+				return
+			}
+			if r.Method == http.MethodHead {
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		default:
+			upstream.ServeHTTP(w, r)
+		}
+	})
+}
+
+type importedMaterialMatrixAssetTransport struct {
+	base   http.RoundTripper
+	target *url.URL
+}
+
+func (t importedMaterialMatrixAssetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.URL.Scheme = t.target.Scheme
+	clone.URL.Host = t.target.Host
+	clone.Host = t.target.Host
+	return t.base.RoundTrip(clone)
+}
+
+func importedMaterialMatrixAssetClient(t *testing.T, server *httptest.Server) *http.Client {
+	t.Helper()
+	target, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	base := server.Client().Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &http.Client{Transport: importedMaterialMatrixAssetTransport{base: base, target: target}}
+}
+
+func importedMaterialMatrixPCM16WAV(durationMS int) []byte {
+	const sampleRate = 8_000
+	const channels = 1
+	const bitsPerSample = 16
+	sampleCount := sampleRate * durationMS / 1_000
+	dataSize := sampleCount * channels * bitsPerSample / 8
+	buffer := bytes.NewBuffer(make([]byte, 0, 44+dataSize))
+	buffer.WriteString("RIFF")
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(36+dataSize))
+	buffer.WriteString("WAVEfmt ")
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(channels))
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(sampleRate*channels*bitsPerSample/8))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(channels*bitsPerSample/8))
+	_ = binary.Write(buffer, binary.LittleEndian, uint16(bitsPerSample))
+	buffer.WriteString("data")
+	_ = binary.Write(buffer, binary.LittleEndian, uint32(dataSize))
+	buffer.Write(make([]byte, dataSize))
+	return buffer.Bytes()
 }
 
 func httptestNewServer(t *testing.T, handler http.Handler) *httptest.Server {

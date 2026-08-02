@@ -28,7 +28,6 @@ import {
 } from '../schema'
 import type {
   AdapterMatch,
-  CompatibilityKey,
   ExtractedChannelLine,
   ExtractedEntity,
   ExtractedWorkbook,
@@ -41,7 +40,6 @@ import type {
 import { V1_HEADERS } from '../workbook'
 
 const V1_SHEET_NAMES = Object.keys(V1_HEADERS)
-const MANUAL_CONFLICT_KEY = 'CH-MEGABYAI/videos-standard'
 
 function entityFromRow(
   sheet: WorksheetSnapshot,
@@ -68,50 +66,45 @@ function defaultLineRef(channelCode: string): string {
   return `channel-${channelCode.toLowerCase().replace(/^ch-/, '')}`
 }
 
-function secureLineRef(businessId: string): string | undefined {
-  if (/^COST-SECURE-R66-|^MAP-SECURE-R66-/.test(businessId)) {
-    return 'secure-enterprise'
-  }
-  if (
-    /^COST-SECURE-R(?:67|68|69|70|71)-|^MAP-SECURE-R(?:67|68|69|70|71)-/.test(
-      businessId
-    )
-  ) {
-    return 'secure-discount'
-  }
-  if (
-    /^COST-SECURE-R(?:72|73|74|75)-|^MAP-SECURE-R(?:72|73|74|75)-/.test(
-      businessId
-    )
-  ) {
-    return 'secure-overseas'
-  }
+function noteValue(entity: ExtractedEntity, name: string): string | undefined {
+  const escaped = name.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+  const match = cellText(entity.fields['备注']).match(
+    new RegExp(`(?:^|[；;]\\s*)${escaped}=([^；;]*)`, 'u')
+  )
+  return match?.[1]?.trim()
+}
+
+function secureLineRef(entity: ExtractedEntity): string | undefined {
+  const group = noteValue(entity, '上游模型分组')
+  if (group === 'video-企业') return 'secure-enterprise'
+  if (group === 'video-特价') return 'secure-discount'
+  if (group === 'video-海外') return 'secure-overseas'
   return undefined
 }
 
-function megaByAIFastLineRef(businessId: string): string | undefined {
-  if (/^(?:COST|MAP)-MEGABYAI-R(?:102|103)-/.test(businessId)) {
-    return 'megabyai-fast-real-person'
-  }
-  if (/^(?:COST|MAP)-MEGABYAI-R(?:104|105)-/.test(businessId)) {
-    return 'megabyai-fast-no-real-person'
-  }
-  return undefined
+function megaByAILineRef(entity: ExtractedEntity): string {
+  const realPerson = noteValue(entity, '真人脸')
+  if (realPerson === '是') return 'megabyai-fast-real-person'
+  if (realPerson === '否') return 'megabyai-fast-no-real-person'
+  return 'channel-megabyai'
 }
 
 function lineRefFor(
   channelCode: string,
-  upstreamModel: string,
-  businessId: string
-): string | undefined {
+  entity: ExtractedEntity
+): string {
   if (channelCode === 'CH-SECURE') {
-    return secureLineRef(businessId)
+    const lineRef = secureLineRef(entity)
+    if (!lineRef) {
+      throw new WorkbookContractError(
+        'SECURE_GROUP_UNRESOLVED',
+        `${entity.businessId} must declare a recognized 上游模型分组.`
+      )
+    }
+    return lineRef
   }
   if (channelCode === 'CH-MEGABYAI') {
-    if (upstreamModel === 'videos-fast') {
-      return megaByAIFastLineRef(businessId)
-    }
-    return undefined
+    return megaByAILineRef(entity)
   }
   return defaultLineRef(channelCode)
 }
@@ -133,6 +126,48 @@ function isUnsupportedSecure480(
 
 function scenarioBaseId(businessId: string): string {
   return businessId.replace(/-(?:NOV|VID)$/, '')
+}
+
+const SCENARIO_COST_COMMON_HEADERS = [
+  '渠道代码',
+  '上游模型',
+  '成本模式',
+  'Token子模式',
+  '计量来源',
+  '计费事件',
+  '币种',
+  '计费倍率',
+  '采购折扣',
+  '充值兑换比例',
+  '手续费率',
+  '原币兑USD',
+  '状态',
+] as const
+
+function scenarioCostContractValue(
+  entity: ExtractedEntity,
+  header: string
+): string {
+  return cellText(entity.fields[header])
+}
+
+function scenarioCostContract(entity: ExtractedEntity): string {
+  const costMode = cellText(entity.fields['成本模式'])
+  const priceHeaders =
+    costMode === 'per_request'
+      ? ['原币按次', '原币基础单价']
+      : costMode === 'per_duration'
+        ? ['原币/秒', '原币基础单价']
+        : costMode === 'per_token'
+          ? ['原币/1M', '原币基础单价']
+          : []
+  const headers = [...SCENARIO_COST_COMMON_HEADERS, ...priceHeaders]
+  return JSON.stringify(
+    headers.map((header) => [
+      header,
+      scenarioCostContractValue(entity, header),
+    ])
+  )
 }
 
 function generatedField(value: boolean | string) {
@@ -161,6 +196,7 @@ function createChannelLines(
     }
     if (channelRef === 'CH-MEGABYAI') {
       return [
+        { businessId: 'channel-megabyai' },
         { businessId: 'megabyai-fast-real-person', supportsRealPerson: true },
         {
           businessId: 'megabyai-fast-no-real-person',
@@ -174,7 +210,11 @@ function createChannelLines(
           channel_ref: generatedField(channelRef),
           line_ref: generatedField(line.businessId),
           status_proposal: generatedField('disabled'),
-          supports_real_person: generatedField(line.supportsRealPerson),
+          ...(line.supportsRealPerson === undefined
+            ? {}
+            : {
+                supports_real_person: generatedField(line.supportsRealPerson),
+              }),
         },
         sourceLocations,
       }))
@@ -329,13 +369,19 @@ export class V1WorkbookAdapter implements WorkbookAdapter {
     }
     const costRuleDrafts = [...costsByScenarioBase.entries()].map(
       ([businessId, candidates]) => {
+        const contracts = new Set(candidates.map(scenarioCostContract))
+        if (contracts.size > 1) {
+          throw new WorkbookContractError(
+            'COST_SCENARIO_CONFLICT',
+            `Cost scenarios with base ID ${businessId} have different contracts.`
+          )
+        }
         const representative = candidates[0]
         const channelCode = cellText(representative.fields['渠道代码'])
-        const upstreamModel = cellText(representative.fields['上游模型'])
         return {
           ...representative,
           businessId,
-          lineRef: lineRefFor(channelCode, upstreamModel, businessId),
+          lineRef: lineRefFor(channelCode, representative),
           sourceLocations: sourceLocationsFor(candidates),
         }
       }
@@ -344,45 +390,7 @@ export class V1WorkbookAdapter implements WorkbookAdapter {
       .filter((mapping) => !isUnsupportedSecure480(mapping, resolutionBySku))
       .map((mapping) => ({
         ...mapping,
-        lineRef: lineRefFor(
-          cellText(mapping.fields['渠道代码']),
-          cellText(mapping.fields['上游模型']),
-          mapping.businessId
-        ),
-      }))
-
-    const conflicts = new Map<string, ExtractedEntity[]>()
-    for (const cost of costRuleDrafts) {
-      const key = `${cellText(cost.fields['渠道代码'])}/${cellText(cost.fields['上游模型'])}`
-      const candidates = conflicts.get(key) ?? []
-      candidates.push(cost)
-      conflicts.set(key, candidates)
-    }
-    const compatibilityKeys: CompatibilityKey[] = [...conflicts.entries()]
-      .filter(([, candidates]) => {
-        const prices = new Set(
-          candidates.map((candidate) =>
-            cellText(candidate.fields['原币基础单价'])
-          )
-        )
-        return prices.size > 1
-      })
-      .map(([businessId, candidates]) => ({
-        businessId,
-        automatic: businessId !== MANUAL_CONFLICT_KEY,
-        sourceLocations: sourceLocationsFor(candidates),
-      }))
-      .sort((left, right) => left.businessId.localeCompare(right.businessId))
-
-    const unresolvedVariants = compatibilityKeys
-      .filter((key) => !key.automatic)
-      .map((key) => ({
-        businessId: key.businessId,
-        fields: {
-          channel_code: generatedField('CH-MEGABYAI'),
-          upstream_model: generatedField('videos-standard'),
-        },
-        sourceLocations: key.sourceLocations,
+        lineRef: lineRefFor(cellText(mapping.fields['渠道代码']), mapping),
       }))
 
     return {
@@ -395,8 +403,8 @@ export class V1WorkbookAdapter implements WorkbookAdapter {
       modelMappings,
       routeBlueprints: [],
       sources,
-      unresolvedVariants,
-      compatibilityKeys,
+      unresolvedVariants: [],
+      compatibilityKeys: [],
     }
   }
 }

@@ -112,6 +112,27 @@ func TestArkToDimensioRejectsMediaLimits(t *testing.T) {
 	}
 }
 
+func TestArkToDimensioUsesModelSpecificTotalMediaLimit(t *testing.T) {
+	content := []ArkContent{{Type: "text", Text: "hi"}}
+	for i := 0; i < 9; i++ {
+		content = append(content, ArkContent{Type: "image_url", Role: "reference_image", ImageURL: &ArkMedia{URL: "img"}})
+	}
+	for i := 0; i < 3; i++ {
+		content = append(content, ArkContent{Type: "video_url", Role: "reference_video", VideoURL: &ArkMedia{URL: "video"}})
+		content = append(content, ArkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &ArkMedia{URL: "audio"}})
+	}
+
+	_, err := ArkToDimensio(ArkRequest{Model: "jmg-video-seedance-2.0-vip", Content: content})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at most 12 total")
+
+	converted, err := ArkToDimensio(ArkRequest{Model: "pxv-seedance-2.0-standard", Content: content})
+	require.NoError(t, err)
+	assert.Len(t, converted.ImageFiles, 9)
+	assert.Len(t, converted.VideoFiles, 3)
+	assert.Len(t, converted.AudioFiles, 3)
+}
+
 func TestArkToDimensioRejectsInvalidContent(t *testing.T) {
 	tests := []struct {
 		name    string

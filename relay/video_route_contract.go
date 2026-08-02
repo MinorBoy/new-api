@@ -31,6 +31,16 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	switch channel.Type {
 	case constant.ChannelTypeCangyuan:
 		return validateTextOnlyVideoRoute(target, nil)
+	case constant.ChannelTypeEightYes:
+		if required := modelResolutionSuffix(target.UpstreamModel); required != "" && !allRouteResolutions(target.Constraints.OutputResolutions, required) {
+			return newVideoRouteContractError("route_contract_resolution", fmt.Sprintf("mapped model requires %s", required))
+		}
+		return nil
+	case constant.ChannelTypeMegaByAI:
+		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
+			return newVideoRouteContractError("route_contract_resolution", "MegaByAI routes support only 480p and 720p")
+		}
+		return nil
 	case constant.ChannelTypePaipu:
 		return validatePaipuVideoRoute(target)
 	case constant.ChannelTypeClmmMall:
@@ -84,7 +94,7 @@ func validateClmmVideoRoute(target modelrouting.Target) error {
 		return newVideoRouteContractError("route_contract_model", err.Error())
 	}
 	limits := target.Constraints.ReferenceLimits
-	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || limits.Images+limits.Videos+limits.Audios > 12 {
+	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > 15 {
 		return newVideoRouteContractError("route_contract_references", "CLMM route reference limits exceed the verified protocol")
 	}
 	if !clmmModelControlsDuration(target.UpstreamModel) && !routeDurationWithin(target.Constraints.Durations, 5, 15) {
@@ -98,15 +108,25 @@ func validateDimensioVideoRoute(target modelrouting.Target) error {
 	if !common.StringsContains(taskdimensio.ModelList, modelName) {
 		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for Dimensio")
 	}
-	if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p") {
-		return newVideoRouteContractError("route_contract_resolution", "Dimensio routes support only 720p and 1080p")
-	}
-	if containsRouteResolution(target.Constraints.OutputResolutions, "1080p") && modelName != "jimeng-video-seedance-2.0-vip" {
-		return newVideoRouteContractError("route_contract_resolution", "Dimensio 1080p requires jimeng-video-seedance-2.0-vip")
-	}
 	limits := target.Constraints.ReferenceLimits
-	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || limits.Images+limits.Videos+limits.Audios > 12 {
+	totalLimit := 12
+	if strings.HasPrefix(modelName, "pxv-") {
+		totalLimit = 15
+	}
+	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > totalLimit {
 		return newVideoRouteContractError("route_contract_references", "Dimensio route reference limits exceed the verified protocol")
+	}
+	if strings.HasPrefix(modelName, "jmg-") {
+		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p") ||
+			(containsRouteResolution(target.Constraints.OutputResolutions, "1080p") && modelName != "jmg-video-seedance-2.0-vip") {
+			return newVideoRouteContractError("route_contract_resolution", "Dimensio JMG route resolution is unsupported")
+		}
+	} else if modelName == "pxv-seedance-2.0-fast" || modelName == "pxv-seedance-2.0-mini" {
+		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
+			return newVideoRouteContractError("route_contract_resolution", "Dimensio PXV fast and mini support only 480p and 720p")
+		}
+	} else if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p", "1080p", "4k") {
+		return newVideoRouteContractError("route_contract_resolution", "Dimensio PXV standard route resolution is unsupported")
 	}
 	if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
 		return newVideoRouteContractError("route_contract_duration", "Dimensio routes require durations from 4 to 15 seconds")
@@ -126,7 +146,7 @@ func validateSecureVideoRoute(group dto.SecureVideoGroup, target modelrouting.Ta
 		if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
 			return newVideoRouteContractError("route_contract_duration", "Secure discount routes require durations from 4 to 15 seconds")
 		}
-		if minimums.Images < 1 || limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || limits.Videos+limits.Audios > 3 {
+		if minimums.Images < 1 || limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceVideoAudioTotalMax(target.Constraints) > 3 || routeReferenceTotalMax(target.Constraints) > 12 {
 			return newVideoRouteContractError("route_contract_references", "Secure discount route reference limits exceed the verified protocol")
 		}
 		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p", "4k") {
@@ -136,7 +156,7 @@ func validateSecureVideoRoute(group dto.SecureVideoGroup, target modelrouting.Ta
 		if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
 			return newVideoRouteContractError("route_contract_duration", "Secure overseas routes require durations from 4 to 15 seconds")
 		}
-		if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || limits.Images+limits.Videos+limits.Audios > 12 {
+		if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > 12 {
 			return newVideoRouteContractError("route_contract_references", "Secure overseas route reference limits exceed the verified protocol")
 		}
 		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p") {
@@ -152,7 +172,7 @@ func validateSecureVideoRoute(group dto.SecureVideoGroup, target modelrouting.Ta
 		if !allRouteResolutions(target.Constraints.OutputResolutions, "720p") {
 			return newVideoRouteContractError("route_contract_resolution", "Secure enterprise routes require 720p")
 		}
-		if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 {
+		if limits.Images > 9 || limits.Videos != 0 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > 12 {
 			return newVideoRouteContractError("route_contract_references", "Secure enterprise route reference limits exceed the verified protocol")
 		}
 	default:
@@ -162,6 +182,20 @@ func validateSecureVideoRoute(group dto.SecureVideoGroup, target modelrouting.Ta
 		return newVideoRouteContractError("route_contract_resolution", modelName+" supports only 720p")
 	}
 	return nil
+}
+
+func routeReferenceTotalMax(constraints modelrouting.Constraints) int {
+	if constraints.ReferenceTotalMax != nil {
+		return *constraints.ReferenceTotalMax
+	}
+	return constraints.ReferenceLimits.Images + constraints.ReferenceLimits.Videos + constraints.ReferenceLimits.Audios
+}
+
+func routeReferenceVideoAudioTotalMax(constraints modelrouting.Constraints) int {
+	if constraints.ReferenceVideoAudioTotalMax != nil {
+		return *constraints.ReferenceVideoAudioTotalMax
+	}
+	return constraints.ReferenceLimits.Videos + constraints.ReferenceLimits.Audios
 }
 
 func routeDurationWithin(constraint modelrouting.DurationConstraint, minimum, maximum int) bool {

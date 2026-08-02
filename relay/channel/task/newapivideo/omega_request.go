@@ -20,8 +20,8 @@ func validateOmegaAIRequest(request arkRequest, profile omegaRequestProfile, ups
 	if err := validateARKSemantics(request, omegaAIProtocolProfile()); err != nil {
 		return err
 	}
-	if request.Resolution != nil {
-		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "resolution is not supported by OmegaAI"}
+	if request.Resolution != nil && strings.ToLower(strings.TrimSpace(*request.Resolution)) != "720p" {
+		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "OmegaAI supports only 720p resolution"}
 	}
 	if request.GenerateAudio != nil {
 		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "generate_audio is not supported by OmegaAI"}

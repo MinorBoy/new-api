@@ -26,9 +26,11 @@ import type {
 
 export type WorkbookContractErrorCode =
   | 'BROKEN_REFERENCE'
+  | 'COST_SCENARIO_CONFLICT'
   | 'DUPLICATE_BUSINESS_ID'
   | 'INVALID_HEADER'
   | 'MISSING_SHEET'
+  | 'SECURE_GROUP_UNRESOLVED'
   | 'UNSUPPORTED_TEMPLATE'
 
 export class WorkbookContractError extends Error {

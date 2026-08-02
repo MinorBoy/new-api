@@ -87,6 +87,7 @@ const V1_CHANNEL_TYPES: Record<string, number> = {
   'CH-DIMENSIO': 200,
   'CH-LUCEN': 203,
   'CH-MEGABYAI': 204,
+  'CH-OMEGAAI': 208,
   'CH-PAIPU': 206,
   'CH-SECURE': 207,
 }
@@ -163,6 +164,30 @@ function listField(entity: ExtractedEntity, ...names: string[]): string[] {
 type ReferenceBounds = {
   minimums: { images: number; videos: number; audios: number }
   limits: { images: number; videos: number; audios: number }
+  totalMax?: number
+  videoAudioTotalMax?: number
+  videoTotalDurationSeconds?: number
+  modes?: string[]
+  aspectRatios?: string[]
+  inputModes?: string[]
+}
+
+function noteValue(entity: ExtractedEntity, name: string): string | undefined {
+  const escaped = name.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+  const match = field(entity, '备注').match(
+    new RegExp(`(?:^|[；;]\\s*)${escaped}=([^；;]*)`, 'u')
+  )
+  return match?.[1]?.trim()
+}
+
+function noteInteger(
+  entity: ExtractedEntity,
+  name: string
+): number | undefined {
+  const value = noteValue(entity, name)
+  if (value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 function legacyReferenceBounds(
@@ -209,6 +234,63 @@ function structuredReferenceBounds(
       videos: maxVideos,
       audios: maxAudios,
     },
+  }
+}
+
+function mappingReferenceBounds(
+  entity: ExtractedEntity
+): ReferenceBounds | null {
+  const images = noteInteger(entity, '参考图数')
+  if (images === undefined) return legacyReferenceBounds(entity)
+  const videos = noteInteger(entity, '参考视频数')
+  const audios = noteInteger(entity, '参考音频数')
+  const totalMax = noteInteger(entity, '最大素材数')
+  const minimumImages = noteInteger(entity, '最小参考图数')
+  if (
+    videos === undefined ||
+    audios === undefined ||
+    totalMax === undefined ||
+    minimumImages === undefined
+  ) {
+    return null
+  }
+  const videoAudioTotalMax = noteInteger(entity, '视频音频合计上限')
+  const videoTotalDurationSeconds = noteInteger(entity, '参考视频总时长上限秒')
+  const modes = (noteValue(entity, '素材模式') ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const aspectRatios = (
+    noteValue(entity, '归一化比例') ??
+    noteValue(entity, '原比例') ??
+    ''
+  )
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value !== '' && value !== 'auto')
+  const inputModes: string[] = []
+  if (minimumImages === 0) {
+    inputModes.push('text')
+  }
+  if (modes.includes('first_last_frames')) {
+    inputModes.push('first_frame', 'first_last_frames')
+  } else if (minimumImages > 0 && images > 0) {
+    inputModes.push('first_frame')
+  }
+  if (modes.includes('omni_reference') || images + videos + audios > 0) {
+    inputModes.push('omni_reference')
+  }
+  return {
+    minimums: { images: minimumImages, videos: 0, audios: 0 },
+    limits: { images, videos, audios },
+    totalMax,
+    ...(videoAudioTotalMax === undefined ? {} : { videoAudioTotalMax }),
+    ...(videoTotalDurationSeconds === undefined
+      ? {}
+      : { videoTotalDurationSeconds }),
+    ...(modes.length === 0 ? {} : { modes }),
+    ...(aspectRatios.length === 0 ? {} : { aspectRatios }),
+    inputModes,
   }
 }
 
@@ -262,6 +344,20 @@ function sanitizedFileName(value: string): string {
 function variantKey(entity: ExtractedEntity): string {
   const resolution = field(entity, 'resolution', '分辨率档位')
   return resolution === '' ? 'default' : normalizeEnum(resolution)
+}
+
+async function routeTargetVariantKey(
+  sku: ExtractedEntity,
+  routeTargetRef: string
+): Promise<string> {
+  const bytes = new TextEncoder().encode(routeTargetRef)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const suffix = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  )
+    .join('')
+    .slice(0, 16)
+  return `${variantKey(sku)}-${suffix}`
 }
 
 function pairingKey(entity: ExtractedEntity): string {
@@ -561,6 +657,8 @@ export async function buildImportDocument(
       const costFields: Record<string, unknown> = {
         cost_mode: costMode,
         cost_variant_key: variant,
+        enabled:
+          field(cost, 'status', '状态').trim().toLowerCase() === 'active',
         line_ref: lineRef,
         route_target_ref: routeTargetRef,
         scenario: field(cost, 'scenario', '定价场景'),
@@ -689,25 +787,17 @@ export async function buildImportDocument(
       )
     }
   } else {
-    const unresolvedKeys = new Set(
-      input.extracted.unresolvedVariants.map(
-        (variant) =>
-          `${field(variant, 'channel_code')}/${field(variant, 'upstream_model')}`
-      )
-    )
     const costsByKey = new Map<string, ExtractedEntity[]>()
     const mappingsByKey = new Map<string, ExtractedEntity[]>()
     for (const cost of input.extracted.costRuleDrafts) {
-      const key = `${field(cost, '渠道代码')}/${field(cost, 'upstream_model', '上游模型')}`
-      if (cost.lineRef && !unresolvedKeys.has(key)) {
+      if (cost.lineRef) {
         const candidates = costsByKey.get(pairingKey(cost)) ?? []
         candidates.push(cost)
         costsByKey.set(pairingKey(cost), candidates)
       }
     }
     for (const mapping of input.extracted.modelMappings) {
-      const key = `${field(mapping, '渠道代码')}/${field(mapping, 'upstream_model', '上游模型')}`
-      if (mapping.lineRef && !unresolvedKeys.has(key)) {
+      if (mapping.lineRef) {
         const candidates = mappingsByKey.get(pairingKey(mapping)) ?? []
         candidates.push(mapping)
         mappingsByKey.set(pairingKey(mapping), candidates)
@@ -775,20 +865,19 @@ export async function buildImportDocument(
             upstream_model: field(mapping, 'upstream_model', '上游模型'),
           })
         )
-        const referenceBounds = legacyReferenceBounds(mapping)
+        const referenceBounds = mappingReferenceBounds(mapping)
         if (!referenceBounds) {
           issues.push(
             sourceIssue(
               'ROUTE_REFERENCE_LIMITS_UNRESOLVED',
               'error',
-              'The legacy mapping note must provide a verified three-digit 素材限制 value.',
+              'The mapping note must provide a complete structured reference contract or a verified legacy 素材限制 value.',
               mapping
             )
           )
           continue
         }
         const targetRef = `route-target/${mapping.businessId}`
-        const variant = variantKey(sku)
         const costMode = field(cost, 'cost_mode', '成本模式')
         const commonCostFields = {
           billing_multiplier: optionalDecimal(
@@ -796,6 +885,7 @@ export async function buildImportDocument(
             'billing_multiplier',
             '计费倍率'
           ),
+          charge_event: field(cost, 'charge_event', '计费事件'),
           currency: field(cost, 'currency', '币种'),
           currency_to_usd_rate: optionalDecimal(
             cost,
@@ -803,6 +893,7 @@ export async function buildImportDocument(
             '原币兑USD'
           ),
           fee_rate: optionalDecimal(cost, 'fee_rate', '手续费率'),
+          meter_source: field(cost, 'meter_source', '计量来源'),
           purchase_discount_ratio: optionalDecimal(
             cost,
             'purchase_discount_ratio',
@@ -813,14 +904,10 @@ export async function buildImportDocument(
             'recharge_exchange_ratio',
             '充值兑换比例'
           ),
+          token_mode: field(cost, 'token_mode', 'Token子模式'),
         }
-        const costFields: Record<string, unknown> = {
+        const costContract: Record<string, unknown> = {
           cost_mode: costMode,
-          cost_variant_key: variant,
-          line_ref: lineRef,
-          route_target_ref: targetRef,
-          scenario: field(cost, 'scenario', '定价场景'),
-          upstream_model: field(cost, 'upstream_model', '上游模型'),
           ...Object.fromEntries(
             Object.entries(commonCostFields).filter(
               ([, value]) => value !== undefined && value !== ''
@@ -828,29 +915,40 @@ export async function buildImportDocument(
           ),
         }
         if (costMode === 'per_request') {
-          costFields.unit_price = optionalDecimal(
+          costContract.unit_price = optionalDecimal(
             cost,
             'native_unit_price',
             '原币按次',
             '原币基础单价'
           )
         } else if (costMode === 'per_duration') {
-          costFields.price_per_second = optionalDecimal(
+          costContract.price_per_second = optionalDecimal(
             cost,
             'price_per_second',
             '原币/秒',
             '原币基础单价'
           )
         } else if (costMode === 'per_token') {
-          costFields.total_per_million = optionalDecimal(
+          costContract.total_per_million = optionalDecimal(
             cost,
             'total_per_million',
             '原币/1M',
             '原币基础单价'
           )
         }
-        for (const [name, value] of Object.entries(costFields)) {
-          if (value === undefined) delete costFields[name]
+        for (const [name, value] of Object.entries(costContract)) {
+          if (value === undefined) delete costContract[name]
+        }
+        const variant = await routeTargetVariantKey(sku, targetRef)
+        const costFields: Record<string, unknown> = {
+          ...costContract,
+          cost_variant_key: variant,
+          enabled:
+            field(cost, 'status', '状态').trim().toLowerCase() === 'active',
+          line_ref: lineRef,
+          route_target_ref: targetRef,
+          scenario: field(cost, 'scenario', '定价场景'),
+          upstream_model: field(cost, 'upstream_model', '上游模型'),
         }
         entities.cost_rule_drafts.push(
           await authoritativeEntity(cost, source, costFields)
@@ -883,6 +981,30 @@ export async function buildImportDocument(
                   output_resolutions: [field(sku, 'resolution', '分辨率档位')],
                   reference_minimums: referenceBounds.minimums,
                   reference_limits: referenceBounds.limits,
+                  ...(referenceBounds.totalMax === undefined
+                    ? {}
+                    : { reference_total_max: referenceBounds.totalMax }),
+                  ...(referenceBounds.videoAudioTotalMax === undefined
+                    ? {}
+                    : {
+                        reference_video_audio_total_max:
+                          referenceBounds.videoAudioTotalMax,
+                      }),
+                  ...(referenceBounds.videoTotalDurationSeconds === undefined
+                    ? {}
+                    : {
+                        reference_video_total_duration_seconds:
+                          referenceBounds.videoTotalDurationSeconds,
+                      }),
+                  ...(referenceBounds.modes === undefined
+                    ? {}
+                    : { reference_modes: referenceBounds.modes }),
+                  ...(referenceBounds.aspectRatios === undefined
+                    ? {}
+                    : { aspect_ratios: referenceBounds.aspectRatios }),
+                  ...(referenceBounds.inputModes === undefined
+                    ? {}
+                    : { input_modes: referenceBounds.inputModes }),
                   route_target_ref: targetRef,
                   sku_ref: skuRef,
                   upstream_model: field(mapping, 'upstream_model', '上游模型'),

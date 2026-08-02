@@ -203,12 +203,13 @@ func TestValidateBillingRequestEnforcesDocumentedModelResolutionMatrix(t *testin
 		resolution string
 		wantError  bool
 	}{
-		{name: "fast vip 720p", model: "jimeng-video-seedance-2.0-fast-vip", resolution: "720p"},
-		{name: "mini 720p", model: "jimeng-video-seedance-2.0-mini", resolution: "720p"},
-		{name: "vip 720p", model: "jimeng-video-seedance-2.0-vip", resolution: "720p"},
-		{name: "vip 1080p", model: "jimeng-video-seedance-2.0-vip", resolution: "1080p"},
-		{name: "fast vip 1080p", model: "jimeng-video-seedance-2.0-fast-vip", resolution: "1080p", wantError: true},
-		{name: "mini 1080p", model: "jimeng-video-seedance-2.0-mini", resolution: "1080p", wantError: true},
+		{name: "fast vip 720p", model: "jmg-video-seedance-2.0-fast-vip", resolution: "720p"},
+		{name: "mini 720p", model: "jmg-video-seedance-2.0-mini", resolution: "720p"},
+		{name: "vip 720p", model: "jmg-video-seedance-2.0-vip", resolution: "720p"},
+		{name: "vip 1080p", model: "jmg-video-seedance-2.0-vip", resolution: "1080p"},
+		{name: "fast vip 1080p", model: "jmg-video-seedance-2.0-fast-vip", resolution: "1080p", wantError: true},
+		{name: "mini 1080p", model: "jmg-video-seedance-2.0-mini", resolution: "1080p", wantError: true},
+		{name: "pxv standard 4k", model: "pxv-seedance-2.0-standard", resolution: "4k"},
 		{name: "unknown model", model: "jimeng-video-unknown", resolution: "720p", wantError: true},
 	}
 	for _, test := range tests {

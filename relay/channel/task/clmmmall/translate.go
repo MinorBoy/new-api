@@ -190,8 +190,8 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 	if len(audios) > 3 {
 		return normalizedArkRequest{}, fmt.Errorf("too many reference audios: maximum is 3")
 	}
-	if len(images)+len(videos)+len(audios) > 12 {
-		return normalizedArkRequest{}, fmt.Errorf("too many media items: maximum is 12")
+	if len(images)+len(videos)+len(audios) > 15 {
+		return normalizedArkRequest{}, fmt.Errorf("too many media items: maximum is 15")
 	}
 	return normalizedArkRequest{
 		model:      request.Model,

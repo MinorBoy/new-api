@@ -82,7 +82,13 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
           '元/秒': 1.38,
           '元/次': null,
           '元/1M': null,
-          素材限制: 933,
+          参考图数: 9,
+          参考视频数: 3,
+          参考音频数: 3,
+          最大素材数: 12,
+          视频音频合计上限: 3,
+          '参考视频总时长上限 秒': 15,
+          最小参考图数: 1,
           清晰度: '720',
           超分: '否',
           时长范围: '4-15',
@@ -91,6 +97,7 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
           过真人脸: '是',
           状态: '正常',
           协议: '自有',
+          上游模型分组: '默认',
           备注: null,
         },
       },
@@ -118,6 +125,14 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
   }
 }
 
+function firstSourceModel(
+  source: SourceWorkbook
+): SourceWorkbook['models'][number] {
+  const model = source.models[0]
+  assert.ok(model)
+  return model
+}
+
 test('maps a second-priced source row to a per-duration USD cost', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(), rules)
   const cost = output.costs.find(
@@ -141,9 +156,24 @@ test('keeps a source row without an official SKU as draft', () => {
   assert.equal(output.issues[0]?.severity, 'WARN')
 })
 
-test('keeps a source row without a material limit as draft', () => {
+test('keeps a zero-priced source row as a disabled draft', () => {
   const source = sourceWithOfficialPrice()
-  source.models[0]!.fields.素材限制 = null
+  firstSourceModel(source).fields['元/秒'] = 0
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs[0]?.status, 'draft')
+  assert.equal(output.mappings[0]?.enabled, '否')
+  assert.ok(
+    output.issues.some(
+      (item) => item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+    )
+  )
+})
+
+test('keeps a source row without structured reference limits as draft', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.最大素材数 = null
 
   const output = buildTemplateData(source, rules)
 
@@ -151,9 +181,84 @@ test('keeps a source row without a material limit as draft', () => {
   assert.ok(
     output.issues.some(
       (item) =>
-        item.code === 'MATERIAL_LIMIT_UNRESOLVED' && item.severity === 'WARN'
+        item.code === 'REFERENCE_CONTRACT_UNRESOLVED' &&
+        item.severity === 'WARN' &&
+        item.message.length > 0
     )
   )
+})
+
+test('writes the structured reference contract to the mapping audit note', () => {
+  const output = buildTemplateData(sourceWithOfficialPrice(), rules)
+  const note = output.mappings[0]?.note ?? ''
+
+  assert.match(note, /参考图数=9/)
+  assert.match(note, /参考视频数=3/)
+  assert.match(note, /参考音频数=3/)
+  assert.match(note, /最大素材数=12/)
+  assert.match(note, /视频音频合计上限=3/)
+  assert.match(note, /素材模式=/)
+  assert.match(note, /上游模型分组=默认/)
+  assert.match(note, /参考视频总时长上限秒=15/)
+  assert.match(note, /最小参考图数=1/)
+})
+
+test('normalizes supplier 2160p rows to the runtime 4k resolution', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.清晰度 = '2160p'
+
+  const output = buildTemplateData(source, rules)
+
+  assert.match(output.mappings[0]?.skuCode ?? '', /4K/u)
+})
+
+test('caps aggregate reference totals by the combined video and audio limit', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.最大素材数 = 15
+  firstSourceModel(source).fields.视频音频合计上限 = 3
+
+  const output = buildTemplateData(source, rules)
+  const note = output.mappings[0]?.note ?? ''
+
+  assert.equal(output.costs[0]?.status, 'active')
+  assert.match(note, /最大素材数=12/)
+})
+
+test('ignores a reference video duration when the row allows no videos', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.参考视频数 = 0
+  firstSourceModel(source).fields.视频输入 = '否'
+
+  const output = buildTemplateData(source, rules)
+  const note = output.mappings[0]?.note ?? ''
+
+  assert.equal(output.costs[0]?.status, 'active')
+  assert.match(note, /参考视频总时长上限秒=0/)
+})
+
+test('derives Dimensio reference modes and aspect ratios from the verified contract', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.渠道 = 7
+  firstSourceModel(source).fields.比例 = 'auto'
+
+  const output = buildTemplateData(source, rules)
+  const note = output.mappings[0]?.note ?? ''
+
+  assert.match(note, /素材模式=first_last_frames,omni_reference,agentic/)
+  assert.match(note, /归一化比例=1:1,4:3,3:4,16:9,9:16,21:9/)
+})
+
+test('derives Secure overseas reference modes and aspect ratios from the verified contract', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.渠道 = 5
+  firstSourceModel(source).fields.上游模型分组 = 'video-海外'
+  firstSourceModel(source).fields.比例 = 'auto'
+
+  const output = buildTemplateData(source, rules)
+  const note = output.mappings[0]?.note ?? ''
+
+  assert.match(note, /素材模式=first_last_frames,omni_reference/)
+  assert.match(note, /归一化比例=1:1,4:3,3:4,16:9,9:16,21:9/)
 })
 
 test('matches a Seedance source family to an official Seedance SKU', async () => {
@@ -183,7 +288,9 @@ test('infers a Seedance official model from a source model family', () => {
 
 test('interprets an Excel date in the duration range as month-day bounds', () => {
   const source = sourceWithOfficialPrice()
-  source.models[0]!.fields.时长范围 = new Date('2026-04-15T00:00:00.000Z')
+  firstSourceModel(source).fields.时长范围 = new Date(
+    '2026-04-15T00:00:00.000Z'
+  )
 
   const output = buildTemplateData(
     source,

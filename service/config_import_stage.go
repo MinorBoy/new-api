@@ -1304,7 +1304,11 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 		}
 	}
 	for _, item := range items {
-		if item.State == string(types.ConfigImportItemStateExcluded) ||
+		disabledCost, err := configImportDisabledCostRuleRetiresActive(item)
+		if err != nil {
+			return nil, err
+		}
+		if item.State == string(types.ConfigImportItemStateExcluded) && !disabledCost ||
 			item.State == string(types.ConfigImportItemStateUnchanged) && item.EntityType != "model_mappings" {
 			continue
 		}
@@ -1356,6 +1360,27 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 		}
 	}
 	return scope, nil
+}
+
+func configImportDisabledCostRuleDraft(item model.ConfigImportItem) (bool, error) {
+	if item.EntityType != "cost_rule_drafts" {
+		return false, nil
+	}
+	var draft types.ConfigImportCostRuleDraft
+	if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+		return false, err
+	}
+	return draft.Enabled != nil && !*draft.Enabled, nil
+}
+
+func configImportDisabledCostRuleRetiresActive(item model.ConfigImportItem) (bool, error) {
+	disabled, err := configImportDisabledCostRuleDraft(item)
+	if err != nil {
+		return false, err
+	}
+	return disabled &&
+		item.State == string(types.ConfigImportItemStateExcluded) &&
+		item.ExclusionReason == "disabled by import document", nil
 }
 
 func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBaseline, error) {
@@ -1642,6 +1667,9 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 			return err
 		}
 		issues = append(issues, generatedIssues...)
+		if err := stageConfigImportDisabledCostRules(tx, items); err != nil {
+			return err
+		}
 		generatedIssues, err = stageConfigImportCostRules(tx, items, lineChannels, unconfirmedLines, adminID)
 		if err != nil {
 			return err
@@ -1722,10 +1750,33 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 	return GetConfigImportBatch(ctx, batchID)
 }
 
+func stageConfigImportDisabledCostRules(db *gorm.DB, items []model.ConfigImportItem) error {
+	for index := range items {
+		item := &items[index]
+		if item.EntityType != "cost_rule_drafts" || item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		var draft types.ConfigImportCostRuleDraft
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+			return err
+		}
+		if draft.Enabled == nil || *draft.Enabled {
+			continue
+		}
+		item.State = string(types.ConfigImportItemStateExcluded)
+		item.ExclusionReason = "disabled by import document"
+		if err := persistConfigImportItemState(db, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type configImportChannelModelSnapshotTarget struct {
-	Models   map[string]struct{}
-	Mapping  map[string]string
-	LineRefs map[string]struct{}
+	Models            map[string]struct{}
+	Mapping           map[string]string
+	AmbiguousMappings map[string]struct{}
+	LineRefs          map[string]struct{}
 }
 
 func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigImportItem) (map[int]configImportChannelModelSnapshotTarget, error) {
@@ -1741,7 +1792,7 @@ func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigIm
 		target, exists := targetsByChannel[channelID]
 		if !exists {
 			target = configImportChannelModelSnapshotTarget{
-				Models: make(map[string]struct{}), Mapping: make(map[string]string), LineRefs: make(map[string]struct{}),
+				Models: make(map[string]struct{}), Mapping: make(map[string]string), AmbiguousMappings: make(map[string]struct{}), LineRefs: make(map[string]struct{}),
 			}
 		}
 		target.LineRefs[lineRef] = struct{}{}
@@ -1762,7 +1813,7 @@ func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigIm
 		target, exists := targetsByChannel[channelID]
 		if !exists {
 			target = configImportChannelModelSnapshotTarget{
-				Models: make(map[string]struct{}), Mapping: make(map[string]string), LineRefs: make(map[string]struct{}),
+				Models: make(map[string]struct{}), Mapping: make(map[string]string), AmbiguousMappings: make(map[string]struct{}), LineRefs: make(map[string]struct{}),
 			}
 		}
 		canonicalModel := configImportRuntimeCanonicalModel(mapping.CanonicalModel)
@@ -1770,10 +1821,14 @@ func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigIm
 		if canonicalModel == "" || upstreamModel == "" {
 			continue
 		}
-		if existing, found := target.Mapping[canonicalModel]; found && existing != upstreamModel {
-			return nil, configImportError("MODEL_SNAPSHOT_MAPPING_CONFLICT", "channel %d maps model %q to both %q and %q", channelID, canonicalModel, existing, upstreamModel)
+		if _, ambiguous := target.AmbiguousMappings[canonicalModel]; !ambiguous {
+			if existing, found := target.Mapping[canonicalModel]; found && existing != upstreamModel {
+				delete(target.Mapping, canonicalModel)
+				target.AmbiguousMappings[canonicalModel] = struct{}{}
+			} else {
+				target.Mapping[canonicalModel] = upstreamModel
+			}
 		}
-		target.Mapping[canonicalModel] = upstreamModel
 		target.Models[canonicalModel] = struct{}{}
 		target.Models[upstreamModel] = struct{}{}
 		target.LineRefs[mapping.LineRef] = struct{}{}
@@ -1900,9 +1955,8 @@ func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lin
 	}
 	sort.Slice(sorted, func(left, right int) bool { return sorted[left].BusinessID < sorted[right].BusinessID })
 	merged := make(map[string]struct {
-		id       int
-		json     string
-		scenario string
+		id   int
+		json string
 	}, len(sorted))
 	for _, item := range sorted {
 		if item.MaterializedID != nil && *item.MaterializedID > 0 {
@@ -1952,7 +2006,7 @@ func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lin
 		}
 		key := fmt.Sprintf("%d|%s|%s", channelID, draft.UpstreamModel, draft.CostVariantKey)
 		if previous, ok := merged[key]; ok {
-			if previous.json == string(configJSON) && isNoVideoWithVideoPair(previous.scenario, draft.Scenario) {
+			if previous.json == string(configJSON) {
 				item.MaterializedID = &previous.id
 				item.MaterializedType = "cost_rule_draft"
 				item.State = string(types.ConfigImportItemStateUnchanged)
@@ -1986,19 +2040,14 @@ func stageConfigImportCostRules(db *gorm.DB, items []model.ConfigImportItem, lin
 		item.MaterializedType = "cost_rule_draft"
 		item.State = string(types.ConfigImportItemStateChanged)
 		merged[key] = struct {
-			id       int
-			json     string
-			scenario string
-		}{id: id, json: string(configJSON), scenario: draft.Scenario}
+			id   int
+			json string
+		}{id: id, json: string(configJSON)}
 		if err := persistConfigImportItemState(db, item); err != nil {
 			return issues, err
 		}
 	}
 	return issues, nil
-}
-
-func isNoVideoWithVideoPair(left, right string) bool {
-	return (left == "no_video" && right == "with_video") || (left == "with_video" && right == "no_video")
 }
 
 func configImportCostNormalizationMismatch(draft types.ConfigImportCostRuleDraft, normalized types.CostRuleConfigV1) bool {
@@ -2347,7 +2396,7 @@ func configImportDurationPrice(proposal types.DurationPriceProposal) (types.Dura
 func configImportCostBySKU(items []model.ConfigImportItem) (map[string]string, error) {
 	byLineModel := make(map[string]string)
 	for _, item := range items {
-		if item.EntityType != "cost_rule_drafts" {
+		if item.EntityType != "cost_rule_drafts" || item.State == string(types.ConfigImportItemStateExcluded) {
 			continue
 		}
 		var draft types.ConfigImportCostRuleDraft

@@ -42,9 +42,21 @@ const COST_MODES = {
 
 type CostMode = (typeof COST_MODES)[keyof typeof COST_MODES]
 
+type ReferenceContract = {
+  images: number
+  videos: number
+  audios: number
+  totalMax: number
+  videoAudioTotalMax: number | null
+  videoDurationSeconds: number
+  minimumImages: number
+  modes: string[]
+  aspectRatios: string[]
+}
+
 function field(record: SourceRecord | undefined, name: string): string {
   if (!record) return ''
-  return cellText(record.fields[name])
+  return cellText(record.fields[name] ?? null)
 }
 
 function numericField(
@@ -52,7 +64,7 @@ function numericField(
   name: string
 ): Decimal | null {
   if (!record) return null
-  const text = field(record, name).replace(/[%￥¥,]/gu, '')
+  const text = field(record, name).replaceAll(/[%￥¥,]/gu, '')
   if (text === '') return null
   try {
     const value = new Decimal(text)
@@ -62,17 +74,138 @@ function numericField(
   }
 }
 
+function referenceContract(record: SourceRecord): {
+  contract: ReferenceContract | null
+  error: string
+  structured: boolean
+} {
+  const structured = Object.hasOwn(record.fields, '参考图数')
+  if (!structured) {
+    const legacy = field(record, '素材限制')
+    if (!/^\d{3}$/u.test(legacy)) {
+      return { contract: null, error: '', structured: false }
+    }
+    const [images, videos, audios] = [...legacy].map(Number)
+    return {
+      contract: {
+        images,
+        videos,
+        audios,
+        totalMax: images + videos + audios,
+        videoAudioTotalMax: null,
+        videoDurationSeconds: videos > 0 ? 15 : 0,
+        minimumImages: 0,
+        modes: [],
+        aspectRatios: [],
+      },
+      error: '',
+      structured: false,
+    }
+  }
+
+  const integer = (name: string, optional = false): number | null => {
+    const value = field(record, name)
+    if (value === '' && optional) return null
+    if (value === '') return null
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null
+  }
+  const images = integer('参考图数')
+  const videos = integer('参考视频数')
+  const audios = integer('参考音频数')
+  const totalMax = integer('最大素材数')
+  const videoAudioTotalMax = integer('视频音频合计上限', true)
+  const videoDurationSeconds = integer('参考视频总时长上限 秒', true)
+  const minimumImages = integer('最小参考图数')
+  if (
+    images === null ||
+    videos === null ||
+    audios === null ||
+    totalMax === null ||
+    minimumImages === null ||
+    (videos > 0 && videoDurationSeconds === null)
+  ) {
+    return { contract: null, error: '', structured: true }
+  }
+  if (minimumImages > images) {
+    return {
+      contract: null,
+      error: '最小参考图数不能超过参考图数',
+      structured: true,
+    }
+  }
+  if (field(record, '视频输入') === '否' && videos > 0) {
+    return {
+      contract: null,
+      error: '视频输入为否时参考视频数必须为0',
+      structured: true,
+    }
+  }
+  if (totalMax > images + videos + audios) {
+    return {
+      contract: null,
+      error: '最大素材数超过独立素材上限之和',
+      structured: true,
+    }
+  }
+  if (videoAudioTotalMax !== null) {
+    if (videoAudioTotalMax > videos + audios) {
+      return {
+        contract: null,
+        error: '视频音频合计上限超过独立上限之和',
+        structured: true,
+      }
+    }
+  }
+  const sourceChannel = field(record, '渠道')
+  const group = field(record, '上游模型分组')
+  let modes: string[] = []
+  if (sourceChannel === '7') {
+    modes = ['first_last_frames', 'omni_reference', 'agentic']
+  } else if (sourceChannel === '5' && group === 'video-海外') {
+    modes = ['first_last_frames', 'omni_reference']
+  }
+  const rawAspectRatio = field(record, '比例').toLowerCase()
+  const aspectRatios = (
+    rawAspectRatio === 'auto' && modes.length > 0
+      ? ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9']
+      : rawAspectRatio.split(',')
+  )
+    .map((value) => value.trim())
+    .filter((value) => value !== '' && value !== 'auto')
+  const effectiveTotalMax = Math.min(
+    totalMax,
+    images + (videoAudioTotalMax ?? videos + audios)
+  )
+  return {
+    contract: {
+      images,
+      videos,
+      audios,
+      totalMax: effectiveTotalMax,
+      videoAudioTotalMax,
+      videoDurationSeconds: videos === 0 ? 0 : (videoDurationSeconds ?? 0),
+      minimumImages,
+      modes,
+      aspectRatios,
+    },
+    error: '',
+    structured: true,
+  }
+}
+
 function slug(value: string): string {
   return value
     .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
+    .replaceAll(/[^A-Z0-9]+/gu, '-')
+    .replaceAll(/^-+|-+$/gu, '')
 }
 
 function resolution(value: string): string {
   const normalized = value.trim().toLowerCase()
   if (normalized === '') return 'default'
+  if (normalized === '2160p') return '4k'
   return normalized.endsWith('p') || normalized === '4k'
     ? normalized
     : `${normalized}p`
@@ -136,11 +269,12 @@ function modelRuleFor(
 function inferClientModel(rawModel: string, officialModels: string[]): string {
   const available = new Set(officialModels)
   const normalized = rawModel.toLowerCase()
-  const suffix = normalized.includes('mini')
-    ? '-mini'
-    : normalized.includes('fast')
-      ? '-fast'
-      : ''
+  let suffix = ''
+  if (normalized.includes('mini')) {
+    suffix = '-mini'
+  } else if (normalized.includes('fast')) {
+    suffix = '-fast'
+  }
   const candidate = `seedance-2.0${suffix}`
   if (available.has(candidate)) return candidate
   if (available.has('seedance-2.0')) return 'seedance-2.0'
@@ -266,11 +400,12 @@ function buildSkus(
     const channelSource = source.channels.find(
       (channel) => field(channel, '渠道') === field(modelRecord, '渠道')
     )
-    const sourceId = officialPrice
-      ? `SRC-OFFICIAL-${slug(model)}`
-      : channelSource
-        ? sourceIdForChannel(channelSource)
-        : 'SRC-SD-IMPORT'
+    let sourceId = 'SRC-SD-IMPORT'
+    if (officialPrice) {
+      sourceId = `SRC-OFFICIAL-${slug(model)}`
+    } else if (channelSource) {
+      sourceId = sourceIdForChannel(channelSource)
+    }
     if (!officialPrice) {
       issues.push(
         issue(
@@ -281,6 +416,14 @@ function buildSkus(
           id
         )
       )
+    }
+    let supportsRealPerson = '待确认'
+    if (modelRule.supportsRealPerson !== undefined) {
+      supportsRealPerson = modelRule.supportsRealPerson ? '是' : '否'
+    }
+    let supportsSuperResolution = '待确认'
+    if (modelRule.supportsSuperResolution !== undefined) {
+      supportsSuperResolution = modelRule.supportsSuperResolution ? '是' : '否'
     }
     rows.set(id, {
       businessId: id,
@@ -294,18 +437,8 @@ function buildSkus(
       maxDurationSeconds: ruleMax,
       ratio: field(modelRecord, '比例') || '按渠道映射',
       supportsVideoInput: booleanLabel(field(modelRecord, '视频输入'), '是'),
-      supportsRealPerson:
-        modelRule.supportsRealPerson === undefined
-          ? '待确认'
-          : modelRule.supportsRealPerson
-            ? '是'
-            : '否',
-      supportsSuperResolution:
-        modelRule.supportsSuperResolution === undefined
-          ? '待确认'
-          : modelRule.supportsSuperResolution
-            ? '是'
-            : '否',
+      supportsRealPerson,
+      supportsSuperResolution,
       measurementMethod: 'video_pixel_tokens',
       status: officialPrice ? 'active' : 'draft',
       sourceId,
@@ -394,12 +527,12 @@ function overridePrice(
   override: RowOverride | undefined,
   mode: CostMode
 ): Decimal | null {
-  const value =
-    mode === 'per_duration'
-      ? override?.nativePerSecond
-      : mode === 'per_request'
-        ? override?.nativePerRequest
-        : override?.nativePerMillion
+  let value = override?.nativePerMillion
+  if (mode === 'per_duration') {
+    value = override?.nativePerSecond
+  } else if (mode === 'per_request') {
+    value = override?.nativePerRequest
+  }
   if (!value) return null
   try {
     const decimal = new Decimal(value)
@@ -454,8 +587,9 @@ function buildCostsAndMappings(
     const sourceId = channelSource
       ? sourceIdForChannel(channelSource)
       : `SRC-${slug(sourceChannel)}-${baseId}`
-    const materialLimit = field(record, '素材限制')
-    const hasMaterialLimit = /^\d{3}$/u.test(materialLimit)
+    const reference = referenceContract(record)
+    const hasReferenceContract = reference.contract !== null
+    const referenceBusinessValid = hasReferenceContract
     const override =
       rules.overrides[`${sourceChannel}/${baseId}`] ??
       rules.overrides[String(record.location.row)]
@@ -474,11 +608,12 @@ function buildCostsAndMappings(
     const native =
       overridePrice(override, effectiveMode) ??
       priceForMode(record, effectiveMode)
-    if (native === null || native.lte(0)) {
+    const hasValidNativePrice = native !== null && native.gt(0)
+    if (!hasValidNativePrice) {
       issues.push(
         issue(
           'COST_PRICE_INVALID',
-          'FAIL',
+          'WARN',
           `Missing positive source price for ${modeName}.`,
           record
         )
@@ -494,14 +629,20 @@ function buildCostsAndMappings(
         )
       )
     }
-    if (!hasMaterialLimit) {
+    if (!hasReferenceContract) {
+      let code = 'MATERIAL_LIMIT_UNRESOLVED'
+      if (reference.error) {
+        code = 'REFERENCE_CONTRACT_INVALID'
+      } else if (reference.structured) {
+        code = 'REFERENCE_CONTRACT_UNRESOLVED'
+      }
+      const message =
+        reference.error ||
+        (reference.structured
+          ? '结构化素材合同字段必须完整且为非负整数。'
+          : 'A verified three-digit 素材限制 value is required for the V1 mapping.')
       issues.push(
-        issue(
-          'MATERIAL_LIMIT_UNRESOLVED',
-          'WARN',
-          'A verified three-digit 素材限制 value is required for the V1 mapping.',
-          record
-        )
+        issue(code, reference.error ? 'FAIL' : 'WARN', message, record)
       )
     }
     const [minDuration, maxDuration] = parseDuration(field(record, '时长范围'))
@@ -519,7 +660,7 @@ function buildCostsAndMappings(
     const sourceStatus: 'active' | 'draft' =
       field(record, '状态') === '正常' ? 'active' : 'draft'
     const costStatus =
-      sku?.status === 'active' && hasMaterialLimit
+      sku?.status === 'active' && referenceBusinessValid && hasValidNativePrice
         ? (override?.status ?? sourceStatus)
         : 'draft'
     let supportsRealPerson = field(record, '过真人脸')
@@ -528,8 +669,20 @@ function buildCostsAndMappings(
     }
     for (const scenario of ['no_video', 'with_video'] as const) {
       const suffix = scenarioCode(scenario)
+      let billingCode = 'TOK'
+      if (effectiveMode === 'per_duration') {
+        billingCode = 'DUR'
+      } else if (effectiveMode === 'per_request') {
+        billingCode = 'REQ'
+      }
+      let unit = 'USD/1M tokens'
+      if (effectiveMode === 'per_duration') {
+        unit = 'USD/second'
+      } else if (effectiveMode === 'per_request') {
+        unit = 'USD/request'
+      }
       costs.push({
-        businessId: `COST-${slug(channelCode.replace(/^CH-/, ''))}-${baseId}-${resolutionId}-${effectiveMode === 'per_duration' ? 'DUR' : effectiveMode === 'per_request' ? 'REQ' : 'TOK'}-${suffix}`,
+        businessId: `COST-${slug(channelCode.replace(/^CH-/, ''))}-${baseId}-${resolutionId}-${billingCode}-${suffix}`,
         channelCode,
         upstreamModel,
         skuCode,
@@ -553,19 +706,27 @@ function buildCostsAndMappings(
         feeRate: feeRate.toFixed(),
         currencyToUsd: currencyToUsd.toFixed(),
         normalizedUsdUnitPrice: normalized.toFixed(),
-        unit:
-          effectiveMode === 'per_duration'
-            ? 'USD/second'
-            : effectiveMode === 'per_request'
-              ? 'USD/request'
-              : 'USD/1M tokens',
+        unit,
         status: costStatus,
         sourceId,
         sourceSheet: record.location.sheet,
         sourceRow: record.location.row,
-        note: `时长=${minDuration}-${maxDuration}; 原模型=${rawModel}; 原备注=${field(record, '备注')}`,
+        note: `时长=${minDuration}-${maxDuration}; 原模型=${rawModel}; 上游模型分组=${field(record, '上游模型分组')}; 真人脸=${supportsRealPerson}; 原备注=${field(record, '备注')}`,
       })
     }
+    const referenceNote = reference.structured
+      ? [
+          `参考图数=${reference.contract?.images ?? ''}`,
+          `参考视频数=${reference.contract?.videos ?? ''}`,
+          `参考音频数=${reference.contract?.audios ?? ''}`,
+          `最大素材数=${reference.contract?.totalMax ?? ''}`,
+          `视频音频合计上限=${reference.contract?.videoAudioTotalMax ?? ''}`,
+          `素材模式=${reference.contract?.modes.join(',') ?? ''}`,
+          `归一化比例=${reference.contract?.aspectRatios.join(',') ?? ''}`,
+          `参考视频总时长上限秒=${reference.contract?.videoDurationSeconds ?? ''}`,
+          `最小参考图数=${reference.contract?.minimumImages ?? ''}`,
+        ]
+      : [`素材限制=${field(record, '素材限制')}`]
     mappings.push({
       businessId: `MAP-${slug(channelCode.replace(/^CH-/, ''))}-${baseId}-${resolutionId}`,
       clientModel,
@@ -577,7 +738,13 @@ function buildCostsAndMappings(
       sourceId,
       sourceSheet: record.location.sheet,
       sourceRow: record.location.row,
-      note: `原模型=${rawModel}; 素材限制=${materialLimit}; 原比例=${field(record, '比例')}; 真人脸=${supportsRealPerson}`,
+      note: [
+        `原模型=${rawModel}`,
+        ...referenceNote,
+        `上游模型分组=${field(record, '上游模型分组')}`,
+        `原比例=${field(record, '比例')}`,
+        `真人脸=${supportsRealPerson}`,
+      ].join('; '),
     })
     if (!channels.some((channel) => channel.businessId === channelCode)) {
       issues.push(
@@ -695,26 +862,24 @@ export function buildTemplateData(
       note: field(channel, 'Base Url'),
       accessedAt: new Date().toISOString().slice(0, 10),
     })),
-    ...[
-      ...new Map(
-        source.officialPrices.map((official) => [
-          field(official, '模型'),
-          {
-            businessId: `SRC-OFFICIAL-${slug(field(official, '模型'))}`,
-            project: field(official, '模型'),
-            valueOrRange: field(official, '分辨率'),
-            unit: 'CNY/1M',
-            asOf: '',
-            sourceType: 'workbook',
-            sourceName: 'sd收录.xlsx',
-            reference: `${official.location.sheet}!${official.location.row}`,
-            owner: '',
-            note: field(official, '备注'),
-            accessedAt: new Date().toISOString().slice(0, 10),
-          },
-        ])
-      ).values(),
-    ],
+    ...new Map(
+      source.officialPrices.map((official) => [
+        field(official, '模型'),
+        {
+          businessId: `SRC-OFFICIAL-${slug(field(official, '模型'))}`,
+          project: field(official, '模型'),
+          valueOrRange: field(official, '分辨率'),
+          unit: 'CNY/1M',
+          asOf: '',
+          sourceType: 'workbook',
+          sourceName: 'sd收录.xlsx',
+          reference: `${official.location.sheet}!${official.location.row}`,
+          owner: '',
+          note: field(official, '备注'),
+          accessedAt: new Date().toISOString().slice(0, 10),
+        },
+      ])
+    ).values(),
   ]
   const data: TemplateData = {
     channels,

@@ -179,7 +179,6 @@ func TestSecureBuildEnterpriseRequest(t *testing.T) {
 			{"type":"text","text":"enterprise multimodal"},
 			{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/main.jpg"}},
 			{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/extra.jpg"}},
-			{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},
 			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}
 		],"duration":8,"ratio":"16:9","resolution":"720p"
 	}`
@@ -191,7 +190,6 @@ func TestSecureBuildEnterpriseRequest(t *testing.T) {
 		"model":"video-2.0-pro","prompt":"enterprise multimodal","duration":8,
 		"aspect_ratio":"16:9","image_url":"https://8.8.8.8/main.jpg",
 		"extra_images":["https://8.8.8.8/extra.jpg"],
-		"extra_videos":["https://8.8.8.8/ref.mp4"],
 		"extra_audios":["https://8.8.8.8/ref.mp3"]
 	}`, string(requestBody))
 	for _, field := range []string{`"ratio"`, `"resolution"`, `"files"`, `"functionMode"`} {
@@ -237,6 +235,7 @@ func TestSecureRequestCapabilityMatrix(t *testing.T) {
 		{name: "enterprise short", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: secureTextBody(4, "16:9", "720p"), code: "InvalidParameter.duration"},
 		{name: "enterprise long", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: secureTextBody(16, "16:9", "720p"), code: "InvalidParameter.duration"},
 		{name: "enterprise last frame", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"first_frame","image_url":{"url":"https://8.8.8.8/a.jpg"}},{"type":"image_url","role":"last_frame","image_url":{"url":"https://8.8.8.8/b.jpg"}}],"duration":8,"ratio":"16:9","resolution":"720p"}`, code: "InvalidParameter.content"},
+		{name: "enterprise reference video", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/a.mp4"}}],"duration":8,"ratio":"16:9","resolution":"720p"}`, code: "InvalidParameter.content"},
 		{name: "watermark", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duration":8,"watermark":false}`, code: "InvalidParameter.watermark"},
 		{name: "generate audio", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duration":8,"generate_audio":false}`, code: "InvalidParameter.generate_audio"},
 		{name: "service tier", group: dto.SecureVideoGroupEnterprise, upstreamModel: "video-2.0-pro", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duration":8,"service_tier":"flex"}`, code: "InvalidParameter.service_tier"},

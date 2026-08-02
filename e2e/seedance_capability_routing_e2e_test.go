@@ -77,7 +77,9 @@ func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Req
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/task/"):
 		_, _ = w.Write([]byte(newAPIVideoPollingResponse))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/tasks/"):
-		_, _ = w.Write([]byte(`{"task_id":"upstream-task","status":"succeeded","progress":100,"result":{"url":"https://example.com/video.mp4"}}`))
+		_, _ = w.Write([]byte(`{"task_id":"upstream-task","status":"completed","progress":100,"result":{"url":"https://example.com/video.mp4"}}`))
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+		_, _ = w.Write([]byte(`{"id":"upstream-task","status":"completed","progress":100,"video_url":"https://example.com/video.mp4"}`))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/"):
 		_, _ = w.Write([]byte(`{"task_id":"upstream-task","status":"completed","progress":100,"video_url":"https://example.com/video.mp4"}`))
 	default:
@@ -87,7 +89,7 @@ func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Req
 
 func isVideoSubmitPath(path string) bool {
 	switch path {
-	case "/v1/video/generations", "/v1/videos/generations", "/v1/videos", "/api/generate-video":
+	case "/v1/video/generations", "/v1/videos/generations", "/v1/videos", "/v1/media/generate", "/api/generate-video":
 		return true
 	default:
 		return false

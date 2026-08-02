@@ -31,14 +31,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -47,7 +40,10 @@ import {
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { useAutoSearch } from '../hooks/use-auto-search'
-import { useCommonLogFilterOptions } from '../hooks/use-common-log-filter-options'
+import {
+  useCommonLogFilterOptions,
+  type LogModelScope,
+} from '../hooks/use-common-log-filter-options'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/time-range'
 import type { CommonLogFilters } from '../types'
@@ -127,8 +123,47 @@ export function CommonLogsFilterBar<TData>(
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
+
+  // Scope the "used models" dropdown to the committed URL filters (time range,
+  // log type, token, group, channel, username). The model filter itself is
+  // deliberately excluded — filtering the model list by the selected model
+  // would be circular. Built from `searchParams` (committed state), not the
+  // local draft, so the dropdown reflects what is actually being viewed.
+  const modelScope = useMemo<LogModelScope>(() => {
+    const committedLogType = getLogTypeValue(searchParams.type)
+    return {
+      ...(committedLogType !== LOG_TYPE_ALL_VALUE
+        ? { type: Number(committedLogType) }
+        : {}),
+      ...(searchParams.startTime
+        ? { start_timestamp: Math.floor(Number(searchParams.startTime) / 1000) }
+        : {}),
+      ...(searchParams.endTime
+        ? { end_timestamp: Math.floor(Number(searchParams.endTime) / 1000) }
+        : {}),
+      ...(searchParams.token
+        ? { token_name: String(searchParams.token) }
+        : {}),
+      ...(searchParams.group ? { group: String(searchParams.group) } : {}),
+      ...(isAdmin && searchParams.channel
+        ? { channel: Number(searchParams.channel) || 0 }
+        : {}),
+      ...(isAdmin && searchParams.username
+        ? { username: String(searchParams.username) }
+        : {}),
+    }
+  }, [
+    searchParams.startTime,
+    searchParams.endTime,
+    searchParams.token,
+    searchParams.group,
+    searchParams.channel,
+    searchParams.username,
+    searchParams.type,
+    isAdmin,
+  ])
   const { modelOptions, groupOptions, tokenOptions, channelOptions } =
-    useCommonLogFilterOptions(isAdmin)
+    useCommonLogFilterOptions(isAdmin, modelScope)
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -282,16 +317,29 @@ export function CommonLogsFilterBar<TData>(
     filters.upstreamRequestId,
   ].filter(Boolean).length
   const sensitiveType = sensitiveVisible ? 'text' : 'password'
-  const logTypeItems = useMemo(
-    () =>
-      LOG_TYPE_FILTERS.map((type) => ({
-        value: type.value,
-        label: t(type.label),
-      })),
-    [t]
+  const logTypeTabs = (
+    <Tabs
+      value={logType}
+      onValueChange={(value) => {
+        const nextLogType =
+          typeof value === 'string' && isLogTypeValue(value)
+            ? value
+            : LOG_TYPE_ALL_VALUE
+        const nextDraft = createDraft(filters, nextLogType)
+        setDraft(nextDraft)
+        flush(nextDraft)
+      }}
+      className='gap-0'
+    >
+      <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
+        {LOG_TYPE_FILTERS.map((type) => (
+          <TabsTrigger key={type.value} value={type.value}>
+            {t(type.label)}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   )
-  const logTypeLabel =
-    logTypeItems.find((type) => type.value === logType)?.label ?? t('All Types')
 
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
@@ -362,34 +410,6 @@ export function CommonLogsFilterBar<TData>(
         openOnFocus
         className='h-8 min-w-0 text-sm leading-5'
       />
-    </LogsFilterField>
-  )
-  const typeFilter = (
-    <LogsFilterField>
-      <Select
-        items={logTypeItems}
-        value={logType}
-        onValueChange={(value) => {
-          const nextLogType =
-            value !== null && isLogTypeValue(value) ? value : LOG_TYPE_ALL_VALUE
-          const nextDraft = createDraft(filters, nextLogType)
-          setDraft(nextDraft)
-          flush(nextDraft)
-        }}
-      >
-        <SelectTrigger>
-          <SelectValue>{logTypeLabel}</SelectValue>
-        </SelectTrigger>
-        <SelectContent alignItemWithTrigger={false}>
-          <SelectGroup>
-            {LOG_TYPE_FILTERS.map((type) => (
-              <SelectItem key={type.value} value={type.value}>
-                {t(type.label)}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
     </LogsFilterField>
   )
   const advancedFilters = (
@@ -468,36 +488,37 @@ export function CommonLogsFilterBar<TData>(
   )
 
   return (
-    <LogsFilterToolbar
-      table={props.table}
-      stats={statsBar}
-      actionStart={sensitiveToggle}
-      primaryFilters={
-        <>
-          {dateRangeFilter}
-          {modelFilter}
-          {groupFilter}
-          {typeFilter}
-        </>
-      }
-      advancedFilters={advancedFilters}
-      mobilePinnedFilters={dateRangeFilter}
-      mobileFilters={
-        <>
-          {modelFilter}
-          {groupFilter}
-          {typeFilter}
-          {advancedFilters}
-        </>
-      }
-      mobileFilterCount={
-        [filters.model, filters.group, hasTypeFilter].filter(Boolean).length +
-        expandedFilterCount
-      }
-      hasAdvancedActiveFilters={hasExpandedFilters}
-      advancedFilterCount={expandedFilterCount}
-      hasActiveFilters={hasAdditionalFilters}
-      onReset={handleReset}
-    />
+    <>
+      {logTypeTabs}
+      <LogsFilterToolbar
+        table={props.table}
+        stats={statsBar}
+        actionStart={sensitiveToggle}
+        primaryFilters={
+          <>
+            {dateRangeFilter}
+            {modelFilter}
+            {groupFilter}
+          </>
+        }
+        advancedFilters={advancedFilters}
+        mobilePinnedFilters={dateRangeFilter}
+        mobileFilters={
+          <>
+            {modelFilter}
+            {groupFilter}
+            {advancedFilters}
+          </>
+        }
+        mobileFilterCount={
+          [filters.model, filters.group].filter(Boolean).length +
+          expandedFilterCount
+        }
+        hasAdvancedActiveFilters={hasExpandedFilters}
+        advancedFilterCount={expandedFilterCount}
+        hasActiveFilters={hasAdditionalFilters}
+        onReset={handleReset}
+      />
+    </>
   )
 }

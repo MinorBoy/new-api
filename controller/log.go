@@ -149,3 +149,50 @@ func GetLogsSelfStat(c *gin.Context) {
 	})
 	return
 }
+
+// GetLogModels returns the distinct model names that appear in consumption
+// logs for the admin view (all users), scoped by the same filters as the log
+// list/stat endpoints. Used by the Common Logs page model dropdown so it only
+// shows models users actually requested, not configured upstream models.
+func GetLogModels(c *gin.Context) {
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	username := c.Query("username")
+	tokenName := c.Query("token_name")
+	modelName := c.Query("model_name")
+	channel, _ := strconv.Atoi(c.Query("channel"))
+	group := c.Query("group")
+	models, err := model.GetDistinctLogModelNames(0, logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    models,
+	})
+}
+
+// GetLogSelfModels is the user-scoped variant of GetLogModels: it only returns
+// model names from the authenticated user's own logs.
+func GetLogSelfModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	tokenName := c.Query("token_name")
+	modelName := c.Query("model_name")
+	group := c.Query("group")
+	models, err := model.GetDistinctLogModelNames(userId, logType, startTimestamp, endTimestamp, modelName, "", tokenName, 0, group)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    models,
+	})
+}

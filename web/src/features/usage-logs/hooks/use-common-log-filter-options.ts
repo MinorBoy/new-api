@@ -13,17 +13,17 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
-import {
-  getAllModels,
-  getChannels,
-  getEnabledModels,
-} from '@/features/channels/api'
 import { getApiKeys } from '@/features/keys/api'
 import { getGroups } from '@/features/users/api'
+
+import { getChannels } from '@/features/channels/api'
+import { getLogModels, getUserLogModels } from '../api'
 
 export type LogFilterOption = {
   value: string
@@ -43,20 +43,26 @@ function createOptions(
   )
 }
 
-export function getModelFilterOptions(
-  isAdmin: boolean,
-  allModels: Array<{ id: string }>,
-  enabledModels: string[]
-): LogFilterOption[] {
-  const modelNames = isAdmin
-    ? allModels.map((model) => model.id)
-    : enabledModels
-  return createOptions(
-    modelNames.map((model) => ({ value: model, label: model }))
-  )
+/**
+ * Filters that scope the "used models" dropdown. These mirror the Common Logs
+ * filter bar fields (minus the model filter itself, which would be circular).
+ * Passing the current values keeps the dropdown in sync with the time range /
+ * log type / token / group / channel / username the user has selected.
+ */
+export type LogModelScope = {
+  type?: number
+  start_timestamp?: number
+  end_timestamp?: number
+  token_name?: string
+  group?: string
+  channel?: number
+  username?: string
 }
 
-export function useCommonLogFilterOptions(isAdmin: boolean): {
+export function useCommonLogFilterOptions(
+  isAdmin: boolean,
+  modelScope: LogModelScope
+): {
   modelOptions: LogFilterOption[]
   groupOptions: LogFilterOption[]
   tokenOptions: LogFilterOption[]
@@ -72,17 +78,18 @@ export function useCommonLogFilterOptions(isAdmin: boolean): {
     queryFn: () => getApiKeys({ p: 1, size: 1000 }),
     staleTime: 5 * 60 * 1000,
   })
-  const modelsQuery = useQuery({
-    queryKey: ['usage-log-filter-options', 'models'],
-    queryFn: getAllModels,
-    enabled: isAdmin,
-    staleTime: 5 * 60 * 1000,
-  })
-  const enabledModelsQuery = useQuery({
-    queryKey: ['usage-log-filter-options', 'enabled-models'],
-    queryFn: getEnabledModels,
-    enabled: !isAdmin,
-    staleTime: 5 * 60 * 1000,
+  // Model names come from the logs themselves (logs.model_name) so the dropdown
+  // only shows models the user actually requested, scoped by the current
+  // filters — not the configured upstream channel models.
+  const logModelsQuery = useQuery({
+    queryKey: ['usage-log-filter-options', 'log-models', isAdmin, modelScope],
+    queryFn: async () => {
+      const result = isAdmin
+        ? await getLogModels(modelScope)
+        : await getUserLogModels(modelScope)
+      return result.data ?? []
+    },
+    staleTime: 30 * 1000,
   })
   const channelsQuery = useQuery({
     queryKey: ['usage-log-filter-options', 'channels'],
@@ -94,12 +101,13 @@ export function useCommonLogFilterOptions(isAdmin: boolean): {
   return {
     modelOptions: useMemo(
       () =>
-        getModelFilterOptions(
-          isAdmin,
-          modelsQuery.data?.data ?? [],
-          enabledModelsQuery.data?.data ?? []
+        createOptions(
+          (logModelsQuery.data ?? []).map((model) => ({
+            value: model,
+            label: model,
+          }))
         ),
-      [enabledModelsQuery.data, isAdmin, modelsQuery.data]
+      [logModelsQuery.data]
     ),
     groupOptions: useMemo(
       () =>

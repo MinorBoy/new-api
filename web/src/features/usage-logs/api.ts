@@ -20,6 +20,8 @@ import { api } from '@/lib/api'
 
 import { buildQueryParams } from './lib/query-params'
 import type {
+  GetLogModelsParams,
+  GetLogModelsResponse,
   GetLogsParams,
   GetLogsResponse,
   GetLogStatsParams,
@@ -66,6 +68,19 @@ async function fetchLogStats<T>(
   return res.data
 }
 
+async function fetchLogModels<T>(
+  endpoint: string,
+  params: T,
+  isAdmin: boolean
+): Promise<GetLogModelsResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const path = buildApiPath(endpoint, isAdmin)
+  const res = await api.get(`${path}/models?${queryParams}`)
+  return res.data
+}
+
 // ============================================================================
 // Common Log APIs
 // ============================================================================
@@ -83,6 +98,13 @@ export const getLogStats = (params: GetLogStatsParams = {}) =>
 export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
+
+export const getLogModels = (params: GetLogModelsParams = {}) =>
+  fetchLogModels('/api/log', params, true)
+
+export const getUserLogModels = (
+  params: Omit<GetLogModelsParams, 'username' | 'channel'> = {}
+) => fetchLogModels('/api/log', params, false)
 
 export async function getUserInfo(
   userId: number

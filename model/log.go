@@ -673,6 +673,61 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return token
 }
 
+// GetDistinctLogModelNames returns the distinct site-facing model names
+// (logs.model_name) matching the same filters used by the log list/stat
+// endpoints. It powers the "used models" dropdown on the Common Logs page so
+// the list reflects what was actually requested instead of the configured
+// upstream channel models.
+//
+// logType defaults to LogTypeConsume when zero, mirroring SumUsedQuota: only
+// consumption rows carry a meaningful model_name. userId is ignored when zero
+// (admin view); a non-zero value scopes the query to a single user. The result
+// is sorted by model_name and capped at logSearchCountLimit.
+func GetDistinctLogModelNames(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) ([]string, error) {
+	tx := LOG_DB.Table("logs").Where("model_name != ?", "")
+
+	if userId != 0 {
+		tx = tx.Where("user_id = ?", userId)
+	}
+	if logType == 0 {
+		logType = LogTypeConsume
+	}
+	tx = tx.Where("type = ?", logType)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if tokenName != "" {
+		tx = tx.Where("token_name = ?", tokenName)
+	}
+	if channel != 0 {
+		tx = tx.Where("channel_id = ?", channel)
+	}
+	if group != "" {
+		tx = tx.Where(logGroupCol+" = ?", group)
+	}
+	var err error
+	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
+		return nil, err
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	err = tx.Distinct("model_name").
+		Order("model_name").
+		Limit(logSearchCountLimit).
+		Pluck("model_name", &models).Error
+	if err != nil {
+		common.SysError("failed to query distinct log model names: " + err.Error())
+		return nil, errors.New("查询日志模型失败")
+	}
+	return models, nil
+}
+
 func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
 	var total int64
 	if err := LOG_DB.WithContext(ctx).Model(&Log{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {

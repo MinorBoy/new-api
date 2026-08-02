@@ -11,7 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	taskclmmmall "github.com/QuantumNous/new-api/relay/channel/task/clmmmall"
 	taskdimensio "github.com/QuantumNous/new-api/relay/channel/task/dimensio"
-	"github.com/QuantumNous/new-api/relay/channel/task/newapivideo"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
@@ -32,7 +32,7 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	case constant.ChannelTypeCangyuan:
 		return validateTextOnlyVideoRoute(target, nil)
 	case constant.ChannelTypePaipu:
-		return validateTextOnlyVideoRoute(target, newapivideo.NewPaipuTaskAdaptor().GetModelList())
+		return validatePaipuVideoRoute(target)
 	case constant.ChannelTypeClmmMall:
 		return validateClmmVideoRoute(target)
 	case constant.ChannelTypeDimensio:
@@ -42,6 +42,22 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	default:
 		return nil
 	}
+}
+
+func validatePaipuVideoRoute(target modelrouting.Target) error {
+	if strings.TrimSpace(target.UpstreamModel) == "" {
+		return newVideoRouteContractError("route_contract_model", "Paipu mapped upstream model is required")
+	}
+	if !routeDurationWithin(target.Constraints.Durations, 1, relaycommon.MaxTaskDurationSeconds) {
+		return newVideoRouteContractError("route_contract_duration", "Paipu route duration exceeds the task protocol limit")
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios {
+		return newVideoRouteContractError("route_contract_references", "Paipu route reference limits exceed the protocol")
+	}
+	return nil
 }
 
 func validateTextOnlyVideoRoute(target modelrouting.Target, allowedModels []string) error {

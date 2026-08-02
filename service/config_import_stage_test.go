@@ -296,6 +296,25 @@ func TestConfigImportBindingNormalizesLegacyEightYesType(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestConfigImportBindingBindsImportedPaipuModelOutsideStaticCatalog(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "channel-paipu", channelRef: "CH-PAIPU", channelType: constant.ChannelTypePaipu,
+		models: []string{"vendor-model-from-import-v9"}, protocol: "task", providerHint: "paipu",
+	})
+	channel := &model.Channel{
+		Type: constant.ChannelTypePaipu, Name: "Paipu", Models: "vendor-model-from-import-v9",
+		Group: "default", Key: "key",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-paipu", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+
+	require.NoError(t, err)
+}
+
 func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

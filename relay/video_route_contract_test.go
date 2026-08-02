@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,14 +35,57 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			target: videoContractTarget("seedance-2.0", []string{"720p"}, 4, 15, []modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
 		},
 		{
-			name: "paipu rejects a route that advertises media", channelType: constant.ChannelTypePaipu,
-			target:   videoContractTarget("lec-seedance-2-0", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
-			wantCode: "route_contract_input_mode",
+			name: "paipu accepts an imported reference route", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("vendor-model-from-import-v9", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{}),
 		},
 		{
-			name: "paipu enforces mapped resolution suffix", channelType: constant.ChannelTypePaipu,
-			target:   videoContractTarget("lec-feituo-seedance-2-0-my-upscaled-1080p", []string{"720p"}, 4, 15, []modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
-			wantCode: "route_contract_resolution",
+			name: "paipu accepts an imported text-only route", channelType: constant.ChannelTypePaipu,
+			target: videoContractTarget("vendor-model-from-import-v9", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
+		},
+		{
+			name: "paipu rejects ten images", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("vendor-model-from-import-v9", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 10, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "paipu rejects four videos", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("vendor-model-from-import-v9", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 4, Audios: 3}, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "paipu rejects four audios", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("vendor-model-from-import-v9", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 4}, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "paipu rejects an empty upstream model", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("  ", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_model",
+		},
+		{
+			name: "paipu rejects an oversized duration", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("vendor-model-from-import-v9", []string{"720p"}, 4, relaycommon.MaxTaskDurationSeconds+1,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_duration",
+		},
+		{
+			name: "paipu rejects minimums above limits", channelType: constant.ChannelTypePaipu,
+			target: videoContractTargetWithMinimums("vendor-model-from-import-v9", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{Images: 5}),
+			wantCode: "route_contract_references",
 		},
 		{
 			name: "clmm rejects audio declaration", channelType: constant.ChannelTypeClmmMall,
@@ -122,6 +166,10 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 }
 
 func videoContractTarget(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits modelrouting.ReferenceLimits) modelrouting.Target {
+	return videoContractTargetWithMinimums(modelName, resolutions, minDuration, maxDuration, inputModes, limits, modelrouting.ReferenceLimits{})
+}
+
+func videoContractTargetWithMinimums(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits, minimums modelrouting.ReferenceLimits) modelrouting.Target {
 	return modelrouting.Target{
 		UpstreamModel: modelName,
 		Constraints: modelrouting.Constraints{
@@ -129,7 +177,7 @@ func videoContractTarget(modelName string, resolutions []string, minDuration, ma
 			Durations: modelrouting.DurationConstraint{
 				Min: common.GetPointer(minDuration), Max: common.GetPointer(maxDuration),
 			},
-			InputModes: inputModes, ReferenceLimits: limits,
+			InputModes: inputModes, ReferenceLimits: limits, ReferenceMinimums: minimums,
 		},
 	}
 }

@@ -68,6 +68,12 @@ export const LOG_TYPE_ENUM = {
  */
 export const LOG_TYPE_ALL_VALUE = '0' as const
 
+/**
+ * Default log type for the Common Logs page when the URL omits `type`.
+ * "Consume" (type=2) — the most common intent when reviewing usage logs.
+ */
+export const LOG_TYPE_DEFAULT_VALUE = String(LOG_TYPE_ENUM.CONSUME) as const
+
 // ============================================================================
 // Time Range Presets
 // ============================================================================

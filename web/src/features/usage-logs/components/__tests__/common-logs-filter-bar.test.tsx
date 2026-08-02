@@ -58,7 +58,9 @@ const lastNavigate = { current: null as Record<string, unknown> | null }
 // mock does not leak across files in a batched `bun test` run. A real
 // QueryClient is provided below instead of mocking @tanstack/react-query.
 mock.module('@tanstack/react-router', () => {
-  const stubSearch = () => ({ type: ['0'] })
+  // No `type` in the search params simulates the default landing state
+  // (no type chosen yet), so the component falls back to its default tab.
+  const stubSearch = () => ({})
   return {
     getRouteApi: () => ({
       useSearch: stubSearch,
@@ -196,7 +198,7 @@ test('selecting a log-type Tab navigates with that type in the URL', async () =>
   await unmountFilterBar(mounted)
 })
 
-test('"All Types" is the active Tab when no type is selected', async () => {
+test('"Consume" is the active Tab when no type is selected (default)', async () => {
   const mounted = await mountFilterBar()
   const activeTriggers = [
     ...mounted.container.querySelectorAll(
@@ -207,7 +209,7 @@ test('"All Types" is the active Tab when no type is selected', async () => {
   assert.equal(activeTriggers.length, 1)
   assert.equal(
     (activeTriggers[0] as HTMLElement).textContent?.trim(),
-    'All Types'
+    'Consume'
   )
 
   await unmountFilterBar(mounted)

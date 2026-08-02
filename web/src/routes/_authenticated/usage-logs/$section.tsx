@@ -20,6 +20,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import z from 'zod'
 
 import { UsageLogs } from '@/features/usage-logs'
+import { LOG_TYPE_DEFAULT_VALUE } from '@/features/usage-logs/constants'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
@@ -66,6 +67,16 @@ export const Route = createFileRoute('/_authenticated/usage-logs/$section')({
         to: '/usage-logs/$section',
         params: { section: params.section },
         search: { ...search, type: undefined },
+        replace: true,
+      })
+    }
+    // common 缺省时补上默认日志类型（消耗），使表格/统计/模型下拉与
+    // 默认选中的 Tab 保持一致，避免"显示消耗但查全部"的不一致。
+    if (params.section === 'common' && !hasTypeSearch) {
+      throw redirect({
+        to: '/usage-logs/$section',
+        params: { section: params.section },
+        search: { ...search, type: [LOG_TYPE_DEFAULT_VALUE] },
         replace: true,
       })
     }

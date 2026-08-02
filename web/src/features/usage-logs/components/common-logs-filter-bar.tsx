@@ -38,7 +38,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_DEFAULT_VALUE,
+  LOG_TYPE_FILTERS,
+} from '../constants'
 import { useAutoSearch } from '../hooks/use-auto-search'
 import {
   useCommonLogFilterOptions,
@@ -79,7 +83,7 @@ function getLogTypeValue(value: unknown): LogTypeValue {
     typeof value[0] === 'string' &&
     isLogTypeValue(value[0])
     ? value[0]
-    : LOG_TYPE_ALL_VALUE
+    : LOG_TYPE_DEFAULT_VALUE
 }
 
 function buildSearchSourceKey(values: {
@@ -287,12 +291,12 @@ export function CommonLogsFilterBar<TData>(
     const resetFilters: CommonLogFilters = { startTime: start, endTime: end }
     const resetDraft: CommonLogDraft = {
       sourceKey: buildSearchSourceKey({
-        type: [LOG_TYPE_ALL_VALUE],
+        type: [LOG_TYPE_DEFAULT_VALUE],
         startTime: start.getTime(),
         endTime: end.getTime(),
       }),
       filters: resetFilters,
-      logType: LOG_TYPE_ALL_VALUE,
+      logType: LOG_TYPE_DEFAULT_VALUE,
     }
     setDraft(resetDraft)
     flush(resetDraft)
@@ -305,7 +309,10 @@ export function CommonLogsFilterBar<TData>(
     !!filters.requestId ||
     !!filters.upstreamRequestId
 
-  const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
+  // A type selection counts as an "active filter" only when it deviates from
+  // the default (Consume). Selecting "All Types" or "Consume" leaves the Reset
+  // button inactive for the type dimension.
+  const hasTypeFilter = logType !== LOG_TYPE_DEFAULT_VALUE
   const hasAdditionalFilters =
     !!filters.model || !!filters.group || hasTypeFilter || hasExpandedFilters
 
@@ -324,7 +331,7 @@ export function CommonLogsFilterBar<TData>(
         const nextLogType =
           typeof value === 'string' && isLogTypeValue(value)
             ? value
-            : LOG_TYPE_ALL_VALUE
+            : LOG_TYPE_DEFAULT_VALUE
         const nextDraft = createDraft(filters, nextLogType)
         setDraft(nextDraft)
         flush(nextDraft)

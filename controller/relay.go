@@ -860,6 +860,10 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskEr
 	if taskErr == nil {
 		return false
 	}
+	if common.GetContextKeyInt(c, constant.ContextKeyChannelType) == constant.ChannelTypePaipu {
+		// Paipu task creation is non-idempotent and must never be submitted twice.
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}

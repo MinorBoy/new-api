@@ -26,10 +26,12 @@ const (
 )
 
 type paipuE2EMock struct {
-	mu            sync.Mutex
-	requests      []mockArkRequest
-	pollResponses []string
-	pollIndex     int
+	mu             sync.Mutex
+	requests       []mockArkRequest
+	pollResponses  []string
+	pollIndex      int
+	submitStatus   int
+	submitResponse string
 }
 
 func (m *paipuE2EMock) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -42,6 +44,13 @@ func (m *paipuE2EMock) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	response := ""
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/videos":
+		if m.submitStatus != 0 {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(m.submitStatus)
+			_, _ = writer.Write([]byte(m.submitResponse))
+			m.mu.Unlock()
+			return
+		}
 		response = `{"task_id":"` + paipuE2EUpstreamTaskID + `","status":"queued"}`
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/videos/"+paipuE2EUpstreamTaskID:
 		if len(m.pollResponses) > 0 {
@@ -58,6 +67,30 @@ func (m *paipuE2EMock) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	_, _ = writer.Write([]byte(response))
+}
+
+func (m *paipuE2EMock) submitCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, request := range m.requests {
+		if request.Method == http.MethodPost && request.Path == "/v1/videos" {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *paipuE2EMock) pollRequests() []mockArkRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var polls []mockArkRequest
+	for _, request := range m.requests {
+		if request.Method == http.MethodGet {
+			polls = append(polls, request)
+		}
+	}
+	return polls
 }
 
 func (m *paipuE2EMock) snapshot() []mockArkRequest {
@@ -101,6 +134,17 @@ func setupPaipuE2E(t *testing.T, pollResponses ...string) *paipuE2EEnvironment {
 	}
 	t.Cleanup(func() { service.GetTaskAdaptorFunc = nil })
 	return &paipuE2EEnvironment{engine: seedanceE2ERouter(), mock: mock}
+}
+
+func setupPaipuE2ENoRetry(t *testing.T, submitStatus int, submitResponse string) *paipuE2EEnvironment {
+	t.Helper()
+	env := setupPaipuE2E(t)
+	env.mock.submitStatus = submitStatus
+	env.mock.submitResponse = submitResponse
+	previousRetryTimes := common.RetryTimes
+	common.RetryTimes = 3
+	t.Cleanup(func() { common.RetryTimes = previousRetryTimes })
+	return env
 }
 
 func TestPaipuARKLifecycleAndTextRequestE2E(t *testing.T) {
@@ -209,6 +253,27 @@ func TestPaipuFailedTaskRefundsE2E(t *testing.T) {
 	var refundLog model.Log
 	require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeRefund).Order("id DESC").First(&refundLog).Error)
 	assert.Equal(t, preConsumedQuota, refundLog.Quota)
+}
+
+func TestPaipuSubmitDoesNotRetryOnUpstreamError(t *testing.T) {
+	tests := []struct {
+		name           string
+		submitStatus   int
+		submitResponse string
+	}{
+		{name: "429 too many requests", submitStatus: http.StatusTooManyRequests, submitResponse: `{"error":{"code":"rate_limited","message":"slow down"}}`},
+		{name: "500 server error", submitStatus: http.StatusInternalServerError, submitResponse: `{"error":{"code":"provider_error","message":"upstream failure"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupPaipuE2ENoRetry(t, tt.submitStatus, tt.submitResponse)
+			requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"no retry submit"}],"duration":8}`
+			status, body := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
+			assert.Equal(t, tt.submitStatus, status, string(body))
+			assert.Equal(t, 1, env.mock.submitCount())
+			assert.Empty(t, env.mock.pollRequests())
+		})
+	}
 }
 
 func assertPaipuE2ESucceededTask(t *testing.T, body []byte, publicID string) {

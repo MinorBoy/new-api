@@ -188,12 +188,25 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.NoError(t, model.DB.Where("task_id = ?", created.ID).First(&task).Error, target.CaseID)
 			require.Equal(t, string(model.TaskStatusSuccess), string(task.Status), target.CaseID)
 			require.NotNil(t, task.PrivateData.BillingContext, target.CaseID)
-			require.GreaterOrEqual(t, task.PrivateData.BillingContext.BillingTokens, 0, target.CaseID)
+			require.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile, target.CaseID)
+			require.Contains(t, []string{model.TaskUsageSourceUpstream, model.TaskUsageSourceLocalCalculated}, task.PrivateData.BillingContext.UsageSource, target.CaseID)
+			require.Positive(t, task.PrivateData.BillingContext.BillingTokens, target.CaseID)
 
 			status, single := performJSONRequest(t, env.engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+created.ID, "Bearer e2e", "")
 			require.Equal(t, http.StatusOK, status, "%s: %s", target.CaseID, single)
 			require.Contains(t, string(single), target.RuntimeModel, target.CaseID)
 			require.NotContains(t, string(single), target.UpstreamModel, target.CaseID)
+			var publicTask struct {
+				Usage struct {
+					CompletionTokens int `json:"completion_tokens"`
+					TotalTokens      int `json:"total_tokens"`
+				} `json:"usage"`
+			}
+			require.NoError(t, common.Unmarshal(single, &publicTask), target.CaseID)
+			require.Positive(t, publicTask.Usage.CompletionTokens, target.CaseID)
+			require.GreaterOrEqual(t, publicTask.Usage.TotalTokens, publicTask.Usage.CompletionTokens, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.BillingTokens, publicTask.Usage.CompletionTokens, target.CaseID)
+			require.NotContains(t, string(single), "usage_source", target.CaseID)
 
 			after := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
 				User: &model.User{Id: e2eUserID}, Token: &model.Token{Id: 1},
@@ -202,35 +215,24 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			delta := after.delta(before)
 			require.Equal(t, int64(1), delta.TaskCount, target.CaseID)
 			require.Equal(t, 1, delta.UserRequestCount, target.CaseID)
-			expectedLogCount := int64(2)
-			expectedRefundLogCount := 1
-			if target.CostMode == types.CostModePerRequest ||
-				((target.ChannelType == constant.ChannelTypeFourSToken || target.ChannelType == constant.ChannelTypePaipu) && target.CostMode == types.CostModePerDuration) {
-				expectedLogCount = 1
-				expectedRefundLogCount = 0
-			}
-			require.Equal(t, expectedLogCount, delta.LogCount, target.CaseID)
+			require.Equal(t, int64(2), delta.LogCount, target.CaseID)
 			require.Equal(t, 1, delta.ConsumeLogCount, target.CaseID)
-			require.Equal(t, expectedRefundLogCount, delta.RefundLogCount, target.CaseID)
+			require.Equal(t, 1, delta.RefundLogCount, target.CaseID)
 			require.Equal(t, task.Quota, delta.UserUsedQuota, target.CaseID)
 			require.Equal(t, int64(task.Quota), delta.ChannelUsedQuota, target.CaseID)
 			require.Equal(t, task.Quota, delta.TokenUsedQuota, target.CaseID)
 			require.Equal(t, 1, delta.QuotaDataCount, target.CaseID)
 			require.Equal(t, task.Quota, delta.QuotaDataQuota, target.CaseID)
 			require.Equal(t, task.PrivateData.BillingContext.BillingTokens, delta.QuotaDataTokenUsed, target.CaseID)
-			if expectedLogCount == 2 {
-				require.True(t, delta.SettlementLogBillingTokensPresent, target.CaseID)
-				require.Equal(t, task.PrivateData.BillingContext.BillingTokens, delta.SettlementLogBillingTokens, target.CaseID)
-			}
+			require.True(t, delta.SettlementLogBillingTokensPresent, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.BillingTokens, delta.SettlementLogBillingTokens, target.CaseID)
 
 			logs := seedanceBillingLogsAfter(t, &seedanceBillingE2EEnv{User: &model.User{Id: e2eUserID}}, before.LastLogID)
-			require.Len(t, logs, int(expectedLogCount), target.CaseID)
+			require.Len(t, logs, 2, target.CaseID)
 			require.Equal(t, true, logs[0].Other["is_task"], target.CaseID)
 			require.Equal(t, "/v1/video/generations", logs[0].Other["request_path"], target.CaseID)
-			if expectedLogCount == 2 {
-				require.Equal(t, created.ID, logs[1].Other["task_id"], target.CaseID)
-				require.Equal(t, float64(task.PrivateData.BillingContext.BillingTokens), logs[1].Other["billing_tokens"], target.CaseID)
-			}
+			require.Equal(t, created.ID, logs[1].Other["task_id"], target.CaseID)
+			require.Equal(t, float64(task.PrivateData.BillingContext.BillingTokens), logs[1].Other["billing_tokens"], target.CaseID)
 
 			var costRequest model.CostAccountingRequest
 			require.NoError(t, model.DB.Where("task_id = ?", created.ID).First(&costRequest).Error, target.CaseID)
@@ -240,6 +242,18 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.UpstreamModel, costAttempt.BillableUpstreamModel, target.CaseID)
 			require.Equal(t, target.CostVariantKey, costAttempt.CostVariantKey, target.CaseID)
 			require.Equal(t, string(target.CostMode), costAttempt.CostMode, target.CaseID)
+			if target.CostMode == types.CostModePerToken && task.PrivateData.BillingContext.UsageSource == model.TaskUsageSourceLocalCalculated {
+				require.Equal(t, string(types.CostAttemptSettlementFailed), costAttempt.Status, target.CaseID)
+				require.Nil(t, costAttempt.CostNanoUSD, target.CaseID)
+				require.NotContains(t, costAttempt.ActualMeterJSON, "completion_tokens", target.CaseID)
+				require.NotContains(t, costAttempt.ActualMeterJSON, "total_tokens", target.CaseID)
+			} else {
+				require.Equal(t, string(types.CostAttemptSettled), costAttempt.Status, target.CaseID)
+				require.NotNil(t, costAttempt.CostNanoUSD, target.CaseID)
+				if target.CostMode == types.CostModePerToken {
+					require.Contains(t, costAttempt.ActualMeterJSON, "total_tokens", target.CaseID)
+				}
+			}
 			var attemptConfig types.CostRuleConfigV1
 			require.NoError(t, common.UnmarshalJsonStr(costAttempt.RuleConfigJSON, &attemptConfig), target.CaseID)
 			require.Equal(t, target.CostConfig.Currency, attemptConfig.Currency, target.CaseID)

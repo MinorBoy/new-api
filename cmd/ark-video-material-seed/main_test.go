@@ -188,6 +188,7 @@ func TestLoadChannelDefinitionsPreservesImportedProviderTypesAndModels(t *testin
 	definitions, err := loadChannelDefinitions(document)
 	require.NoError(t, err)
 	require.Equal(t, constant.ChannelTypeFourSToken, definitions["channel-4stoken"].Type)
+	require.Equal(t, constant.ChannelTypeEightYes, definitions["channel-8yes"].Type)
 	require.Equal(t, constant.ChannelTypeClmmMall, definitions["channel-clmm"].Type)
 	require.True(t, definitions["channel-4stoken"].Enabled)
 	require.False(t, definitions["channel-8yes"].Enabled)

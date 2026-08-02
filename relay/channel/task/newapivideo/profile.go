@@ -21,6 +21,8 @@ const ChannelNameOmegaAI = "OmegaAI"
 
 const ChannelNameFourSToken = "4stoken"
 
+const ChannelNameEightYes = "8yes"
+
 type videoRequestDialect string
 
 const (
@@ -32,6 +34,7 @@ const (
 	videoRequestDialectSecureEnterprise    videoRequestDialect = "secure_enterprise"
 	videoRequestDialectOmegaMediaArrays    videoRequestDialect = "omega_media_arrays"
 	videoRequestDialectFourSToken          videoRequestDialect = "fourstoken"
+	videoRequestDialectEightYes            videoRequestDialect = "eightyes"
 )
 
 type omegaRequestProfile struct {
@@ -242,6 +245,20 @@ func fourSTokenProtocolProfile() protocolProfile {
 	}
 }
 
+func eightYesProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:                    ChannelNameEightYes,
+		modelList:                      []string{},
+		submitPath:                     "/v1/videos",
+		pollPath:                       "/v1/videos/{task_id}",
+		contentType:                    "application/json",
+		requestDialect:                 videoRequestDialectEightYes,
+		requirePublicHTTPMedia:         true,
+		singleFrameImagesAreReferences: true,
+		defaultDurationSeconds:         5,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -287,6 +304,10 @@ func NewOmegaAITaskAdaptor() *TaskAdaptor {
 
 func NewFourSTokenTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: fourSTokenProtocolProfile()}
+}
+
+func NewEightYesTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: eightYesProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

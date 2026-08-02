@@ -81,7 +81,7 @@ export type BuildImportDocumentInput = {
 
 const V1_CHANNEL_TYPES: Record<string, number> = {
   'CH-4STOKEN': 209,
-  'CH-8YES': 1,
+  'CH-8YES': 210,
   'CH-CANGYUANSUANLI': 205,
   'CH-CLMM': 202,
   'CH-DIMENSIO': 200,

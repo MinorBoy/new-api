@@ -277,14 +277,14 @@ func TestConfigImportBindingNormalizesLegacyFourSTokenType(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestConfigImportBindingRejectsTaskProtocolOnOpenAIChannel(t *testing.T) {
+func TestConfigImportBindingNormalizesLegacyEightYesType(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
 		lineRef: "channel-8yes", channelRef: "CH-8YES", channelType: constant.ChannelTypeOpenAI,
 		models: []string{"seedance-2.0"}, protocol: "task", providerHint: "8yes",
 	})
 	channel := &model.Channel{
-		Type: constant.ChannelTypeOpenAI, Name: "8yes", Models: "seedance-2.0",
+		Type: constant.ChannelTypeEightYes, Name: "8yes", Models: "seedance-2.0",
 		Group: "default", Key: "key",
 	}
 	require.NoError(t, model.DB.Create(channel).Error)
@@ -293,7 +293,7 @@ func TestConfigImportBindingRejectsTaskProtocolOnOpenAIChannel(t *testing.T) {
 		LineRef: "channel-8yes", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
 	}})
 
-	require.ErrorContains(t, err, "BINDING_CHANNEL_PROTOCOL")
+	require.NoError(t, err)
 }
 
 func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(t *testing.T) {

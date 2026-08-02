@@ -749,6 +749,8 @@ func loadChannelDefinitions(document types.ConfigImportDocument) (map[string]cha
 		channelType := *channel.ChannelType
 		if channel.BusinessID == "CH-4STOKEN" && channelType == constant.ChannelTypeOpenAI {
 			channelType = constant.ChannelTypeFourSToken
+		} else if channel.BusinessID == "CH-8YES" && channelType == constant.ChannelTypeOpenAI {
+			channelType = constant.ChannelTypeEightYes
 		}
 		channelTypes[channel.BusinessID] = channelType
 	}

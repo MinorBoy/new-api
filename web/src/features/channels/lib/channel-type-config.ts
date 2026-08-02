@@ -336,10 +336,23 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Map client-visible Ark model names to verified 4stoken upstream models',
     },
   },
+  210: {
+    id: 210,
+    name: CHANNEL_TYPES[210],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://8yes.cc',
+    supportedModels: [],
+    hints: {
+      baseUrl: 'Default: https://8yes.cc',
+      key: 'Enter the raw API key issued by 8yes',
+      models:
+        'Map client-visible Ark model names to verified 8yes upstream models',
+    },
+  },
 }
 
 const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([
-  200, 202, 203, 204, 205, 206, 207, 208, 209,
+  200, 202, 203, 204, 205, 206, 207, 208, 209, 210,
 ])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

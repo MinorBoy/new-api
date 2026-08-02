@@ -92,6 +92,7 @@ func supportsGenericChannelTest(channelType int) bool {
 		constant.ChannelTypeSecure,
 		constant.ChannelTypeOmegaAI,
 		constant.ChannelTypeFourSToken,
+		constant.ChannelTypeEightYes,
 	}
 	return !lo.Contains(unsupportedChannelTypes, channelType)
 }

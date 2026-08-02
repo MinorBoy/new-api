@@ -415,10 +415,18 @@ func importedMaterialChannelType(t *testing.T, document types.ConfigImportDocume
 		if channelRef == "CH-4STOKEN" && channelType == constant.ChannelTypeOpenAI {
 			return constant.ChannelTypeFourSToken
 		}
+		if channelRef == "CH-8YES" && channelType == constant.ChannelTypeOpenAI {
+			return constant.ChannelTypeEightYes
+		}
 		return channelType
 	}
 	require.FailNow(t, "imported channel is missing", channelRef)
 	return 0
+}
+
+func TestImportedMaterialChannelTypeNormalizesLegacyEightYesType(t *testing.T) {
+	document := loadImportedMaterialMatrixDocument(t)
+	require.Equal(t, constant.ChannelTypeEightYes, importedMaterialChannelType(t, document, "channel-8yes"))
 }
 
 func importedMaterialChannelModels(t *testing.T, document types.ConfigImportDocument, lineRef string) []string {
@@ -572,6 +580,8 @@ func importedMaterialSubmitPath(channelType int, lineRef string) string {
 		return "/v1/videos/generations"
 	case constant.ChannelTypeLucen, constant.ChannelTypeNewAPIVideo:
 		return "/v1/video/generations"
+	case constant.ChannelTypeEightYes:
+		return "/v1/videos"
 	case constant.ChannelTypeSecure:
 		if lineRef == "secure-discount" || lineRef == "secure-overseas" {
 			return "/api/generate-video"

@@ -237,6 +237,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-MEGABYAI'), 204)
   assert.equal(typesByChannel.get('CH-SECURE'), 207)
   assert.equal(typesByChannel.get('CH-4STOKEN'), 209)
+  assert.equal(typesByChannel.get('CH-8YES'), 210)
 })
 
 test('v1 adapter preserves the one manual MegaByAI conflict and removes Secure unsupported 480p rows', async () => {

@@ -209,7 +209,9 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if request.CallbackURL != nil && !profile.ignoreUnsupportedOptionalARKFields {
 		return &arkRequestError{Code: "InvalidParameter.callback_url", Message: "callback_url is not supported by this channel"}
 	}
-	if request.Seed != nil && profile.requestDialect != videoRequestDialectFourSToken {
+	supportsSeed := profile.requestDialect == videoRequestDialectFourSToken ||
+		profile.requestDialect == videoRequestDialectEightYes
+	if request.Seed != nil && !supportsSeed {
 		return &arkRequestError{Code: "InvalidParameter.seed", Message: "seed is not supported by this channel"}
 	}
 	if !profile.ignoreUnsupportedOptionalARKFields {
@@ -289,7 +291,7 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if audioCount > 0 && request.GenerateAudio != nil && !*request.GenerateAudio {
 		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "reference audio conflicts with generate_audio=false"}
 	}
-	if request.Seed != nil && profile.requestDialect == videoRequestDialectFourSToken {
+	if request.Seed != nil && supportsSeed {
 		value, err := decimal.NewFromString(request.Seed.String())
 		if err != nil || !value.Equal(value.Truncate(0)) || value.LessThan(decimal.NewFromInt(-1)) || value.GreaterThan(decimal.NewFromInt(4294967295)) {
 			return &arkRequestError{Code: "InvalidParameter.seed", Message: "seed must be an integer between -1 and 4294967295"}

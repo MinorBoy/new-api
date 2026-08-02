@@ -374,6 +374,7 @@ func isSeedanceTaskPlatform(platform constant.TaskPlatform) bool {
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
 		return true
 	default:
@@ -394,6 +395,7 @@ func seedanceTaskPlatformValues() []string {
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
 	}
 	values := make([]string, 0, len(candidates))
@@ -425,7 +427,8 @@ func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[str
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypePaipu)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)):
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)):
 		return nil, fmt.Errorf("new-api video task adaptor must implement ARK conversion")
 	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
 		return nil, errClmmMallArkTaskConverterUnavailable

@@ -545,3 +545,41 @@ describe('4stoken channel configuration', () => {
     ).toBe('https://proxy.example.com')
   })
 })
+
+describe('8yes channel configuration', () => {
+  test('registers task-only type 210 without inventing a model catalog', () => {
+    expect(CHANNEL_TYPES[210]).toBe('8yes')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 210,
+      label: '8yes',
+    })
+    expect(getChannelTypeIcon(210)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(210)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(210)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(210)).toBe(false)
+    expect(getChannelTypeConfig(210)).toMatchObject({
+      id: 210,
+      name: '8yes',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://8yes.cc',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(210)).toBe('https://8yes.cc')
+    expect(getChannelModelOptions(210, [], [])).toEqual([])
+    expect(getBaseUrlOnChannelTypeChange(210, '', false)).toBe(
+      'https://8yes.cc'
+    )
+    expect(
+      getBaseUrlOnChannelTypeChange(210, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+    expect(getChannelTypeHints(210)).toEqual({
+      baseUrl: 'Default: https://8yes.cc',
+      key: 'Enter the raw API key issued by 8yes',
+      models:
+        'Map client-visible Ark model names to verified 8yes upstream models',
+    })
+    expect(CHANNEL_TYPE_WARNINGS[210]).toBe(
+      '8yes is task-only. Enable it only after real upstream contract acceptance.'
+    )
+  })
+})

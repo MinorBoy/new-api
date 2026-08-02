@@ -34,7 +34,8 @@ type parsedTask struct {
 }
 
 func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
-	parsed, err := parseTaskProjection(body)
+	allowMissingSuccessURL := a.activeProfile().requestDialect == videoRequestDialectEightYes
+	parsed, err := parseTaskProjection(body, allowMissingSuccessURL)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func sanitizePublicTaskFailure(message string, upstreamTaskID string) string {
 	return sanitizeUpstreamFailure(message)
 }
 
-func parseTaskProjection(body []byte) (*parsedTask, error) {
+func parseTaskProjection(body []byte, allowMissingSuccessURL ...bool) (*parsedTask, error) {
 	var header struct {
 		Code    json.RawMessage `json:"code"`
 		Message string          `json:"message"`
@@ -136,7 +137,8 @@ func parseTaskProjection(body []byte) (*parsedTask, error) {
 	if err := populateBillingUsage(parsed); err != nil {
 		return nil, err
 	}
-	if parsed.Status == model.TaskStatusSuccess && strings.TrimSpace(parsed.URL) == "" {
+	missingURLAllowed := len(allowMissingSuccessURL) > 0 && allowMissingSuccessURL[0]
+	if parsed.Status == model.TaskStatusSuccess && strings.TrimSpace(parsed.URL) == "" && !missingURLAllowed {
 		return nil, fmt.Errorf("successful new-api video task has no result URL")
 	}
 	return parsed, nil
@@ -536,7 +538,8 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 }
 
 func parsePublicTaskProjection(task *model.Task) (*parsedTask, error) {
-	parsed, err := parseTaskProjection(task.Data)
+	allowMissingSuccessURL := task.Status == model.TaskStatusSuccess && strings.TrimSpace(task.PrivateData.ResultURL) != ""
+	parsed, err := parseTaskProjection(task.Data, allowMissingSuccessURL)
 	if err == nil || task.Status != model.TaskStatusFailure {
 		return parsed, err
 	}

@@ -120,4 +120,11 @@ describe('pre-acceptance channel defaults', () => {
       2
     )
   })
+
+  test('selecting 8yes defaults a new channel to manually disabled', () => {
+    assert.equal(
+      getStatusOnChannelTypeChange(1, 210, CHANNEL_FORM_DEFAULT_VALUES.status),
+      2
+    )
+  })
 })

@@ -274,6 +274,9 @@ func normalizedConfigImportBindingChannelType(channelRef string, sourceType int)
 	if channelRef == "CH-4STOKEN" && sourceType == constant.ChannelTypeOpenAI {
 		return constant.ChannelTypeFourSToken
 	}
+	if channelRef == "CH-8YES" && sourceType == constant.ChannelTypeOpenAI {
+		return constant.ChannelTypeEightYes
+	}
 	return sourceType
 }
 
@@ -294,7 +297,8 @@ func isConfigImportTaskChannelType(channelType int) bool {
 		constant.ChannelTypePaipu,
 		constant.ChannelTypeSecure,
 		constant.ChannelTypeOmegaAI,
-		constant.ChannelTypeFourSToken:
+		constant.ChannelTypeFourSToken,
+		constant.ChannelTypeEightYes:
 		return true
 	default:
 		return false

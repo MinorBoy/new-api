@@ -973,6 +973,12 @@ type TaskInfo struct {
 	Resolution              string               `json:"resolution,omitempty"`
 	CompletionTokensPresent bool                 `json:"-"`
 	TotalTokensPresent      bool                 `json:"-"`
+	DurationSeconds         int                  `json:"-"`
+	DurationPresent         bool                 `json:"-"`
+	ResolutionPresent       bool                 `json:"-"`
+	FramesPerSecond         int                  `json:"-"`
+	FramesPerSecondPresent  bool                 `json:"-"`
+	UsageSource             string               `json:"-"`
 	BillingClamp            *common.QuotaClamp   `json:"-"`
 	CostMeter               *hosttypes.CostMeter `json:"-"`
 }

@@ -124,6 +124,12 @@ type TaskPrivateData struct {
 	Routing        *modelrouting.Audit `json:"routing,omitempty"`
 }
 
+const (
+	TaskUsageProfileSeedance       = "seedance"
+	TaskUsageSourceUpstream        = "upstream"
+	TaskUsageSourceLocalCalculated = "local_calculated"
+)
+
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
 	BillingMode              string               `json:"billing_mode,omitempty"`
@@ -146,6 +152,8 @@ type TaskBillingContext struct {
 	InputVideoDurationMS     int64                `json:"input_video_duration_ms,omitempty"`
 	UpstreamCostMode         string               `json:"upstream_cost_mode,omitempty"`
 	PerCallBilling           bool                 `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算
+	UsageProfile             string               `json:"usage_profile,omitempty"`
+	UsageSource              string               `json:"usage_source,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）

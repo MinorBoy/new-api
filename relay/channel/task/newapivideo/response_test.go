@@ -254,6 +254,20 @@ func TestParseTaskResultUsesFirstOutputURL(t *testing.T) {
 	assert.Equal(t, "https://x/secure-result.mp4", result.Url)
 }
 
+func TestParseTaskResultAcceptsPaipuDocumentResponses(t *testing.T) {
+	t.Run("queued with progress", func(t *testing.T) {
+		result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"id":"paipu-private","task_id":"paipu-private","status":"queued","progress":0}`))
+		require.NoError(t, err)
+		assert.Equal(t, model.TaskStatusQueued, result.Status)
+	})
+	t.Run("completed content url", func(t *testing.T) {
+		result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"id":"paipu-private","status":"completed","content":{"video_url":"https://assets.example/paipu.mp4"}}`))
+		require.NoError(t, err)
+		assert.Equal(t, model.TaskStatusSuccess, result.Status)
+		assert.Equal(t, "https://assets.example/paipu.mp4", result.Url)
+	})
+}
+
 func TestParseTaskResultFailurePrecedence(t *testing.T) {
 	tests := []struct {
 		name string

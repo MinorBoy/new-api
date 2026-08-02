@@ -353,45 +353,18 @@ describe('Paipu channel configuration', () => {
     expect(MODEL_FETCHABLE_TYPES.has(206)).toBe(false)
   })
 
-  test('provides the documented default and model directory', () => {
+  test('provides the documented default with an empty model catalog', () => {
     expect(getChannelTypeConfig(206)).toMatchObject({
       id: 206,
       name: 'Paipu',
       icon: 'NewAPI',
       defaultBaseUrl: 'https://api.paipu.net',
-      supportedModels: [
-        'lec-sz-seedance-2-0-480p',
-        'lec-gongteng-seedance-2-0-720p',
-        'lec-gongteng-seedance-2-0-fast-720p',
-        'lec-gongteng-seedance-2-0-1080p',
-        'lec-seedance-2-0',
-        'lec-feituo-seedance-2-0-hn-fast-720p',
-        'lec-feituo-seedance-2-0-hn-720p',
-        'lec-feituo-seedance-2-0-xh-fast-933-720p',
-        'lec-feituo-seedance-2-0-xh-pro-933-720p',
-        'lec-feituo-seedance-2-0-ld-cvk-2',
-        'lec-feituo-seedance-2-0-limited-720p',
-        'lec-feituo-seedance-2-0-my-fast-upscaled-1080p',
-        'lec-feituo-seedance-2-0-my-upscaled-1080p',
-        'lec-seedance-videos-standard',
-        'lec-seedance-videos-face-standard',
-        'lec-seedance-videos-face-fast',
-        'lec-seedance-videos-stable',
-        'lec-seedance-videos-stable-fast',
-        'lec-seedance-videos-stable-mini',
-        'lec-seedance-videos-stable-720p',
-        'lec-seedance-videos-fast-720p',
-        'lec-seedance-videos-mini-720p',
-        'lec-seedance-videos-fast',
-        'lec-seedance-videos-mini',
-      ],
+      supportedModels: [],
     })
     expect(getDefaultBaseUrl(206)).toBe('https://api.paipu.net')
-    expect(getChannelTypeHints(206)).toEqual({
-      baseUrl: 'Default: https://api.paipu.net',
-      key: 'Enter the raw API key issued by Paipu',
-      models: 'Select from the 24 documented Paipu /v1/videos models',
-    })
+    expect(getChannelTypeHints(206).models).toBe(
+      'Import Paipu models from channel configuration or add verified mappings manually'
+    )
     expect(TYPE_TO_KEY_PROMPT[206]).toBe(
       'Enter the raw API key issued by Paipu'
     )
@@ -400,8 +373,8 @@ describe('Paipu channel configuration', () => {
     )
   })
 
-  test('exposes the configured models and applies the managed default URL', () => {
-    expect(getChannelModelOptions(206, [], [])).toHaveLength(24)
+  test('exposes no static models and applies the managed default URL', () => {
+    expect(getChannelModelOptions(206, [], [])).toEqual([])
     expect(
       getBaseUrlOnChannelTypeChange(206, 'https://newapi.megabyai.cc', false)
     ).toBe('https://api.paipu.net')

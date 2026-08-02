@@ -4639,7 +4639,7 @@
     "Select display mode": "Выбрать режим отображения",
     "Select end time": "Выбрать время окончания",
     "Select from presets or type custom identifier.": "Выберите из предустановок или введите пользовательский идентификатор.",
-    "Select from the 24 documented Paipu /v1/videos models": "Выберите одну из 24 задокументированных моделей Paipu /v1/videos",
+    "Import Paipu models from channel configuration or add verified mappings manually": "Импортируйте модели Paipu из конфигурации каналов или добавьте проверенные сопоставления вручную",
     "Select granularity": "Выбрать детализацию",
     "Select groups (leave empty to keep current)": "Выбрать группы (оставьте пустым, чтобы сохранить текущие)",
     "Select interface density": "Выберите плотность интерфейса",

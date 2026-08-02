@@ -4639,7 +4639,7 @@
     "Select display mode": "Chọn chế độ hiển thị",
     "Select end time": "Chọn thời gian kết thúc",
     "Select from presets or type custom identifier.": "Chọn từ các cài đặt sẵn hoặc nhập mã định danh tùy chỉnh.",
-    "Select from the 24 documented Paipu /v1/videos models": "Chọn trong 24 mô hình Paipu /v1/videos được tài liệu hóa",
+    "Import Paipu models from channel configuration or add verified mappings manually": "Nhập các mô hình Paipu từ cấu hình kênh hoặc thêm thủ công các ánh xạ đã xác minh",
     "Select granularity": "Select detail level",
     "Select groups (leave empty to keep current)": "Chọn nhóm (để trống để giữ nguyên hiện tại)",
     "Select interface density": "Chọn mật độ giao diện",

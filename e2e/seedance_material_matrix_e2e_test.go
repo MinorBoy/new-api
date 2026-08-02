@@ -182,6 +182,10 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.UpstreamModel, task.PrivateData.Routing.UpstreamModel, target.CaseID)
 			require.Equal(t, target.CostVariantKey, task.PrivateData.Routing.CostVariantKey, target.CaseID)
 			require.Positive(t, task.Quota, target.CaseID)
+			require.NotNil(t, task.PrivateData.BillingContext, target.CaseID)
+			require.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion, target.CaseID)
+			require.Positive(t, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
+			require.GreaterOrEqual(t, task.PrivateData.BillingContext.UsageTotalTokens, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
 
 			summary := service.RunTaskPollingOnce(context.Background(), nil)
 			require.Equal(t, 1, summary.UnfinishedTasks, target.CaseID)
@@ -205,7 +209,9 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.NoError(t, common.Unmarshal(single, &publicTask), target.CaseID)
 			require.Positive(t, publicTask.Usage.CompletionTokens, target.CaseID)
 			require.GreaterOrEqual(t, publicTask.Usage.TotalTokens, publicTask.Usage.CompletionTokens, target.CaseID)
-			require.Equal(t, task.PrivateData.BillingContext.BillingTokens, publicTask.Usage.CompletionTokens, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, publicTask.Usage.CompletionTokens, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.UsageTotalTokens, publicTask.Usage.TotalTokens, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, task.PrivateData.BillingContext.BillingTokens, target.CaseID)
 			require.NotContains(t, string(single), "usage_source", target.CaseID)
 
 			after := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{

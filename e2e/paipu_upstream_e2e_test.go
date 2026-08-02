@@ -228,11 +228,20 @@ func TestPaipuMissingUsageUsesValidatedResolutionE2E(t *testing.T) {
 			require.NoError(t, common.Unmarshal(submit, &submitted))
 			require.NotEmpty(t, submitted.ID)
 
-			task := pollNewAPIVideoTask(t, submitted.ID)
+			var task model.Task
+			require.NoError(t, model.DB.Where("task_id = ?", submitted.ID).First(&task).Error)
+			require.NotNil(t, task.PrivateData.BillingContext)
+			assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
+			assert.Equal(t, tt.wantTokens, task.PrivateData.BillingContext.UsageCompletionTokens)
+			assert.Equal(t, tt.wantTokens, task.PrivateData.BillingContext.UsageTotalTokens)
+
+			task = pollNewAPIVideoTask(t, submitted.ID)
 			require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 			require.NotNil(t, task.PrivateData.BillingContext)
 			assert.Equal(t, tt.resolution, task.PrivateData.BillingContext.Resolution)
 			assert.Equal(t, tt.wantTokens, task.PrivateData.BillingContext.BillingTokens)
+			assert.Equal(t, tt.wantTokens, task.PrivateData.BillingContext.UsageCompletionTokens)
+			assert.Equal(t, tt.wantTokens, task.PrivateData.BillingContext.UsageTotalTokens)
 
 			status, body := performJSONRequest(t, env.engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+submitted.ID, "Bearer e2e-1", "")
 			require.Equal(t, http.StatusOK, status, string(body))
@@ -243,8 +252,8 @@ func TestPaipuMissingUsageUsesValidatedResolutionE2E(t *testing.T) {
 				} `json:"usage"`
 			}
 			require.NoError(t, common.Unmarshal(body, &response))
-			assert.Equal(t, tt.wantTokens, response.Usage.CompletionTokens)
-			assert.Equal(t, tt.wantTokens, response.Usage.TotalTokens)
+			assert.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, response.Usage.CompletionTokens)
+			assert.Equal(t, task.PrivateData.BillingContext.UsageTotalTokens, response.Usage.TotalTokens)
 		})
 	}
 }

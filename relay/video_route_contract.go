@@ -68,7 +68,7 @@ func validateClmmVideoRoute(target modelrouting.Target) error {
 		return newVideoRouteContractError("route_contract_model", err.Error())
 	}
 	limits := target.Constraints.ReferenceLimits
-	if limits.Images > 9 || limits.Videos > 3 || limits.Audios != 0 || limits.Images+limits.Videos > 12 {
+	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || limits.Images+limits.Videos+limits.Audios > 12 {
 		return newVideoRouteContractError("route_contract_references", "CLMM route reference limits exceed the verified protocol")
 	}
 	if !clmmModelControlsDuration(target.UpstreamModel) && !routeDurationWithin(target.Constraints.Durations, 5, 15) {

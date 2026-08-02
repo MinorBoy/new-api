@@ -44,8 +44,17 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_resolution",
 		},
 		{
-			name: "clmm rejects audio declaration", channelType: constant.ChannelTypeClmmMall,
-			target:   videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
+			name: "clmm accepts imported audio capability", channelType: constant.ChannelTypeClmmMall,
+			target: videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
+		},
+		{
+			name: "clmm rejects more than three audios", channelType: constant.ChannelTypeClmmMall,
+			target:   videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Audios: 4}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "clmm rejects combined maxima above twelve", channelType: constant.ChannelTypeClmmMall,
+			target:   videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 1}),
 			wantCode: "route_contract_references",
 		},
 		{

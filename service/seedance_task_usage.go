@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -49,6 +50,19 @@ func PersistedSeedanceTaskUsage(bc *model.TaskBillingContext) (SeedanceTaskUsage
 	}, true
 }
 
+func applySeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo, usage SeedanceTaskUsage, source string) {
+	result.CompletionTokens = usage.CompletionTokens
+	result.TotalTokens = usage.TotalTokens
+	result.CompletionTokensPresent = true
+	result.TotalTokensPresent = true
+	result.UsageSource = source
+	billingContext := task.PrivateData.BillingContext
+	billingContext.UsageCompletionTokens = usage.CompletionTokens
+	billingContext.UsageTotalTokens = usage.TotalTokens
+	billingContext.BillingTokens = usage.CompletionTokens
+	billingContext.UsageSource = source
+}
+
 func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) error {
 	if task == nil || result == nil || model.TaskStatus(result.Status) != model.TaskStatusSuccess {
 		return nil
@@ -61,9 +75,10 @@ func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) 
 	if result.BillingClamp == nil &&
 		result.CompletionTokensPresent && result.TotalTokensPresent &&
 		IsValidSeedanceUpstreamUsage(int64(result.CompletionTokens), int64(result.TotalTokens)) {
-		result.UsageSource = model.TaskUsageSourceUpstream
-		billingContext.UsageSource = model.TaskUsageSourceUpstream
-		billingContext.BillingTokens = result.CompletionTokens
+		applySeedanceTaskUsage(task, result, SeedanceTaskUsage{
+			CompletionTokens: result.CompletionTokens,
+			TotalTokens:      result.TotalTokens,
+		}, model.TaskUsageSourceUpstream)
 		return nil
 	}
 
@@ -75,16 +90,17 @@ func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) 
 		FramesPerSecond:        result.FramesPerSecond,
 		FramesPerSecondPresent: result.FramesPerSecondPresent,
 	})
-	if err != nil {
-		return err
+	if err == nil {
+		applySeedanceTaskUsage(task, result, usage, model.TaskUsageSourceLocalCalculated)
+		return nil
 	}
-	result.CompletionTokens = usage.CompletionTokens
-	result.TotalTokens = usage.TotalTokens
-	result.CompletionTokensPresent = true
-	result.TotalTokensPresent = true
-	result.UsageSource = model.TaskUsageSourceLocalCalculated
-	billingContext.UsageSource = model.TaskUsageSourceLocalCalculated
-	billingContext.BillingTokens = usage.CompletionTokens
+	if usage, ok := PersistedSeedanceTaskUsage(billingContext); ok {
+		applySeedanceTaskUsage(task, result, usage, model.TaskUsageSourceLocalCalculated)
+		return nil
+	}
+	if billingContext.UsageSnapshotVersion == model.TaskUsageSnapshotVersion1 {
+		return errors.New("versioned Seedance usage snapshot is unavailable")
+	}
 	return nil
 }
 

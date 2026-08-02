@@ -296,6 +296,27 @@ func runSinglePollingUpdate(t *testing.T, adaptor TaskPollingAdaptor, task *mode
 	}, upstreamID, map[string]*model.Task{upstreamID: task})
 }
 
+func TestSeedanceVersionedTaskDoesNotFinalizeWithoutUsage(t *testing.T) {
+	truncate(t)
+	task := seedPollingTask(t, 0, "task_public_broken_usage", "upstream_broken_usage")
+	task.Quota = 4000
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:         model.TaskUsageProfileSeedance,
+		UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+		HasVideoInput:        true,
+	}
+	require.NoError(t, task.Update())
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), Url: "https://x/video.mp4"}}
+
+	err := runSinglePollingUpdate(t, adaptor, task)
+
+	require.ErrorContains(t, err, "versioned Seedance usage snapshot is unavailable")
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), stored.Status)
+	assert.Equal(t, 4000, stored.Quota)
+}
+
 func TestUpdateVideoSingleTaskHTTPRetryableLeavesTaskUnchanged(t *testing.T) {
 	tests := []struct {
 		name     string

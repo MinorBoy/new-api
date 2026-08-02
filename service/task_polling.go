@@ -606,6 +606,16 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 	taskResult.Reason = sanitizeTaskPollingText(taskResult.Reason, privateTaskID)
 	taskResult.ErrorCode = sanitizeTaskPollingText(taskResult.ErrorCode, privateTaskID)
+	if model.TaskStatus(taskResult.Status) == model.TaskStatusSuccess {
+		if err := NormalizeSeedanceTaskUsage(task, taskResult); err != nil {
+			logger.LogError(ctx, fmt.Sprintf(
+				"Seedance task usage normalization failed: task_id=%s channel_id=%d cost_request_id=%d error=%s",
+				task.TaskID, task.ChannelId, task.PrivateData.CostRequestID,
+				sanitizeTaskPollingText(err.Error(), privateTaskID),
+			))
+			return fmt.Errorf("normalize Seedance task usage for task %s: %s", task.TaskID, sanitizeTaskPollingText(err.Error(), privateTaskID))
+		}
+	}
 
 	task.Data = redactVideoResponseBody(responseBody)
 
@@ -663,12 +673,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if taskResult.Progress != "" {
 		task.Progress = taskResult.Progress
 	}
-	if task.Status == model.TaskStatusSuccess {
-		if err := NormalizeSeedanceTaskUsage(task, taskResult); err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Seedance task usage normalization failed: task_id=%s error=%s", task.TaskID, sanitizeTaskPollingText(err.Error(), privateTaskID)))
-		}
-	}
-
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
 	if isDone && snap.Status != task.Status {
 		if err := preparePolledTaskCostSettlement(ctx, adaptor, task, taskResult); err != nil {

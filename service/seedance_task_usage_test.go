@@ -217,6 +217,58 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 		assert.Equal(t, 108900, task.PrivateData.BillingContext.BillingTokens)
 	})
 
+	t.Run("authoritative usage replaces persisted pair", func(t *testing.T) {
+		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+			UsageCompletionTokens: 108000, UsageTotalTokens: 108000,
+		}}}
+		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), CompletionTokens: 108900, CompletionTokensPresent: true, TotalTokens: 109000, TotalTokensPresent: true}
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+		assert.Equal(t, 108900, task.PrivateData.BillingContext.UsageCompletionTokens)
+		assert.Equal(t, 109000, task.PrivateData.BillingContext.UsageTotalTokens)
+		assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
+	})
+
+	t.Run("terminal calculation replaces request fallback", func(t *testing.T) {
+		bc := &model.TaskBillingContext{
+			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+			RequestedDurationSeconds: 5, Resolution: "720p", UsageCompletionTokens: 108000, UsageTotalTokens: 108000,
+		}
+		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
+		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), FramesPerSecond: 30, FramesPerSecondPresent: true}
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+		assert.Equal(t, 135000, bc.UsageCompletionTokens)
+		assert.Equal(t, 135000, bc.UsageTotalTokens)
+	})
+
+	t.Run("broken request facts use persisted fallback", func(t *testing.T) {
+		bc := &model.TaskBillingContext{
+			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
+			UsageCompletionTokens: 108000, UsageTotalTokens: 172800, HasVideoInput: true,
+		}
+		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
+		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.Equal(t, 172800, result.TotalTokens)
+	})
+
+	t.Run("versioned task rejects missing fallback", func(t *testing.T) {
+		bc := &model.TaskBillingContext{UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1, HasVideoInput: true}
+		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
+		err := NormalizeSeedanceTaskUsage(task, &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)})
+		require.EqualError(t, err, "versioned Seedance usage snapshot is unavailable")
+	})
+
+	t.Run("legacy task tolerates unavailable usage", func(t *testing.T) {
+		bc := &model.TaskBillingContext{UsageProfile: model.TaskUsageProfileSeedance, HasVideoInput: true}
+		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
+		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+		assert.False(t, result.CompletionTokensPresent)
+		assert.Empty(t, result.UsageSource)
+	})
+
 	t.Run("ignores non Seedance profile", func(t *testing.T) {
 		task := &model.Task{
 			Status:      model.TaskStatusSuccess,

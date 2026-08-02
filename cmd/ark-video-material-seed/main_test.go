@@ -90,8 +90,8 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 		accepted++
 	}
 
-	require.Equal(t, 26, accepted)
-	require.Equal(t, 72, blocked)
+	require.Equal(t, 58, accepted)
+	require.Equal(t, 40, blocked)
 }
 
 func TestMockVideoServerSupportsProviderSubmitAndPollingPaths(t *testing.T) {

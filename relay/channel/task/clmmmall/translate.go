@@ -33,6 +33,7 @@ type normalizedArkRequest struct {
 	duration   *int
 	images     []string
 	videos     []string
+	audios     []string
 }
 
 func arkToClmm(request arkRequest, upstreamModel string) (clmmRequest, int, error) {
@@ -95,6 +96,7 @@ func arkToClmm(request arkRequest, upstreamModel string) (clmmRequest, int, erro
 		MySeconds:          mySeconds,
 		ReferenceImageURLs: normalized.images,
 		ReferenceVideos:    videos,
+		ReferenceAudios:    normalized.audios,
 	}, billingSeconds, nil
 }
 
@@ -136,6 +138,7 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 	texts := make([]string, 0, len(request.Content))
 	images := make([]string, 0)
 	videos := make([]string, 0)
+	audios := make([]string, 0)
 	for _, item := range request.Content {
 		switch strings.TrimSpace(item.Type) {
 		case "text":
@@ -161,7 +164,14 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 			}
 			videos = append(videos, item.VideoURL.URL)
 		case "audio_url":
-			return normalizedArkRequest{}, fmt.Errorf("audio input is not supported by CLMM Mall")
+			if item.AudioURL == nil || strings.TrimSpace(item.AudioURL.URL) == "" {
+				return normalizedArkRequest{}, fmt.Errorf("audio_url.url is required")
+			}
+			role := strings.TrimSpace(item.Role)
+			if role != "" && role != "reference_audio" {
+				return normalizedArkRequest{}, fmt.Errorf("audio role must be reference_audio")
+			}
+			audios = append(audios, item.AudioURL.URL)
 		case "draft_task":
 			return normalizedArkRequest{}, fmt.Errorf("draft_task is not supported by CLMM Mall")
 		default:
@@ -177,7 +187,10 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 	if len(videos) > 3 {
 		return normalizedArkRequest{}, fmt.Errorf("too many reference videos: maximum is 3")
 	}
-	if len(images)+len(videos) > 12 {
+	if len(audios) > 3 {
+		return normalizedArkRequest{}, fmt.Errorf("too many reference audios: maximum is 3")
+	}
+	if len(images)+len(videos)+len(audios) > 12 {
 		return normalizedArkRequest{}, fmt.Errorf("too many media items: maximum is 12")
 	}
 	return normalizedArkRequest{
@@ -188,6 +201,7 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 		duration:   request.Duration,
 		images:     images,
 		videos:     videos,
+		audios:     audios,
 	}, nil
 }
 

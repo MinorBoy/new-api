@@ -48,6 +48,7 @@ type clmmRequest struct {
 	MySeconds          string   `json:"mySeconds,omitempty"`
 	ReferenceImageURLs []string `json:"reference_image_urls,omitempty"`
 	ReferenceVideos    []string `json:"reference_videos,omitempty"`
+	ReferenceAudios    []string `json:"reference_audios,omitempty"`
 }
 
 type clmmSubmitResponse struct {

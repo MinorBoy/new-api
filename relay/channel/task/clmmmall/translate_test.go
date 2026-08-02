@@ -90,6 +90,28 @@ func TestArkToClmmPreservesContentOrderAndDegradesImageRoles(t *testing.T) {
 	}`, string(mustMarshalClmm(t, converted)))
 }
 
+func TestArkToClmmMapsReferenceAudiosInContentOrder(t *testing.T) {
+	converted, _, err := arkToClmm(arkRequest{
+		Model: "client-model",
+		Content: []arkContent{
+			{Type: "text", Text: "audio prompt"},
+			{Type: "audio_url", Role: "reference_audio", AudioURL: &arkMedia{URL: "https://example.com/first.mp3"}},
+			{Type: "audio_url", AudioURL: &arkMedia{URL: "data:audio/wav;base64,AA=="}},
+		},
+	}, "op-any-imported-model")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"model":"op-any-imported-model",
+		"prompt":"audio prompt",
+		"aspect_ratio":"16:9",
+		"resolution":"480p",
+		"size":"1280x720",
+		"seconds":"5",
+		"reference_audios":["https://example.com/first.mp3","data:audio/wav;base64,AA=="]
+	}`, string(mustMarshalClmm(t, converted)))
+}
+
 func TestArkToClmmUsesDurationLimitSuffix(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -239,8 +261,11 @@ func TestArkToClmmRejectsUnsupportedArkInput(t *testing.T) {
 		{name: "invalid video role", mutate: func(request *arkRequest) {
 			request.Content = append(request.Content, arkContent{Type: "video_url", VideoURL: &arkMedia{URL: "video"}})
 		}},
-		{name: "audio", mutate: func(request *arkRequest) {
-			request.Content = append(request.Content, arkContent{Type: "audio_url", AudioURL: &arkMedia{URL: "audio"}})
+		{name: "empty audio url", mutate: func(request *arkRequest) {
+			request.Content = append(request.Content, arkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &arkMedia{}})
+		}},
+		{name: "invalid audio role", mutate: func(request *arkRequest) {
+			request.Content = append(request.Content, arkContent{Type: "audio_url", Role: "background_audio", AudioURL: &arkMedia{URL: "audio"}})
 		}},
 		{name: "draft task", mutate: func(request *arkRequest) {
 			request.Content = append(request.Content, arkContent{Type: "draft_task", DraftTask: map[string]any{"id": "draft"}})
@@ -287,6 +312,42 @@ func TestArkToClmmEnforcesMediaLimits(t *testing.T) {
 	}
 	_, _, err = arkToClmm(arkRequest{Model: "client-model", Content: videos}, "sh-video")
 	require.Error(t, err)
+
+	audios := []arkContent{{Type: "text", Text: "prompt"}}
+	for i := 0; i < 4; i++ {
+		audios = append(audios, arkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &arkMedia{URL: fmt.Sprintf("audio-%d", i)}})
+	}
+	_, _, err = arkToClmm(arkRequest{Model: "client-model", Content: audios}, "sh-video")
+	require.Error(t, err)
+
+	tooManyMedia := []arkContent{{Type: "text", Text: "prompt"}}
+	for i := 0; i < 7; i++ {
+		tooManyMedia = append(tooManyMedia, arkContent{Type: "image_url", ImageURL: &arkMedia{URL: fmt.Sprintf("image-%d", i)}})
+	}
+	for i := 0; i < 3; i++ {
+		tooManyMedia = append(tooManyMedia, arkContent{Type: "video_url", Role: "reference_video", VideoURL: &arkMedia{URL: fmt.Sprintf("video-%d", i)}})
+		tooManyMedia = append(tooManyMedia, arkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &arkMedia{URL: fmt.Sprintf("audio-%d", i)}})
+	}
+	_, _, err = arkToClmm(arkRequest{Model: "client-model", Content: tooManyMedia}, "sh-video")
+	require.Error(t, err)
+}
+
+func TestArkToClmmAcceptsAudioAndTotalMediaUpperBounds(t *testing.T) {
+	content := []arkContent{{Type: "text", Text: "boundary prompt"}}
+	for i := 0; i < 6; i++ {
+		content = append(content, arkContent{Type: "image_url", ImageURL: &arkMedia{URL: fmt.Sprintf("image-%d", i)}})
+	}
+	for i := 0; i < 3; i++ {
+		content = append(content, arkContent{Type: "video_url", Role: "reference_video", VideoURL: &arkMedia{URL: fmt.Sprintf("video-%d", i)}})
+		content = append(content, arkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &arkMedia{URL: fmt.Sprintf("audio-%d", i)}})
+	}
+
+	converted, _, err := arkToClmm(arkRequest{Model: "client-model", Content: content}, "sh-video")
+
+	require.NoError(t, err)
+	assert.Len(t, converted.ReferenceImageURLs, 6)
+	assert.Len(t, converted.ReferenceVideos, 3)
+	assert.Contains(t, string(mustMarshalClmm(t, converted)), `"reference_audios"`)
 }
 
 func TestArkToClmmAcceptsOrdinaryDurationAndMediaUpperBounds(t *testing.T) {

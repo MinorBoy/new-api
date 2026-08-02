@@ -120,6 +120,7 @@ func setupSeedanceCapabilityRoutingE2E(t *testing.T) *seedanceCapabilityE2EEnv {
 		}
 	})
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	require.NoError(t, appI18n.Init())
 	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
 	groupRatios := ratio_setting.GetGroupRatioCopy()

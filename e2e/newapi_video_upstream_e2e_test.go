@@ -56,6 +56,7 @@ func (m *mockNewAPIVideoServer) snapshot() []mockArkRequest {
 func setupNewAPIVideoLifecycle(t *testing.T) (*gin.Engine, *mockNewAPIVideoServer) {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &mockNewAPIVideoServer{}
 	server := httptest.NewServer(mock)
 	t.Cleanup(server.Close)

@@ -58,13 +58,34 @@ func TestDoResponsePreservesARKTaskIDOptionalFields(t *testing.T) {
 func TestParseTaskResultPreservesUsageResolutionAndTerminalStates(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 
-	result, err := adaptor.ParseTaskResult([]byte("{\"status\":\"succeeded\",\"resolution\":\"1080p\",\"content\":{\"video_url\":\"https://example.com/video.mp4\"},\"usage\":{\"completion_tokens\":1000,\"total_tokens\":1200}}"))
+	result, err := adaptor.ParseTaskResult([]byte("{\"status\":\"succeeded\",\"duration\":7,\"resolution\":\"1080p\",\"framespersecond\":30,\"content\":{\"video_url\":\"https://example.com/video.mp4\"},\"usage\":{\"completion_tokens\":1000,\"total_tokens\":1200}}"))
 	require.NoError(t, err)
 	require.Equal(t, model.TaskStatusSuccess, result.Status)
+	require.Equal(t, 7, result.DurationSeconds)
+	require.True(t, result.DurationPresent)
 	require.Equal(t, "1080p", result.Resolution)
+	require.True(t, result.ResolutionPresent)
+	require.Equal(t, 30, result.FramesPerSecond)
+	require.True(t, result.FramesPerSecondPresent)
 	require.Equal(t, 1000, result.CompletionTokens)
 	require.Equal(t, 1200, result.TotalTokens)
 	require.True(t, result.CompletionTokensPresent)
+	require.True(t, result.TotalTokensPresent)
+
+	invalidFacts, err := adaptor.ParseTaskResult([]byte("{\"status\":\"succeeded\",\"duration\":7.5,\"resolution\":\"unsupported\",\"framespersecond\":241}"))
+	require.NoError(t, err)
+	require.Zero(t, invalidFacts.DurationSeconds)
+	require.True(t, invalidFacts.DurationPresent)
+	require.Equal(t, "unsupported", invalidFacts.Resolution)
+	require.True(t, invalidFacts.ResolutionPresent)
+	require.Zero(t, invalidFacts.FramesPerSecond)
+	require.True(t, invalidFacts.FramesPerSecondPresent)
+
+	absentFacts, err := adaptor.ParseTaskResult([]byte("{\"status\":\"succeeded\"}"))
+	require.NoError(t, err)
+	require.False(t, absentFacts.DurationPresent)
+	require.False(t, absentFacts.ResolutionPresent)
+	require.False(t, absentFacts.FramesPerSecondPresent)
 
 	zero, err := adaptor.ParseTaskResult([]byte("{\"status\":\"succeeded\",\"usage\":{\"completion_tokens\":0,\"total_tokens\":1200}}"))
 	require.NoError(t, err)
@@ -84,6 +105,33 @@ func TestParseTaskResultPreservesUsageResolutionAndTerminalStates(t *testing.T) 
 		require.NoError(t, err)
 		require.Equal(t, model.TaskStatusFailure, failed.Status)
 		require.Equal(t, status, failed.Reason)
+	}
+}
+
+func TestEstimateDurationSecondsUsesValidatedNativeRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration string
+		want     int
+	}{
+		{name: "explicit", duration: `,"duration":9`, want: 9},
+		{name: "omitted", want: 5},
+		{name: "smart", duration: `,"duration":-1`, want: 5},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"duration"}]` + test.duration + `}`
+			c := newNativeTaskContext(t, body)
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+			adaptor := &TaskAdaptor{}
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+
+			seconds, taskErr := adaptor.EstimateDurationSeconds(c, info)
+
+			require.Nil(t, taskErr)
+			assert.Equal(t, test.want, seconds)
+		})
 	}
 }
 

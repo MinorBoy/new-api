@@ -20,6 +20,7 @@ import (
 
 func TestLucenARKLifecycleE2E(t *testing.T) {
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	videoConfig := config.GlobalConfig.Get(video_setting.ConfigName)
 	previousVideoConfig, err := config.ConfigToMap(videoConfig)
 	require.NoError(t, err)
@@ -64,7 +65,7 @@ func TestLucenARKLifecycleE2E(t *testing.T) {
 		"content":[
 			{"type":"text","text":"multimodal Lucen acceptance"},
 			{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}},
-			{"type":"video_url","role":"reference_video","video_url":{"url":"asset://video-reference-1"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://assets.example/video-reference-1.mp4"}},
 			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"data:audio/wav;base64,UklGRg=="}}
 		],
 		"resolution":"720p",
@@ -98,7 +99,7 @@ func TestLucenARKLifecycleE2E(t *testing.T) {
 		"content":[
 			{"type":"text","text":"multimodal Lucen acceptance"},
 			{"type":"image_url","role":"reference_image","image_url":{"url":"data:image/png;base64,QUJDRA=="}},
-			{"type":"video_url","role":"reference_video","video_url":{"url":"asset://video-reference-1"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://assets.example/video-reference-1.mp4"}},
 			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"data:audio/wav;base64,UklGRg=="}}
 		],
 		"generateAudio":true,

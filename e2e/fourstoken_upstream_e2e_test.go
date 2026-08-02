@@ -78,6 +78,7 @@ type fourSTokenE2EEnvironment struct {
 func setupFourSTokenE2E(t *testing.T, pollResponses ...string) *fourSTokenE2EEnvironment {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &fourSTokenE2EMock{pollResponses: pollResponses}
 	server := httptest.NewServer(mock)
 	t.Cleanup(server.Close)

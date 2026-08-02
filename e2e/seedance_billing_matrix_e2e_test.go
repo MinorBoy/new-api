@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -29,6 +30,24 @@ import (
 )
 
 var seedanceBillingReferenceDurationPattern = regexp.MustCompile(`(?:^|-)reference-(\d+)s(?:-|\.)`)
+
+type seedanceBillingVideoMetadataClient struct{}
+
+func (seedanceBillingVideoMetadataClient) Metadata(_ context.Context, rawURL string) (videometa.Metadata, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataInvalidMedia}
+	}
+	match := seedanceBillingReferenceDurationPattern.FindStringSubmatch(path.Base(parsedURL.Path))
+	if len(match) != 2 {
+		return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataInvalidMedia}
+	}
+	duration, err := strconv.Atoi(match[1])
+	if err != nil || duration <= 0 {
+		return videometa.Metadata{}, &service.VideoMetadataError{Kind: service.VideoMetadataInvalidMedia}
+	}
+	return videometa.Metadata{DurationMS: int64(duration) * 1000}, nil
+}
 
 func silenceSeedanceBillingLogs(t *testing.T) {
 	t.Helper()
@@ -315,6 +334,8 @@ func seedanceBillingReferenceVideoProfiles() [][]int {
 func setupSeedanceBillingE2E(t *testing.T) *seedanceBillingE2EEnv {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	service.SetVideoMetadataClient(seedanceBillingVideoMetadataClient{})
+	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
 
 	originalRetryTimes := common.RetryTimes
 	common.RetryTimes = 0

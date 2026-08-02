@@ -110,6 +110,7 @@ type paipuE2EEnvironment struct {
 func setupPaipuE2E(t *testing.T, pollResponses ...string) *paipuE2EEnvironment {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &paipuE2EMock{pollResponses: pollResponses}
 	server := httptest.NewServer(mock)
 	t.Cleanup(server.Close)

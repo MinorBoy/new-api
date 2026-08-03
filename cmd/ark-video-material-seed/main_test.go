@@ -127,6 +127,22 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 	require.Equal(t, 1, disabled)
 }
 
+func TestSelectFailureFixtureTargetFallsBackToAcceptedProviderChannel(t *testing.T) {
+	targets := []matrixTarget{
+		{CaseID: "cangyuan", ChannelType: constant.ChannelTypeCangyuan},
+		{CaseID: "secure", ChannelType: constant.ChannelTypeSecure},
+	}
+
+	selected := selectFailureFixtureTarget(targets)
+	require.NotNil(t, selected)
+	require.Equal(t, "cangyuan", selected.CaseID)
+
+	targets = append(targets, matrixTarget{CaseID: "new-api-video", ChannelType: constant.ChannelTypeNewAPIVideo})
+	selected = selectFailureFixtureTarget(targets)
+	require.NotNil(t, selected)
+	require.Equal(t, "new-api-video", selected.CaseID)
+}
+
 func TestMockVideoServerSupportsProviderSubmitAndPollingPaths(t *testing.T) {
 	server := &mockVideoServer{models: make(map[string]string)}
 	submitPaths := []string{"/v1/video/generations", "/v1/videos/generations", "/v1/videos", "/v1/media/generate", "/api/generate-video"}
@@ -155,6 +171,38 @@ func TestMockVideoServerSupportsProviderSubmitAndPollingPaths(t *testing.T) {
 		require.Contains(t, recorder.Body.String(), "upstream-task-", testCase.path)
 		require.Contains(t, recorder.Body.String(), `"status":"`+testCase.status+`"`, testCase.path)
 	}
+
+	server.failNextTask()
+	submit := httptest.NewRecorder()
+	server.ServeHTTP(submit, httptest.NewRequest(http.MethodPost, "/v1/video/generations", strings.NewReader(`{"model":"seedance-failure-fixture"}`)))
+	require.Equal(t, http.StatusOK, submit.Code)
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, common.Unmarshal(submit.Body.Bytes(), &created))
+	require.NotEmpty(t, created.ID)
+
+	failed := httptest.NewRecorder()
+	server.ServeHTTP(failed, httptest.NewRequest(http.MethodGet, "/v1/video/generations/"+created.ID, nil))
+	require.Equal(t, http.StatusOK, failed.Code)
+	require.Contains(t, failed.Body.String(), `"status":"FAILURE"`)
+	require.Contains(t, failed.Body.String(), "mock content policy rejection")
+
+	server.failNextTask()
+	directSubmit := httptest.NewRecorder()
+	server.ServeHTTP(directSubmit, httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"seedance-direct-failure-fixture"}`)))
+	require.Equal(t, http.StatusOK, directSubmit.Code)
+	var directCreated struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, common.Unmarshal(directSubmit.Body.Bytes(), &directCreated))
+	require.NotEmpty(t, directCreated.ID)
+
+	directFailed := httptest.NewRecorder()
+	server.ServeHTTP(directFailed, httptest.NewRequest(http.MethodGet, "/v1/videos/"+directCreated.ID, nil))
+	require.Equal(t, http.StatusOK, directFailed.Code)
+	require.Contains(t, directFailed.Body.String(), `"status":"failed"`)
+	require.Contains(t, directFailed.Body.String(), "mock content policy rejection")
 }
 
 func TestCleanupSeedDataOnlyRemovesSeedIdentityRows(t *testing.T) {

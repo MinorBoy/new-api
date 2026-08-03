@@ -31,7 +31,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
-import { formatMarginPPM, formatNanoUSD } from '../lib/cost-rule'
+import {
+  formatMarginPPM,
+  formatNanoUSD,
+  signedMetricClass,
+} from '../lib/cost-rule'
 import type { CostProfitSummary } from '../types'
 
 type ProfitSummaryProps = {
@@ -64,6 +68,7 @@ function SummaryMetric(props: {
   value: string
   icon: React.ElementType
   metric?: string
+  valueClassName?: string
 }) {
   const Icon = props.icon
   return (
@@ -73,7 +78,7 @@ function SummaryMetric(props: {
         <span>{props.label}</span>
       </div>
       <p
-        className='mt-2 font-mono text-lg font-semibold tabular-nums sm:text-xl'
+        className={`mt-2 font-mono text-lg font-semibold tabular-nums sm:text-xl ${props.valueClassName ?? ''}`}
         data-metric={props.metric}
       >
         {props.value}
@@ -154,12 +159,17 @@ export function ProfitSummary(props: ProfitSummaryProps) {
           label={t('Billed gross profit')}
           value={amount(summary.realized_profit_nano_usd)}
           icon={TrendingUp}
+          metric='gross-profit'
+          valueClassName={signedMetricClass(
+            summary.realized_profit_nano_usd
+          )}
         />
         <SummaryMetric
           label={t('Gross margin')}
           value={margin(summary.gross_margin_ppm)}
           icon={Percent}
           metric='gross-margin'
+          valueClassName={signedMetricClass(summary.gross_margin_ppm)}
         />
       </div>
       <div className='bg-muted/20 flex flex-wrap gap-2 border-t px-4 py-3'>

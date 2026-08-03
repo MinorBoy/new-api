@@ -168,6 +168,41 @@ test('renders exact billed profit totals and attributed channel rows', async () 
     assert.match(text, /Primary OpenAI/)
     assert.match(text, /vendor-model/)
     assert.match(text, /15/)
+    const profit = browserWindow.document.querySelector(
+      '[data-metric="gross-profit"]'
+    )
+    const grossMargin = browserWindow.document.querySelector(
+      '[data-metric="gross-margin"]'
+    )
+    assert.equal(profit?.classList.contains('text-success'), true)
+    assert.equal(grossMargin?.classList.contains('text-success'), true)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
+test('renders negative channel profit and margin in the destructive color', async () => {
+  const mounted = await mount(
+    <ProfitTable
+      rows={[
+        {
+          ...breakdown,
+          realized_profit_nano_usd: '-250000000',
+          gross_margin_ppm: '-125000',
+        },
+      ]}
+      loading={false}
+    />
+  )
+  try {
+    const profit = browserWindow.document.querySelector(
+      '[data-metric="gross-profit"]'
+    )
+    const grossMargin = browserWindow.document.querySelector(
+      '[data-metric="gross-margin"]'
+    )
+    assert.equal(profit?.classList.contains('text-destructive'), true)
+    assert.equal(grossMargin?.classList.contains('text-destructive'), true)
   } finally {
     await unmount(mounted)
   }
@@ -191,6 +226,13 @@ test('renders an em dash for margin when revenue is zero', async () => {
       '[data-metric="gross-margin"]'
     )
     assert.equal(margin?.textContent?.trim(), '—')
+    const profit = browserWindow.document.querySelector(
+      '[data-metric="gross-profit"]'
+    )
+    assert.equal(profit?.classList.contains('text-success'), false)
+    assert.equal(profit?.classList.contains('text-destructive'), false)
+    assert.equal(margin?.classList.contains('text-success'), false)
+    assert.equal(margin?.classList.contains('text-destructive'), false)
   } finally {
     await unmount(mounted)
   }

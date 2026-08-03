@@ -101,6 +101,7 @@ type RelayInfo struct {
 	RelayMode              int
 	OriginModelName        string
 	RequestURLPath         string
+	InboundRequestPath     string
 	RequestHeaders         map[string]string
 	ShouldIncludeUsage     bool
 	DisablePing            bool // 是否禁止向下游发送自定义 Ping
@@ -504,6 +505,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.NewRequestId()
 	}
+	inboundRequestPath := c.FullPath()
+	if inboundRequestPath == "" {
+		inboundRequestPath = c.Request.URL.Path
+	}
 	info := &RelayInfo{
 		Request: request,
 
@@ -521,11 +526,12 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
 		TokenGroup:     tokenGroup,
 
-		isFirstResponse: true,
-		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
-		RequestURLPath:  c.Request.URL.String(),
-		RequestHeaders:  cloneRequestHeaders(c),
-		IsStream:        isStream,
+		isFirstResponse:    true,
+		RelayMode:          relayconstant.Path2RelayMode(c.Request.URL.Path),
+		RequestURLPath:     c.Request.URL.String(),
+		InboundRequestPath: inboundRequestPath,
+		RequestHeaders:     cloneRequestHeaders(c),
+		IsStream:           isStream,
 
 		StartTime:         startTime,
 		FirstResponseTime: startTime.Add(-time.Second),

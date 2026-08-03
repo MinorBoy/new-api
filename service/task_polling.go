@@ -707,6 +707,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 	if terminalCASWinner {
 		settlePolledTaskCost(ctx, adaptor, task, taskResult)
+		persistPolledTerminalTaskUserResponse(ctx, adaptor, task)
 	}
 
 	return nil

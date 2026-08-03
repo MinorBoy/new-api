@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -158,6 +159,31 @@ func (a *taskPollingFetchAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo
 
 type taskPollingHTTPFetchAdaptor struct {
 	*taskPollingFetchAdaptor
+}
+
+type taskResponseAuditPollingAdaptor struct {
+	*taskPollingFetchAdaptor
+}
+
+func (a *taskResponseAuditPollingAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
+	return common.Marshal(map[string]any{
+		"id":     task.TaskID,
+		"status": task.Status.ToVideoStatus(),
+	})
+}
+
+func (a *taskResponseAuditPollingAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
+	response := map[string]any{
+		"id":     task.TaskID,
+		"status": strings.ToLower(string(task.Status)),
+	}
+	if task.Status == model.TaskStatusFailure {
+		response["error"] = map[string]any{
+			"code":    "mock_failed",
+			"message": task.FailReason,
+		}
+	}
+	return common.Marshal(response)
 }
 
 func (a *taskPollingHTTPFetchAdaptor) ParseTaskPollingHTTPError(body []byte, statusCode int) *relaycommon.TaskInfo {
@@ -466,6 +492,47 @@ func TestUpdateVideoSingleTaskDetailedWrapperPreservesBodyAndResultURL(t *testin
 	assert.Contains(t, string(task.Data), `"usage"`)
 	assert.Contains(t, string(task.Data), `"future_field":{"keep":true}`)
 	assert.Equal(t, []string{"upstream_detailed"}, adaptor.fetchedTaskIDs())
+}
+
+func TestVideoPollingPersistsTerminalUserResponseForOriginalProtocol(t *testing.T) {
+	tests := []struct {
+		name        string
+		requestPath string
+		result      *relaycommon.TaskInfo
+		wantJSON    string
+	}{
+		{
+			name:        "OpenAI success",
+			requestPath: "/v1/video/generations",
+			result:      &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), Url: "https://x/video.mp4"},
+			wantJSON:    `{"id":"task_public_audit","status":"completed"}`,
+		},
+		{
+			name:        "ARK failure",
+			requestPath: "/api/v3/contents/generations/tasks",
+			result:      &relaycommon.TaskInfo{Status: string(model.TaskStatusFailure), Reason: "mock moderation rejection"},
+			wantJSON:    `{"error":{"code":"mock_failed","message":"mock moderation rejection"},"id":"task_public_audit","status":"failure"}`,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			truncate(t)
+			task := seedPollingTask(t, 0, "task_public_audit", "upstream_private_audit")
+			task.Properties.RequestPath = testCase.requestPath
+			require.NoError(t, task.Update())
+			adaptor := &taskResponseAuditPollingAdaptor{&taskPollingFetchAdaptor{
+				parseResult: testCase.result,
+			}}
+
+			require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+			var stored model.Task
+			require.NoError(t, model.DB.First(&stored, task.ID).Error)
+			assert.JSONEq(t, testCase.wantJSON, string(stored.PrivateData.UserResponseData))
+			assert.NotContains(t, string(stored.PrivateData.UserResponseData), "upstream_private_audit")
+		})
+	}
 }
 
 func TestSeedanceTaskPollingPersistsLocallyCalculatedUsage(t *testing.T) {

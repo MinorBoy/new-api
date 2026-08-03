@@ -23,8 +23,9 @@ import (
 const newAPIVideoPollingResponse = `{"code":"success","message":"","data":{"task_id":"upstream-task","status":"SUCCESS","result_url":"https://example.com/video.mp4","submit_time":1784728184,"start_time":1784728190,"finish_time":1784728390,"progress":"100%","user_id":59,"channel_id":14,"group":"secret","quota":2000000,"platform":"54","properties":{"origin_model_name":"doubao-seedance-2-0-260128","upstream_model_name":"seedance-720p-token"},"data":{"content":{"video_url":"https://example.com/video.mp4"},"created_at":1784728184,"updated_at":1784728390,"draft":false,"duration":10,"execution_expires_after":172800,"framespersecond":24,"generate_audio":true,"id":"provider-secret","model":"doubao-seedance-2.0","priority":0,"ratio":"16:9","resolution":"720p","seed":92859,"service_tier":"default","status":"succeeded","usage":{"completion_tokens":216900,"total_tokens":216900},"future_field":{"keep":true}}}}`
 
 type mockNewAPIVideoServer struct {
-	mu       sync.Mutex
-	requests []mockArkRequest
+	mu              sync.Mutex
+	requests        []mockArkRequest
+	pollingResponse string
 }
 
 func (m *mockNewAPIVideoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,13 @@ func (m *mockNewAPIVideoServer) ServeHTTP(w http.ResponseWriter, r *http.Request
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/video/generations":
 		_, _ = w.Write([]byte(`{"id":"upstream-task","task_id":"upstream-task","object":"video","model":"seedance-720p-token","status":"queued","progress":0,"created_at":1784728184}`))
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/video/generations/upstream-task":
-		_, _ = w.Write([]byte(newAPIVideoPollingResponse))
+		m.mu.Lock()
+		pollingResponse := m.pollingResponse
+		m.mu.Unlock()
+		if pollingResponse == "" {
+			pollingResponse = newAPIVideoPollingResponse
+		}
+		_, _ = w.Write([]byte(pollingResponse))
 	default:
 		http.NotFound(w, r)
 	}
@@ -51,6 +58,12 @@ func (m *mockNewAPIVideoServer) snapshot() []mockArkRequest {
 	requests := make([]mockArkRequest, len(m.requests))
 	copy(requests, m.requests)
 	return requests
+}
+
+func (m *mockNewAPIVideoServer) setPollingResponse(response string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pollingResponse = response
 }
 
 func setupNewAPIVideoLifecycle(t *testing.T) (*gin.Engine, *mockNewAPIVideoServer) {
@@ -162,6 +175,11 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	assert.Contains(t, string(task.Data), `"upstream_model_name":"seedance-720p-token"`)
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
+	assertNewAPIVideoE2EPublicBody(t, task.PrivateData.UserResponseData)
+	var terminalResponse map[string]interface{}
+	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
+	assert.Equal(t, publicID, terminalResponse["id"])
+	assert.Equal(t, "completed", terminalResponse["status"])
 
 	requests = mock.snapshot()
 	require.Len(t, requests, 2)
@@ -204,6 +222,11 @@ func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
+	assertNewAPIVideoE2EPublicBody(t, task.PrivateData.UserResponseData)
+	var terminalResponse map[string]interface{}
+	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
+	assert.Equal(t, publicID, terminalResponse["id"])
+	assert.Equal(t, "succeeded", terminalResponse["status"])
 	assertNewAPIVideoLifecycleQueries(t, engine, publicID)
 
 	invalid := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"first_frame"}]}`
@@ -211,4 +234,40 @@ func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, status, string(invalidResponse))
 	assert.Contains(t, string(invalidResponse), "text")
 	assert.Len(t, mock.snapshot(), 2)
+}
+
+func TestNewAPIVideoARKFailurePersistsPublicTerminalResponseE2E(t *testing.T) {
+	engine, mock := setupNewAPIVideoLifecycle(t)
+	mock.setPollingResponse(`{
+		"status":"failed",
+		"error":{"code":"content_policy_violation","message":"mock moderation rejection"},
+		"task_id":"upstream-task",
+		"user_id":59,
+		"quota":2000000
+	}`)
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"blocked mock task"}],"duration":10}`
+	status, submit := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
+	require.Equal(t, http.StatusOK, status, string(submit))
+	var created map[string]interface{}
+	require.NoError(t, common.Unmarshal(submit, &created))
+	publicID, ok := created["id"].(string)
+	require.True(t, ok)
+
+	task := pollNewAPIVideoTask(t, publicID)
+	require.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+	assert.Equal(t, "mock moderation rejection", task.FailReason)
+	assertNewAPIVideoE2EPublicBody(t, task.PrivateData.UserResponseData)
+	var terminalResponse struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Error  struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
+	assert.Equal(t, publicID, terminalResponse.ID)
+	assert.Equal(t, "failed", terminalResponse.Status)
+	assert.Equal(t, "content_policy_violation", terminalResponse.Error.Code)
+	assert.Equal(t, "mock moderation rejection", terminalResponse.Error.Message)
 }

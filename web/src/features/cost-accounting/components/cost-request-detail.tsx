@@ -42,7 +42,11 @@ import dayjs from '@/lib/dayjs'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { costAccountingQueryKeys, getCostAccountingRequest } from '../api'
-import { formatMarginPPM, formatNanoUSD } from '../lib/cost-rule'
+import {
+  formatMarginPPM,
+  formatNanoUSD,
+  signedMetricClass,
+} from '../lib/cost-rule'
 import type {
   CostAccountingAttemptLedger,
   CostAttemptStatus,
@@ -313,11 +317,16 @@ function DetailValue(props: {
   label: string
   value: React.ReactNode
   mono?: boolean
+  dataMetric?: string
+  valueClassName?: string
 }) {
   return (
     <div className='min-w-0'>
       <dt className='text-muted-foreground text-xs'>{props.label}</dt>
-      <dd className={`mt-1 break-all ${props.mono ? 'font-mono text-xs' : ''}`}>
+      <dd
+        className={`mt-1 break-all ${props.mono ? 'font-mono text-xs' : ''} ${props.valueClassName ?? ''}`}
+        data-metric={props.dataMetric}
+      >
         {props.value}
       </dd>
     </div>
@@ -468,11 +477,17 @@ export function CostRequestDetail(props: CostRequestDetailProps) {
               t('Unavailable')
             )}
             mono
+            dataMetric='gross-profit'
+            valueClassName={signedMetricClass(
+              request.billed_gross_profit_nano_usd
+            )}
           />
           <DetailValue
             label={t('Gross margin')}
             value={safeMargin(request.gross_margin_ppm, t('Unavailable'))}
             mono
+            dataMetric='gross-margin'
+            valueClassName={signedMetricClass(request.gross_margin_ppm)}
           />
         </dl>
 

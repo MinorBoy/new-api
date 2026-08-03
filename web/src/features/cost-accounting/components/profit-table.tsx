@@ -45,7 +45,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-import { formatMarginPPM, formatNanoUSD } from '../lib/cost-rule'
+import {
+  formatMarginPPM,
+  formatNanoUSD,
+  signedMetricClass,
+} from '../lib/cost-rule'
 import type { CostProfitBreakdown } from '../types'
 
 type ProfitTableProps = {
@@ -118,7 +122,10 @@ export function ProfitTable(props: ProfitTableProps) {
       columnHelper.accessor('realized_profit_nano_usd', {
         header: t('Billed gross profit'),
         cell: (context) => (
-          <span className='font-mono tabular-nums'>
+          <span
+            className={`font-mono tabular-nums ${signedMetricClass(context.getValue())}`}
+            data-metric='gross-profit'
+          >
             {amount(context.getValue())}
           </span>
         ),
@@ -126,7 +133,10 @@ export function ProfitTable(props: ProfitTableProps) {
       columnHelper.accessor('gross_margin_ppm', {
         header: t('Gross margin'),
         cell: (context) => (
-          <span className='font-mono tabular-nums'>
+          <span
+            className={`font-mono tabular-nums ${signedMetricClass(context.getValue())}`}
+            data-metric='gross-margin'
+          >
             {margin(context.getValue())}
           </span>
         ),

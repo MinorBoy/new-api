@@ -425,6 +425,39 @@ test('shows winning attempt identity, frozen rule, zero meter values, and audits
   }
 })
 
+test('renders negative billed profit and margin in the destructive color', async () => {
+  const queryClient = createQueryClient()
+  queryClient.setQueryData(costAccountingQueryKeys.request(101), {
+    success: true,
+    message: '',
+    data: {
+      ...requestDetail,
+      request: {
+        ...requestDetail.request,
+        billed_gross_profit_nano_usd: '-24000',
+        gross_margin_ppm: '-125000',
+      },
+    },
+  })
+
+  const mounted = await mount(
+    <CostRequestDetail requestID={101} isAdmin open />,
+    queryClient
+  )
+  try {
+    const profit = browserWindow.document.querySelector(
+      '[data-metric="gross-profit"]'
+    )
+    const grossMargin = browserWindow.document.querySelector(
+      '[data-metric="gross-margin"]'
+    )
+    assert.equal(profit?.classList.contains('text-destructive'), true)
+    assert.equal(grossMargin?.classList.contains('text-destructive'), true)
+  } finally {
+    await unmount(mounted)
+  }
+})
+
 test('requires a reconciliation reason and preserves explicit zero token meters', async () => {
   const submitted: Array<Record<string, unknown>> = []
   api.defaults.adapter = async (config) => {

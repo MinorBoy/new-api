@@ -3,7 +3,6 @@ package relay
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,22 +37,12 @@ type TaskSubmitResult struct {
 	//PerCallPrice   types.PriceData
 }
 
-const maxTaskUserResponseAuditBytes = 1 << 20
-
 func persistTerminalTaskUserResponse(c *gin.Context, task *model.Task, responseBody []byte) {
-	if task == nil || len(responseBody) == 0 {
-		return
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
 	}
-	if task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
-		return
-	}
-	if len(responseBody) > maxTaskUserResponseAuditBytes {
-		logger.LogWarn(c, fmt.Sprintf("skip terminal task user response audit payload because it exceeds %d bytes: task_id=%s", maxTaskUserResponseAuditBytes, task.TaskID))
-		return
-	}
-	if err := model.UpdateTaskUserResponseData(task.ID, json.RawMessage(bytes.Clone(responseBody))); err != nil {
-		logger.LogWarn(c, fmt.Sprintf("persist terminal task user response audit payload failed: task_id=%s error=%v", task.TaskID, err))
-	}
+	service.PersistTerminalTaskUserResponse(ctx, task, responseBody)
 }
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：

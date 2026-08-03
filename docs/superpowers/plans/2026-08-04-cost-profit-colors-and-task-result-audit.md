@@ -20,10 +20,10 @@
 - Test: `web/src/features/cost-accounting/components/__tests__/profit-report.test.tsx`
 - Test: `web/src/features/cost-accounting/components/__tests__/cost-request-detail.test.tsx`
 
-- [ ] **Step 1: 写入正数、负数和零值颜色失败测试**
-- [ ] **Step 2: 运行受影响前端测试并确认因缺少语义 class 失败**
-- [ ] **Step 3: 实现规范整数符号解析和三个页面位置的 class 绑定**
-- [ ] **Step 4: 重跑前端测试并确认通过**
+- [x] **Step 1: 写入正数、负数和零值颜色失败测试**
+- [x] **Step 2: 运行受影响前端测试并确认因缺少语义 class 失败**
+- [x] **Step 3: 实现规范整数符号解析和三个页面位置的 class 绑定**
+- [x] **Step 4: 重跑前端测试并确认通过**
 
 ### Task 2: 轮询终态公开响应归档
 
@@ -34,11 +34,11 @@
 - Test: `service/task_polling_test.go`
 - Test: `relay/relay_task_response_audit_test.go`
 
-- [ ] **Step 1: 写入成功和失败终态自动归档失败测试**
-- [ ] **Step 2: 运行测试并确认 `UserResponseData` 为空**
-- [ ] **Step 3: 提取共用归档函数，并按 `request_path` 调用 OpenAI/ARK 转换器**
-- [ ] **Step 4: 在计费和成本结算完成后持久化公开响应，避免后续更新覆盖**
-- [ ] **Step 5: 重跑服务与 relay 测试并确认通过**
+- [x] **Step 1: 写入成功和失败终态自动归档失败测试**
+- [x] **Step 2: 运行测试并确认 `UserResponseData` 为空**
+- [x] **Step 3: 提取共用归档函数，并按 `request_path` 调用 OpenAI/ARK 转换器**
+- [x] **Step 4: 在计费和成本结算完成后持久化公开响应，避免后续更新覆盖**
+- [x] **Step 5: 重跑服务与 relay 测试并确认通过**
 
 ### Task 3: E2E 成功与失败 mock 数据
 
@@ -48,18 +48,18 @@
 - Modify: `cmd/ark-video-material-seed/main_test.go`
 - Modify: `docs/superpowers/reports/2026-08-03-seedance-official-sale-pricing-acceptance.md`
 
-- [ ] **Step 1: 增加 E2E 断言，要求轮询后成功与失败任务均已有公开终态结果**
-- [ ] **Step 2: 扩展 mock server，使指定任务返回稳定且已脱敏的失败响应**
-- [ ] **Step 3: 保留 110 条矩阵成功任务，额外通过真实链路生成 1 条失败展示任务**
-- [ ] **Step 4: 重跑 seed 并核对 110 条成功、1 条失败和 111 条终态结果**
-- [ ] **Step 5: 更新验收报告中的任务日志结果数据**
+- [x] **Step 1: 增加 E2E 断言，要求轮询后成功与失败任务均已有公开终态结果**
+- [x] **Step 2: 扩展 mock server，使指定任务返回稳定且已脱敏的失败响应**
+- [x] **Step 3: 保留 110 条矩阵成功任务，额外通过真实链路生成 1 条失败展示任务**
+- [x] **Step 4: 重跑 seed 并核对 110 条成功、1 条失败和 111 条终态结果**
+- [x] **Step 5: 更新验收报告中的任务日志结果数据**
 
 ### Task 4: 全量验证与提交
 
 **Files:**
 - Verify only
 
-- [ ] **Step 1: 运行受影响 Go 测试与 `go test ./... -count=1 -p=1`**
-- [ ] **Step 2: 运行前端测试、`bun run typecheck` 和 `bun run build`**
-- [ ] **Step 3: 运行 `git diff --check`、`gofmt -l` 和私有字段扫描**
-- [ ] **Step 4: 提交并推送 `ysr`**
+- [x] **Step 1: 运行受影响 Go 测试与 `go test ./... -count=1 -p=1`**
+- [x] **Step 2: 运行前端测试、`bun run typecheck` 和 `bun run build`**
+- [x] **Step 3: 运行 `git diff --check`、`gofmt -l` 和私有字段扫描**
+- [x] **Step 4: 提交并推送 `ysr`**

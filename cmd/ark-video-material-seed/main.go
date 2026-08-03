@@ -89,10 +89,12 @@ type importedCostConfig struct {
 type seedResult struct {
 	TotalTargets      int
 	AcceptedTasks     int
+	FailedMockTasks   int64
 	ContractBlocks    int
 	DisabledPricing   int
 	CommonLogs        int64
 	TaskRows          int64
+	TerminalResults   int64
 	QuotaDataRows     int64
 	CostRequests      int64
 	CostAttempts      int64
@@ -103,10 +105,12 @@ type seedResult struct {
 }
 
 type mockVideoServer struct {
-	mu       sync.Mutex
-	nextID   int
-	requests []mockVideoRequest
-	models   map[string]string
+	mu          sync.Mutex
+	nextID      int
+	requests    []mockVideoRequest
+	models      map[string]string
+	failedTasks map[string]bool
+	failNext    bool
 }
 
 type mockVideoRequest struct {
@@ -198,6 +202,7 @@ func run() error {
 	}
 	materialLimits := make(map[string]int)
 	createdTasks := make([]string, 0, len(targets))
+	acceptedTargets := make([]matrixTarget, 0, len(targets))
 	contractBlocks := 0
 	disabledPricing := 0
 
@@ -248,15 +253,73 @@ func run() error {
 		if task.Status != model.TaskStatusSuccess {
 			return fmt.Errorf("%s: task %s finished as %s", target.CaseID, created.ID, task.Status)
 		}
+		if len(task.PrivateData.UserResponseData) == 0 {
+			return fmt.Errorf("%s: task %s is missing terminal user response", target.CaseID, created.ID)
+		}
+		acceptedTargets = append(acceptedTargets, target)
+	}
+
+	failureTarget := selectFailureFixtureTarget(acceptedTargets)
+	if failureTarget == nil {
+		return errors.New("no accepted target is available for the failure fixture")
+	}
+	failureChannelID := channelIDs[failureTarget.LineRef]
+	policyID, err := saveSingleTargetPolicy(policyIDs[failureTarget.RuntimeModel], *failureTarget, failureChannelID)
+	if err != nil {
+		return fmt.Errorf("save failure fixture routing policy: %w", err)
+	}
+	policyIDs[failureTarget.RuntimeModel] = policyID
+	mock.failNextTask()
+	status, body := performJSONRequest(engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer "+seedToken, requestBody(*failureTarget, seedAssetBaseURL))
+	if status != http.StatusOK {
+		return fmt.Errorf("failure fixture submit failed with HTTP %d: %s", status, strings.TrimSpace(string(body)))
+	}
+	var failedCreated struct {
+		ID string `json:"id"`
+	}
+	if err := common.Unmarshal(body, &failedCreated); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(failedCreated.ID, "task_") {
+		return fmt.Errorf("failure fixture returned unexpected task id %q", failedCreated.ID)
+	}
+	createdTasks = append(createdTasks, failedCreated.ID)
+	if summary := service.RunTaskPollingOnce(context.Background(), nil); summary.UnfinishedTasks < 1 {
+		return errors.New("failure fixture polling did not process unfinished task")
+	}
+	var failedTask model.Task
+	if err := model.DB.Where("task_id = ?", failedCreated.ID).First(&failedTask).Error; err != nil {
+		return err
+	}
+	if failedTask.Status != model.TaskStatusFailure {
+		return fmt.Errorf("failure fixture task %s finished as %s", failedCreated.ID, failedTask.Status)
+	}
+	if len(failedTask.PrivateData.UserResponseData) == 0 {
+		return fmt.Errorf("failure fixture task %s is missing terminal user response", failedCreated.ID)
+	}
+	if !strings.Contains(string(failedTask.PrivateData.UserResponseData), "mock content policy rejection") {
+		return fmt.Errorf("failure fixture task %s is missing the public failure reason", failedCreated.ID)
 	}
 
 	model.SaveQuotaDataCache()
-	result, err := summarizeResult(user.Id, token.Id, len(targets), contractBlocks, disabledPricing, createdTasks, materialLimits, mock.count())
+	result, err := summarizeResult(user.Id, token.Id, len(targets), len(createdTasks)-1, contractBlocks, disabledPricing, createdTasks, materialLimits, mock.count())
 	if err != nil {
 		return err
 	}
 	printResult(result)
 	return nil
+}
+
+func selectFailureFixtureTarget(targets []matrixTarget) *matrixTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+	for i := range targets {
+		if targets[i].ChannelType == constant.ChannelTypeNewAPIVideo {
+			return &targets[i]
+		}
+	}
+	return &targets[0]
 }
 
 func initResources() error {
@@ -1122,8 +1185,17 @@ func (m *mockVideoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/") {
 		taskID := strings.TrimPrefix(r.URL.Path, "/v1/videos/")
+		_, failed := m.taskState(taskID)
+		status := "completed"
+		videoURL := "https://example.com/video.mp4"
+		var upstreamError map[string]any
+		if failed {
+			status = "failed"
+			videoURL = ""
+			upstreamError = map[string]any{"code": "content_policy_violation", "message": "mock content policy rejection"}
+		}
 		response, _ := common.Marshal(map[string]any{
-			"task_id": taskID, "status": "completed", "progress": 100, "video_url": "https://example.com/video.mp4",
+			"task_id": taskID, "status": status, "progress": 100, "video_url": videoURL, "error": upstreamError,
 		})
 		_, _ = w.Write(response)
 		return
@@ -1193,27 +1265,60 @@ func (m *mockVideoServer) nextTaskID(modelName string) string {
 	defer m.mu.Unlock()
 	m.nextID++
 	taskID := fmt.Sprintf("upstream-task-%03d", m.nextID)
+	if m.models == nil {
+		m.models = make(map[string]string)
+	}
 	m.models[taskID] = modelName
+	if m.failNext {
+		if m.failedTasks == nil {
+			m.failedTasks = make(map[string]bool)
+		}
+		m.failedTasks[taskID] = true
+		m.failNext = false
+	}
 	return taskID
 }
 
-func (m *mockVideoServer) pollingResponse(taskID string) []byte {
+func (m *mockVideoServer) failNextTask() {
 	m.mu.Lock()
-	modelName := m.models[taskID]
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	m.failNext = true
+}
+
+func (m *mockVideoServer) taskState(taskID string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.models[taskID], m.failedTasks[taskID]
+}
+
+func (m *mockVideoServer) pollingResponse(taskID string) []byte {
+	modelName, failed := m.taskState(taskID)
 	if modelName == "" {
 		modelName = "seedance-local-mock"
+	}
+	status := "SUCCESS"
+	resultURL := "https://example.com/video.mp4"
+	nestedStatus := "succeeded"
+	failReason := ""
+	var nestedError map[string]any
+	if failed {
+		status = "FAILURE"
+		resultURL = ""
+		nestedStatus = "failed"
+		failReason = "mock content policy rejection"
+		nestedError = map[string]any{"code": "content_policy_violation", "message": failReason}
 	}
 	response, _ := common.Marshal(map[string]any{
 		"code": "success", "message": "",
 		"data": map[string]any{
-			"task_id": taskID, "status": "SUCCESS", "result_url": "https://example.com/video.mp4",
+			"task_id": taskID, "status": status, "result_url": resultURL, "fail_reason": failReason,
 			"submit_time": time.Now().Unix() - 20, "start_time": time.Now().Unix() - 15, "finish_time": time.Now().Unix(),
 			"progress": "100%", "quota": 2_000_000, "platform": "54",
 			"properties": map[string]any{"origin_model_name": modelrouting.Seedance20, "upstream_model_name": modelName},
 			"data": map[string]any{
-				"content": map[string]any{"video_url": "https://example.com/video.mp4"},
-				"id":      taskID, "model": modelName, "status": "succeeded", "duration": 10, "resolution": "720p", "ratio": "16:9",
+				"content": map[string]any{"video_url": resultURL},
+				"error":   nestedError,
+				"id":      taskID, "model": modelName, "status": nestedStatus, "duration": 10, "resolution": "720p", "ratio": "16:9",
 				"usage": map[string]any{"completion_tokens": 216900, "total_tokens": 216900},
 			},
 		},
@@ -1227,15 +1332,27 @@ func (m *mockVideoServer) count() int {
 	return len(m.requests)
 }
 
-func summarizeResult(userID, tokenID, totalTargets, contractBlocks, disabledPricing int, taskIDs []string, materialLimits map[string]int, upstreamCalls int) (seedResult, error) {
+func summarizeResult(userID, tokenID, totalTargets, acceptedTasks, contractBlocks, disabledPricing int, taskIDs []string, materialLimits map[string]int, upstreamCalls int) (seedResult, error) {
 	var commonLogs int64
 	if err := model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", userID).Count(&commonLogs).Error; err != nil {
 		return seedResult{}, err
 	}
 	var taskRows int64
+	var failedMockTasks int64
+	var terminalResults int64
 	if len(taskIDs) > 0 {
-		if err := model.DB.Model(&model.Task{}).Where("task_id IN ?", taskIDs).Count(&taskRows).Error; err != nil {
+		var tasks []model.Task
+		if err := model.DB.Where("task_id IN ?", taskIDs).Find(&tasks).Error; err != nil {
 			return seedResult{}, err
+		}
+		taskRows = int64(len(tasks))
+		for i := range tasks {
+			if tasks[i].Status == model.TaskStatusFailure {
+				failedMockTasks++
+			}
+			if len(tasks[i].PrivateData.UserResponseData) > 0 {
+				terminalResults++
+			}
 		}
 	}
 	var quotaDataRows int64
@@ -1251,8 +1368,8 @@ func summarizeResult(userID, tokenID, totalTargets, contractBlocks, disabledPric
 		return seedResult{}, err
 	}
 	return seedResult{
-		TotalTargets: totalTargets, AcceptedTasks: len(taskIDs), ContractBlocks: contractBlocks, DisabledPricing: disabledPricing,
-		CommonLogs: commonLogs, TaskRows: taskRows, QuotaDataRows: quotaDataRows,
+		TotalTargets: totalTargets, AcceptedTasks: acceptedTasks, FailedMockTasks: failedMockTasks, ContractBlocks: contractBlocks, DisabledPricing: disabledPricing,
+		CommonLogs: commonLogs, TaskRows: taskRows, TerminalResults: terminalResults, QuotaDataRows: quotaDataRows,
 		CostRequests: costRequests, CostAttempts: costAttempts, MaterialLimits: materialLimits,
 		MockUpstreamCalls: upstreamCalls, UserID: userID, TokenID: tokenID,
 	}, nil
@@ -1262,7 +1379,7 @@ func printResult(result seedResult) {
 	fmt.Println("ARK SDK video material matrix seed completed")
 	fmt.Printf("user: %s (id=%d), token: %s (id=%d), group: %s\n", seedUsername, result.UserID, seedToken, result.TokenID, seedGroup)
 	fmt.Printf("targets: %d, accepted tasks: %d, contract blocks before submit: %d, disabled pricing drafts: %d\n", result.TotalTargets, result.AcceptedTasks, result.ContractBlocks, result.DisabledPricing)
-	fmt.Printf("task rows: %d, usage logs for user: %d, quota_data rows: %d\n", result.TaskRows, result.CommonLogs, result.QuotaDataRows)
+	fmt.Printf("task rows: %d, failed mock tasks: %d, terminal user results: %d, usage logs for user: %d, quota_data rows: %d\n", result.TaskRows, result.FailedMockTasks, result.TerminalResults, result.CommonLogs, result.QuotaDataRows)
 	fmt.Printf("cost accounting requests: %d, attempts: %d, mock upstream calls: %d\n", result.CostRequests, result.CostAttempts, result.MockUpstreamCalls)
 	fmt.Printf("material limits: 431=%d, 900=%d, 903=%d, 933=%d\n", result.MaterialLimits["431"], result.MaterialLimits["900"], result.MaterialLimits["903"], result.MaterialLimits["933"])
 	fmt.Println("view pages:")

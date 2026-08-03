@@ -231,7 +231,11 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	privateData := TaskPrivateData{}
 	if relayInfo != nil {
 		privateData.CostRequestID = relayInfo.CostRequestID
-		properties.RequestPath = commonRelay.SafeRequestPath(relayInfo.RequestURLPath)
+		requestPath := relayInfo.InboundRequestPath
+		if requestPath == "" {
+			requestPath = relayInfo.RequestURLPath
+		}
+		properties.RequestPath = commonRelay.SafeRequestPath(requestPath)
 	}
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
 		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||

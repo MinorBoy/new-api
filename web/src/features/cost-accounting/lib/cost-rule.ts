@@ -157,6 +157,18 @@ export function formatMarginPPM(value: string | null): string {
   return negative ? `-${percentage}` : percentage
 }
 
+export function signedMetricClass(value: string | undefined): string {
+  if (value === undefined) return ''
+  try {
+    const parsed = parseInteger(value, 'signed metric')
+    if (parsed > 0n) return 'text-success'
+    if (parsed < 0n) return 'text-destructive'
+  } catch {
+    return ''
+  }
+  return ''
+}
+
 export function parseCostRuleForm(
   formValues: CostRuleFormValues
 ): CostRuleConfigV1 {

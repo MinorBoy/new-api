@@ -209,6 +209,49 @@ func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *
 	assert.Equal(t, string(types.CostModePerRequest), task.PrivateData.BillingContext.UpstreamCostMode)
 }
 
+func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *testing.T) {
+	setupControllerTaskCostDB(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	c.Set("task_resolution", "720p")
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          12,
+		OriginModelName: "client-video-model",
+		PriceData: types.PriceData{
+			BillingMode:              billing_setting.BillingModePerDuration,
+			Quota:                    100,
+			RequestedDurationSeconds: 5,
+		},
+		CostAttempt: &types.CostAttemptHandle{CostMode: types.CostModePerDuration},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 73, ChannelType: constant.ChannelTypeNewAPIVideo,
+			UpstreamModelName: "doubao-seedance-2-0-260128",
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			PublicTaskID:          "task-mapped-seedance-profile",
+			UsageCompletionTokens: 108000,
+			UsageTotalTokens:      172800,
+		},
+	}
+	result := &relay.TaskSubmitResult{
+		UpstreamTaskID: "upstream-task",
+		TaskData:       []byte(`{"id":"upstream-task","status":"queued"}`),
+		Platform:       constant.TaskPlatform("task-test"),
+		Quota:          100,
+	}
+
+	require.NoError(t, persistSubmittedTask(c, relayInfo, result))
+
+	var task model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task-mapped-seedance-profile").First(&task).Error)
+	require.NotNil(t, task.PrivateData.BillingContext)
+	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
+	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
+	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
+	assert.False(t, task.PrivateData.BillingContext.PerCallBilling)
+}
+
 func TestHandleTaskCostCoverageFailureExcludesChannelAndRetries(t *testing.T) {
 	previousRetryTimes := common.RetryTimes
 	common.RetryTimes = 1

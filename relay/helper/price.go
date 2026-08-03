@@ -195,10 +195,19 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 			return hosttypes.PriceData{}, fmt.Errorf("model %s has invalid duration price: %w", info.OriginModelName, err)
 		}
 
-		freeModel := false
-		if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && (durationPrice.Price == 0 || groupRatioInfo.GroupRatio == 0) {
+		freeModel := groupRatioInfo.GroupRatio == 0
+		if len(durationPrice.Scenarios) == 0 {
+			freeModel = freeModel || durationPrice.Price == 0
+		} else if !freeModel {
 			freeModel = true
+			for _, scenario := range durationPrice.Scenarios {
+				if scenario.OutputPrice > 0 {
+					freeModel = false
+					break
+				}
+			}
 		}
+		freeModel = !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && freeModel
 		return hosttypes.PriceData{
 			FreeModel:      freeModel,
 			BillingMode:    billing_setting.BillingModePerDuration,

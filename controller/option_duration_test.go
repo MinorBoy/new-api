@@ -93,7 +93,88 @@ func TestUpdateOptionRejectsInvalidDurationPriceBeforePersistence(t *testing.T) 
 	common.OptionMapRWMutex.RUnlock()
 }
 
-func TestGetOptionsReturnsEffectiveDurationBillingDefaults(t *testing.T) {
+func TestUpdateOptionRejectsSeedanceBillingModeOverrideBeforePersistence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalDB := model.DB
+	originalLogDB := model.LOG_DB
+	originalRedisEnabled := common.RedisEnabled
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLogDB
+		common.RedisEnabled = originalRedisEnabled
+		sqlDB, sqlErr := db.DB()
+		if sqlErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}, &model.Log{}))
+
+	savedBillingOptions := make(map[string]string)
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		if strings.HasPrefix(key, "billing_setting.") {
+			savedBillingOptions[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(savedBillingOptions)) })
+
+	const optionKey = "billing_setting.billing_mode"
+	const originalValue = `{"doubao-seedance-2-0-260128":"per_duration"}`
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{optionKey: originalValue}))
+	require.NoError(t, db.Create(&model.Option{Key: optionKey, Value: originalValue}).Error)
+
+	common.OptionMapRWMutex.Lock()
+	optionMapWasNil := common.OptionMap == nil
+	if optionMapWasNil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousValue, hadPreviousValue := common.OptionMap[optionKey]
+	common.OptionMap[optionKey] = originalValue
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if optionMapWasNil {
+			common.OptionMap = nil
+			return
+		}
+		if hadPreviousValue {
+			common.OptionMap[optionKey] = previousValue
+		} else {
+			delete(common.OptionMap, optionKey)
+		}
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/option/", strings.NewReader(
+		`{"key":"billing_setting.billing_mode","value":"{\"doubao-seedance-2-0-260128\":\"ratio\"}"}`,
+	))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateOption(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "config import")
+
+	var persisted model.Option
+	require.NoError(t, db.First(&persisted, "key = ?", optionKey).Error)
+	assert.Equal(t, originalValue, persisted.Value)
+}
+
+func TestGetOptionsReturnsOnlyConfiguredDurationBilling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	savedBillingOptions := make(map[string]string)
@@ -167,12 +248,10 @@ func TestGetOptionsReturnsEffectiveDurationBillingDefaults(t *testing.T) {
 	var modes map[string]string
 	require.NoError(t, common.UnmarshalJsonStr(values[modeKey], &modes))
 	assert.Equal(t, billing_setting.BillingModeTieredExpr, modes["legacy-model"])
-	assert.Equal(t, billing_setting.BillingModePerDuration, modes["jimeng-video-seedance-2.0-vip"])
+	assert.NotContains(t, modes, "jimeng-video-seedance-2.0-vip")
 
 	var prices map[string]types.DurationPrice
 	require.NoError(t, common.UnmarshalJsonStr(values[priceKey], &prices))
 	assert.Equal(t, 2.0, prices["legacy-video"].Price)
-	defaultRule, ok := prices["jimeng-video-seedance-2.0-vip"]
-	require.True(t, ok)
-	assert.InDelta(t, 0.62/7.3, defaultRule.Price, 1e-10)
+	assert.NotContains(t, prices, "jimeng-video-seedance-2.0-vip")
 }

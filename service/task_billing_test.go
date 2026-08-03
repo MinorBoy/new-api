@@ -303,6 +303,48 @@ func TestTaskBillingOtherIncludesDurationSnapshot(t *testing.T) {
 	assert.NotContains(t, other, "model_price")
 }
 
+func TestTaskBillingOtherUsesExplicitScenarioPriceSnapshot(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		BillingMode: billing_setting.BillingModePerDuration,
+		DurationPrice: &types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
+			"720p:with_video": {
+				OutputPrice:            0.4,
+				Unit:                   types.DurationUnitSecond,
+				RoundingStepSeconds:    1,
+				MinimumDurationSeconds: 4,
+				PricingVersion:         "official-sheet-v1",
+				Source:                 "official_price_sheet",
+			},
+		}},
+		DurationSource:           types.DurationSourceRequest,
+		RequestedDurationSeconds: 5,
+		BillableDurationSeconds:  5,
+		DurationBilling: &types.DurationBillingBreakdown{
+			Scenario:              types.DurationScenarioWithVideo,
+			Resolution:            "720p",
+			OutputSeconds:         5,
+			BillableOutputSeconds: 5,
+			InputVideoDurationMS:  15000,
+			OutputPricePerSecond:  "0.4",
+			OutputCharge:          "2",
+			TotalCharge:           "2",
+		},
+	}
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, 0.4, other["duration_price"])
+	assert.Equal(t, types.DurationScenarioWithVideo, other["duration_pricing_scenario"])
+	assert.Equal(t, "720p", other["duration_pricing_resolution"])
+	assert.Equal(t, "0.4", other["output_price_per_second"])
+	assert.Equal(t, "2", other["output_duration_charge"])
+	assert.Equal(t, "2", other["duration_total_charge"])
+	assert.Equal(t, int64(15000), other["input_video_duration_ms"])
+	assert.NotContains(t, other, "input_video_charge")
+	assert.NotContains(t, other, "seedance_price_matrix")
+}
+
 func TestLogTaskConsumptionIncludesDurationSnapshot(t *testing.T) {
 	truncate(t)
 	const userID, channelID, quota = 41, 41, 750_000

@@ -37,6 +37,7 @@ import {
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { TaskAuditDataDialog } from '../dialogs/task-audit-data-dialog'
+import { ModelBadge } from '../model-badge'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,
@@ -122,6 +123,18 @@ function TaskAuditDataCell({ data, title }: { data: unknown; title: string }) {
 
 export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   const { t } = useTranslation()
+  const requestModelColumn: ColumnDef<TaskLog> = {
+    accessorKey: 'request_model',
+    header: t('Request Model'),
+    cell: ({ row }) => {
+      const requestModel = row.original.request_model
+      if (!requestModel) {
+        return <span className='text-muted-foreground/60 text-xs'>-</span>
+      }
+      return <ModelBadge modelName={requestModel} />
+    },
+    size: 180,
+  }
   const requestDataColumn: ColumnDef<TaskLog> = {
     accessorKey: 'user_request_data',
     header: t('Request Data'),
@@ -225,32 +238,33 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           )
         },
       },
+      requestModelColumn,
       requestDataColumn,
       {
         accessorKey: 'upstream_response_data',
-        header: t('Upstream Response Data'),
+        header: t('Upstream Response (Create Task)'),
         cell: ({ row }) => (
           <TaskAuditDataCell
             data={row.original.upstream_response_data}
-            title='Upstream Response Data'
+            title='Upstream Response (Create Task)'
           />
         ),
         size: 180,
       },
       {
         accessorKey: 'user_response_data',
-        header: t('User Response Data'),
+        header: t('Task Details'),
         cell: ({ row }) => (
           <TaskAuditDataCell
             data={row.original.user_response_data}
-            title='User Response Data'
+            title='Task Details'
           />
         ),
         size: 180,
       }
     )
   } else {
-    columns.push(requestDataColumn)
+    columns.push(requestModelColumn, requestDataColumn)
   }
 
   columns.push(

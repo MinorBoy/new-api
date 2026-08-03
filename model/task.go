@@ -133,31 +133,33 @@ const (
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	BillingMode              string               `json:"billing_mode,omitempty"`
-	DurationPrice            *types.DurationPrice `json:"duration_price,omitempty"`
-	DurationSource           string               `json:"duration_source,omitempty"`
-	RequestedDurationSeconds int                  `json:"requested_duration_seconds,omitempty"`
-	BillableDurationSeconds  int                  `json:"billable_duration_seconds,omitempty"`
-	ModelPrice               float64              `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio               float64              `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio               float64              `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios              map[string]float64   `json:"other_ratios,omitempty"`      // 附加倍率（分辨率等）
-	OriginModelName          string               `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	UpstreamModelName        string               `json:"upstream_model_name,omitempty"`
-	HasVideoInput            bool                 `json:"has_video_input,omitempty"`
-	GenerateAudio            *bool                `json:"generate_audio,omitempty"`
-	Draft                    bool                 `json:"draft,omitempty"`
-	ServiceTier              string               `json:"service_tier,omitempty"`
-	Resolution               string               `json:"resolution,omitempty"`
-	BillingTokens            int                  `json:"billing_tokens,omitempty"`
-	UsageSnapshotVersion     int                  `json:"usage_snapshot_version,omitempty"`
-	UsageCompletionTokens    int                  `json:"usage_completion_tokens,omitempty"`
-	UsageTotalTokens         int                  `json:"usage_total_tokens,omitempty"`
-	InputVideoDurationMS     int64                `json:"input_video_duration_ms,omitempty"`
-	UpstreamCostMode         string               `json:"upstream_cost_mode,omitempty"`
-	PerCallBilling           bool                 `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算
-	UsageProfile             string               `json:"usage_profile,omitempty"`
-	UsageSource              string               `json:"usage_source,omitempty"`
+	BillingMode              string                          `json:"billing_mode,omitempty"`
+	DurationPrice            *types.DurationPrice            `json:"duration_price,omitempty"`
+	DurationSource           string                          `json:"duration_source,omitempty"`
+	RequestedDurationSeconds int                             `json:"requested_duration_seconds,omitempty"`
+	BillableDurationSeconds  int                             `json:"billable_duration_seconds,omitempty"`
+	DurationResolution       string                          `json:"duration_resolution,omitempty"`
+	InputVideoDurationMS     int64                           `json:"input_video_duration_ms,omitempty"`
+	DurationBilling          *types.DurationBillingBreakdown `json:"duration_billing,omitempty"`
+	ModelPrice               float64                         `json:"model_price,omitempty"`       // 模型单价
+	GroupRatio               float64                         `json:"group_ratio,omitempty"`       // 分组倍率
+	ModelRatio               float64                         `json:"model_ratio,omitempty"`       // 模型倍率
+	OtherRatios              map[string]float64              `json:"other_ratios,omitempty"`      // 附加倍率（分辨率等）
+	OriginModelName          string                          `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
+	UpstreamModelName        string                          `json:"upstream_model_name,omitempty"`
+	HasVideoInput            bool                            `json:"has_video_input,omitempty"`
+	GenerateAudio            *bool                           `json:"generate_audio,omitempty"`
+	Draft                    bool                            `json:"draft,omitempty"`
+	ServiceTier              string                          `json:"service_tier,omitempty"`
+	Resolution               string                          `json:"resolution,omitempty"`
+	BillingTokens            int                             `json:"billing_tokens,omitempty"`
+	UsageSnapshotVersion     int                             `json:"usage_snapshot_version,omitempty"`
+	UsageCompletionTokens    int                             `json:"usage_completion_tokens,omitempty"`
+	UsageTotalTokens         int                             `json:"usage_total_tokens,omitempty"`
+	UpstreamCostMode         string                          `json:"upstream_cost_mode,omitempty"`
+	PerCallBilling           bool                            `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算
+	UsageProfile             string                          `json:"usage_profile,omitempty"`
+	UsageSource              string                          `json:"usage_source,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）

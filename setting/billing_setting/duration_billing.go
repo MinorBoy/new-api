@@ -2,54 +2,21 @@ package billing_setting
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 )
 
-var defaultDurationPrice = map[string]types.DurationPrice{
-	"jimeng-video-seedance-2.0-fast-vip": {
-		Price: 0.48 / 7.3, Unit: types.DurationUnitSecond,
-		RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
-	},
-	"jimeng-video-seedance-2.0-mini": {
-		Price: 0.39 / 7.3, Unit: types.DurationUnitSecond,
-		RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
-	},
-	"jimeng-video-seedance-2.0-vip": {
-		Price: 0.62 / 7.3, Unit: types.DurationUnitSecond,
-		RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
-	},
-}
-
 func GetDurationPrice(model string) (types.DurationPrice, bool) {
-	if price, ok := billingSetting.DurationPrice.Get(model); ok {
-		return price, true
-	}
-	price, ok := defaultDurationPrice[model]
-	return price, ok
+	return billingSetting.DurationPrice.Get(model)
 }
 
 func GetDurationPriceCopy() map[string]types.DurationPrice {
-	configuredPrices := billingSetting.DurationPrice.ReadAll()
-	prices := make(map[string]types.DurationPrice, len(defaultDurationPrice)+len(configuredPrices))
-	for model, price := range defaultDurationPrice {
-		prices[model] = price
-	}
-	for model, price := range configuredPrices {
-		prices[model] = price
-	}
-	return prices
-}
-
-func GetDefaultDurationPriceMap() map[string]types.DurationPrice {
-	prices := make(map[string]types.DurationPrice, len(defaultDurationPrice))
-	for model, price := range defaultDurationPrice {
-		prices[model] = price
-	}
-	return prices
+	return billingSetting.DurationPrice.ReadAll()
 }
 
 func ValidateDurationPriceJSONString(raw string) error {
@@ -66,6 +33,27 @@ func ValidateDurationPriceJSONString(raw string) error {
 		}
 		if err := price.Validate(relaycommon.MaxTaskDurationSeconds); err != nil {
 			return fmt.Errorf("invalid duration price for %s: %w", model, err)
+		}
+	}
+	currentPrices := GetDurationPriceCopy()
+	for model, current := range currentPrices {
+		if seedancepricing.Family(model) == "" {
+			continue
+		}
+		proposed, exists := prices[model]
+		if !exists {
+			return fmt.Errorf("Seedance duration price for %s cannot be removed outside config import", model)
+		}
+		if !reflect.DeepEqual(current, proposed) {
+			return fmt.Errorf("Seedance duration price for %s must be updated through config import", model)
+		}
+	}
+	for model := range prices {
+		if seedancepricing.Family(model) == "" {
+			continue
+		}
+		if _, exists := currentPrices[model]; !exists {
+			return fmt.Errorf("Seedance duration price for %s must be created through config import", model)
 		}
 	}
 	return nil

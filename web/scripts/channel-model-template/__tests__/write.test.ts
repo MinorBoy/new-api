@@ -150,6 +150,45 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
     assert.equal(converted.document.template_version, '1')
     assert.equal(converted.hasFailures, false)
     assert.equal(converted.document.entities.channels.length, 1)
+    assert.deepEqual(
+      converted.document.entities.sale_proposals.map((proposal) => ({
+        businessID: proposal.business_id,
+        billingMode: proposal.billing_mode,
+        currency: proposal.currency,
+        scenario: proposal.scenario,
+        durationPrice: proposal.duration_price,
+      })),
+      [
+        {
+          businessID: 'SALE-SEEDANCE-2-0-720P-NOV',
+          billingMode: 'per_duration',
+          currency: 'USD',
+          scenario: 'no_video',
+          durationPrice: {
+            price: '0.136164383561643822',
+            unit: 'second',
+            rounding_step_seconds: 1,
+            minimum_duration_seconds: 0,
+            pricing_version: 'official-sheet-v1',
+            source: 'SRC-OFFICIAL-SEEDANCE-2-0!5',
+          },
+        },
+        {
+          businessID: 'SALE-SEEDANCE-2-0-720P-VID',
+          billingMode: 'per_duration',
+          currency: 'USD',
+          scenario: 'with_video',
+          durationPrice: {
+            price: '0.082876712328767115',
+            unit: 'second',
+            rounding_step_seconds: 1,
+            minimum_duration_seconds: 0,
+            pricing_version: 'official-sheet-v1',
+            source: 'SRC-OFFICIAL-SEEDANCE-2-0!6',
+          },
+        },
+      ]
+    )
     const reader = new ZipReader(
       new Uint8ArrayReader(await fs.readFile(outputPath))
     )

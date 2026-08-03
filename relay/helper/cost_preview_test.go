@@ -127,6 +127,59 @@ func TestCostPreviewUserBillingQuotaSupportsTextDurationAndExpressionModes(t *te
 	}
 }
 
+func TestCostPreviewUserBillingQuotaUsesSeedanceScenarioFacts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedGroups := ratio_setting.GroupRatio2JSONString()
+	savedModes := billing_setting.GetBillingModeCopy()
+	savedExpressions := billing_setting.GetBillingExprCopy()
+	savedDurations := billing_setting.GetDurationPriceCopy()
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedGroups))
+		restoreCostPreviewBillingConfig(t, savedModes, savedExpressions, savedDurations)
+	})
+
+	groups, err := common.Marshal(map[string]float64{"preview-group": 2})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(groups)))
+	configureCostPreviewBilling(t,
+		map[string]string{"doubao-seedance-2-0-260128": billing_setting.BillingModePerDuration},
+		nil,
+		map[string]types.DurationPrice{
+			"doubao-seedance-2-0-260128": {
+				Scenarios: map[string]types.DurationPriceScenario{
+					"720p:with_video": {
+						OutputPrice: 0.2, Unit: types.DurationUnitSecond,
+						RoundingStepSeconds: 1, PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
+					},
+				},
+			},
+		},
+	)
+
+	var input dto.CostPreviewRequest
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"origin_model":"doubao-seedance-2-0-260128",
+		"user_group":"preview-group",
+		"duration_seconds":6,
+		"resolution":"720p",
+		"has_video_input":true,
+		"input_video_duration_ms":5000
+	}`, &input))
+	input.RelayMode = relayconstant.RelayModeVideoSubmit
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	quota, snapshot, err := PreviewUserBillingQuota(ctx, input)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1_200_000), quota)
+	assert.Equal(t, "500000", snapshot)
+}
+
 func configureCostPreviewBilling(t *testing.T, modes map[string]string, expressions map[string]string, durations map[string]types.DurationPrice) {
 	t.Helper()
 	modesJSON, err := common.Marshal(modes)

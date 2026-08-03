@@ -67,7 +67,7 @@ func TestTaskDurationQuota(t *testing.T) {
 			}
 			priceData.ReplaceOtherRatios(test.ratios)
 
-			quota, billable, clamp, err := taskDurationQuota(priceData, test.requested)
+			quota, billable, clamp, err := taskDurationQuota(&priceData, test.requested)
 
 			require.NoError(t, err)
 			assert.Equal(t, test.wantQuota, quota)
@@ -77,6 +77,63 @@ func TestTaskDurationQuota(t *testing.T) {
 	}
 }
 
+func TestTaskDurationQuotaUsesExplicitScenarioCharges(t *testing.T) {
+	var priceData types.PriceData
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"BillingMode":"per_duration",
+		"DurationPrice":{
+			"price":1,
+			"unit":"second",
+			"rounding_step_seconds":1,
+			"scenarios":{
+				"720p:with_video":{
+					"output_price":0.4,
+					"unit":"second",
+					"rounding_step_seconds":1,
+					"pricing_version":"sd-2026-08-03",
+					"source":"sd官价!7"
+				}
+			}
+		},
+		"duration_resolution":"720p",
+		"has_video_input":true,
+		"input_video_duration_ms":2000,
+		"GroupRatioInfo":{"GroupRatio":1.5}
+	}`, &priceData))
+	quota, billable, clamp, err := taskDurationQuota(&priceData, 4)
+
+	require.NoError(t, err)
+	assert.Equal(t, 4, billable)
+	assert.Equal(t, 1_200_000, quota)
+	assert.Nil(t, clamp)
+	encoded, marshalErr := common.Marshal(priceData)
+	require.NoError(t, marshalErr)
+	assert.Contains(t, string(encoded), `"output_charge":"1.6"`)
+	assert.Contains(t, string(encoded), `"group_ratio":"1.5"`)
+	assert.Contains(t, string(encoded), `"final_charge":"2.4"`)
+}
+
+func TestTaskDurationQuotaRejectsMissingExplicitScenarioPrice(t *testing.T) {
+	var priceData types.PriceData
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"BillingMode":"per_duration",
+		"DurationPrice":{
+			"price":1,
+			"unit":"second",
+			"rounding_step_seconds":1,
+			"scenarios":{
+				"720p:no_video":{"output_price":0.4,"unit":"second","rounding_step_seconds":1,"pricing_version":"official-sheet-v1","source":"official_price_sheet"}
+			}
+		},
+		"duration_resolution":"1080p"
+	}`, &priceData))
+
+	_, _, _, err := taskDurationQuota(&priceData, 4)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "explicit duration pricing scenario")
+}
+
 func TestTaskDurationQuotaRejectsReservedDurationRatios(t *testing.T) {
 	rule := types.DurationPrice{Price: 0.1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1, MinimumDurationSeconds: 4}
 	for _, key := range []string{"seconds", "duration"} {
@@ -84,7 +141,7 @@ func TestTaskDurationQuotaRejectsReservedDurationRatios(t *testing.T) {
 			priceData := types.PriceData{DurationPrice: &rule, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}}
 			priceData.ReplaceOtherRatios(map[string]float64{key: 1})
 
-			_, _, _, err := taskDurationQuota(priceData, 6)
+			_, _, _, err := taskDurationQuota(&priceData, 6)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "reserved duration ratio")
@@ -96,7 +153,7 @@ func TestTaskDurationQuotaSaturatesFinitePrice(t *testing.T) {
 	rule := types.DurationPrice{Price: math.MaxFloat64, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1, MinimumDurationSeconds: 4}
 	priceData := types.PriceData{DurationPrice: &rule, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}}
 
-	quota, billable, clamp, err := taskDurationQuota(priceData, 6)
+	quota, billable, clamp, err := taskDurationQuota(&priceData, 6)
 
 	require.NoError(t, err)
 	assert.Equal(t, common.MaxQuota, quota)
@@ -126,7 +183,7 @@ func TestTaskDurationQuotaPreservesFractionalQuotaPerUnit(t *testing.T) {
 		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 	}
 
-	quota, _, clamp, err := taskDurationQuota(priceData, 1)
+	quota, _, clamp, err := taskDurationQuota(&priceData, 1)
 
 	require.NoError(t, err)
 	assert.Equal(t, 3, quota)

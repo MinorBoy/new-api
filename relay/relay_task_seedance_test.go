@@ -68,39 +68,46 @@ func configureSeedanceDurationPricing(t *testing.T, prices map[string]types.Dura
 	}))
 }
 
-func TestSeedanceDurationPricingUsesBasePriceFor720pText(t *testing.T) {
-	price := types.DurationPrice{Price: 1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1}
+func TestSeedanceDurationPricingUsesExplicitOutputPriceFor720pText(t *testing.T) {
+	price := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
+		"720p:no_video": {
+			OutputPrice: 0.4, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1,
+			PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
+		},
+	}}
 	priceData := types.PriceData{
-		BillingMode:    billing_setting.BillingModePerDuration,
-		DurationPrice:  &price,
-		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		BillingMode:        billing_setting.BillingModePerDuration,
+		DurationPrice:      &price,
+		DurationResolution: "720p",
+		GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
 	}
 
-	require.NoError(t, applySeedanceDurationPricing(&priceData, modelrouting.Seedance20Mini, "720p", false, 0, 5))
-	assert.InDelta(t, 1, priceData.OtherRatios()["seedance_price_matrix"], 1e-9)
-	quota, _, _, err := taskDurationQuota(priceData, 5)
+	quota, _, _, err := taskDurationQuota(&priceData, 5)
 	require.NoError(t, err)
-	assert.Equal(t, 2_500_000, quota)
+	assert.Equal(t, 1_000_000, quota)
 }
 
-func TestSeedanceDurationPricingReplacesLegacyAdapterRatiosForReferenceVideo(t *testing.T) {
-	price := types.DurationPrice{Price: 1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1}
+func TestSeedanceDurationPricingIgnoresReferenceVideoDurationForSale(t *testing.T) {
+	price := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
+		"720p:with_video": {
+			OutputPrice: 0.4,
+			Unit:        types.DurationUnitSecond, RoundingStepSeconds: 1,
+			PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
+		},
+	}}
 	priceData := types.PriceData{
-		BillingMode:    billing_setting.BillingModePerDuration,
-		DurationPrice:  &price,
-		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		BillingMode:          billing_setting.BillingModePerDuration,
+		DurationPrice:        &price,
+		DurationResolution:   "720p",
+		HasVideoInput:        true,
+		InputVideoDurationMS: 5000,
+		GroupRatioInfo:       types.GroupRatioInfo{GroupRatio: 1},
 	}
-	priceData.AddOtherRatio("resolution", 2.5)
-	priceData.AddOtherRatio("video_input", 14.0/23.0)
-
-	require.NoError(t, applySeedanceDurationPricing(&priceData, modelrouting.Seedance20Mini, "720p", true, 5000, 5))
-	ratios := priceData.OtherRatios()
-	assert.NotContains(t, ratios, "resolution")
-	assert.NotContains(t, ratios, "video_input")
-	assert.InDelta(t, 28.0/23.0, ratios["seedance_price_matrix"], 1e-9)
-	quota, _, _, err := taskDurationQuota(priceData, 5)
+	quota, _, _, err := taskDurationQuota(&priceData, 5)
 	require.NoError(t, err)
-	assert.Equal(t, 3_043_478, quota)
+	assert.Equal(t, 1_000_000, quota)
+	assert.NotContains(t, priceData.OtherRatios(), "seedance_price_matrix")
+	assert.NotContains(t, priceData.OtherRatios(), "video_input")
 }
 
 func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
@@ -111,12 +118,28 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	const upstreamModel = "jmg-video-seedance-2.0-vip"
 	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
 		originModel: {
-			Price: 0.1, Unit: types.DurationUnitSecond,
-			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+			Scenarios: map[string]types.DurationPriceScenario{
+				"720p:no_video": {
+					OutputPrice:            0.1,
+					Unit:                   types.DurationUnitSecond,
+					RoundingStepSeconds:    1,
+					MinimumDurationSeconds: 4,
+					PricingVersion:         "official-sheet-v1",
+					Source:                 "official_price_sheet",
+				},
+			},
 		},
 		upstreamModel: {
-			Price: 9, Unit: types.DurationUnitSecond,
-			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+			Scenarios: map[string]types.DurationPriceScenario{
+				"720p:no_video": {
+					OutputPrice:            9,
+					Unit:                   types.DurationUnitSecond,
+					RoundingStepSeconds:    1,
+					MinimumDurationSeconds: 4,
+					PricingVersion:         "official-sheet-v1",
+					Source:                 "official_price_sheet",
+				},
+			},
 		},
 	})
 
@@ -176,6 +199,60 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	assert.Equal(t, upstreamModel, upstreamRequest["model"])
 }
 
+func TestDimensioMappedSeedanceRejectsLegacyFlatDurationPrice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+
+	const originModel = "client-seedance-vip"
+	const upstreamModel = "jmg-video-seedance-2.0-vip"
+	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
+		originModel: {
+			Price:                  0.1,
+			Unit:                   types.DurationUnitSecond,
+			RoundingStepSeconds:    1,
+			MinimumDurationSeconds: 4,
+		},
+	})
+
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1,"task_id":"dim-upstream","status":"pending"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", bytes.NewBufferString(`{
+		"model":"client-seedance-vip",
+		"content":[{"type":"text","text":"generate a video"}],
+		"duration":6,
+		"resolution":"720p"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeDimensio)
+	c.Set(string(constant.ContextKeyChannelBaseUrl), server.URL)
+	c.Set(string(constant.ContextKeyChannelKey), "mock-key")
+	c.Set("model_mapping", `{"client-seedance-vip":"jmg-video-seedance-2.0-vip"}`)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: originModel,
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
+		Billing:         seedanceTaskTestBilling{},
+	}
+
+	result, taskErr := RelayTaskSubmit(c, info, nil)
+
+	require.Nil(t, result)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "seedance_sale_price_not_configured", taskErr.Code)
+	assert.Zero(t, upstreamCalls.Load())
+}
+
 func TestTaskModel2DtoHidesCapabilityRouteFromUsers(t *testing.T) {
 	task := &model.Task{
 		TaskID:     "task-routing-private",
@@ -224,12 +301,17 @@ func TestTaskModel2DtoExposesAuditPayloadsToAdminsOnly(t *testing.T) {
 
 func TestTaskModel2DtoIncludesInboundRequestPath(t *testing.T) {
 	task := &model.Task{
-		Properties: model.Properties{RequestPath: "/v1/video/generations"},
+		Properties: model.Properties{
+			OriginModelName: "client-video-model",
+			RequestPath:     "/v1/video/generations",
+		},
 	}
 
 	taskDTO := TaskModel2Dto(task, true)
 
 	assert.Equal(t, "/v1/video/generations", taskDTO.RequestPath)
+	assert.Equal(t, "client-video-model", taskDTO.RequestModel)
+	assert.Equal(t, "client-video-model", TaskModel2Dto(task, false).RequestModel)
 }
 
 func TestTaskModel2DtoHidesMegaByAIDataWithoutRoutingFromUsers(t *testing.T) {
@@ -259,8 +341,16 @@ func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {
 	const originModel = "client-seedance-overflow"
 	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
 		originModel: {
-			Price: math.MaxFloat64, Unit: types.DurationUnitSecond,
-			RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
+			Scenarios: map[string]types.DurationPriceScenario{
+				"720p:no_video": {
+					OutputPrice:            math.MaxFloat64,
+					Unit:                   types.DurationUnitSecond,
+					RoundingStepSeconds:    1,
+					MinimumDurationSeconds: 4,
+					PricingVersion:         "official-sheet-v1",
+					Source:                 "official_price_sheet",
+				},
+			},
 		},
 	})
 

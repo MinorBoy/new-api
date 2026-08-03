@@ -40,6 +40,7 @@ import {
 } from '@/components/drawer-layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import {
   Form,
@@ -328,6 +329,9 @@ function buildPreviewRequest(
   samples: {
     userGroup: string
     duration: string
+    resolution: string
+    hasVideoInput: boolean
+    inputVideoDuration: string
     inputTokens: string
     outputTokens: string
   }
@@ -349,6 +353,25 @@ function buildPreviewRequest(
     const duration = parseSampleInteger(samples.duration, 'Duration')
     if (duration === 0) throw new Error('Duration must be greater than zero')
     request.duration_seconds = duration
+    if (taskOnly) {
+      request.resolution = samples.resolution.trim().toLowerCase()
+      if (!request.resolution) throw new Error('Resolution is required')
+      request.has_video_input = samples.hasVideoInput
+      if (samples.hasVideoInput) {
+        const inputVideoSeconds = parseSampleInteger(
+          samples.inputVideoDuration,
+          'Reference video duration'
+        )
+        if (inputVideoSeconds === 0) {
+          throw new Error('Reference video duration must be greater than zero')
+        }
+        const inputVideoDurationMS = inputVideoSeconds * 1000
+        if (!Number.isSafeInteger(inputVideoDurationMS)) {
+          throw new Error('Reference video duration is too large')
+        }
+        request.input_video_duration_ms = inputVideoDurationMS
+      }
+    }
     request.meter = {
       source: values.meter_source,
       duration_seconds: samples.duration,
@@ -400,6 +423,9 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
     props.channel.group.split(',')[0] || 'default'
   )
   const [duration, setDuration] = useState('10')
+  const [resolution, setResolution] = useState('720p')
+  const [hasVideoInput, setHasVideoInput] = useState(false)
+  const [inputVideoDuration, setInputVideoDuration] = useState('5')
   const [inputTokens, setInputTokens] = useState('1000')
   const [outputTokens, setOutputTokens] = useState('500')
 
@@ -459,6 +485,9 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
         buildPreviewRequest(props, values, {
           userGroup,
           duration,
+          resolution,
+          hasVideoInput,
+          inputVideoDuration,
           inputTokens,
           outputTokens,
         })
@@ -754,17 +783,64 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
                   />
                 </Field>
                 {costMode === 'per_duration' ? (
-                  <Field>
-                    <FieldLabel htmlFor='cost-preview-duration'>
-                      {t('Duration seconds')}
-                    </FieldLabel>
-                    <Input
-                      id='cost-preview-duration'
-                      inputMode='numeric'
-                      value={duration}
-                      onChange={(event) => setDuration(event.target.value)}
-                    />
-                  </Field>
+                  <>
+                    <Field>
+                      <FieldLabel htmlFor='cost-preview-duration'>
+                        {t('Duration seconds')}
+                      </FieldLabel>
+                      <Input
+                        id='cost-preview-duration'
+                        inputMode='numeric'
+                        value={duration}
+                        onChange={(event) => setDuration(event.target.value)}
+                      />
+                    </Field>
+                    {taskOnly ? (
+                      <>
+                        <Field>
+                          <FieldLabel htmlFor='cost-preview-resolution'>
+                            {t('Resolution')}
+                          </FieldLabel>
+                          <Input
+                            id='cost-preview-resolution'
+                            value={resolution}
+                            onChange={(event) =>
+                              setResolution(event.target.value)
+                            }
+                          />
+                        </Field>
+                        <Field>
+                          <div className='flex min-h-9 items-center gap-2'>
+                            <Checkbox
+                              id='cost-preview-has-video-input'
+                              checked={hasVideoInput}
+                              onCheckedChange={(checked) =>
+                                setHasVideoInput(checked === true)
+                              }
+                            />
+                            <FieldLabel htmlFor='cost-preview-has-video-input'>
+                              {t('Reference video input')}
+                            </FieldLabel>
+                          </div>
+                        </Field>
+                        {hasVideoInput ? (
+                          <Field>
+                            <FieldLabel htmlFor='cost-preview-input-video-duration'>
+                              {t('Reference video duration seconds')}
+                            </FieldLabel>
+                            <Input
+                              id='cost-preview-input-video-duration'
+                              inputMode='numeric'
+                              value={inputVideoDuration}
+                              onChange={(event) =>
+                                setInputVideoDuration(event.target.value)
+                              }
+                            />
+                          </Field>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </>
                 ) : null}
                 {costMode === 'per_token' ? (
                   <>

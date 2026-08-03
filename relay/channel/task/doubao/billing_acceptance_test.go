@@ -2,7 +2,6 @@ package doubao
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
@@ -15,7 +14,6 @@ type seedanceAcceptanceModel struct {
 	ID            string
 	Resolutions   []string
 	Durations     []int
-	BaseRMB       float64
 	SupportsVideo bool
 	ImageRole     string
 }
@@ -26,10 +24,10 @@ type seedanceAcceptanceVideoProfile struct {
 
 func seedanceAcceptanceModels() []seedanceAcceptanceModel {
 	return []seedanceAcceptanceModel{
-		{"doubao-seedance-2-0-260128", []string{"480p", "720p", "1080p", "4k"}, integerRange(4, 15), 46, true, "reference_image"},
-		{"doubao-seedance-2-0-fast-260128", []string{"480p", "720p"}, integerRange(4, 15), 37, true, "reference_image"},
-		{"doubao-seedance-2-0-mini-260615", []string{"480p", "720p"}, integerRange(4, 15), 23, true, "reference_image"},
-		{"doubao-seedance-1-5-pro-251215", []string{"480p", "720p", "1080p"}, integerRange(4, 12), 8, false, "first_frame"},
+		{"doubao-seedance-2-0-260128", []string{"480p", "720p", "1080p", "4k"}, integerRange(4, 15), true, "reference_image"},
+		{"doubao-seedance-2-0-fast-260128", []string{"480p", "720p"}, integerRange(4, 15), true, "reference_image"},
+		{"doubao-seedance-2-0-mini-260615", []string{"480p", "720p"}, integerRange(4, 15), true, "reference_image"},
+		{"doubao-seedance-1-5-pro-251215", []string{"480p", "720p", "1080p"}, integerRange(4, 12), false, "first_frame"},
 	}
 }
 
@@ -93,37 +91,6 @@ func TestSeedanceBillingAcceptanceGeneratorCounts(t *testing.T) {
 	assert.Equal(t, 60348, seedanceAcceptanceExplicitCaseCount())
 }
 
-func TestSeedanceBillingAcceptanceOfficialPriceOracle(t *testing.T) {
-	tests := []struct {
-		model      string
-		resolution string
-		hasVideo   bool
-		want       float64
-	}{
-		{"doubao-seedance-2-0-260128", "480p", false, 46},
-		{"doubao-seedance-2-0-260128", "480p", true, 28},
-		{"doubao-seedance-2-0-260128", "720p", false, 46},
-		{"doubao-seedance-2-0-260128", "720p", true, 28},
-		{"doubao-seedance-2-0-260128", "1080p", false, 51},
-		{"doubao-seedance-2-0-260128", "1080p", true, 31},
-		{"doubao-seedance-2-0-260128", "4k", false, 26},
-		{"doubao-seedance-2-0-260128", "4k", true, 16},
-		{"doubao-seedance-2-0-fast-260128", "480p", false, 37},
-		{"doubao-seedance-2-0-fast-260128", "480p", true, 22},
-		{"doubao-seedance-2-0-fast-260128", "720p", false, 37},
-		{"doubao-seedance-2-0-fast-260128", "720p", true, 22},
-		{"doubao-seedance-2-0-mini-260615", "480p", false, 23},
-		{"doubao-seedance-2-0-mini-260615", "480p", true, 14},
-		{"doubao-seedance-2-0-mini-260615", "720p", false, 23},
-		{"doubao-seedance-2-0-mini-260615", "720p", true, 14},
-	}
-
-	for _, tt := range tests {
-		caseID := fmt.Sprintf("model=%s/resolution=%s/has_video=%t", tt.model, tt.resolution, tt.hasVideo)
-		assert.Equal(t, tt.want, seedanceAcceptanceOfficialUnitPrice(t, tt.model, tt.resolution, tt.hasVideo), caseID)
-	}
-}
-
 func TestSeedanceBillingAcceptanceExplicitMatrix(t *testing.T) {
 	models := seedanceAcceptanceModels()
 	profiles := seedanceAcceptanceVideoProfiles()
@@ -137,9 +104,8 @@ func TestSeedanceBillingAcceptanceExplicitMatrix(t *testing.T) {
 		for _, resolution := range model.Resolutions {
 			for _, duration := range model.Durations {
 				for profileIndex := -1; profileIndex < len(profiles); profileIndex++ {
-					hasVideo := profileIndex >= 0
 					videoDurations := []int(nil)
-					if hasVideo {
+					if profileIndex >= 0 {
 						videoDurations = profiles[profileIndex].Durations
 					}
 					for _, image := range boolValues {
@@ -173,13 +139,7 @@ func TestSeedanceBillingAcceptanceExplicitMatrix(t *testing.T) {
 						}
 
 						require.NoError(t, validateSeedanceNativeFields(request, facts, false), caseID)
-						ratio, ok := GetVideoBillingRatio(model.ID, resolution, hasVideo)
-						require.True(t, ok, caseID)
-						officialUnitPrice := seedanceAcceptanceOfficialUnitPrice(t, model.ID, resolution, hasVideo)
-						configuredUnitPrice := seedanceAcceptanceUnitPrice(t, model.ID, resolution, hasVideo)
-						assert.Equal(t, officialUnitPrice, configuredUnitPrice, caseID)
-						wantRatio := officialUnitPrice / model.BaseRMB
-						assert.InDelta(t, wantRatio, ratio, 1e-12, caseID)
+						assert.True(t, seedancepricing.SupportsResolution(model.ID, resolution), caseID)
 						executed++
 					}
 				}
@@ -432,64 +392,4 @@ func TestSeedanceBillingAcceptanceInvalidMatrix(t *testing.T) {
 		require.NotEmpty(t, err.Error(), testCase.id)
 	}
 	require.Len(t, seen, 36)
-}
-
-func seedanceAcceptanceOfficialUnitPrice(t *testing.T, model, resolution string, hasVideo bool) float64 {
-	t.Helper()
-
-	switch model {
-	case "doubao-seedance-2-0-260128":
-		switch resolution {
-		case "480p", "720p":
-			if hasVideo {
-				return 28
-			}
-			return 46
-		case "1080p":
-			if hasVideo {
-				return 31
-			}
-			return 51
-		case "4k":
-			if hasVideo {
-				return 16
-			}
-			return 26
-		}
-	case "doubao-seedance-2-0-fast-260128":
-		if resolution == "480p" || resolution == "720p" {
-			if hasVideo {
-				return 22
-			}
-			return 37
-		}
-	case "doubao-seedance-2-0-mini-260615":
-		if resolution == "480p" || resolution == "720p" {
-			if hasVideo {
-				return 14
-			}
-			return 23
-		}
-	}
-
-	require.FailNow(t, "unknown official Seedance unit price", "model=%s resolution=%s has_video=%t", model, resolution, hasVideo)
-	return 0
-}
-
-func seedanceAcceptanceUnitPrice(t *testing.T, model, resolution string, hasVideo bool) float64 {
-	t.Helper()
-
-	family := seedancePricingFamily(model)
-	require.NotEmpty(t, family, "unknown Seedance pricing family for model=%s", model)
-	resolution = strings.ToLower(strings.TrimSpace(resolution))
-	switch resolution {
-	case "480p", "720p", "1080p", "4k":
-	default:
-		require.FailNow(t, "unknown Seedance price resolution", "model=%s resolution=%s", model, resolution)
-	}
-	// Delegate to the shared seedancepricing table so the acceptance oracle asserts
-	// the Doubao adapter and the profit predictor read the same official unit price.
-	price, ok := seedancepricing.OfficialUnitPrice(model, resolution, hasVideo)
-	require.True(t, ok, "missing Seedance price for model=%s resolution=%s has_video=%t", model, resolution, hasVideo)
-	return price
 }

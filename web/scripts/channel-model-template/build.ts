@@ -493,7 +493,7 @@ function buildSales(
         clientModel: sku.model,
         skuCode: sku.businessId,
         scenario,
-        billingMode: 'per_token',
+        billingMode: 'per_duration',
         currency: rules.defaults.currency,
         nativePerMillion,
         outputWidth: sku.outputWidth,
@@ -508,7 +508,7 @@ function buildSales(
         sourceId,
         sourceSheet: official.location.sheet,
         sourceRow: official.location.row,
-        note: '由 sd官价生成；USD 为预览值。',
+        note: '由官方售价工作表生成；USD/基准秒为显式场景输出单价，参考视频时长不参与用户售价。',
       })
     }
   }

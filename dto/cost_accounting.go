@@ -64,6 +64,9 @@ type CostPreviewRequest struct {
 	Usage                  *relaydto.Usage             `json:"usage,omitempty"`
 	TokenMeta              *relaytypes.TokenCountMeta  `json:"token_meta,omitempty"`
 	DurationSeconds        *int                        `json:"duration_seconds,omitempty"`
+	Resolution             string                      `json:"resolution,omitempty"`
+	HasVideoInput          bool                        `json:"has_video_input,omitempty"`
+	InputVideoDurationMS   int64                       `json:"input_video_duration_ms,omitempty"`
 	ExpressionRequestInput *CostExpressionRequestInput `json:"expression_request_input,omitempty"`
 	CostMode               types.CostMode              `json:"cost_mode" binding:"required"`
 	Config                 types.CostRuleConfigV1      `json:"config" binding:"required"`

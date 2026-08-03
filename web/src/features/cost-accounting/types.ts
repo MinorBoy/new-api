@@ -261,6 +261,9 @@ export interface CostPreviewRequest {
   usage?: CostPreviewUsage
   token_meta?: CostPreviewTokenMeta
   duration_seconds?: number
+  resolution?: string
+  has_video_input?: boolean
+  input_video_duration_ms?: number
   expression_request_input?: CostExpressionRequestInput
   cost_mode: CostMode
   config: CostRuleConfigV1

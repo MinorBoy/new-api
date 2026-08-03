@@ -126,7 +126,7 @@ function requireFullRecalculation(xml: string): string {
     )
   }
   return xml.replace(calcProperties, (_match, attributes: string) => {
-    const withoutRecalcFlags = attributes.replace(
+    const withoutRecalcFlags = attributes.replaceAll(
       /\s+(?:fullCalcOnLoad|forceFullCalc)="[^"]*"/giu,
       ''
     )
@@ -399,9 +399,11 @@ function issueRows(issues: Issue[]): CellValue[][] {
 function setFormula(
   sheet: ExcelJS.Worksheet,
   address: string,
-  formula: string
+  formula: string,
+  result?: number | string
 ): void {
-  sheet.getCell(address).value = { formula }
+  sheet.getCell(address).value =
+    result === undefined ? { formula } : { formula, result }
 }
 
 function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
@@ -428,14 +430,25 @@ function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
       `IF(A${row}="","",IF(COUNTIF($A$5:$A$504,A${row})>1,"错误:重复SKU代码",IF(OR(B${row}="",C${row}="",D${row}="",E${row}<=0,F${row}<=0,G${row}<=0,H${row}<=0,I${row}<H${row},N${row}="",O${row}=""),"错误:必填项","OK")))`
     )
   }
-  for (let row = 5; row < data.sales.length + 5; row += 1) {
+  for (const [index, sale] of data.sales.entries()) {
+    const row = index + 5
     setFormula(
       sales,
       `K${row}`,
       `IFERROR(H${row}*I${row}*J${row}/'参数'!$B$7,"")`
     )
-    setFormula(sales, `M${row}`, `IFERROR(G${row}*'参数'!$B$6,"")`)
-    setFormula(sales, `N${row}`, `IFERROR(L${row}*'参数'!$B$6,"")`)
+    setFormula(
+      sales,
+      `M${row}`,
+      `IFERROR(G${row}*'参数'!$B$6,"")`,
+      sale.usdPerMillion
+    )
+    setFormula(
+      sales,
+      `N${row}`,
+      `IFERROR(L${row}*'参数'!$B$6,"")`,
+      sale.usdPerSecond
+    )
     setFormula(
       sales,
       `T${row}`,
@@ -588,7 +601,25 @@ export async function writeTemplateWorkbook(
   const parameters = workbook.getWorksheet('参数')
   const instructions = workbook.getWorksheet('使用说明')
   const checks = workbook.getWorksheet('校验')
-  if (!parameters || !instructions || !checks) {
+  const channels = workbook.getWorksheet('渠道')
+  const skus = workbook.getWorksheet('模型SKU')
+  const sales = workbook.getWorksheet('官方售价')
+  const costs = workbook.getWorksheet('渠道成本')
+  const mappings = workbook.getWorksheet('模型映射')
+  const profits = workbook.getWorksheet('利润测算')
+  const sources = workbook.getWorksheet('来源')
+  if (
+    !parameters ||
+    !instructions ||
+    !checks ||
+    !channels ||
+    !skus ||
+    !sales ||
+    !costs ||
+    !mappings ||
+    !profits ||
+    !sources
+  ) {
     throw new Error('V1 output sheets are unavailable')
   }
   parameters.getCell('B5').value = Number(
@@ -607,41 +638,13 @@ export async function writeTemplateWorkbook(
   instructions.getCell('B35').value = input.data.mappings.length
   instructions.getCell('B36').value = input.data.profits.length
 
-  writeRows(
-    workbook.getWorksheet('渠道')!,
-    V1_HEADERS.渠道,
-    channelRows(input.data)
-  )
-  writeRows(
-    workbook.getWorksheet('模型SKU')!,
-    V1_HEADERS.模型SKU,
-    skuRows(input.data)
-  )
-  writeRows(
-    workbook.getWorksheet('官方售价')!,
-    V1_HEADERS.官方售价,
-    saleRows(input.data)
-  )
-  writeRows(
-    workbook.getWorksheet('渠道成本')!,
-    V1_HEADERS.渠道成本,
-    costRows(input.data)
-  )
-  writeRows(
-    workbook.getWorksheet('模型映射')!,
-    V1_HEADERS.模型映射,
-    mappingRows(input.data)
-  )
-  writeRows(
-    workbook.getWorksheet('利润测算')!,
-    V1_HEADERS.利润测算,
-    profitRows(input.data)
-  )
-  writeRows(
-    workbook.getWorksheet('来源')!,
-    V1_HEADERS.来源,
-    sourceRows(input.data)
-  )
+  writeRows(channels, V1_HEADERS.渠道, channelRows(input.data))
+  writeRows(skus, V1_HEADERS.模型SKU, skuRows(input.data))
+  writeRows(sales, V1_HEADERS.官方售价, saleRows(input.data))
+  writeRows(costs, V1_HEADERS.渠道成本, costRows(input.data))
+  writeRows(mappings, V1_HEADERS.模型映射, mappingRows(input.data))
+  writeRows(profits, V1_HEADERS.利润测算, profitRows(input.data))
+  writeRows(sources, V1_HEADERS.来源, sourceRows(input.data))
   writeRows(checks, V1_HEADERS.校验, issueRows(issues))
   writeFormulas(workbook, input.data)
   workbook.calcProperties.fullCalcOnLoad = true

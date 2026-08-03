@@ -11,6 +11,7 @@ import (
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -54,6 +55,44 @@ func TestModelPriceHelperPerCallBuildsDurationPriceData(t *testing.T) {
 	assert.False(t, priceData.UsePrice)
 	assert.Equal(t, types.DurationSourceRequest, priceData.DurationSource)
 	assert.True(t, HasModelBillingConfig("duration-alias"))
+}
+
+func TestModelPriceHelperPerCallDoesNotTreatPricedScenarioAsFree(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	quotaSetting := operation_setting.GetQuotaSetting()
+	previousFreePreConsume := quotaSetting.EnableFreeModelPreConsume
+	quotaSetting.EnableFreeModelPreConsume = false
+	t.Cleanup(func() {
+		quotaSetting.EnableFreeModelPreConsume = previousFreePreConsume
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"scenario-duration":"per_duration"}`,
+		"billing_setting.duration_price": `{"scenario-duration":{"scenarios":{"720p:no_video":{` +
+			`"output_price":0.1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,` +
+			`"pricing_version":"official-sheet-v1","source":"official_price_sheet"}}}}`,
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "scenario-duration",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+
+	priceData, err := ModelPriceHelperPerCall(ctx, info)
+
+	require.NoError(t, err)
+	assert.False(t, priceData.FreeModel)
 }
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {

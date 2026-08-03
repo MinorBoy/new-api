@@ -515,6 +515,17 @@ test('previews task-only duration costs through the video billing path', async (
     />
   )
   try {
+    const resolution = browserWindow.document.querySelector(
+      '#cost-preview-resolution'
+    ) as HTMLInputElement | null
+    const hasVideoInput = browserWindow.document.querySelector(
+      '#cost-preview-has-video-input'
+    ) as HTMLButtonElement | null
+    assert.ok(resolution)
+    assert.equal(resolution.value, '720p')
+    assert.ok(hasVideoInput)
+    await act(async () => hasVideoInput.click())
+
     await act(async () => {
       findButton('Preview cost').click()
       await previewRequestSent
@@ -523,6 +534,9 @@ test('previews task-only duration costs through the video billing path', async (
     assert.ok(previewRequest)
     assert.equal(previewRequest.relay_mode, 31)
     assert.equal(previewRequest.request_path, '/v1/video/generations')
+    assert.equal(previewRequest.resolution, '720p')
+    assert.equal(previewRequest.has_video_input, true)
+    assert.equal(previewRequest.input_video_duration_ms, 5000)
   } finally {
     await unmount(mounted)
   }

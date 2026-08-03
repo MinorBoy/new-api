@@ -6,9 +6,8 @@ import (
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 )
 
-// Doubao family identifiers are retained as aliases over the shared seedancepricing
-// package so the billing adapter and its tests keep their existing branch logic and
-// names without duplicating the official price table.
+// Doubao family identifiers are retained as aliases over the shared Seedance
+// capability profile.
 const (
 	seedance20Family     = seedancepricing.Family20
 	seedance20FastFamily = seedancepricing.Family20Fast
@@ -28,25 +27,9 @@ var ModelList = []string{
 
 var ChannelName = "doubao-video"
 
-// seedancePricingFamily is the compatibility alias for seedancepricing.Family,
-// retained so existing billing-adapter call sites keep their names while delegating
-// to the single shared table.
+// seedancePricingFamily is the compatibility alias for seedancepricing.Family.
 func seedancePricingFamily(modelName string) string {
 	return seedancepricing.Family(modelName)
-}
-
-// GetVideoInputRatio returns the billing multiplier (actual unit price / family base
-// price) for the given model at the given output resolution, depending on whether
-// the request includes reference video input. It delegates to seedancepricing so the
-// Doubao adapter and the profit predictor share one source of truth. A multiplier of
-// 1.0 means the caller may omit the OtherRatio.
-func GetVideoInputRatio(modelName, resolution string, hasVideo bool) (float64, bool) {
-	return seedancepricing.VideoInputRatio(modelName, resolution, hasVideo)
-}
-
-// GetVideoBillingRatio is the descriptive alias used by billing callers.
-func GetVideoBillingRatio(modelName, resolution string, hasVideo bool) (float64, bool) {
-	return GetVideoInputRatio(modelName, resolution, hasVideo)
 }
 
 func GetSeedance15ProRatios(generateAudio, draft bool, serviceTier string) (map[string]float64, bool) {

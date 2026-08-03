@@ -267,7 +267,7 @@ func TestSeedRuntimeSettingsPersistsRoutingGroupWithoutOverwritingPricing(t *tes
 	require.NoError(t, db.First(&groupRatioOption, "key = ?", "GroupRatio").Error)
 	var groupRatios map[string]float64
 	require.NoError(t, common.UnmarshalJsonStr(groupRatioOption.Value, &groupRatios))
-	require.Equal(t, float64(1), groupRatios[seedGroup])
+	require.Equal(t, seedGroupRatio, groupRatios[seedGroup])
 
 	var modelRatioOptionCount int64
 	require.NoError(t, db.Model(&model.Option{}).Where("key = ?", "ModelRatio").Count(&modelRatioOptionCount).Error)

@@ -1309,7 +1309,7 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 			return nil, err
 		}
 		if item.State == string(types.ConfigImportItemStateExcluded) && !disabledCost ||
-			item.State == string(types.ConfigImportItemStateUnchanged) && item.EntityType != "model_mappings" {
+			item.State == string(types.ConfigImportItemStateUnchanged) && item.EntityType != "model_mappings" && item.EntityType != "sale_proposals" {
 			continue
 		}
 		switch item.EntityType {
@@ -1356,6 +1356,43 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 			}
 			if blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
 				scope.routingPolicies[fmt.Sprintf("default|%s", configImportRuntimeCanonicalModel(blueprint.CanonicalModel))] = struct{}{}
+			}
+		}
+	}
+	seedanceOfficialSale, seedanceSaleModels, err := configImportSeedanceSaleCleanupScope(db, items)
+	if err != nil {
+		return nil, err
+	}
+	if seedanceOfficialSale {
+		for _, optionKey := range configImportSeedanceSaleOptionKeys {
+			if scope.optionFields[optionKey] == nil {
+				scope.optionFields[optionKey] = make(map[string]struct{})
+			}
+			for modelName := range seedanceSaleModels {
+				scope.optionFields[optionKey][modelName] = struct{}{}
+			}
+		}
+		if db.Migrator().HasTable(&model.Option{}) {
+			var options []model.Option
+			optionValues := make([]any, 0, len(configImportSeedanceSaleOptionKeys))
+			for _, optionKey := range configImportSeedanceSaleOptionKeys {
+				optionValues = append(optionValues, optionKey)
+			}
+			if err := db.Where(clause.IN{Column: clause.Column{Name: "key"}, Values: optionValues}).Find(&options).Error; err != nil {
+				return nil, err
+			}
+			for _, option := range options {
+				current := make(map[string]any)
+				if strings.TrimSpace(option.Value) != "" {
+					if err := common.UnmarshalJsonStr(option.Value, &current); err != nil {
+						return nil, configImportError("BASELINE_PRICING_OPTION", "option %q is not a JSON object", option.Key)
+					}
+				}
+				for modelName := range current {
+					if seedancepricing.Family(modelName) != "" {
+						scope.optionFields[option.Key][modelName] = struct{}{}
+					}
+				}
 			}
 		}
 	}
@@ -2281,9 +2318,11 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 	}
 	patches := make(map[string]any)
 	isSeedance := seedancepricing.Family(canonicalModel) != ""
-	hasPricing := proposal.UnitPrice != nil || proposal.PricePerUnit != nil || proposal.InputPerMillion != nil || proposal.OutputPerMillion != nil || proposal.CompletionPerMillion != nil || proposal.TotalPerMillion != nil || proposal.DurationPrice != nil || strings.TrimSpace(proposal.BillingExpr) != ""
-	if isSeedance && hasPricing {
-		durationPrice, err := configImportSeedanceDurationPrice(canonicalModel)
+	if isSeedance {
+		if proposal.DurationPrice == nil || strings.TrimSpace(proposal.Scenario) == "" || strings.TrimSpace(proposal.Resolution) == "" {
+			return nil, configImportError("PRICING_SEEDANCE_SCENARIO_REQUIRED", "Seedance sale proposal requires resolution, scenario, and explicit duration price")
+		}
+		durationPrice, err := configImportSeedanceScenarioDurationPrice(proposal)
 		if err != nil {
 			return nil, err
 		}
@@ -2301,6 +2340,13 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 		patches["billing_setting.billing_mode"] = modes
 		patches["billing_setting.billing_expr"] = expressions
 		patches["billing_setting.duration_price"] = prices
+		for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio"} {
+			cleanup := make(map[string]any, len(models))
+			for _, modelName := range models {
+				cleanup[modelName] = nil
+			}
+			patches[key] = cleanup
+		}
 		return patches, nil
 	}
 	if proposal.BillingExpr != "" {
@@ -2340,24 +2386,49 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 	return patches, nil
 }
 
-func configImportSeedanceDurationPrice(modelName string) (types.DurationPrice, error) {
-	unitPrice, ok := seedancepricing.OfficialUnitPrice(modelName, "720p", false)
-	if !ok {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_PROFILE", "Seedance model %q has no 720p text-to-video price", modelName)
+func configImportSeedanceScenarioDurationPrice(proposal types.ConfigImportSaleProposal) (types.DurationPrice, error) {
+	if proposal.DurationPrice == nil {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_SCENARIO_REQUIRED", "Seedance explicit duration price is required")
 	}
-	profile, ok := seedancepricing.Profile("720p")
-	if !ok {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_PROFILE", "Seedance 720p profile is unavailable")
+	pricingVersion := strings.TrimSpace(proposal.DurationPrice.PricingVersion)
+	source := strings.TrimSpace(proposal.DurationPrice.Source)
+	if pricingVersion == "" || source == "" {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_AUDIT_REQUIRED", "Seedance official duration price requires pricing_version and source")
 	}
-	price := unitPrice * float64(profile.Width) * float64(profile.Height) * float64(profile.FrameRateNum) /
-		float64(profile.FrameRateDen) / 1024 / 1_000_000 / ratio_setting.USD2RMB
-	durationPrice := types.DurationPrice{
-		Price:               price,
-		Unit:                types.DurationUnitSecond,
-		RoundingStepSeconds: 1,
+	if !strings.EqualFold(strings.TrimSpace(proposal.Currency), "USD") {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_OFFICIAL_CURRENCY", "Seedance official sale price currency must be USD")
 	}
+	sourceRef := strings.TrimSpace(proposal.SourceRef)
+	if pricingVersion != "official-sheet-v1" || strings.TrimSpace(proposal.Sheet) != "官方售价" ||
+		!strings.HasPrefix(sourceRef, "SRC-OFFICIAL-SEEDANCE-") || proposal.Row == nil || *proposal.Row <= 0 ||
+		source != fmt.Sprintf("%s!%d", sourceRef, *proposal.Row) {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_OFFICIAL_SOURCE", "Seedance sale price must reference an official pricing sheet row")
+	}
+	scenario := strings.ToLower(strings.TrimSpace(proposal.Scenario))
+	if scenario != types.DurationScenarioNoVideo && scenario != types.DurationScenarioWithVideo {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_SCENARIO_INVALID", "unsupported Seedance pricing scenario %q", proposal.Scenario)
+	}
+	resolution := strings.ToLower(strings.TrimSpace(proposal.Resolution))
+	if resolution == "" {
+		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_RESOLUTION_REQUIRED", "Seedance pricing resolution is required")
+	}
+	price, err := decimal.NewFromString(strings.TrimSpace(proposal.DurationPrice.Price))
+	if err != nil || price.IsNegative() {
+		return types.DurationPrice{}, configImportError("PRICING_DECIMAL", "duration output price is not a non-negative decimal")
+	}
+	outputPrice, _ := price.Float64()
+	durationPrice := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
+		types.DurationScenarioKey(resolution, scenario): {
+			OutputPrice:            outputPrice,
+			Unit:                   strings.TrimSpace(proposal.DurationPrice.Unit),
+			RoundingStepSeconds:    proposal.DurationPrice.RoundingStepSeconds,
+			MinimumDurationSeconds: proposal.DurationPrice.MinimumDurationSeconds,
+			PricingVersion:         pricingVersion,
+			Source:                 source,
+		},
+	}}
 	if err := durationPrice.Validate(relaycommon.MaxTaskDurationSeconds); err != nil {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_PROFILE", "%v", err)
+		return types.DurationPrice{}, configImportError("PRICING_DURATION_INVALID", "%v", err)
 	}
 	return durationPrice, nil
 }

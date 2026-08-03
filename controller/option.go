@@ -383,6 +383,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "billing_setting.billing_mode":
+		err = billing_setting.ValidateBillingModeJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "billing_setting.duration_price":
 		err = billing_setting.ValidateDurationPriceJSONString(option.Value.(string))
 		if err != nil {

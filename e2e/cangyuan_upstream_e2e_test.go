@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,12 +88,6 @@ func setupCangyuanE2E(t *testing.T, pollResponses ...string) *cangyuanE2EEnviron
 	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	require.NoError(t, channel.Update())
-
-	ratio := ratio_setting.GetModelRatioCopy()
-	ratio["doubao-seedance-2-0-260128"] = 0.1
-	encoded, err := common.Marshal(ratio)
-	require.NoError(t, err)
-	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
 
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		return relay.GetTaskAdaptor(platform)

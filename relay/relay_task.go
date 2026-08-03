@@ -230,7 +230,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 			info.PriceData.AddOtherRatio(k, v)
 		}
 	}
-	seedanceTask := seedancepricing.Family(info.OriginModelName) != ""
+	seedanceTask := seedancepricing.Family(info.OriginModelName) != "" || seedancepricing.Family(info.UpstreamModelName) != ""
 	seedanceHasVideoInput := false
 	if seedanceTask {
 		estimator, ok := adaptor.(channel.TaskDurationEstimator)
@@ -263,6 +263,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 				return nil, taskErr
 			}
 		}
+		info.PriceData.DurationResolution = resolutionProfile.Name
+		info.PriceData.HasVideoInput = seedanceHasVideoInput
+		if info.TaskRelayInfo != nil {
+			info.PriceData.InputVideoDurationMS = info.TaskRelayInfo.InputVideoDurationMS
+		}
 		if err := prepareSeedanceUsageSnapshot(info, requestedSeconds, resolutionProfile.Name, seedanceHasVideoInput); err != nil {
 			return nil, service.TaskErrorWrapperLocal(err, "video_usage_context_unavailable", http.StatusInternalServerError)
 		}
@@ -270,6 +275,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 
 	// 6. per_duration delegates requested duration extraction to the adaptor and
 	// calculates the charge centrally. Legacy task billing remains unchanged.
+	if seedanceTask && (info.PriceData.BillingMode != billing_setting.BillingModePerDuration ||
+		info.PriceData.DurationPrice == nil || len(info.PriceData.DurationPrice.Scenarios) == 0) {
+		return nil, service.TaskErrorWrapperLocal(errors.New("Seedance requires explicit scenario duration pricing"), "seedance_sale_price_not_configured", http.StatusBadRequest)
+	}
 	if info.PriceData.BillingMode == billing_setting.BillingModePerDuration {
 		estimator, ok := adaptor.(channel.TaskDurationEstimator)
 		if !ok {
@@ -283,16 +292,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 				return nil, taskErr
 			}
 		}
-		if seedanceTask {
-			inputDurationMS := int64(0)
-			if info.TaskRelayInfo != nil {
-				inputDurationMS = info.TaskRelayInfo.InputVideoDurationMS
-			}
-			if err := applySeedanceDurationPricing(&info.PriceData, info.OriginModelName, c.GetString("task_resolution"), seedanceHasVideoInput, inputDurationMS, requestedSeconds); err != nil {
-				return nil, service.TaskErrorWrapperLocal(err, "duration_billing_error", http.StatusBadRequest)
-			}
-		}
-		quota, billableSeconds, clamp, err := taskDurationQuota(info.PriceData, requestedSeconds)
+		quota, billableSeconds, clamp, err := taskDurationQuota(&info.PriceData, requestedSeconds)
 		if err != nil {
 			return nil, service.TaskErrorWrapperLocal(err, "duration_billing_error", http.StatusBadRequest)
 		}
@@ -622,14 +622,34 @@ func taskQuotaWithOtherRatios(priceData types.PriceData) (int, *common.QuotaClam
 	return common.QuotaFromFloatChecked(priceData.ApplyOtherRatiosToFloat(baseQuota))
 }
 
-func taskDurationQuota(priceData types.PriceData, requestedSeconds int) (int, int, *common.QuotaClamp, error) {
-	if priceData.DurationPrice == nil {
+func taskDurationQuota(priceData *types.PriceData, requestedSeconds int) (int, int, *common.QuotaClamp, error) {
+	if priceData == nil || priceData.DurationPrice == nil {
 		return 0, 0, nil, fmt.Errorf("duration price is not configured")
 	}
 	if priceData.HasOtherRatio("seconds") || priceData.HasOtherRatio("duration") {
 		return 0, 0, nil, fmt.Errorf("reserved duration ratio is not allowed for per_duration billing")
 	}
 
+	if len(priceData.DurationPrice.Scenarios) > 0 {
+		charge, err := priceData.DurationPrice.CalculateCharge(
+			requestedSeconds,
+			priceData.DurationResolution,
+			priceData.HasVideoInput,
+			priceData.InputVideoDurationMS,
+			relaycommon.MaxTaskDurationSeconds,
+		)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		groupRatio := decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio)
+		finalCharge := charge.TotalCharge.Mul(groupRatio)
+		priceData.DurationBilling = charge.Breakdown()
+		priceData.DurationBilling.GroupRatio = groupRatio.String()
+		priceData.DurationBilling.FinalCharge = finalCharge.String()
+		quotaDecimal := finalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+		quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
+		return quota, charge.BillableOutputSeconds, clamp, nil
+	}
 	billableSeconds, err := priceData.DurationPrice.BillableSeconds(requestedSeconds, relaycommon.MaxTaskDurationSeconds)
 	if err != nil {
 		return 0, 0, nil, err
@@ -645,25 +665,6 @@ func taskDurationQuota(priceData types.PriceData, requestedSeconds int) (int, in
 	return quota, billableSeconds, clamp, nil
 }
 
-func applySeedanceDurationPricing(priceData *types.PriceData, modelName, resolution string, hasVideoInput bool, inputDurationMS int64, outputDurationSeconds int) error {
-	if priceData == nil {
-		return errors.New("price data is unavailable")
-	}
-	multiplier, ok := seedancepricing.DurationMultiplier(modelName, resolution, hasVideoInput, inputDurationMS, outputDurationSeconds)
-	if !ok {
-		return fmt.Errorf("unsupported Seedance duration pricing inputs for model %s", modelName)
-	}
-	ratios := priceData.OtherRatios()
-	if ratios == nil {
-		ratios = make(map[string]float64)
-	}
-	delete(ratios, "resolution")
-	delete(ratios, "video_input")
-	ratios["seedance_price_matrix"] = multiplier
-	priceData.ReplaceOtherRatios(ratios)
-	return nil
-}
-
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) (int, bool) {
 	priceData := info.PriceData
@@ -671,11 +672,12 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 		return 0, false
 	}
 	if priceData.BillingMode == billing_setting.BillingModePerDuration {
-		quota, _, clamp, err := taskDurationQuota(priceData, priceData.RequestedDurationSeconds)
+		quota, _, clamp, err := taskDurationQuota(&priceData, priceData.RequestedDurationSeconds)
 		if err != nil {
 			return 0, false
 		}
 		noteTaskQuotaClamp(info, clamp)
+		info.PriceData.DurationBilling = priceData.DurationBilling
 		return quota, true
 	}
 	quota, clamp := taskQuotaWithOtherRatios(priceData)
@@ -1031,6 +1033,7 @@ func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 		FinishTime:      task.FinishTime,
 		Progress:        task.Progress,
 		Properties:      properties,
+		RequestModel:    task.Properties.OriginModelName,
 		Username:        task.Username,
 		Data:            data,
 		RequestPath:     task.Properties.RequestPath,

@@ -15,11 +15,13 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -190,15 +192,13 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	c.Set(string(constant.ContextKeyTaskDraft), draft)
 	c.Set(string(constant.ContextKeyTaskServiceTier), serviceTier)
 	c.Set("task_resolution", resolution)
-	if family == seedance15ProFamily {
-		ratios, _ := GetSeedance15ProRatios(generateAudio, draft, serviceTier)
-		return ratios
-	}
-	ratio, ok := GetVideoInputRatio(modelName, resolution, hasVideo)
-	if !ok || ratio == 1.0 {
+	if info.PriceData.BillingMode == billing_setting.BillingModePerDuration {
 		return nil
 	}
-	return map[string]float64{"video_input": ratio}
+	if family == seedance15ProFamily {
+		return nil
+	}
+	return nil
 }
 
 // ValidateBillingRequest runs after model mapping, so aliases cannot bypass
@@ -272,7 +272,7 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 	if resolution == "" {
 		resolution = strings.ToLower(strings.TrimSpace(metadataStringDefault(req.Metadata, "resolution", "720p")))
 	}
-	if _, ok := GetVideoInputRatio(modelName, resolution, metadataContentHasVideo(req.Metadata)); family != seedance15ProFamily && !ok {
+	if !seedancepricing.SupportsResolution(modelName, resolution) {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, modelName), "invalid_request", http.StatusBadRequest)
 	}
 	serviceTier := strings.ToLower(strings.TrimSpace(c.GetString(string(constant.ContextKeyTaskServiceTier))))
@@ -357,24 +357,8 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 	if bc == nil || taskResult == nil {
 		return 0
 	}
-	modelName := bc.UpstreamModelName
-	if modelName == "" {
-		modelName = bc.OriginModelName
-	}
-	family := seedancePricingFamily(modelName)
 	priceData := &types.PriceData{}
 	priceData.ReplaceOtherRatios(bc.OtherRatios)
-	if (family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily) && taskResult.Resolution != "" {
-		if ratio, ok := GetVideoInputRatio(modelName, taskResult.Resolution, bc.HasVideoInput); ok {
-			if ratio == 1 {
-				rations := priceData.OtherRatios()
-				delete(rations, "video_input")
-				priceData.ReplaceOtherRatios(rations)
-			} else {
-				priceData.AddOtherRatio("video_input", ratio)
-			}
-		}
-	}
 	if taskResult.CompletionTokensPresent || taskResult.CompletionTokens != 0 || taskResult.TotalTokens != 0 {
 		ratios := priceData.OtherRatios()
 		delete(ratios, "draft_estimate")
@@ -382,13 +366,8 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 	}
 	bc.OtherRatios = priceData.OtherRatios()
 	if taskResult.Resolution != "" {
-		resolution := strings.ToLower(strings.TrimSpace(taskResult.Resolution))
-		if family == seedance15ProFamily {
-			if resolution == "480p" || resolution == "720p" || resolution == "1080p" {
-				bc.Resolution = resolution
-			}
-		} else if _, ok := GetVideoInputRatio(modelName, resolution, bc.HasVideoInput); ok {
-			bc.Resolution = resolution
+		if profile, ok := seedancepricing.Profile(taskResult.Resolution); ok {
+			bc.Resolution = profile.Name
 		}
 	}
 	return 0

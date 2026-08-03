@@ -412,6 +412,11 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 				return err
 			}
 		}
+		if proposal.DurationPrice != nil {
+			if err := validateConfigImportDecimal("sale_proposals.duration_price.price", &proposal.DurationPrice.Price); err != nil {
+				return err
+			}
+		}
 	}
 	for index := range entities.CostRuleDrafts {
 		draft := &entities.CostRuleDrafts[index]

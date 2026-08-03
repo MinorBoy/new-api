@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,21 +136,20 @@ func TestEstimateDurationSecondsUsesValidatedNativeRequest(t *testing.T) {
 	}
 }
 
-func TestAdjustBillingOnCompleteUsesTerminalFacts(t *testing.T) {
-	t.Run("updates only video price ratio", func(t *testing.T) {
+func TestAdjustBillingOnCompleteKeepsSalePriceIndependentFromTerminalFacts(t *testing.T) {
+	t.Run("updates resolution without video price ratio", func(t *testing.T) {
 		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			UpstreamModelName: "doubao-seedance-2-0-260128",
 			HasVideoInput:     true,
 			OtherRatios: map[string]float64{
-				"video_input": 1,
-				"duration":    5,
+				"duration": 5,
 			},
 		}}}
 
 		(&TaskAdaptor{}).AdjustBillingOnComplete(task, &relaycommon.TaskInfo{Resolution: "1080p", TotalTokens: 1000})
 
 		ratios := task.PrivateData.BillingContext.OtherRatios
-		assert.InDelta(t, 31.0/46.0, ratios["video_input"], 1e-9)
+		assert.NotContains(t, ratios, "video_input")
 		assert.Equal(t, 5.0, ratios["duration"])
 		assert.Equal(t, "1080p", task.PrivateData.BillingContext.Resolution)
 	})
@@ -193,4 +193,31 @@ func TestEstimateBillingAcceptsStringBooleanMetadata(t *testing.T) {
 	ratio := (&TaskAdaptor{}).EstimateBilling(c, info)
 	assert.NotContains(t, ratio, "audio")
 	assert.False(t, c.GetBool(string(constant.ContextKeyTaskGenerateAudio)))
+}
+
+func TestEstimateBillingDoesNotReturnSeedancePriceRatioForDurationBilling(t *testing.T) {
+	c := newNativeTaskContext(t, `{}`)
+	c.Set(common.KeySeedanceOfficialAPI, false)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "doubao-seedance-2-0-mini-260615",
+		PriceData:       types.PriceData{BillingMode: "per_duration"},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "doubao-seedance-2-0-mini-260615",
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	relaycommon.StoreTaskRequest(c, info, "generate", relaycommon.TaskSubmitReq{
+		Model: "doubao-seedance-2-0-mini-260615",
+		Metadata: map[string]interface{}{
+			"resolution": "720p",
+			"content": []interface{}{
+				map[string]interface{}{"type": "video_url"},
+			},
+		},
+	})
+
+	ratios := (&TaskAdaptor{}).EstimateBilling(c, info)
+
+	assert.NotContains(t, ratios, "video_input")
+	assert.NotContains(t, ratios, "seedance_price_matrix")
 }

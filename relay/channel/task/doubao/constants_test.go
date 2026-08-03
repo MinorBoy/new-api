@@ -3,37 +3,32 @@ package doubao
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestSeedancePricingMatrix(t *testing.T) {
+func TestSeedanceResolutionCapabilityMatrix(t *testing.T) {
 	tests := []struct {
 		name       string
 		model      string
 		resolution string
-		hasVideo   bool
-		want       float64
-		wantOK     bool
+		want       bool
 	}{
-		{"2.0 720p text", "doubao-seedance-2-0-260128", "720p", false, 1, true},
-		{"2.0 1080p video", "doubao-seedance-2-0-260128", "1080p", true, 31.0 / 46.0, true},
-		{"2.0 4k text", "doubao-seedance-2-0-260128", "4K", false, 26.0 / 46.0, true},
-		{"fast video", "doubao-seedance-2-0-fast-260128", "480p", true, 22.0 / 37.0, true},
-		{"mini exact", "doubao-seedance-2-0-mini-260615", "720p", true, 14.0 / 23.0, true},
-		{"mini future suffix", "doubao-seedance-2-0-mini-270101", "480p", false, 1, true},
-		{"mini rejects 1080p", "doubao-seedance-2-0-mini-260615", "1080p", false, 0, false},
-		{"fast rejects 4k", "doubao-seedance-2-0-fast-260128", "4k", false, 0, false},
-		{"unknown resolution", "doubao-seedance-2-0-260128", "2k", false, 0, false},
-		{"unknown model", "other-model", "720p", false, 0, false},
+		{"2.0 720p", "doubao-seedance-2-0-260128", "720p", true},
+		{"2.0 1080p", "doubao-seedance-2-0-260128", "1080p", true},
+		{"2.0 4k", "doubao-seedance-2-0-260128", "4K", true},
+		{"fast 480p", "doubao-seedance-2-0-fast-260128", "480p", true},
+		{"mini exact", "doubao-seedance-2-0-mini-260615", "720p", true},
+		{"mini future suffix", "doubao-seedance-2-0-mini-270101", "480p", true},
+		{"mini rejects 1080p", "doubao-seedance-2-0-mini-260615", "1080p", false},
+		{"fast rejects 4k", "doubao-seedance-2-0-fast-260128", "4k", false},
+		{"unknown resolution", "doubao-seedance-2-0-260128", "2k", false},
+		{"unknown model", "other-model", "720p", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := GetVideoBillingRatio(tt.model, tt.resolution, tt.hasVideo)
-			assert.Equal(t, tt.wantOK, ok)
-			if tt.wantOK {
-				assert.InDelta(t, tt.want, got, 1e-9)
-			}
+			assert.Equal(t, tt.want, seedancepricing.SupportsResolution(tt.model, tt.resolution))
 		})
 	}
 	require.Contains(t, ModelList, "doubao-seedance-2-0-mini-260615")

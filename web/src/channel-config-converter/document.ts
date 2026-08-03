@@ -548,6 +548,7 @@ export async function buildImportDocument(
   for (const sale of input.extracted.saleProposals) {
     const source = sourceRef(sale)
     const skuRef = field(sale, 'sku_ref', 'SKU代码')
+    const sku = skuByRef.get(skuRef)
     if (!sourceIDs.has(source) || !skuIDs.has(skuRef)) {
       issues.push(
         sourceIssue(
@@ -560,12 +561,49 @@ export async function buildImportDocument(
       continue
     }
     const price = optionalDecimal(sale, 'native_unit_price', '原币/1M')
+    const scenario = field(sale, 'scenario', '定价场景').toLowerCase()
+    const resolution = sku ? field(sku, 'resolution', '分辨率档位') : ''
+    const usdPerSecond = optionalDecimal(sale, 'USD/基准秒')
+    const nativePerSecond = optionalDecimal(sale, '原币/基准秒')
+    const saleLocation = sourceLocation(sale)
+    let durationPrice:
+      | {
+          price: string
+          unit: 'second'
+          rounding_step_seconds: number
+          minimum_duration_seconds: number
+          pricing_version: string
+          source: string
+        }
+      | undefined
+    if (usdPerSecond) {
+      durationPrice = {
+        price: usdPerSecond,
+        unit: 'second',
+        rounding_step_seconds: 1,
+        minimum_duration_seconds: 0,
+        pricing_version: 'official-sheet-v1',
+        source: `${source}!${saleLocation.row}`,
+      }
+    }
+    let pricingFields: Record<string, unknown> = {}
+    if (durationPrice) {
+      pricingFields = { duration_price: durationPrice }
+    } else if (price) {
+      pricingFields = { total_per_million: price }
+    } else if (nativePerSecond) {
+      pricingFields = { price_per_unit: nativePerSecond }
+    }
     entities.sale_proposals.push(
       await authoritativeEntity(sale, source, {
-        billing_mode: field(sale, 'billing_mode', '计费模式'),
-        currency: field(sale, 'currency', '币种'),
+        billing_mode: durationPrice
+          ? 'per_duration'
+          : field(sale, 'billing_mode', '计费模式'),
+        currency: durationPrice ? 'USD' : field(sale, 'currency', '币种'),
         model_sku_ref: skuRef,
-        ...(price ? { total_per_million: price } : {}),
+        ...(scenario ? { scenario } : {}),
+        ...(resolution ? { resolution } : {}),
+        ...pricingFields,
       })
     )
   }

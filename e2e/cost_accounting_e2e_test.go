@@ -451,7 +451,11 @@ func TestCostAccountingAsyncChargeEventsE2E(t *testing.T) {
 			assert.Equal(t, expectedRevenue, report.RealizedRevenueNanoUSD)
 			assert.Equal(t, int64(200_000_000), report.RealizedCostNanoUSD)
 			assert.Equal(t, expectedRevenue-int64(200_000_000), report.RealizedProfitNanoUSD)
-			assert.Equal(t, int64(1), report.NegativeProfitRequestCount)
+			expectedNegativeProfitRequests := int64(0)
+			if expectedRevenue < int64(200_000_000) {
+				expectedNegativeProfitRequests = 1
+			}
+			assert.Equal(t, expectedNegativeProfitRequests, report.NegativeProfitRequestCount)
 		})
 	}
 }

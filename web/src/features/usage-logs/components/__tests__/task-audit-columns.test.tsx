@@ -31,6 +31,7 @@ const domGlobals = [
   'SVGElement',
   'Node',
   'Element',
+  'customElements',
   'Event',
   'CustomEvent',
   'MutationObserver',
@@ -45,6 +46,19 @@ for (const key of domGlobals) {
     value: domWindow[key],
   })
 }
+
+Object.defineProperty(domWindow, 'matchMedia', {
+  configurable: true,
+  value: () => ({
+    matches: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }),
+})
+Object.defineProperty(globalThis, 'matchMedia', {
+  configurable: true,
+  value: domWindow.matchMedia,
+})
 
 const { act, Fragment } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -61,9 +75,10 @@ await i18n.use(initReactI18next).init({
         Endpoint: 'Endpoint',
         Inbound: 'Inbound:',
         View: 'View',
+        'Request Model': 'Request Model',
         'Request Data': 'Request Data',
-        'Upstream Response Data': 'Upstream Response Data',
-        'User Response Data': 'User Response Data',
+        'Upstream Response (Create Task)': 'Upstream Response (Create Task)',
+        'Task Details': 'Task Details',
       },
     },
   },
@@ -118,6 +133,7 @@ async function getAuditButtonLabels(): Promise<
     task_id: 'task_1',
     action: 'GENERATE',
     channel_id: 1,
+    request_model: 'client-model',
     submit_time: 1,
     status: 'SUCCESS',
     user_request_data: { model: 'seedance' },
@@ -144,8 +160,8 @@ async function getAuditButtonLabels(): Promise<
         typeof column.header === 'string' &&
         [
           'Request Data',
-          'Upstream Response Data',
-          'User Response Data',
+          'Upstream Response (Create Task)',
+          'Task Details',
         ].includes(column.header)
     )
     .map((column, index) => {
@@ -230,30 +246,82 @@ async function getEndpointCellText(): Promise<string> {
   return text
 }
 
+async function getRequestModelCellText(): Promise<string> {
+  let columns: ColumnDef<TaskLog>[] = []
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const log: TaskLog = {
+    id: 1,
+    user_id: 1,
+    platform: 'seedance',
+    task_id: 'task_1',
+    action: 'GENERATE',
+    channel_id: 1,
+    request_model: 'client-model',
+    submit_time: 1,
+    status: 'SUCCESS',
+  }
+
+  function ColumnsProbe() {
+    columns = useTaskLogsColumns(false)
+    return null
+  }
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ColumnsProbe />
+      </I18nextProvider>
+    )
+  })
+
+  const requestModelColumn = columns.find(
+    (column) =>
+      'accessorKey' in column && column.accessorKey === 'request_model'
+  )
+  const content =
+    typeof requestModelColumn?.cell === 'function'
+      ? requestModelColumn.cell({ row: { original: log } } as never)
+      : null
+
+  await act(async () => {
+    root.render(<I18nextProvider i18n={i18n}>{content}</I18nextProvider>)
+  })
+
+  const text = container.textContent?.trim() ?? ''
+  await act(async () => root.unmount())
+  container.remove()
+
+  return text
+}
+
 describe('task audit columns', () => {
   after(() => {
     domWindow.close()
   })
 
-  test('shows request, upstream response, and user response data columns to administrators', async () => {
+  test('shows request model, request, upstream create response, and task detail columns to administrators', async () => {
     const headers = await getHeaders(true)
 
+    assert.equal(headers.includes('Request Model'), true)
     assert.equal(headers.includes('Request Data'), true)
-    assert.equal(headers.includes('Upstream Response Data'), true)
-    assert.equal(headers.includes('User Response Data'), true)
+    assert.equal(headers.includes('Upstream Response (Create Task)'), true)
+    assert.equal(headers.includes('Task Details'), true)
   })
 
   test('places administrator audit columns after channel and user identity', async () => {
     const headers = await getHeaders(true)
 
-    assert.deepEqual(headers.slice(0, 7), [
+    assert.deepEqual(headers.slice(0, 8), [
       'Submit Time',
       'Channel',
       'Endpoint',
       'User',
+      'Request Model',
       'Request Data',
-      'Upstream Response Data',
-      'User Response Data',
+      'Upstream Response (Create Task)',
+      'Task Details',
     ])
   })
 
@@ -263,12 +331,19 @@ describe('task audit columns', () => {
     assert.equal(text, 'Inbound:/v1/video/generations')
   })
 
-  test('shows request data but hides upstream and user response data columns from regular users', async () => {
+  test('renders the request model returned by the task API', async () => {
+    const text = await getRequestModelCellText()
+
+    assert.equal(text, 'client-model')
+  })
+
+  test('shows request model and request data but hides admin task responses from regular users', async () => {
     const headers = await getHeaders(false)
 
+    assert.equal(headers.includes('Request Model'), true)
     assert.equal(headers.includes('Request Data'), true)
-    assert.equal(headers.includes('Upstream Response Data'), false)
-    assert.equal(headers.includes('User Response Data'), false)
+    assert.equal(headers.includes('Upstream Response (Create Task)'), false)
+    assert.equal(headers.includes('Task Details'), false)
   })
 
   test('uses the compact View label for every task audit data action', async () => {

@@ -10,6 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
@@ -21,6 +23,15 @@ var (
 	ErrConfigImportNotReady    = configImportError("PUBLISH_BATCH_STATUS", "config import batch is not ready")
 	ErrConfigImportAlreadyDone = configImportError("PUBLISH_ALREADY_COMPLETE", "config import batch has already been published")
 )
+
+var configImportSeedanceSaleOptionKeys = []string{
+	"ModelPrice",
+	"ModelRatio",
+	"CompletionRatio",
+	"billing_setting.billing_mode",
+	"billing_setting.billing_expr",
+	"billing_setting.duration_price",
+}
 
 // ConfigImportRefreshKeys identifies cache domains affected by a publication.
 type ConfigImportRefreshKeys struct {
@@ -535,8 +546,12 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 		return nil
 	}
 	patches := make(map[string]map[string]any)
+	seedanceOfficialSale, seedanceSaleModels, err := configImportSeedanceSaleCleanupScope(tx, items)
+	if err != nil {
+		return err
+	}
 	for _, item := range items {
-		if item.EntityType != "sale_proposals" || item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+		if item.EntityType != "sale_proposals" || item.State == string(types.ConfigImportItemStateExcluded) {
 			continue
 		}
 		var document map[string]any
@@ -560,6 +575,15 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 				patches[key] = make(map[string]any)
 			}
 			for modelName, value := range values {
+				if key == "billing_setting.duration_price" && configImportDurationPriceHasScenarios(value) {
+					if previous, exists := patches[key][modelName]; exists {
+						merged, mergeErr := mergeConfigImportDurationPriceValues(previous, value, modelName)
+						if mergeErr != nil {
+							return configImportError("PUBLISH_PRICING_CONFLICT", "%v", mergeErr)
+						}
+						value = merged
+					}
+				}
 				patches[key][modelName] = value
 			}
 		}
@@ -584,11 +608,48 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 				return configImportError("PUBLISH_PRICING_OPTION", "option %q is not a JSON object", key)
 			}
 		}
+		if seedanceOfficialSale {
+			if common.StringsContains(configImportSeedanceSaleOptionKeys, key) {
+				for modelName := range current {
+					if _, updatedByImport := patches[key][modelName]; updatedByImport {
+						continue
+					}
+					_, mappedSeedanceModel := seedanceSaleModels[modelName]
+					if mappedSeedanceModel || seedancepricing.Family(modelName) != "" {
+						delete(current, modelName)
+					}
+				}
+			}
+		}
 		for modelName, value := range patches[key] {
+			if value == nil {
+				delete(current, modelName)
+				continue
+			}
 			if key == "billing_setting."+billing_setting.BillingExprField {
 				if expression, ok := value.(string); ok && strings.TrimSpace(expression) == "" {
 					delete(current, modelName)
 					continue
+				}
+			}
+			if key == "billing_setting.duration_price" && configImportDurationPriceHasScenarios(value) {
+				if existing, exists := current[modelName]; exists {
+					merged, mergeErr := mergeConfigImportPublishedDurationPriceValue(existing, value, modelName)
+					if mergeErr != nil {
+						return configImportError("PUBLISH_PRICING_OPTION", "%v", mergeErr)
+					}
+					value = merged
+				}
+				encodedPrice, encodeErr := common.Marshal(value)
+				if encodeErr != nil {
+					return encodeErr
+				}
+				var durationPrice types.DurationPrice
+				if decodeErr := common.Unmarshal(encodedPrice, &durationPrice); decodeErr != nil {
+					return configImportError("PUBLISH_PRICING_OPTION", "duration price for model %q is invalid: %v", modelName, decodeErr)
+				}
+				if validateErr := durationPrice.Validate(relaycommon.MaxTaskDurationSeconds); validateErr != nil {
+					return configImportError("PUBLISH_PRICING_OPTION", "duration price for model %q is invalid: %v", modelName, validateErr)
 				}
 			}
 			current[modelName] = value
@@ -603,6 +664,218 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 		refresh.OptionKeys = append(refresh.OptionKeys, key)
 	}
 	return nil
+}
+
+func configImportSeedanceSaleCleanupScope(db *gorm.DB, items []model.ConfigImportItem) (bool, map[string]struct{}, error) {
+	models := make(map[string]struct{})
+	officialSale := false
+	for _, item := range items {
+		if item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		switch item.EntityType {
+		case "model_mappings", "route_blueprints":
+			if err := configImportCollectSeedanceSaleModels(item, models); err != nil {
+				return false, nil, err
+			}
+		case "sale_proposals":
+			var document map[string]any
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &document); err != nil {
+				return false, nil, err
+			}
+			staged, ok := document["staged_proposal"].(map[string]any)
+			if !ok {
+				continue
+			}
+			optionPatches, ok := staged["option_patches"].(map[string]any)
+			if !ok {
+				continue
+			}
+			rawDurationPrices, ok := optionPatches["billing_setting.duration_price"].(map[string]any)
+			if !ok {
+				continue
+			}
+			for modelName, value := range rawDurationPrices {
+				if configImportDurationPriceHasScenarios(value) && seedancepricing.Family(modelName) != "" {
+					officialSale = true
+					models[strings.TrimSpace(modelName)] = struct{}{}
+				}
+			}
+		}
+	}
+	if !officialSale || db == nil || !db.Migrator().HasTable(&model.ConfigImportBatch{}) || !db.Migrator().HasTable(&model.ConfigImportItem{}) {
+		return officialSale, models, nil
+	}
+
+	var publishedBatchIDs []int64
+	if err := db.Model(&model.ConfigImportBatch{}).
+		Where("status = ?", types.ConfigImportBatchStatusPublished).
+		Order("id ASC").
+		Pluck("id", &publishedBatchIDs).Error; err != nil {
+		return false, nil, err
+	}
+	if len(publishedBatchIDs) == 0 {
+		return officialSale, models, nil
+	}
+	var historicalItems []model.ConfigImportItem
+	if err := db.Where("batch_id IN ? AND entity_type IN ?", publishedBatchIDs, []string{"model_mappings", "route_blueprints"}).
+		Order("batch_id ASC, entity_type ASC, business_id ASC, id ASC").
+		Find(&historicalItems).Error; err != nil {
+		return false, nil, err
+	}
+	for _, item := range historicalItems {
+		if item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		if err := configImportCollectSeedanceSaleModels(item, models); err != nil {
+			return false, nil, err
+		}
+	}
+	return officialSale, models, nil
+}
+
+func configImportCollectSeedanceSaleModels(item model.ConfigImportItem, models map[string]struct{}) error {
+	switch item.EntityType {
+	case "model_mappings":
+		var mapping types.ConfigImportModelMapping
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
+			return err
+		}
+		canonicalModel := configImportRuntimeCanonicalModel(mapping.CanonicalModel)
+		if seedancepricing.Family(canonicalModel) == "" && seedancepricing.Family(mapping.ClientModel) == "" {
+			return nil
+		}
+		for _, modelName := range []string{canonicalModel, mapping.CanonicalModel, mapping.ClientModel, mapping.UpstreamModel} {
+			if modelName = strings.TrimSpace(modelName); modelName != "" {
+				models[modelName] = struct{}{}
+			}
+		}
+	case "route_blueprints":
+		var blueprint types.ConfigImportRouteBlueprint
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+			return err
+		}
+		canonicalModel := configImportRuntimeCanonicalModel(blueprint.CanonicalModel)
+		if seedancepricing.Family(canonicalModel) == "" && seedancepricing.Family(blueprint.ClientModel) == "" {
+			return nil
+		}
+		for _, modelName := range []string{canonicalModel, blueprint.CanonicalModel, blueprint.ClientModel} {
+			if modelName = strings.TrimSpace(modelName); modelName != "" {
+				models[modelName] = struct{}{}
+			}
+		}
+		for _, target := range blueprint.Targets {
+			if modelName := strings.TrimSpace(target.UpstreamModel); modelName != "" {
+				models[modelName] = struct{}{}
+			}
+		}
+	}
+	return nil
+}
+
+func configImportDurationPriceHasScenarios(value any) bool {
+	durationPrice, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	scenarios, ok := durationPrice["scenarios"].(map[string]any)
+	return ok && len(scenarios) > 0
+}
+
+func mergeConfigImportPublishedDurationPriceValue(existing, incoming any, modelName string) (map[string]any, error) {
+	left, leftOK := existing.(map[string]any)
+	right, rightOK := incoming.(map[string]any)
+	if !leftOK || !rightOK {
+		return nil, fmt.Errorf("duration price for model %q is not an explicit scenario object", modelName)
+	}
+	rightScenarios, ok := right["scenarios"].(map[string]any)
+	if !ok || len(rightScenarios) == 0 {
+		return nil, fmt.Errorf("duration price for model %q has no incoming explicit scenarios", modelName)
+	}
+
+	merged := make(map[string]any, len(right))
+	for key, value := range right {
+		if key != "scenarios" {
+			merged[key] = value
+		}
+	}
+	mergedScenarios := make(map[string]any)
+	if raw, exists := left["scenarios"]; exists {
+		leftScenarios, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("duration price for model %q has invalid published scenarios", modelName)
+		}
+		for key, value := range leftScenarios {
+			mergedScenarios[key] = value
+		}
+	}
+	for key, value := range rightScenarios {
+		mergedScenarios[key] = value
+	}
+	merged["scenarios"] = mergedScenarios
+	return merged, nil
+}
+
+func mergeConfigImportDurationPriceValues(existing, incoming any, modelName string) (map[string]any, error) {
+	left, leftOK := existing.(map[string]any)
+	right, rightOK := incoming.(map[string]any)
+	if !leftOK || !rightOK {
+		return nil, fmt.Errorf("duration price for model %q is not an explicit scenario object", modelName)
+	}
+	merged := make(map[string]any, len(left)+1)
+	for key, value := range left {
+		merged[key] = value
+	}
+	for key, value := range right {
+		if key == "scenarios" {
+			continue
+		}
+		if previous, exists := merged[key]; exists {
+			previousJSON, _ := common.Marshal(previous)
+			valueJSON, _ := common.Marshal(value)
+			if string(previousJSON) != string(valueJSON) {
+				return nil, fmt.Errorf("duration price for model %q has conflicting field %q", modelName, key)
+			}
+			continue
+		}
+		merged[key] = value
+	}
+	leftScenarios := map[string]any{}
+	if raw, exists := left["scenarios"]; exists {
+		var ok bool
+		leftScenarios, ok = raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("duration price for model %q has invalid scenarios", modelName)
+		}
+	}
+	rightScenarios := map[string]any{}
+	if raw, exists := right["scenarios"]; exists {
+		var ok bool
+		rightScenarios, ok = raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("duration price for model %q has invalid scenarios", modelName)
+		}
+	}
+	mergedScenarios := make(map[string]any, len(leftScenarios)+len(rightScenarios))
+	for key, value := range leftScenarios {
+		mergedScenarios[key] = value
+	}
+	for key, value := range rightScenarios {
+		if previous, exists := mergedScenarios[key]; exists {
+			previousJSON, _ := common.Marshal(previous)
+			valueJSON, _ := common.Marshal(value)
+			if string(previousJSON) != string(valueJSON) {
+				return nil, fmt.Errorf("duration price for model %q has conflicting scenario %q", modelName, key)
+			}
+			continue
+		}
+		mergedScenarios[key] = value
+	}
+	if len(mergedScenarios) == 0 {
+		return nil, fmt.Errorf("duration price for model %q has no explicit scenarios", modelName)
+	}
+	merged["scenarios"] = mergedScenarios
+	return merged, nil
 }
 
 func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {

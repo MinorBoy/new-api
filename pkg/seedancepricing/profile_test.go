@@ -48,61 +48,25 @@ func TestProfileNormalizesAndRejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestVideoInputRatioMatchesOfficialSeedanceMatrix(t *testing.T) {
+func TestSupportsResolutionUsesCapabilityContractWithoutPricing(t *testing.T) {
 	tests := []struct {
-		name       string
 		model      string
 		resolution string
-		hasVideo   bool
-		want       float64
-		wantOK     bool
+		want       bool
 	}{
-		{"2.0 480p text", "doubao-seedance-2-0-260128", "480p", false, 1, true},
-		{"2.0 480p video", "doubao-seedance-2-0-260128", "480p", true, 28.0 / 46.0, true},
-		{"2.0 720p text", "doubao-seedance-2-0-260128", "720p", false, 1, true},
-		{"2.0 720p video", "doubao-seedance-2-0-260128", "720p", true, 28.0 / 46.0, true},
-		{"2.0 1080p text", "doubao-seedance-2-0-260128", "1080p", false, 51.0 / 46.0, true},
-		{"2.0 1080p video", "doubao-seedance-2-0-260128", "1080p", true, 31.0 / 46.0, true},
-		{"2.0 4k text", "doubao-seedance-2-0-260128", "4k", false, 26.0 / 46.0, true},
-		{"2.0 4k video", "doubao-seedance-2-0-260128", "4k", true, 16.0 / 46.0, true},
-		{"fast 480p text", "doubao-seedance-2-0-fast-260128", "480p", false, 1, true},
-		{"fast 480p video", "doubao-seedance-2-0-fast-260128", "480p", true, 22.0 / 37.0, true},
-		{"fast 720p video", "doubao-seedance-2-0-fast-260128", "720p", true, 22.0 / 37.0, true},
-		{"mini 480p text", "doubao-seedance-2-0-mini-260615", "480p", false, 1, true},
-		{"mini 720p video", "doubao-seedance-2-0-mini-260615", "720p", true, 14.0 / 23.0, true},
-		{"mini future suffix", "doubao-seedance-2-0-mini-270101", "480p", false, 1, true},
-		{"2.0 future suffix video", "doubao-seedance-2-0-271231", "1080p", true, 31.0 / 46.0, true},
+		{"doubao-seedance-2-0-260128", "480p", true},
+		{"doubao-seedance-2-0-260128", "1080p", true},
+		{"doubao-seedance-2-0-260128", "4K", true},
+		{"doubao-seedance-2-0-fast-260128", "720p", true},
+		{"doubao-seedance-2-0-fast-260128", "1080p", false},
+		{"doubao-seedance-2-0-mini-260615", "480p", true},
+		{"doubao-seedance-2-0-mini-260615", "4k", false},
+		{"doubao-seedance-1-5-pro-251215", "1080p", true},
+		{"other-model", "720p", false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := VideoInputRatio(tt.model, tt.resolution, tt.hasVideo)
-			assert.Equal(t, tt.wantOK, ok)
-			if tt.wantOK {
-				assert.InDelta(t, tt.want, got, 1e-9)
-			}
-		})
-	}
-}
-
-func TestVideoInputRatioRejectsUnsupportedCombinations(t *testing.T) {
-	tests := []struct {
-		name       string
-		model      string
-		resolution string
-		hasVideo   bool
-	}{
-		{"fast rejects 1080p", "doubao-seedance-2-0-fast-260128", "1080p", false},
-		{"fast rejects 4k", "doubao-seedance-2-0-fast-260128", "4k", true},
-		{"mini rejects 1080p", "doubao-seedance-2-0-mini-260615", "1080p", false},
-		{"mini rejects 4k", "doubao-seedance-2-0-mini-260615", "4k", true},
-		{"unknown resolution", "doubao-seedance-2-0-260128", "2k", false},
-		{"unknown model", "other-model", "720p", false},
-		{"1.5 pro has no video ratio", "doubao-seedance-1-5-pro-251215", "720p", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, ok := VideoInputRatio(tt.model, tt.resolution, tt.hasVideo)
-			assert.False(t, ok)
+		t.Run(tt.model+"/"+tt.resolution, func(t *testing.T) {
+			assert.Equal(t, tt.want, SupportsResolution(tt.model, tt.resolution))
 		})
 	}
 }
@@ -126,72 +90,21 @@ func TestFamilyResolvesFromCanonicalModelNames(t *testing.T) {
 	}
 }
 
-func TestVideoInputRatioNormalizesResolution(t *testing.T) {
-	got, ok := VideoInputRatio("doubao-seedance-2-0-260128", " 4K ", true)
-	require.True(t, ok)
-	assert.InDelta(t, 16.0/46.0, got, 1e-9)
-
-	got, ok = VideoInputRatio("doubao-seedance-2-0-260128", "", false)
-	require.True(t, ok)
-	assert.InDelta(t, 1.0, got, 1e-9)
-}
-
-func TestDurationMultiplierUsesOfficialTokensAndInputDuration(t *testing.T) {
+func TestFamilyResolvesProviderSeedanceAliases(t *testing.T) {
 	tests := []struct {
-		name          string
-		model         string
-		resolution    string
-		hasVideo      bool
-		inputDuration int64
-		outputSeconds int
-		want          float64
+		model string
+		want  string
 	}{
-		{
-			name:          "mini 720p text uses the base price",
-			model:         "doubao-seedance-2-0-mini-260615",
-			resolution:    "720p",
-			outputSeconds: 5,
-			want:          1,
-		},
-		{
-			name:          "mini 720p includes five seconds of reference video",
-			model:         "doubao-seedance-2-0-mini-260615",
-			resolution:    "720p",
-			hasVideo:      true,
-			inputDuration: 5000,
-			outputSeconds: 5,
-			want:          (14.0 / 23.0) * 2,
-		},
-		{
-			name:          "standard 480p scales by output pixels",
-			model:         "doubao-seedance-2-0-260128",
-			resolution:    "480p",
-			outputSeconds: 5,
-			want:          (864.0 * 496.0) / (1280.0 * 720.0),
-		},
+		{"jmg-video-seedance-2.0-fast-vip", Family20Fast},
+		{"jmg-video-seedance-2.0-mini", Family20Mini},
+		{"jmg-video-seedance-2.0-vip", Family20},
+		{"pxv-seedance-2.0-standard", Family20},
+		{"jimeng-video-seedance-2.0-vip", Family20},
+		{"unrelated-video-model", ""},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := DurationMultiplier(tt.model, tt.resolution, tt.hasVideo, tt.inputDuration, tt.outputSeconds)
-			require.True(t, ok)
-			assert.InDelta(t, tt.want, got, 1e-9)
-		})
-	}
-}
-
-func TestDurationMultiplierRejectsUntrustedDurations(t *testing.T) {
-	for _, tt := range []struct {
-		name          string
-		inputDuration int64
-		outputSeconds int
-	}{
-		{name: "missing video duration", inputDuration: 0, outputSeconds: 5},
-		{name: "negative video duration", inputDuration: -1, outputSeconds: 5},
-		{name: "missing output duration", inputDuration: 0, outputSeconds: 0},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			_, ok := DurationMultiplier("doubao-seedance-2-0-mini-260615", "720p", tt.name != "missing output duration", tt.inputDuration, tt.outputSeconds)
-			assert.False(t, ok)
+	for _, test := range tests {
+		t.Run(test.model, func(t *testing.T) {
+			assert.Equal(t, test.want, Family(test.model))
 		})
 	}
 }

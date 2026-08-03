@@ -128,11 +128,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return nil
 }
 
-func (a *TaskAdaptor) EstimateBilling(c *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
-	if strings.EqualFold(strings.TrimSpace(c.GetString("task_resolution")), "1080p") {
-		return map[string]float64{"resolution": 2.5}
-	}
-	return map[string]float64{"resolution": 1}
+func (a *TaskAdaptor) EstimateBilling(_ *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
+	return nil
 }
 
 func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.RelayInfo) (int, *dto.TaskError) {

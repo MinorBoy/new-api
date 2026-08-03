@@ -792,7 +792,7 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		upstreamCostMode = string(relayInfo.CostAttempt.CostMode)
 	}
 	usageProfile := ""
-	if seedancepricing.Family(relayInfo.OriginModelName) != "" {
+	if seedancepricing.Family(relayInfo.OriginModelName) != "" || seedancepricing.Family(relayInfo.UpstreamModelName) != "" {
 		usageProfile = model.TaskUsageProfileSeedance
 	}
 	usageSnapshotVersion := 0
@@ -815,13 +815,15 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		DurationSource:           relayInfo.PriceData.DurationSource,
 		RequestedDurationSeconds: relayInfo.PriceData.RequestedDurationSeconds,
 		BillableDurationSeconds:  relayInfo.PriceData.BillableDurationSeconds,
+		DurationResolution:       relayInfo.PriceData.DurationResolution,
+		DurationBilling:          relayInfo.PriceData.DurationBilling,
 		ModelPrice:               relayInfo.PriceData.ModelPrice,
 		GroupRatio:               relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:               relayInfo.PriceData.ModelRatio,
 		OtherRatios:              relayInfo.PriceData.OtherRatios(),
 		OriginModelName:          relayInfo.OriginModelName,
 		UpstreamModelName:        relayInfo.UpstreamModelName,
-		HasVideoInput:            c.GetBool(string(constant.ContextKeyTaskVideoHasInput)),
+		HasVideoInput:            relayInfo.PriceData.HasVideoInput,
 		GenerateAudio:            generateAudio,
 		Draft:                    c.GetBool(string(constant.ContextKeyTaskDraft)),
 		ServiceTier:              c.GetString(string(constant.ContextKeyTaskServiceTier)),

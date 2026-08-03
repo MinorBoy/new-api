@@ -23,19 +23,23 @@ import (
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
 const importedMaterialMatrixGroup = "default"
 const importedMaterialMatrixAssetBaseURL = "http://cdn.openai.com/ark-matrix"
+const importedMaterialMatrixGroupRatio = 1.25
 
 type importedMaterialMatrixTarget struct {
 	CaseID                             string
@@ -256,6 +260,33 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.CostVariantKey, task.PrivateData.Routing.CostVariantKey, target.CaseID)
 			require.Positive(t, task.Quota, target.CaseID)
 			require.NotNil(t, task.PrivateData.BillingContext, target.CaseID)
+			hasVideoInput := target.RequestRefs.Videos > 0
+			require.Equal(t, hasVideoInput, task.PrivateData.BillingContext.HasVideoInput, target.CaseID)
+			require.Equal(t, importedMaterialMatrixGroupRatio, task.PrivateData.BillingContext.GroupRatio, target.CaseID)
+			require.NotNil(t, task.PrivateData.BillingContext.DurationBilling, target.CaseID)
+			durationPrice, ok := billing_setting.GetDurationPrice(target.RuntimeModel)
+			require.True(t, ok, target.CaseID)
+			charge, err := durationPrice.CalculateCharge(
+				target.Duration,
+				target.Resolution,
+				hasVideoInput,
+				task.PrivateData.BillingContext.InputVideoDurationMS,
+				relaycommon.MaxTaskDurationSeconds,
+			)
+			require.NoError(t, err, target.CaseID)
+			expectedFinalCharge := charge.TotalCharge.Mul(decimal.NewFromFloat(importedMaterialMatrixGroupRatio))
+			expectedQuota := common.QuotaFromDecimal(expectedFinalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+			require.Equal(t, expectedQuota, task.Quota, target.CaseID)
+			require.Equal(t, "official-sheet-v1", task.PrivateData.BillingContext.DurationBilling.PricingVersion, target.CaseID)
+			require.Equal(t, charge.OutputCharge.String(), task.PrivateData.BillingContext.DurationBilling.OutputCharge, target.CaseID)
+			require.Equal(t, expectedFinalCharge.String(), task.PrivateData.BillingContext.DurationBilling.FinalCharge, target.CaseID)
+			if hasVideoInput {
+				alternate, alternateErr := durationPrice.CalculateCharge(
+					target.Duration, target.Resolution, true, 1, relaycommon.MaxTaskDurationSeconds,
+				)
+				require.NoError(t, alternateErr, target.CaseID)
+				require.Equal(t, charge.TotalCharge.String(), alternate.TotalCharge.String(), target.CaseID)
+			}
 			require.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion, target.CaseID)
 			require.Positive(t, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
 			require.GreaterOrEqual(t, task.PrivateData.BillingContext.UsageTotalTokens, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
@@ -432,7 +463,7 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 
 	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
 	groupRatios := ratio_setting.GetGroupRatioCopy()
-	groupRatios[importedMaterialMatrixGroup] = 1
+	groupRatios[importedMaterialMatrixGroup] = importedMaterialMatrixGroupRatio
 	encodedGroupRatios, err := common.Marshal(groupRatios)
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(encodedGroupRatios)))

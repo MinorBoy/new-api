@@ -317,6 +317,30 @@ test('uses the configured exchange rate for official sale previews', () => {
   )
 })
 
+test('keeps explicit no-video and with-video official USD per-second prices', () => {
+  const output = buildTemplateData(sourceWithOfficialPrice(), rules)
+
+  assert.deepEqual(
+    output.sales.map((sale) => ({
+      scenario: sale.scenario,
+      billingMode: sale.billingMode,
+      usdPerSecond: sale.usdPerSecond,
+    })),
+    [
+      {
+        scenario: 'no_video',
+        billingMode: 'per_duration',
+        usdPerSecond: '0.136164383561643822',
+      },
+      {
+        scenario: 'with_video',
+        billingMode: 'per_duration',
+        usdPerSecond: '0.082876712328767115',
+      },
+    ]
+  )
+})
+
 test('uses a registered source ID for generated cost rows', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(), rules)
 

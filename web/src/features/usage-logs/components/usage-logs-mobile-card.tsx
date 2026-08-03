@@ -391,6 +391,22 @@ function TaskLogsCard<TData>({
         <SummaryField label={t('Submit Time')} cell={submitTimeCell} />
         <SummaryField label={t('User')} cell={cells.get('user')} primaryOnly />
         <SummaryField
+          label={t('Request Model')}
+          cell={cells.get('request_model')}
+        />
+        <SummaryField
+          label={t('Request Data')}
+          cell={cells.get('user_request_data')}
+        />
+        <SummaryField
+          label={t('Upstream Response (Create Task)')}
+          cell={cells.get('upstream_response_data')}
+        />
+        <SummaryField
+          label={t('Task Details')}
+          cell={cells.get('user_response_data')}
+        />
+        <SummaryField
           label={t('Result')}
           cell={cells.get('fail_reason')}
           className='col-span-2 bg-transparent px-0 py-0'

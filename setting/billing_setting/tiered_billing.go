@@ -3,7 +3,9 @@ package billing_setting
 import (
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
@@ -44,9 +46,6 @@ func GetBillingMode(model string) string {
 	if mode, ok := billingSetting.BillingMode.Get(model); ok {
 		return mode
 	}
-	if _, ok := defaultDurationPrice[model]; ok {
-		return BillingModePerDuration
-	}
 	return BillingModeRatio
 }
 
@@ -55,15 +54,39 @@ func GetBillingExpr(model string) (string, bool) {
 }
 
 func GetBillingModeCopy() map[string]string {
-	configuredModes := billingSetting.BillingMode.ReadAll()
-	modes := make(map[string]string, len(defaultDurationPrice)+len(configuredModes))
-	for model := range defaultDurationPrice {
-		modes[model] = BillingModePerDuration
+	return billingSetting.BillingMode.ReadAll()
+}
+
+func ValidateBillingModeJSONString(raw string) error {
+	var modes map[string]string
+	if err := common.UnmarshalJsonStr(raw, &modes); err != nil {
+		return fmt.Errorf("invalid billing mode JSON: %w", err)
 	}
-	for model, mode := range configuredModes {
-		modes[model] = mode
+	if modes == nil {
+		return fmt.Errorf("billing mode must be a JSON object")
 	}
-	return modes
+	currentModes := GetBillingModeCopy()
+	for model, current := range currentModes {
+		if seedancepricing.Family(model) == "" {
+			continue
+		}
+		proposed, exists := modes[model]
+		if !exists {
+			return fmt.Errorf("Seedance billing mode for %s cannot be removed outside config import", model)
+		}
+		if current != proposed {
+			return fmt.Errorf("Seedance billing mode for %s must be updated through config import", model)
+		}
+	}
+	for model := range modes {
+		if seedancepricing.Family(model) == "" {
+			continue
+		}
+		if _, exists := currentModes[model]; !exists {
+			return fmt.Errorf("Seedance billing mode for %s must be created through config import", model)
+		}
+	}
+	return nil
 }
 
 func GetBillingExprCopy() map[string]string {

@@ -51,6 +51,27 @@ func PreviewFinalUserQuota(ctx *gin.Context, info *relaycommon.RelayInfo, input 
 		if input.DurationSeconds != nil {
 			requestedSeconds = *input.DurationSeconds
 		}
+		if len(previewInfo.PriceData.DurationPrice.Scenarios) > 0 {
+			charge, err := previewInfo.PriceData.DurationPrice.CalculateCharge(
+				requestedSeconds,
+				previewInfo.PriceData.DurationResolution,
+				previewInfo.PriceData.HasVideoInput,
+				previewInfo.PriceData.InputVideoDurationMS,
+				relaycommon.MaxTaskDurationSeconds,
+			)
+			if err != nil {
+				return 0, err
+			}
+			previewInfo.PriceData.DurationBilling = charge.Breakdown()
+			quotaDecimal := charge.TotalCharge.
+				Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+				Mul(decimal.NewFromFloat(previewInfo.PriceData.GroupRatioInfo.GroupRatio))
+			quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
+			if clamp != nil {
+				return 0, fmt.Errorf("billing preview quota is out of range: %w", clamp)
+			}
+			return int64(quota), nil
+		}
 		billableSeconds, err := previewInfo.PriceData.DurationPrice.BillableSeconds(requestedSeconds, relaycommon.MaxTaskDurationSeconds)
 		if err != nil {
 			return 0, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -62,6 +63,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		info.PriceData.DurationSource,
 		info.PriceData.RequestedDurationSeconds,
 		info.PriceData.BillableDurationSeconds,
+		info.PriceData.DurationBilling,
 	)
 	if resolutionRatio, ok := info.PriceData.OtherRatios()["resolution"]; ok {
 		other["resolution_ratio"] = resolutionRatio
@@ -374,7 +376,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
-		appendDurationBillingOther(other, bc.BillingMode, bc.DurationPrice, bc.DurationSource, bc.RequestedDurationSeconds, bc.BillableDurationSeconds)
+		appendDurationBillingOther(other, bc.BillingMode, bc.DurationPrice, bc.DurationSource, bc.RequestedDurationSeconds, bc.BillableDurationSeconds, bc.DurationBilling)
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				if k == "resolution" {
@@ -409,18 +411,38 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	return other
 }
 
-func appendDurationBillingOther(other map[string]interface{}, mode string, price *types.DurationPrice, source string, requested, billable int) {
+func appendDurationBillingOther(other map[string]interface{}, mode string, price *types.DurationPrice, source string, requested, billable int, breakdown *types.DurationBillingBreakdown) {
 	if mode != billing_setting.BillingModePerDuration || price == nil {
 		return
 	}
 	other["billing_mode"] = mode
-	other["duration_price"] = price.Price
-	other["duration_unit"] = price.Unit
-	other["rounding_step_seconds"] = price.RoundingStepSeconds
-	other["minimum_duration_seconds"] = price.MinimumDurationSeconds
 	other["duration_source"] = source
 	other["requested_duration_seconds"] = requested
 	other["billable_duration_seconds"] = billable
+	if breakdown == nil {
+		other["duration_price"] = price.Price
+		other["duration_unit"] = price.Unit
+		other["rounding_step_seconds"] = price.RoundingStepSeconds
+		other["minimum_duration_seconds"] = price.MinimumDurationSeconds
+		return
+	}
+	if outputPrice, err := strconv.ParseFloat(breakdown.OutputPricePerSecond, 64); err == nil {
+		other["duration_price"] = outputPrice
+	}
+	other["duration_unit"] = types.DurationUnitSecond
+	other["rounding_step_seconds"] = breakdown.RoundingStepSeconds
+	other["minimum_duration_seconds"] = breakdown.MinimumDurationSeconds
+	other["duration_pricing_scenario"] = breakdown.Scenario
+	other["duration_pricing_resolution"] = breakdown.Resolution
+	other["duration_pricing_version"] = breakdown.PricingVersion
+	other["duration_pricing_source"] = breakdown.Source
+	other["output_price_per_second"] = breakdown.OutputPricePerSecond
+	other["output_duration_charge"] = breakdown.OutputCharge
+	other["duration_total_charge"] = breakdown.FinalCharge
+	if breakdown.FinalCharge == "" {
+		other["duration_total_charge"] = breakdown.TotalCharge
+	}
+	other["input_video_duration_ms"] = breakdown.InputVideoDurationMS
 }
 
 func taskBillingContextPriceData(bc *model.TaskBillingContext) *types.PriceData {

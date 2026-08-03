@@ -26,14 +26,13 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 	service.InitHttpClient()
 
 	models := []struct {
-		name            string
-		upstreamModel   string
-		resolution      string
-		resolutionRatio float64
+		name          string
+		upstreamModel string
+		resolution    string
 	}{
-		{name: "fast_vip_720p", upstreamModel: "jmg-video-seedance-2.0-fast-vip", resolution: "720p", resolutionRatio: 1},
-		{name: "mini_720p", upstreamModel: "jmg-video-seedance-2.0-mini", resolution: "720p", resolutionRatio: 1},
-		{name: "vip_1080p", upstreamModel: "jmg-video-seedance-2.0-vip", resolution: "1080p", resolutionRatio: 2.5},
+		{name: "fast_vip_720p", upstreamModel: "jmg-video-seedance-2.0-fast-vip", resolution: "720p"},
+		{name: "mini_720p", upstreamModel: "jmg-video-seedance-2.0-mini", resolution: "720p"},
+		{name: "vip_1080p", upstreamModel: "jmg-video-seedance-2.0-vip", resolution: "1080p"},
 	}
 	terminalStates := []struct {
 		name          string
@@ -133,8 +132,7 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 				require.Nil(t, durationErr)
 				assert.Equal(t, 6, requested)
 				ratios := adaptor.EstimateBilling(c, info)
-				assert.Equal(t, modelCase.resolutionRatio, ratios["resolution"])
-				assert.NotContains(t, ratios, "seconds")
+				assert.Empty(t, ratios)
 
 				requestBody, err := adaptor.BuildRequestBody(c, info)
 				require.NoError(t, err)
@@ -198,7 +196,6 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 							DurationSource:           types.DurationSourceRequest,
 							RequestedDurationSeconds: requested,
 							BillableDurationSeconds:  requested,
-							OtherRatios:              map[string]float64{"resolution": modelCase.resolutionRatio},
 						},
 					},
 				}
@@ -209,7 +206,7 @@ func TestDimensioSeedance20ProtocolE2E(t *testing.T) {
 				assert.Equal(t, types.DurationSourceRequest, task.PrivateData.BillingContext.DurationSource)
 				assert.Equal(t, 6, task.PrivateData.BillingContext.RequestedDurationSeconds)
 				assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
-				assert.Equal(t, map[string]float64{"resolution": modelCase.resolutionRatio}, task.PrivateData.BillingContext.OtherRatios)
+				assert.Empty(t, task.PrivateData.BillingContext.OtherRatios)
 				arkResponseData, err := adaptor.ConvertToArkVideoTask(task)
 				require.NoError(t, err)
 				assert.NotContains(t, string(arkResponseData), upstreamTaskID)

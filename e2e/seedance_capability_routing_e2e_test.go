@@ -17,7 +17,9 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -426,7 +428,12 @@ func TestSeedanceCapabilityRoutingPrivacyAndBillingE2E(t *testing.T) {
 	assert.Equal(t, upstreamUpscaled1080, task.PrivateData.Routing.UpstreamModel)
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, modelrouting.Seedance20, task.PrivateData.BillingContext.OriginModelName)
-	assert.Equal(t, 0.1, task.PrivateData.BillingContext.ModelRatio)
+	assert.Zero(t, task.PrivateData.BillingContext.ModelRatio)
+	assert.Equal(t, billing_setting.BillingModePerDuration, task.PrivateData.BillingContext.BillingMode)
+	require.NotNil(t, task.PrivateData.BillingContext.DurationBilling)
+	assert.Equal(t, "1080p", task.PrivateData.BillingContext.DurationBilling.Resolution)
+	assert.Equal(t, types.DurationScenarioWithVideo, task.PrivateData.BillingContext.DurationBilling.Scenario)
+	assert.Equal(t, "official-sheet-v1", task.PrivateData.BillingContext.DurationBilling.PricingVersion)
 	assert.Positive(t, task.Quota)
 
 	status, single := performJSONRequest(t, env.engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+publicID, "Bearer e2e", "")

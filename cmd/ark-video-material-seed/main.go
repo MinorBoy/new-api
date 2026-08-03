@@ -46,6 +46,7 @@ const (
 	seedTokenName    = "ARK SDK material matrix local seed"
 	seedChannelName  = "ark-sdk-matrix-mock-"
 	seedAssetBaseURL = "http://cdn.openai.com/ark-matrix"
+	seedGroupRatio   = 1.25
 )
 
 type matrixTarget struct {
@@ -422,7 +423,7 @@ func seedRuntimeSettings() error {
 	}
 
 	groupRatios := ratio_setting.GetGroupRatioCopy()
-	groupRatios[seedGroup] = 1
+	groupRatios[seedGroup] = seedGroupRatio
 	encodedGroupRatios, err := common.Marshal(groupRatios)
 	if err != nil {
 		return err

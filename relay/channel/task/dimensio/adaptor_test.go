@@ -161,8 +161,7 @@ func TestDurationBillingUsesValidatedRequestDuration(t *testing.T) {
 	assert.Equal(t, 7, requested)
 
 	ratio := (&TaskAdaptor{}).EstimateBilling(c, nil)
-	assert.Equal(t, map[string]float64{"resolution": 2.5}, ratio)
-	assert.NotContains(t, ratio, "seconds")
+	assert.Empty(t, ratio)
 }
 
 func TestEstimateDurationSecondsRejectsInvalidContext(t *testing.T) {

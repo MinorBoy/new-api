@@ -81,7 +81,7 @@ func TestConcurrentBillingConfigUpdateAndRead(t *testing.T) {
 	assert.Contains(t, result.exprs, "race-model")
 	assert.Contains(t, result.prices, "race-model")
 	assert.Equal(t, true, result.pricingSync["base"])
-	assert.Equal(t, BillingModePerDuration, result.modes["jimeng-video-seedance-2.0-vip"])
+	assert.NotContains(t, result.modes, "jimeng-video-seedance-2.0-vip")
 }
 
 func TestBillingConfigNullKeepsMapsUsable(t *testing.T) {
@@ -111,9 +111,9 @@ func TestBillingConfigNullKeepsMapsUsable(t *testing.T) {
 		assert.False(t, hasExpr)
 		_, hasPrice := GetDurationPrice("boundary-model")
 		assert.False(t, hasPrice)
-		assert.Contains(t, GetBillingModeCopy(), "jimeng-video-seedance-2.0-vip")
+		assert.Empty(t, GetBillingModeCopy())
 		assert.Empty(t, GetBillingExprCopy())
-		assert.Contains(t, GetDurationPriceCopy(), "jimeng-video-seedance-2.0-vip")
+		assert.Empty(t, GetDurationPriceCopy())
 	})
 }
 

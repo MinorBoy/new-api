@@ -186,6 +186,8 @@ type ConfigImportModelSKU struct {
 type ConfigImportSaleProposal struct {
 	ConfigImportAuthoritativeEntity
 	ModelSKURef          string                 `json:"model_sku_ref"`
+	Scenario             string                 `json:"scenario,omitempty"`
+	Resolution           string                 `json:"resolution,omitempty"`
 	Currency             string                 `json:"currency,omitempty"`
 	UnitPrice            *string                `json:"unit_price,omitempty"`
 	PricePerUnit         *string                `json:"price_per_unit,omitempty"`
@@ -211,6 +213,8 @@ type DurationPriceProposal struct {
 	Unit                   string `json:"unit"`
 	RoundingStepSeconds    int    `json:"rounding_step_seconds"`
 	MinimumDurationSeconds int    `json:"minimum_duration_seconds"`
+	PricingVersion         string `json:"pricing_version,omitempty"`
+	Source                 string `json:"source,omitempty"`
 }
 
 type ConfigImportCostRuleDraft struct {

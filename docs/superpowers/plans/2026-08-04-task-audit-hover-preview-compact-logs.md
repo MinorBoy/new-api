@@ -18,7 +18,7 @@
 - `web/src/features/usage-logs/components/dialogs/task-audit-data-dialog.tsx`：提供稳定的审计数据格式化函数和现有完整详情 Dialog。
 - `web/src/features/usage-logs/components/__tests__/task-audit-columns.test.tsx`：保护三列入口、聚焦预览、完整 JSON、复制入口、点击详情和空数据降级。
 - `web/src/features/usage-logs/lib/table-density.ts`：按日志分类提供稳定的桌面表格密度配置。
-- `web/src/features/usage-logs/lib/__tests__/table-density.test.ts`：保护任务/绘图紧凑、普通日志不变的布局契约。
+- `web/src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx`：从 `UsageLogsTable` 边界保护任务/绘图紧凑、普通日志不变的布局契约。
 - `web/src/features/usage-logs/components/usage-logs-table.tsx`：把分类密度配置应用到表头和桌面数据行。
 
 ### 任务 1：为三列审计数据增加悬停与聚焦预览
@@ -188,7 +188,7 @@ git commit -m "feat: 优化任务审计数据查看交互"
 **文件：**
 
 - 新建：`web/src/features/usage-logs/lib/table-density.ts`
-- 新建：`web/src/features/usage-logs/lib/__tests__/table-density.test.ts`
+- 新建：`web/src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx`
 - 修改：`web/src/features/usage-logs/components/usage-logs-table.tsx`
 
 - [ ] **步骤 1：先写分类密度失败测试**
@@ -200,8 +200,8 @@ const taskDensity = getUsageLogsTableDensity('task')
 const drawingDensity = getUsageLogsTableDensity('drawing')
 const commonDensity = getUsageLogsTableDensity('common')
 
-assert.equal(taskDensity.rowClassName, '!h-13')
-assert.equal(drawingDensity.rowClassName, '!h-13')
+assert.equal(taskDensity.rowClassName, 'h-13!')
+assert.equal(drawingDensity.rowClassName, 'h-13!')
 assert.match(taskDensity.getColumnClassName('status', 'header') ?? '', /px-1\.5/)
 assert.match(taskDensity.getColumnClassName('status', 'cell') ?? '', /py-2\.5/)
 assert.equal(commonDensity.rowClassName, '')
@@ -222,7 +222,7 @@ assert.match(
 运行：
 
 ```powershell
-bun test --parallel=1 src/features/usage-logs/lib/__tests__/table-density.test.ts
+bun test --parallel=1 src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx
 ```
 
 工作目录：`web/`
@@ -255,7 +255,7 @@ const commonColumnClassName: DataTableColumnClassName = (_columnId, kind) =>
   kind === 'cell' ? 'py-2' : undefined
 
 const compactDensity = {
-  rowClassName: '!h-13',
+  rowClassName: 'h-13!',
   getColumnClassName: compactColumnClassName,
 }
 
@@ -298,7 +298,7 @@ const tableDensity = getUsageLogsTableDensity(logCategory)
 运行：
 
 ```powershell
-bun test --parallel=1 src/features/usage-logs/lib/__tests__/table-density.test.ts
+bun test --parallel=1 src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx
 bun test --parallel=1 src/features/usage-logs
 ```
 
@@ -309,7 +309,7 @@ bun test --parallel=1 src/features/usage-logs
 - [ ] **步骤 5：提交桌面表格紧凑布局**
 
 ```powershell
-git add web/src/features/usage-logs/lib/table-density.ts web/src/features/usage-logs/lib/__tests__/table-density.test.ts web/src/features/usage-logs/components/usage-logs-table.tsx
+git add web/src/features/usage-logs/lib/table-density.ts web/src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx web/src/features/usage-logs/components/usage-logs-table.tsx docs/superpowers/plans/2026-08-04-task-audit-hover-preview-compact-logs.md
 git commit -m "style: 收紧任务与绘图日志列表"
 ```
 
@@ -321,7 +321,7 @@ git commit -m "style: 收紧任务与绘图日志列表"
 
 ```powershell
 bun run typecheck
-bunx oxlint -c .oxlintrc.json src/features/usage-logs/components/columns/task-logs-columns.tsx src/features/usage-logs/components/dialogs/task-audit-data-dialog.tsx src/features/usage-logs/components/usage-logs-table.tsx src/features/usage-logs/components/__tests__/task-audit-columns.test.tsx src/features/usage-logs/lib/table-density.ts src/features/usage-logs/lib/__tests__/table-density.test.ts
+bunx oxlint -c .oxlintrc.json src/features/usage-logs/components/columns/task-logs-columns.tsx src/features/usage-logs/components/dialogs/task-audit-data-dialog.tsx src/features/usage-logs/components/usage-logs-table.tsx src/features/usage-logs/components/__tests__/task-audit-columns.test.tsx src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx src/features/usage-logs/lib/table-density.ts
 bun run format:check
 ```
 

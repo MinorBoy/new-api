@@ -38,6 +38,7 @@ import {
 } from '../constants'
 import { useColumnsByCategory } from '../lib/columns'
 import { parseLogOther } from '../lib/format'
+import { getUsageLogsTableDensity } from '../lib/table-density'
 import { fetchLogsByCategory } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
@@ -175,6 +176,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const isCommon = logCategory === 'common'
+  const tableDensity = getUsageLogsTableDensity(logCategory)
 
   return (
     <DataTablePage
@@ -188,6 +190,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       )}
       skeletonKeyPrefix='usage-log-skeleton'
       applyHeaderSize
+      getColumnClassName={tableDensity.getColumnClassName}
       tableClassName={cn(
         '[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_td_*]:text-[13px] [&_[data-slot=table]_th]:text-[13px] [&_[data-slot=table]_th_*]:text-[13px]'
       )}
@@ -224,8 +227,12 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
           <DataTableRow
             key={row.id}
             row={row}
-            className={cn('transition-colors', tintClass)}
-            getColumnClassName={() => (isCommon ? 'py-2' : 'py-3.5')}
+            className={cn(
+              'transition-colors',
+              tableDensity.rowClassName,
+              tintClass
+            )}
+            getColumnClassName={tableDensity.getColumnClassName}
           />
         )
       }}

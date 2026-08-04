@@ -109,6 +109,69 @@ func TestParseTaskResultPreservesUsageResolutionAndTerminalStates(t *testing.T) 
 	}
 }
 
+func TestConvertToArkVideoTaskCompletesPublicTerminalResponse(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public",
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		FinishTime: 222,
+		UpdatedAt:  333,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "cgt-private",
+			ResultURL:      "https://example.com/video.mp4",
+		},
+		Data: []byte(`{
+			"id":"cgt-private",
+			"model":"private-upstream-model",
+			"status":"succeeded",
+			"content":{"video_url":"https://example.com/video.mp4"},
+			"error":{"code":"stale_error","message":"private detail"},
+			"diagnostic":"private diagnostic",
+			"supplier_account":"private account"
+		}`),
+	}
+
+	body, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
+
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "cgt-private")
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "task_public", response["id"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
+	assert.Equal(t, "succeeded", response["status"])
+	assert.NotContains(t, response, "diagnostic")
+	assert.NotContains(t, response, "supplier_account")
+	assert.NotContains(t, response, "error")
+	assert.EqualValues(t, 111, response["created_at"])
+	assert.EqualValues(t, 222, response["updated_at"])
+	assert.Equal(t, "720p", response["resolution"])
+	assert.EqualValues(t, 5, response["duration"])
+	assert.Contains(t, response, "usage")
+}
+
+func TestConvertToArkVideoTaskSanitizesFailureTaskID(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_failed",
+		Status:     model.TaskStatusFailure,
+		SubmitTime: 111,
+		FinishTime: 222,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "cgt-private-failed",
+		},
+		Data: []byte(`{"id":"cgt-private-failed","status":"failed","error":{"code":"provider_failed","message":"task cgt-private-failed failed"}}`),
+	}
+
+	body, err := (&TaskAdaptor{}).ConvertToArkVideoTask(task)
+
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "cgt-private-failed")
+	assert.NotContains(t, string(body), "content")
+	assert.Contains(t, string(body), "[redacted]")
+}
+
 func TestEstimateDurationSecondsUsesValidatedNativeRequest(t *testing.T) {
 	tests := []struct {
 		name     string

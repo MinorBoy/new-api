@@ -554,6 +554,82 @@ func TestVideoPollingPersistsTerminalUserResponseForOriginalProtocol(t *testing.
 	}
 }
 
+func TestSeedanceVideoPollingPersistsCompleteArkTerminalResponse(t *testing.T) {
+	truncate(t)
+	task := seedPollingTask(t, 0, "task_public_seedance_audit", "upstream_private_seedance_audit")
+	task.Platform = constant.TaskPlatform(fmt.Sprint(constant.ChannelTypeFourSToken))
+	task.SubmitTime = 111
+	task.UpdatedAt = 222
+	task.Properties.RequestPath = "/v1/video/generations"
+	task.Properties.OriginModelName = "doubao-seedance-2-0-mini-260615"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+		SeedanceTokenBilling:     seedanceTokenBilling720p(),
+	}
+	require.NoError(t, task.Update())
+	adaptor := &taskResponseAuditPollingAdaptor{&taskPollingFetchAdaptor{
+		parseResult: &relaycommon.TaskInfo{
+			Status: string(model.TaskStatusSuccess),
+			Url:    "https://x/video.mp4",
+		},
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(stored.PrivateData.UserResponseData, &response))
+	assert.Equal(t, "task_public_seedance_audit", response["id"])
+	assert.Equal(t, "doubao-seedance-2-0-mini-260615", response["model"])
+	assert.Equal(t, "succeeded", response["status"])
+	content, ok := response["content"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "https://x/video.mp4", content["video_url"])
+	assert.EqualValues(t, 0, response["seed"])
+	assert.Equal(t, "720p", response["resolution"])
+	assert.Equal(t, "16:9", response["ratio"])
+	assert.EqualValues(t, 5, response["duration"])
+	assert.EqualValues(t, 24, response["framespersecond"])
+	assert.Equal(t, "default", response["service_tier"])
+	assert.EqualValues(t, 172800, response["execution_expires_after"])
+	assert.Equal(t, true, response["generate_audio"])
+	assert.Equal(t, false, response["draft"])
+	assert.EqualValues(t, 0, response["priority"])
+	usage, ok := response["usage"].(map[string]any)
+	require.True(t, ok)
+	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 108000, usage["total_tokens"])
+	assert.NotContains(t, string(stored.PrivateData.UserResponseData), "upstream_private_seedance_audit")
+}
+
+func TestNewAPIVideoNonSeedancePollingKeepsOpenAIAuditFormat(t *testing.T) {
+	truncate(t)
+	task := seedPollingTask(t, 0, "task_public_generic_video", "upstream_generic_video")
+	task.Platform = constant.TaskPlatform(fmt.Sprint(constant.ChannelTypeNewAPIVideo))
+	task.Properties.RequestPath = "/v1/video/generations"
+	task.Properties.OriginModelName = "generic-video-model"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UpstreamCostMode: string(types.CostModePerDuration),
+	}
+	require.NoError(t, task.Update())
+	adaptor := &taskResponseAuditPollingAdaptor{&taskPollingFetchAdaptor{
+		parseResult: &relaycommon.TaskInfo{
+			Status: string(model.TaskStatusSuccess),
+			Url:    "https://x/video.mp4",
+		},
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.JSONEq(t, `{"id":"task_public_generic_video","status":"completed"}`, string(stored.PrivateData.UserResponseData))
+	assert.NotContains(t, string(stored.PrivateData.UserResponseData), "resolution")
+}
+
 func TestSeedanceTaskPollingPersistsLocallyCalculatedUsage(t *testing.T) {
 	truncate(t)
 	task := seedPollingTask(t, 0, "task_public_seedance_usage", "upstream_seedance_usage")

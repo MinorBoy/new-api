@@ -6,6 +6,8 @@ Ark SDK 视频矩阵 E2E 当前有 118 条成功任务。其中 25 条任务的�
 
 根因不是任务日志页面裁剪字段，而是不同渠道适配器根据各自上游响应生成终态结果。上游没有返回的字段目前不会统一补齐，因此同一个 Ark SDK 接口产生了不同完整度的响应结构。
 
+首轮实现后的矩阵 E2E 进一步暴露了第二个旁路：后台轮询审计会根据任务创建路径选择 `ConvertToOpenAIVideo` 或 `ConvertToArkVideoTask`，直接持久化转换结果，不经过 `seedanceTaskResponse`。因此仅在 relay 查询层补全无法保证任务日志完整，统一规范化必须下沉到 relay 和 service 都可复用的业务层。
+
 ## 目标
 
 - 所有 Seedance 渠道的成功任务必须返回完整、稳定的 Ark 视频终态结构。
@@ -110,12 +112,12 @@ Ark SDK 视频矩阵 E2E 当前有 118 条成功任务。其中 25 条任务的�
 ## 组件与数据流
 
 1. 任务轮询适配器解析供应商响应并更新 `Task.Data`、状态、结果 URL 和计费事实。
-2. 渠道的 `ConvertToArkVideoTask` 生成初始 Ark 响应。
-3. `seedanceTaskResponse` 对公共 ID、模型、状态、时间、视频 URL 和 Token 用量执行现有规范化。
-4. 新增集中式终态补全步骤，解析用户请求快照和计费快照，按优先级补齐全部公共字段。
+2. Seedance 渠道无论创建路径为何，后台轮询审计都使用 `ConvertToArkVideoTask` 生成初始 Ark 响应。
+3. `service.NormalizeSeedanceTaskResponse` 统一规范化公共 ID、模型、状态、时间、视频 URL、Token 用量和终态默认字段。
+4. relay 查询接口和 service 后台轮询审计共同调用同一个规范化器，避免任一路径保存简化响应。
 5. 完整响应返回给 Ark SDK 用户，并通过现有 `PersistTerminalTaskUserResponse` 保存到任务日志审计字段。
 
-补全逻辑放在通用 Seedance 响应层，不放进前端。任务日志页面继续原样展示后端保存的最终用户响应。
+补全逻辑放在 service 的通用 Seedance 响应层，不放进前端或单个渠道适配器。任务日志页面继续原样展示后端保存的最终用户响应。
 
 ## 请求快照解析
 

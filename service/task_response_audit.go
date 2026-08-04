@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 )
@@ -47,6 +48,28 @@ func persistPolledTerminalTaskUserResponse(ctx context.Context, adaptor TaskPoll
 		responseBody []byte
 		err          error
 	)
+	if IsSeedanceTask(task) {
+		converter, ok := adaptor.(taskArkVideoConverter)
+		if !ok {
+			return
+		}
+		responseBody, err = converter.ConvertToArkVideoTask(task)
+		if err == nil {
+			var response map[string]interface{}
+			if err = common.Unmarshal(responseBody, &response); err == nil {
+				err = NormalizeSeedanceTaskResponse(task, response)
+			}
+			if err == nil {
+				responseBody, err = common.Marshal(response)
+			}
+		}
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("build terminal task user response audit payload failed: task_id=%s request_path=%s error=%v", task.TaskID, requestPath, err))
+			return
+		}
+		PersistTerminalTaskUserResponse(ctx, task, responseBody)
+		return
+	}
 	switch {
 	case strings.HasPrefix(requestPath, "/v1/video/generations"), strings.HasPrefix(requestPath, "/v1/videos"):
 		converter, ok := adaptor.(taskOpenAIVideoConverter)

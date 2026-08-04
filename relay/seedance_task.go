@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,11 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
-	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -75,7 +71,7 @@ func seedanceFetchTaskByID(c *gin.Context) (*model.Task, bool, error) {
 	if err != nil || !exists {
 		return task, exists, err
 	}
-	if !isSeedanceTaskPlatform(task.Platform) {
+	if !service.IsSeedanceTask(task) {
 		return nil, false, nil
 	}
 	return task, true, nil
@@ -88,6 +84,48 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 		Where("user_id = ?", c.GetInt("id")).
 		Where("platform IN ?", seedanceTaskPlatformValues()).
 		Where("submit_time >= ?", time.Now().Add(-7*24*time.Hour).Unix())
+	var requestPathExpression, billingProfileExpression string
+	var modelExpressions []string
+	switch {
+	case common.UsingMainDatabase(common.DatabaseTypePostgreSQL):
+		requestPathExpression = "properties ->> 'request_path'"
+		billingProfileExpression = "private_data -> 'billing_context' ->> 'usage_profile'"
+		modelExpressions = []string{
+			"properties ->> 'origin_model_name'",
+			"properties ->> 'upstream_model_name'",
+			"private_data -> 'billing_context' ->> 'origin_model_name'",
+			"private_data -> 'billing_context' ->> 'upstream_model_name'",
+		}
+	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
+		requestPathExpression = "JSON_UNQUOTE(JSON_EXTRACT(properties, '$.request_path'))"
+		billingProfileExpression = "JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.billing_context.usage_profile'))"
+		modelExpressions = []string{
+			"JSON_UNQUOTE(JSON_EXTRACT(properties, '$.origin_model_name'))",
+			"JSON_UNQUOTE(JSON_EXTRACT(properties, '$.upstream_model_name'))",
+			"JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.billing_context.origin_model_name'))",
+			"JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.billing_context.upstream_model_name'))",
+		}
+	default:
+		requestPathExpression = "json_extract(properties, '$.request_path')"
+		billingProfileExpression = "json_extract(private_data, '$.billing_context.usage_profile')"
+		modelExpressions = []string{
+			"json_extract(properties, '$.origin_model_name')",
+			"json_extract(properties, '$.upstream_model_name')",
+			"json_extract(private_data, '$.billing_context.origin_model_name')",
+			"json_extract(private_data, '$.billing_context.upstream_model_name')",
+		}
+	}
+	evidencePredicates := []string{
+		"LOWER(COALESCE(" + requestPathExpression + ", '')) LIKE ?",
+		"LOWER(COALESCE(" + billingProfileExpression + ", '')) = ?",
+	}
+	evidenceArgs := []interface{}{"/api/v3/contents/generations/tasks%", model.TaskUsageProfileSeedance}
+	for _, expression := range modelExpressions {
+		predicate, args := seedanceModelEvidencePredicate(expression)
+		evidencePredicates = append(evidencePredicates, predicate)
+		evidenceArgs = append(evidenceArgs, args...)
+	}
+	query = query.Where("("+strings.Join(evidencePredicates, " OR ")+")", evidenceArgs...)
 
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
 		query = query.Where("status = ?", seedanceInternalStatus(status))
@@ -104,15 +142,13 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 	if serviceTierFilter == "" {
 		serviceTierFilter = strings.TrimSpace(c.Query("filter[service_tier]"))
 	}
-
 	if modelFilter == "" && serviceTierFilter == "" {
 		var total int64
 		if err := query.Count(&total).Error; err != nil {
 			return nil, err
 		}
 		var tasks []*model.Task
-		err := query.Order("id DESC").Offset((pageNum - 1) * pageSize).Limit(pageSize).Find(&tasks).Error
-		if err != nil {
+		if err := query.Order("id DESC").Offset((pageNum - 1) * pageSize).Limit(pageSize).Find(&tasks).Error; err != nil {
 			return nil, err
 		}
 		items := make([]map[string]interface{}, 0, len(tasks))
@@ -127,6 +163,11 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 	}
 
 	return seedanceFilteredTaskList(query, pageNum, pageSize, modelFilter, serviceTierFilter)
+}
+
+func seedanceModelEvidencePredicate(expression string) (string, []interface{}) {
+	compact := "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(" + expression + ", ''), '-', ''), '_', ''), '.', ''), ' ', ''))"
+	return "(" + compact + " LIKE ? OR " + compact + " LIKE ?)", []interface{}{"%seedance20%", "%seedance15pro%"}
 }
 
 func seedanceFilteredTaskList(query *gorm.DB, pageNum, pageSize int, modelFilter, serviceTierFilter string) (*seedanceTaskListResponse, error) {
@@ -152,6 +193,9 @@ func seedanceFilteredTaskList(query *gorm.DB, pageNum, pageSize int, modelFilter
 		for _, task := range batch {
 			lastID = task.ID
 			hasLastID = true
+			if !service.IsSeedanceTask(task) {
+				continue
+			}
 			if !seedanceTaskMatchesJSONFilter(task, modelFilter, serviceTierFilter) {
 				continue
 			}
@@ -220,194 +264,18 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	response["id"] = task.TaskID
-	publicStatus := seedanceTaskStatus(task.Status)
-	if upstreamStatus, ok := response["status"].(string); ok && task.Status == model.TaskStatusFailure {
-		switch strings.ToLower(upstreamStatus) {
-		case "expired", "cancelled":
-			publicStatus = strings.ToLower(upstreamStatus)
-		}
-	}
-	response["status"] = publicStatus
-	if modelValue, exists := response["model"]; !exists || modelValue == "" {
-		modelName := task.Properties.OriginModelName
-		if modelName == "" {
-			modelName = task.Properties.UpstreamModelName
-		}
-		response["model"] = modelName
-	}
-	if _, exists := response["created_at"]; !exists {
-		createdAt := task.SubmitTime
-		if createdAt == 0 {
-			createdAt = task.CreatedAt
-		}
-		response["created_at"] = createdAt
-	}
-	if _, exists := response["updated_at"]; !exists {
-		response["updated_at"] = task.UpdatedAt
-	}
-	if task.Status == model.TaskStatusSuccess {
-		content, ok := response["content"].(map[string]interface{})
-		if !ok {
-			content = make(map[string]interface{})
-		}
-		videoURL, _ := content["video_url"].(string)
-		if videoURL == "" && task.PrivateData.ResultURL != "" {
-			content["video_url"] = task.PrivateData.ResultURL
-			response["content"] = content
-		}
-	}
-	if err := populateSeedanceTaskUsage(task, response); err != nil {
+	if err := service.NormalizeSeedanceTaskResponse(task, response); err != nil {
 		return nil, err
 	}
 	return response, nil
 }
 
-func populateSeedanceTaskUsage(task *model.Task, response map[string]interface{}) error {
-	if task == nil || task.Status != model.TaskStatusSuccess || response == nil {
-		return nil
-	}
-	billingContext := task.PrivateData.BillingContext
-	if billingContext != nil && billingContext.UsageSnapshotVersion == model.TaskUsageSnapshotVersion1 {
-		if billingContext.UsageSource != model.TaskUsageSourceUpstream &&
-			billingContext.UsageSource != model.TaskUsageSourceLocalCalculated {
-			return errors.New("Seedance terminal usage is unavailable")
-		}
-		usage, ok := service.PersistedSeedanceTaskUsage(billingContext)
-		if !ok {
-			return errors.New("Seedance terminal usage is unavailable")
-		}
-		response["usage"] = map[string]interface{}{
-			"completion_tokens": usage.CompletionTokens,
-			"total_tokens":      usage.TotalTokens,
-		}
-		return nil
-	}
-	preferLocalUsage := billingContext != nil && billingContext.UsageSource == model.TaskUsageSourceLocalCalculated
-	if rawUsage, exists := response["usage"]; exists && !preferLocalUsage {
-		usageData, err := common.Marshal(rawUsage)
-		if err == nil {
-			var usage struct {
-				CompletionTokens *int64 `json:"completion_tokens"`
-				TotalTokens      *int64 `json:"total_tokens"`
-			}
-			if common.Unmarshal(usageData, &usage) == nil &&
-				usage.CompletionTokens != nil && usage.TotalTokens != nil &&
-				service.IsValidSeedanceUpstreamUsage(*usage.CompletionTokens, *usage.TotalTokens) {
-				return nil
-			}
-		}
-	}
-
-	if billingContext == nil {
-		return nil
-	}
-	if billingContext.UsageProfile != model.TaskUsageProfileSeedance {
-		costMode := types.CostMode(billingContext.UpstreamCostMode)
-		if costMode != types.CostModePerRequest && costMode != types.CostModePerDuration {
-			return nil
-		}
-	}
-
-	responseData, err := common.Marshal(response)
-	if err != nil {
-		return nil
-	}
-	var output struct {
-		Duration        *json.Number `json:"duration"`
-		Resolution      string       `json:"resolution"`
-		FramesPerSecond *json.Number `json:"framespersecond"`
-	}
-	if common.Unmarshal(responseData, &output) != nil {
-		return nil
-	}
-
-	terminalFacts := service.SeedanceTerminalFacts{
-		Resolution:        output.Resolution,
-		ResolutionPresent: strings.TrimSpace(output.Resolution) != "",
-	}
-	if output.Duration != nil {
-		terminalFacts.DurationPresent = true
-		value, ok := boundedSeedanceResponseInteger(output.Duration, relaycommon.MaxTaskDurationSeconds)
-		if ok {
-			terminalFacts.DurationSeconds = int(value)
-		}
-	}
-	if output.FramesPerSecond != nil {
-		terminalFacts.FramesPerSecondPresent = true
-		value, ok := boundedSeedanceResponseInteger(output.FramesPerSecond, 240)
-		if ok {
-			terminalFacts.FramesPerSecond = int(value)
-		}
-	}
-	usage, err := service.CalculateSeedanceTaskUsage(billingContext, terminalFacts)
-	if err != nil {
-		return nil
-	}
-	response["usage"] = map[string]interface{}{
-		"completion_tokens": usage.CompletionTokens,
-		"total_tokens":      usage.TotalTokens,
-	}
-	return nil
-}
-
-func boundedSeedanceResponseInteger(number *json.Number, maximum int64) (int64, bool) {
-	if number == nil {
-		return 0, false
-	}
-	value, err := decimal.NewFromString(number.String())
-	if err != nil || value.LessThanOrEqual(decimal.Zero) || value.GreaterThan(decimal.NewFromInt(maximum)) || !value.Equal(value.Truncate(0)) {
-		return 0, false
-	}
-	return value.IntPart(), true
-}
-
 func isSeedanceTaskPlatform(platform constant.TaskPlatform) bool {
-	switch platform {
-	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeVolcEngine)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDoubaoVideo)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeLucen)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMegaByAI)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeCangyuan)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypePaipu)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
-		return true
-	default:
-		return false
-	}
+	return service.IsSeedanceTaskPlatform(platform)
 }
 
 func seedanceTaskPlatformValues() []string {
-	candidates := []constant.TaskPlatform{
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeVolcEngine)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDoubaoVideo)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeLucen)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMegaByAI)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeCangyuan)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypePaipu)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSecure)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeOmegaAI)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
-	}
-	values := make([]string, 0, len(candidates))
-	for _, platform := range candidates {
-		if isSeedanceTaskPlatform(platform) {
-			values = append(values, string(platform))
-		}
-	}
-	return values
+	return service.SeedanceTaskPlatformValues()
 }
 
 func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[string]interface{}, error) {
@@ -446,18 +314,7 @@ func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[str
 }
 
 func seedanceTaskStatus(status model.TaskStatus) string {
-	switch status {
-	case model.TaskStatusSuccess:
-		return "succeeded"
-	case model.TaskStatusFailure:
-		return "failed"
-	case model.TaskStatusInProgress:
-		return "running"
-	case model.TaskStatusQueued, model.TaskStatusSubmitted, model.TaskStatusNotStart:
-		return "queued"
-	default:
-		return "queued"
-	}
+	return service.SeedanceTaskStatus(status)
 }
 
 func seedanceInternalStatus(status string) model.TaskStatus {

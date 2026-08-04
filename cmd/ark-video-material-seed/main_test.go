@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -217,6 +218,13 @@ func TestMockVideoServerSupportsProviderSubmitAndPollingPaths(t *testing.T) {
 		require.Equal(t, http.StatusOK, recorder.Code, testCase.path)
 		require.Contains(t, recorder.Body.String(), "upstream-task-", testCase.path)
 		require.Contains(t, recorder.Body.String(), `"status":"`+testCase.status+`"`, testCase.path)
+		switch {
+		case strings.HasPrefix(testCase.path, "/v1/videos/tasks/"),
+			strings.HasPrefix(testCase.path, "/v1/videos/"):
+			require.NotContains(t, recorder.Body.String(), `"framespersecond"`, testCase.path)
+		default:
+			require.Contains(t, recorder.Body.String(), `"framespersecond":24`, testCase.path)
+		}
 	}
 
 	server.failNextTask()
@@ -250,6 +258,89 @@ func TestMockVideoServerSupportsProviderSubmitAndPollingPaths(t *testing.T) {
 	require.Equal(t, http.StatusOK, directFailed.Code)
 	require.Contains(t, directFailed.Body.String(), `"status":"failed"`)
 	require.Contains(t, directFailed.Body.String(), "mock content policy rejection")
+}
+
+func TestValidateArkTerminalResponse(t *testing.T) {
+	complete := json.RawMessage(`{
+		"id":"task_x",
+		"model":"m",
+		"status":"succeeded",
+		"content":{"video_url":"https://x/video.mp4"},
+		"usage":{"completion_tokens":0,"total_tokens":0},
+		"created_at":1,
+		"updated_at":2,
+		"seed":0,
+		"resolution":"720p",
+		"ratio":"16:9",
+		"duration":5,
+		"framespersecond":24,
+		"service_tier":"default",
+		"execution_expires_after":172800,
+		"generate_audio":true,
+		"draft":false,
+		"priority":0
+	}`)
+	require.NoError(t, validateArkTerminalResponse(complete, model.TaskStatusSuccess, "task_x", "m"))
+
+	missingFPS := json.RawMessage(strings.Replace(string(complete), `"framespersecond":24,`, "", 1))
+	require.ErrorContains(t, validateArkTerminalResponse(missingFPS, model.TaskStatusSuccess, "task_x", "m"), "framespersecond")
+
+	failed := json.RawMessage(`{
+		"id":"task_x",
+		"model":"m",
+		"status":"failed",
+		"usage":{"completion_tokens":0,"total_tokens":0},
+		"error":{"code":"task_failed","message":"task failed"},
+		"created_at":1,
+		"updated_at":2,
+		"seed":0,
+		"resolution":"720p",
+		"ratio":"16:9",
+		"duration":5,
+		"framespersecond":24,
+		"service_tier":"default",
+		"execution_expires_after":172800,
+		"generate_audio":true,
+		"draft":false,
+		"priority":0
+	}`)
+	require.NoError(t, validateArkTerminalResponse(failed, model.TaskStatusFailure, "task_x", "m"))
+	for _, status := range []string{"expired", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			response := json.RawMessage(strings.Replace(string(failed), `"status":"failed"`, `"status":"`+status+`"`, 1))
+			require.NoError(t, validateArkTerminalResponse(response, model.TaskStatusFailure, "task_x", "m"))
+		})
+	}
+
+	failedWithVideo := json.RawMessage(strings.Replace(
+		string(failed),
+		`"status":"failed"`,
+		`"status":"failed","content":{"video_url":"https://x/video.mp4"}`,
+		1,
+	))
+	require.ErrorContains(t, validateArkTerminalResponse(failedWithVideo, model.TaskStatusFailure, "task_x", "m"), "content")
+
+	successWithError := json.RawMessage(strings.Replace(
+		string(complete),
+		`"status":"succeeded"`,
+		`"status":"succeeded","error":{"code":"stale","message":"private"}`,
+		1,
+	))
+	require.ErrorContains(t, validateArkTerminalResponse(successWithError, model.TaskStatusSuccess, "task_x", "m"), "error")
+
+	negativeDuration := json.RawMessage(strings.Replace(string(complete), `"duration":5`, `"duration":-1`, 1))
+	require.ErrorContains(t, validateArkTerminalResponse(negativeDuration, model.TaskStatusSuccess, "task_x", "m"), "duration")
+
+	unknownField := json.RawMessage(strings.Replace(
+		string(complete),
+		`"status":"succeeded"`,
+		`"status":"succeeded","diagnostic":"private"`,
+		1,
+	))
+	require.ErrorContains(t, validateArkTerminalResponse(unknownField, model.TaskStatusSuccess, "task_x", "m"), "diagnostic")
+
+	require.ErrorContains(t, validateArkTerminalResponse(complete, model.TaskStatusSuccess, "other_task", "m"), "id")
+	require.ErrorContains(t, validateArkTerminalResponse(complete, model.TaskStatusSuccess, "task_x", "other-model"), "model")
 }
 
 func TestMockVideoServerPollingResponseIncludesOfficialArkTaskFields(t *testing.T) {

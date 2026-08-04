@@ -53,7 +53,7 @@
 
 ## E2E 覆盖
 
-持久化执行时间为 `2026-08-04 18:30:41` 至 `2026-08-04 18:32:22`，结果如下：
+终态响应根治后的最新持久化执行时间为 `2026-08-04 23:39:05` 至 `2026-08-04 23:40:33`，结果如下：
 
 | 项目 | 数量 |
 | --- | ---: |
@@ -108,17 +108,58 @@ Seedance 用户售价继续使用官方 Token 公式，并与供应商成本完�
 | 计费毛利润 | `$9.485201506` |
 | 整体毛利率 | `11.5431%` |
 
-失败样本经过真实提交、轮询、退款和零成本确认链路。任务详情已展示最终返回给用户的 mock 结果：
+## 终态响应结构
+
+根治前 118 条成功任务中只有 25 条具备完整 Ark 结构，另外 93 条为简化响应：4SToken 26、8yes 11、Dimensio 11、Paipu 20、MegaByAI 19、Z5API 6。任务日志没有裁剪字段，缺陷来自两个后端入口的响应规范化不一致：查询接口经过 `seedanceTaskResponse`，后台轮询审计则按创建路径直接保存 OpenAI 或 Ark 转换结果。
+
+本轮将完整规范化下沉为 `service.NormalizeSeedanceTaskResponse`，由用户查询和后台轮询审计共同调用。Seedance 任务无论通过 `/v1/video/generations` 还是 Ark 任务路径创建，轮询审计都固定保存 Ark 结构，不再由创建路径决定任务日志格式。OpenAI 查询入口遇到 Seedance 任务时也会重新生成完整 Ark 审计，不能再用 OpenAI 简化响应覆盖已经保存的任务详情。
+
+Seedance 识别不再只依赖共享渠道类型，而是要求渠道平台之外还存在 Ark 官方请求路径、冻结的 Seedance 计费档案或可识别的 Seedance 模型证据。共享 `NewAPIVideo`、MegaByAI 等渠道承载的普通视频任务仍保持原 OpenAI 响应合同。DoubaoVideo 和 VolcEngine 使用的 Doubao adaptor 已补齐 Ark 转换器，避免这两类真实 Seedance 任务在后台轮询终态静默缺失审计。Doubao Ark 转换只构造官方字段白名单，不再把原始上游响应中的诊断字段、供应商账号或上游模型身份直接公开。
+
+字段来源优先级为“上游有效事实、用户请求快照、冻结计费快照、固定默认值”。公开模型身份固定优先使用任务属性中的客户端模型，再回退冻结计费快照中的客户端模型，不接受上游非空模型覆盖。事实不可得时强制使用 `seed=0`、`resolution=720p`、`ratio=16:9`、`duration=5`、`framespersecond=24`、`service_tier=default`、`execution_expires_after=172800`、`generate_audio=true`、`draft=false`、`priority=0` 和零值 Token 用量。成功终态的 `content.video_url` 必须来自上游有效事实或已保存的 `ResultURL`；两者均为空时规范化直接失败，不会保存伪造或空地址。非法、负数或空时间先按 `SubmitTime/CreatedAt`、`FinishTime/UpdatedAt` 回退，仍无事实时显式返回 `0`。损坏的版本化 Token 快照在任务详情展示层回退为零值，但轮询结算继续严格拒绝，避免展示 500 的同时保持计费安全。成功终态删除上游遗留 `error`，失败终态删除 `content`；失败状态允许 Ark 合法的 `failed`、`expired`、`cancelled`，失败消息统一脱敏，不向用户响应和任务日志暴露私有上游任务 ID。该补全只作用于成功或失败终态，排队和运行中响应不会提前注入终态默认字段。
+
+Ark 任务列表在数据库层按请求路径、冻结计费档案和 Seedance 模型证据筛选，兼容 SQLite、MySQL 和 PostgreSQL。无 JSON 业务筛选时恢复数据库 `COUNT + LIMIT/OFFSET`，不会为了首页总数加载近七天全部共享视频渠道任务；本轮 MySQL 实际接口核验返回 HTTP 200、`total=119`。
+
+数据库逐字段核验结果如下：
+
+| 合同 | 完整率 |
+| --- | ---: |
+| 全部终态公共字段 | `119/119` |
+| 公开任务 ID、模型、状态与任务事实一致 | `119/119` |
+| 成功任务公共字段、`content.video_url`、`usage` | `118/118` |
+| 成功任务 `duration`、`framespersecond`、`execution_expires_after` | `118/118` |
+| 失败任务公共字段、`usage`、`error` | `1/1` |
+| 失败任务无非空 `content.video_url` | `1/1` |
+| 终态用户响应包含私有上游任务 ID | `0/119` |
+| 终态用户响应包含非官方诊断/任务字段 | `0/119` |
+
+失败样本经过真实提交、轮询、退款和零成本确认链路。任务详情已展示最终返回给用户的完整 mock 结果：
 
 ```json
 {
-  "id": "task_JXM37JUwR34K5FYpU7oroSDuzf6zHjPT",
+  "id": "task_Agm9qT0KwhN1CgBbBUwHzKEoWyPd2n06",
   "model": "doubao-seedance-2-0-mini-260615",
   "status": "failed",
+  "usage": {
+    "completion_tokens": 0,
+    "total_tokens": 0
+  },
   "error": {
     "code": "content_policy_violation",
     "message": "mock content policy rejection"
-  }
+  },
+  "created_at": 1785858032,
+  "updated_at": 1785858032,
+  "seed": 0,
+  "resolution": "480p",
+  "ratio": "16:9",
+  "duration": 4,
+  "framespersecond": 24,
+  "service_tier": "default",
+  "execution_expires_after": 172800,
+  "generate_audio": true,
+  "draft": false,
+  "priority": 0
 }
 ```
 
@@ -148,6 +189,15 @@ Seedance 用户售价继续使用官方 Token 公式，并与供应商成本完�
 - 本地计算用户 Token 售价时，按终态计量的供应商成本仍保留可信上游计量。
 - 发布成功后导入向导退出审查步骤，避免继续显示已发布批次的旧审查状态。
 - E2E 失败任务必须保存并展示最终用户失败结果，成功与失败任务均必须完成成本和利润断言。
+- Seedance 查询接口和后台轮询审计必须经过同一个终态规范化器；创建路径不得改变任务日志的 Ark 响应合同。
+- OpenAI 查询入口不得用简化响应覆盖 Seedance 的完整 Ark 审计。
+- Seedance 识别必须结合请求路径、冻结计费档案或模型证据；共享渠道上的普通视频任务不得被转换为 Ark。
+- DoubaoVideo 和 VolcEngine 的 Seedance 终态必须具备 Ark 转换能力。
+- 非法时间、损坏的展示用量快照和失败消息脱敏必须保留完整任务详情，同时不放宽计费结算校验。
+- Doubao Ark 转换必须使用字段白名单，公开模型必须来自客户端任务事实或冻结计费快照，成功响应不得残留上游 `error`。
+- 成功终态缺少非空视频地址时必须拒绝规范化；严格 E2E 必须接受 `failed`、`expired`、`cancelled` 三种 Ark 失败终态。
+- Ark 列表无筛选首页必须在数据库层完成证据过滤、计数和分页，不得加载全部共享渠道任务。
+- E2E 对全部 119 条终态响应执行字段、数值边界、任务 ID、模型身份、成功/失败互斥结构和未知字段硬断言，任一渠道违反合同立即失败。
 
 ## 验证命令
 
@@ -165,10 +215,10 @@ git diff --check
 
 - Docker 镜像重建成功，`new-api`、`video-metadata`、MySQL、Redis 均为 healthy。
 - `GET /api/status` 返回 HTTP 200，`success=true`。
-- `go test ./model ./service ./cmd/ark-video-material-seed -count=1 -p=1`：通过。
-- `cd web && bun test --parallel=1`：473 pass、0 fail。
+- `go test ./model ./relay ./service ./cmd/ark-video-material-seed -count=1 -p=1`：通过。
+- `cd web && bun test --parallel=1`：480 pass、0 fail。
 - `cd web && bun run typecheck`：通过。
 - 受影响前端文件定向 `oxlint`：通过、零输出。
 - `git diff --check`：通过。
-- `bun run build` 已在 Docker 重建阶段通过。
+- `cd web && bun run build`：通过。
 - 全仓 `bun run lint` 仍受仓库既有未修改文件的 lint 错误阻断，本轮修改文件的定向 lint 已通过。

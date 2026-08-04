@@ -104,8 +104,12 @@ type responseTask struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-	CreatedAt int64 `json:"created_at"`
-	UpdatedAt int64 `json:"updated_at"`
+	CreatedAt             int64        `json:"created_at"`
+	UpdatedAt             int64        `json:"updated_at"`
+	ExecutionExpiresAfter *json.Number `json:"execution_expires_after"`
+	GenerateAudio         *bool        `json:"generate_audio"`
+	Draft                 *bool        `json:"draft"`
+	Priority              *json.Number `json:"priority"`
 }
 
 // ============================
@@ -618,4 +622,60 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	}
 
 	return common.Marshal(openAIVideo)
+}
+
+func (a *TaskAdaptor) ConvertToArkVideoTask(originTask *model.Task) ([]byte, error) {
+	if originTask == nil {
+		return nil, stderrors.New("task is nil")
+	}
+	var upstream responseTask
+	if len(originTask.Data) > 0 {
+		if err := common.Unmarshal(originTask.Data, &upstream); err != nil {
+			return nil, errors.Wrap(err, "unmarshal doubao task data failed")
+		}
+	}
+	response := map[string]interface{}{
+		"status":       upstream.Status,
+		"seed":         upstream.Seed,
+		"resolution":   upstream.Resolution,
+		"ratio":        upstream.Ratio,
+		"service_tier": upstream.ServiceTier,
+		"created_at":   upstream.CreatedAt,
+		"updated_at":   upstream.UpdatedAt,
+		"usage": map[string]interface{}{
+			"completion_tokens": upstream.Usage.CompletionTokens,
+			"total_tokens":      upstream.Usage.TotalTokens,
+		},
+	}
+	if upstream.Content.VideoURL != "" {
+		response["content"] = map[string]interface{}{"video_url": upstream.Content.VideoURL}
+	}
+	if upstream.Duration != "" {
+		response["duration"] = upstream.Duration
+	}
+	if upstream.FramesPerSecond != "" {
+		response["framespersecond"] = upstream.FramesPerSecond
+	}
+	if upstream.ExecutionExpiresAfter != nil {
+		response["execution_expires_after"] = upstream.ExecutionExpiresAfter
+	}
+	if upstream.GenerateAudio != nil {
+		response["generate_audio"] = upstream.GenerateAudio
+	}
+	if upstream.Draft != nil {
+		response["draft"] = upstream.Draft
+	}
+	if upstream.Priority != nil {
+		response["priority"] = upstream.Priority
+	}
+	if upstream.Error.Code != "" || upstream.Error.Message != "" {
+		response["error"] = map[string]interface{}{
+			"code":    upstream.Error.Code,
+			"message": upstream.Error.Message,
+		}
+	}
+	if err := service.NormalizeSeedanceTaskResponse(originTask, response); err != nil {
+		return nil, err
+	}
+	return common.Marshal(response)
 }

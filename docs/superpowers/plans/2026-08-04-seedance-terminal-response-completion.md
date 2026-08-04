@@ -6,6 +6,8 @@
 
 **Architecture:** 保留渠道适配器现有协议转换职责，在通用 `seedanceTaskResponse` 末端增加集中式响应补全器。补全器按“上游响应、用户请求快照、计费快照、固定默认值”的顺序填充字段；E2E 种子逐条校验最终用户响应，而不是只检查响应存在。
 
+**执行偏差记录：** 首轮 E2E 发现后台轮询审计直接持久化适配器转换结果，绕过 `seedanceTaskResponse`。最终实现将统一规范化器下沉为 `service.NormalizeSeedanceTaskResponse`，并由 relay 查询和 service 轮询审计共同调用；Seedance 轮询审计固定保存 Ark 结构，不再按创建路径保存 OpenAI 简化结构。
+
 **Tech Stack:** Go 1.22、Gin、GORM、`common` JSON 封装、Testify、MySQL/SQLite 测试夹具、现有 Ark 视频矩阵种子。
 
 ---

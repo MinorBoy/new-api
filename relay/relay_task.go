@@ -42,6 +42,18 @@ func persistTerminalTaskUserResponse(c *gin.Context, task *model.Task, responseB
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
 	}
+	if service.IsSeedanceTask(task) {
+		response, err := seedanceTaskResponse(task)
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("build Seedance terminal task audit response failed: task_id=%s error=%v", task.TaskID, err))
+			return
+		}
+		responseBody, err = common.Marshal(response)
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("marshal Seedance terminal task audit response failed: task_id=%s error=%v", task.TaskID, err))
+			return
+		}
+	}
 	service.PersistTerminalTaskUserResponse(ctx, task, responseBody)
 }
 

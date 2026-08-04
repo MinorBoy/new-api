@@ -489,7 +489,7 @@ func TestClmmMallSeedanceTaskFetchUsesArkConverterAndProtectsPrivateData(t *test
 			Status:     model.TaskStatusSuccess,
 			SubmitTime: 111,
 			UpdatedAt:  222,
-			Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+			Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s", RequestPath: "/api/v3/contents/generations/tasks"},
 			PrivateData: model.TaskPrivateData{
 				UpstreamTaskID: "clmm-upstream-success",
 				ResultURL:      "https://example.com/private-fallback.mp4",
@@ -503,7 +503,7 @@ func TestClmmMallSeedanceTaskFetchUsesArkConverterAndProtectsPrivateData(t *test
 			Status:      model.TaskStatusFailure,
 			SubmitTime:  333,
 			UpdatedAt:   444,
-			Properties:  model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+			Properties:  model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s", RequestPath: "/api/v3/contents/generations/tasks"},
 			PrivateData: model.TaskPrivateData{UpstreamTaskID: "clmm-upstream-failed"},
 			Data:        json.RawMessage(`{"task_id":"clmm-upstream-failed","status":"failed","error":{"code":"provider_code","message":"provider detail"},"diagnostic":"raw-private-failure"}`),
 		},
@@ -581,7 +581,7 @@ func TestClmmMallVideoFetchByIDUsesArkConverterAndProtectsPrivateData(t *testing
 		Status:     model.TaskStatusSuccess,
 		SubmitTime: 111,
 		UpdatedAt:  222,
-		Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+		Properties: model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s", RequestPath: "/api/v3/contents/generations/tasks"},
 		PrivateData: model.TaskPrivateData{
 			UpstreamTaskID: "upstream-private-id",
 		},
@@ -627,7 +627,7 @@ func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.
 			UserId:      7,
 			Status:      model.TaskStatusSuccess,
 			SubmitTime:  now,
-			Properties:  model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s"},
+			Properties:  model.Properties{OriginModelName: "client-video-model", UpstreamModelName: "me-videos-720P-10s", RequestPath: "/api/v3/contents/generations/tasks"},
 			PrivateData: model.TaskPrivateData{UpstreamTaskID: "clmm-list-upstream"},
 			Data:        json.RawMessage(`{"task_id":"clmm-list-upstream","status":"completed","video_url":"https://example.com/list.mp4","service_tier":"priority","diagnostic":"raw-list-private"}`),
 		},
@@ -637,7 +637,7 @@ func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.
 			UserId:     8,
 			Status:     model.TaskStatusSuccess,
 			SubmitTime: now,
-			Properties: model.Properties{OriginModelName: "client-video-model"},
+			Properties: model.Properties{OriginModelName: "client-video-model", RequestPath: "/api/v3/contents/generations/tasks"},
 			Data:       json.RawMessage(`{"task_id":"other-user-upstream","status":"completed","video_url":"https://example.com/other.mp4","service_tier":"priority"}`),
 		},
 		{
@@ -646,7 +646,7 @@ func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.
 			UserId:     7,
 			Status:     model.TaskStatusSuccess,
 			SubmitTime: now,
-			Properties: model.Properties{OriginModelName: "other-model"},
+			Properties: model.Properties{OriginModelName: "other-model", RequestPath: "/api/v3/contents/generations/tasks"},
 			Data:       json.RawMessage(`{"task_id":"wrong-model-upstream","status":"completed","video_url":"https://example.com/wrong-model.mp4","service_tier":"priority"}`),
 		},
 		{
@@ -655,7 +655,7 @@ func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.
 			UserId:     7,
 			Status:     model.TaskStatusFailure,
 			SubmitTime: now,
-			Properties: model.Properties{OriginModelName: "client-video-model"},
+			Properties: model.Properties{OriginModelName: "client-video-model", RequestPath: "/api/v3/contents/generations/tasks"},
 			Data:       json.RawMessage(`{"task_id":"wrong-status-upstream","status":"failed","service_tier":"priority"}`),
 		},
 		{
@@ -664,7 +664,7 @@ func TestClmmMallSeedanceTaskListFiltersOwnedTasksWithoutPrivateData(t *testing.
 			UserId:     7,
 			Status:     model.TaskStatusSuccess,
 			SubmitTime: now,
-			Properties: model.Properties{OriginModelName: "client-video-model"},
+			Properties: model.Properties{OriginModelName: "client-video-model", RequestPath: "/api/v3/contents/generations/tasks"},
 			Data:       json.RawMessage(`{"task_id":"wrong-tier-upstream","status":"completed","video_url":"https://example.com/wrong-tier.mp4","service_tier":"default"}`),
 		},
 	}
@@ -739,7 +739,7 @@ func TestDimensioTaskFetchPreservesProviderTimestampsAndErrors(t *testing.T) {
 	task := model.Task{
 		TaskID: "task_failed", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeDimensio)), UserId: 7,
 		Status: model.TaskStatusFailure, SubmitTime: 111, UpdatedAt: 222,
-		Properties: model.Properties{OriginModelName: "alias"},
+		Properties: model.Properties{OriginModelName: "alias", RequestPath: "/api/v3/contents/generations/tasks"},
 		Data:       json.RawMessage(`{"task_id":"dim-upstream","status":"failed","error":"审核不通过","error_code":"2043","created_at":333,"updated_at":444}`),
 	}
 	require.NoError(t, model.DB.Create(&task).Error)
@@ -940,6 +940,220 @@ const newAPIVideoDetailedZeroUsage = `{
 	}
 }`
 
+func TestSeedanceTaskResponseCompletesSimplifiedSuccessResponse(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_complete",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
+		Status:     model.TaskStatusSuccess,
+		SubmitTime: 111,
+		FinishTime: 222,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://example.com/video.mp4",
+			UserRequestData: json.RawMessage(`{
+				"ratio":"21:9",
+				"duration":4,
+				"resolution":"1080p",
+				"seed":7,
+				"framespersecond":30,
+				"execution_expires_after":3600,
+				"generate_audio":false,
+				"draft":true,
+				"priority":2,
+				"service_tier":"flex"
+			}`),
+			BillingContext: &model.TaskBillingContext{
+				UsageProfile:             model.TaskUsageProfileSeedance,
+				UsageSnapshotVersion:     model.TaskUsageSnapshotVersion1,
+				UsageInputTokens:         20,
+				UsageCompletionTokens:    100,
+				UsageTotalTokens:         120,
+				UsageSource:              model.TaskUsageSourceLocalCalculated,
+				RequestedDurationSeconds: 5,
+				Resolution:               "720p",
+				ServiceTier:              "default",
+			},
+		},
+		Data: json.RawMessage(`{
+			"task_id":"upstream-secret",
+			"status":"completed",
+			"progress":100,
+			"video_url":"https://example.com/video.mp4"
+		}`),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	assert.Equal(t, "task_public_complete", response["id"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
+	assert.Equal(t, "succeeded", response["status"])
+	assert.EqualValues(t, 7, response["seed"])
+	assert.Equal(t, "1080p", response["resolution"])
+	assert.Equal(t, "21:9", response["ratio"])
+	assert.EqualValues(t, 4, response["duration"])
+	assert.EqualValues(t, 30, response["framespersecond"])
+	assert.Equal(t, "flex", response["service_tier"])
+	assert.EqualValues(t, 3600, response["execution_expires_after"])
+	assert.Equal(t, false, response["generate_audio"])
+	assert.Equal(t, true, response["draft"])
+	assert.EqualValues(t, 2, response["priority"])
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 100, usage["completion_tokens"])
+	assert.EqualValues(t, 120, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseUsesExplicitDefaultsWhenFactsAreUnavailable(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_defaults",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
+		Status:     model.TaskStatusSuccess,
+		CreatedAt:  10,
+		UpdatedAt:  20,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://example.com/video.mp4",
+		},
+		Data: json.RawMessage(`{
+			"status":"completed",
+			"video_url":"https://example.com/video.mp4"
+		}`),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, response["seed"])
+	assert.Equal(t, "720p", response["resolution"])
+	assert.Equal(t, "16:9", response["ratio"])
+	assert.EqualValues(t, 5, response["duration"])
+	assert.EqualValues(t, 24, response["framespersecond"])
+	assert.Equal(t, "default", response["service_tier"])
+	assert.EqualValues(t, 172800, response["execution_expires_after"])
+	assert.Equal(t, true, response["generate_audio"])
+	assert.Equal(t, false, response["draft"])
+	assert.EqualValues(t, 0, response["priority"])
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 0, usage["completion_tokens"])
+	assert.EqualValues(t, 0, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseAppliesTerminalFactPriority(t *testing.T) {
+	tests := []struct {
+		name         string
+		data         string
+		requestData  json.RawMessage
+		wantDuration int64
+	}{
+		{
+			name:         "upstream wins",
+			data:         `{"status":"succeeded","duration":6,"content":{"video_url":"https://x/video.mp4"}}`,
+			requestData:  json.RawMessage(`{"duration":4}`),
+			wantDuration: 6,
+		},
+		{
+			name:         "invalid upstream falls back to request",
+			data:         `{"status":"succeeded","duration":999999,"content":{"video_url":"https://x/video.mp4"}}`,
+			requestData:  json.RawMessage(`{"duration":4}`),
+			wantDuration: 4,
+		},
+		{
+			name:         "broken request falls back to billing",
+			data:         `{"status":"succeeded","content":{"video_url":"https://x/video.mp4"}}`,
+			requestData:  json.RawMessage(`{"duration":`),
+			wantDuration: 5,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			task := &model.Task{
+				TaskID:     "task_priority",
+				Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
+				Status:     model.TaskStatusSuccess,
+				Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+				PrivateData: model.TaskPrivateData{
+					ResultURL:       "https://x/video.mp4",
+					UserRequestData: testCase.requestData,
+					BillingContext: &model.TaskBillingContext{
+						RequestedDurationSeconds: 5,
+						GenerateAudio:            common.GetPointer(false),
+					},
+				},
+				Data: json.RawMessage(testCase.data),
+			}
+
+			response, err := seedanceTaskResponse(task)
+
+			require.NoError(t, err)
+			assert.EqualValues(t, testCase.wantDuration, response["duration"])
+			assert.Equal(t, false, response["generate_audio"])
+		})
+	}
+}
+
+func TestSeedanceTaskResponseCompletesFailureMetadataWithoutFakeVideo(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_public_failed",
+		Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
+		Status:     model.TaskStatusFailure,
+		SubmitTime: 111,
+		FinishTime: 222,
+		UpdatedAt:  222,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+		PrivateData: model.TaskPrivateData{
+			ResultURL:       "https://must-not-leak.example/video.mp4",
+			UserRequestData: json.RawMessage(`{"duration":4,"resolution":"720p"}`),
+		},
+		Data: json.RawMessage(`{
+			"status":"failed",
+			"content":{"video_url":"https://must-not-leak.example/video.mp4"}
+		}`),
+	}
+
+	response, err := seedanceTaskResponse(task)
+
+	require.NoError(t, err)
+	assert.Equal(t, "failed", response["status"])
+	errorData, ok := response["error"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task_failed", errorData["code"])
+	assert.Equal(t, "task failed", errorData["message"])
+	assert.Contains(t, response, "duration")
+	assert.Contains(t, response, "framespersecond")
+	_, hasContent := response["content"]
+	assert.False(t, hasContent)
+}
+
+func TestSeedanceTaskResponseDoesNotCompleteNonTerminalResponse(t *testing.T) {
+	for _, status := range []model.TaskStatus{model.TaskStatusQueued, model.TaskStatusInProgress} {
+		t.Run(string(status), func(t *testing.T) {
+			task := &model.Task{
+				TaskID:     "task_public_pending",
+				Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
+				Status:     status,
+				SubmitTime: 111,
+				UpdatedAt:  222,
+				Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
+				Data:       json.RawMessage(`{"status":"processing","progress":50}`),
+			}
+
+			response, err := seedanceTaskResponse(task)
+
+			require.NoError(t, err)
+			assert.Equal(t, seedanceTaskStatus(status), response["status"])
+			for _, key := range []string{
+				"seed", "resolution", "ratio", "duration", "framespersecond", "service_tier",
+				"execution_expires_after", "generate_audio", "draft", "priority", "usage",
+			} {
+				assert.NotContains(t, response, key)
+			}
+		})
+	}
+}
+
 func TestSeedanceTaskResponseCalculatesUsageForPerDurationUpstream(t *testing.T) {
 	task := &model.Task{
 		TaskID:     "task_public_usage",
@@ -1013,7 +1227,7 @@ func TestSeedanceTaskResponseUsesPersistedFinalUsage(t *testing.T) {
 	assert.EqualValues(t, 109000, usage["total_tokens"])
 }
 
-func TestSeedanceTaskResponseRejectsBrokenVersionedUsage(t *testing.T) {
+func TestSeedanceTaskResponseDefaultsBrokenVersionedUsageToZero(t *testing.T) {
 	task := &model.Task{
 		TaskID: "task_public_broken_usage", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
 		Status: model.TaskStatusSuccess, Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
@@ -1023,8 +1237,50 @@ func TestSeedanceTaskResponseRejectsBrokenVersionedUsage(t *testing.T) {
 		}},
 		Data: json.RawMessage(`{"status":"succeeded","content":{"video_url":"https://x/video.mp4"}}`),
 	}
-	_, err := seedanceTaskResponse(task)
-	require.ErrorContains(t, err, "Seedance terminal usage is unavailable")
+	response, err := seedanceTaskResponse(task)
+	require.NoError(t, err)
+	usage, ok := response["usage"].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 0, usage["completion_tokens"])
+	assert.EqualValues(t, 0, usage["total_tokens"])
+}
+
+func TestSeedanceTaskResponseFallsBackFromInvalidUpstreamTimestamps(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		task          *model.Task
+		wantCreatedAt int64
+		wantUpdatedAt int64
+	}{
+		{
+			name: "task facts",
+			task: &model.Task{
+				CreatedAt: 99, SubmitTime: 111, FinishTime: 222, UpdatedAt: 333,
+			},
+			wantCreatedAt: 111,
+			wantUpdatedAt: 222,
+		},
+		{
+			name: "explicit zero fallback",
+			task: &model.Task{},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			task := testCase.task
+			task.TaskID = "task_public_timestamps"
+			task.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo))
+			task.Status = model.TaskStatusSuccess
+			task.Properties = model.Properties{OriginModelName: "doubao-seedance-2-0-260128"}
+			task.PrivateData.ResultURL = "https://x/video.mp4"
+			task.Data = json.RawMessage(`{"status":"succeeded","created_at":null,"updated_at":-1,"content":{"video_url":"https://x/video.mp4"}}`)
+
+			response, err := seedanceTaskResponse(task)
+
+			require.NoError(t, err)
+			assert.EqualValues(t, testCase.wantCreatedAt, response["created_at"])
+			assert.EqualValues(t, testCase.wantUpdatedAt, response["updated_at"])
+		})
+	}
 }
 
 func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
@@ -1244,7 +1500,10 @@ func createNewAPIVideoQueryTask(t *testing.T, channelTypes ...int) *model.Task {
 		FinishTime: now + 10,
 		UpdatedAt:  now + 10,
 		Progress:   "100%",
-		Properties: model.Properties{OriginModelName: "client-model", UpstreamModelName: "provider-model"},
+		Properties: model.Properties{
+			OriginModelName: "client-model", UpstreamModelName: "provider-model",
+			RequestPath: "/api/v3/contents/generations/tasks",
+		},
 		PrivateData: model.TaskPrivateData{
 			UpstreamTaskID: "upstream-secret",
 			ResultURL:      "https://example.com/video.mp4",
@@ -1327,6 +1586,38 @@ func TestNewAPIVideoOpenAIQueryUsesDirectPublicProjection(t *testing.T) {
 	}
 }
 
+func TestSeedanceOpenAIQueryDoesNotOverwriteCompleteArkAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	task := createNewAPIVideoQueryTask(t)
+	task.Properties.OriginModelName = "doubao-seedance-2-0-260128"
+	task.Properties.RequestPath = "/v1/video/generations"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+		SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(false),
+	}
+	require.NoError(t, task.Update())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/video/generations/"+task.TaskID, nil)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Set("id", 7)
+
+	body, taskErr := videoFetchByIDRespBodyBuilder(c)
+
+	require.Nil(t, taskErr)
+	assert.NotContains(t, string(body), `"resolution"`)
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	var audited map[string]any
+	require.NoError(t, common.Unmarshal(stored.PrivateData.UserResponseData, &audited))
+	assert.Equal(t, "succeeded", audited["status"])
+	assert.Equal(t, "720p", audited["resolution"])
+	assert.Contains(t, audited, "usage")
+}
+
 func TestNewAPIVideoARKQuerySingleAndList(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)
@@ -1365,7 +1656,7 @@ func TestNewAPIVideoPollingFailureQueriesRemainPublic(t *testing.T) {
 		TaskID: "task_public_failed", Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)), UserId: 7,
 		Status: model.TaskStatusFailure, SubmitTime: now, FinishTime: now + 10, UpdatedAt: now + 10, Progress: "100%",
 		FailReason:  "task not found or expired",
-		Properties:  model.Properties{OriginModelName: "client-model", UpstreamModelName: "provider-model"},
+		Properties:  model.Properties{OriginModelName: "client-model", UpstreamModelName: "provider-model", RequestPath: "/api/v3/contents/generations/tasks"},
 		PrivateData: model.TaskPrivateData{UpstreamTaskID: "upstream-secret"},
 		Data:        json.RawMessage(`{"code":"not_found","message":"provider task missing","user_id":59,"quota":2000000}`),
 	}
@@ -1633,7 +1924,7 @@ func TestSeedanceTaskListFiltersAndPaginatesJSON(t *testing.T) {
 			UserId:     7,
 			Status:     model.TaskStatusQueued,
 			SubmitTime: now,
-			Properties: model.Properties{OriginModelName: modelName},
+			Properties: model.Properties{OriginModelName: modelName, RequestPath: "/api/v3/contents/generations/tasks"},
 			Data:       json.RawMessage(`{"service_tier":"default"}`),
 		})
 	}
@@ -1650,6 +1941,59 @@ func TestSeedanceTaskListFiltersAndPaginatesJSON(t *testing.T) {
 	assert.Len(t, response.Items, 3)
 }
 
+func TestSeedanceTaskListNoFilterDoesNotLoadEverySharedPlatformTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupSeedanceTaskDB(t)
+	now := time.Now().Unix()
+	tasks := make([]model.Task, 0, seedanceTaskScanBatchSize+7)
+	for i := 0; i < seedanceTaskScanBatchSize+5; i++ {
+		tasks = append(tasks, model.Task{
+			TaskID:     fmt.Sprintf("generic_task_%03d", i),
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+			UserId:     7,
+			Status:     model.TaskStatusSuccess,
+			SubmitTime: now,
+			Properties: model.Properties{RequestPath: "/v1/video/generations", OriginModelName: "generic-video-model"},
+		})
+	}
+	for i := 0; i < 2; i++ {
+		tasks = append(tasks, model.Task{
+			TaskID:     fmt.Sprintf("seedance_task_%03d", i),
+			Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+			UserId:     7,
+			Status:     model.TaskStatusQueued,
+			SubmitTime: now,
+			Properties: model.Properties{RequestPath: "/api/v3/contents/generations/tasks", OriginModelName: "doubao-seedance-2-0-260128"},
+			Data:       json.RawMessage(`{"status":"queued"}`),
+		})
+	}
+	require.NoError(t, model.DB.CreateInBatches(&tasks, 50).Error)
+
+	loadedRows := int64(0)
+	const callbackName = "test:seedance-list-loaded-rows"
+	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		if db.Statement == nil || db.Statement.Table != "tasks" || strings.Contains(strings.ToUpper(db.Statement.SQL.String()), "COUNT(") {
+			return
+		}
+		loadedRows += db.Statement.RowsAffected
+	}))
+	t.Cleanup(func() {
+		_ = model.DB.Callback().Query().Remove(callbackName)
+	})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks?page_num=1&page_size=1", nil)
+	c.Set("id", 7)
+	body, taskErr := SeedanceTaskFetch(c)
+
+	require.Nil(t, taskErr)
+	var response seedanceTaskListResponse
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, 2, response.Total)
+	assert.Len(t, response.Items, 1)
+	assert.LessOrEqual(t, loadedRows, int64(1))
+}
+
 func TestSeedanceTaskListDefaultsMissingServiceTier(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupSeedanceTaskDB(t)
@@ -1660,7 +2004,7 @@ func TestSeedanceTaskListDefaultsMissingServiceTier(t *testing.T) {
 		UserId:     7,
 		Status:     model.TaskStatusQueued,
 		SubmitTime: now,
-		Properties: model.Properties{OriginModelName: "wanted-model"},
+		Properties: model.Properties{OriginModelName: "wanted-model", RequestPath: "/api/v3/contents/generations/tasks"},
 		Data:       json.RawMessage(`{"id":"cgt-secret"}`),
 	}
 	require.NoError(t, model.DB.Create(&task).Error)

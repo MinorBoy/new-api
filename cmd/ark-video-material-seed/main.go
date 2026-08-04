@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/router"
@@ -265,6 +267,9 @@ func run() error {
 		if len(task.PrivateData.UserResponseData) == 0 {
 			return fmt.Errorf("%s: task %s is missing terminal user response", target.CaseID, created.ID)
 		}
+		if err := validateArkTerminalResponse(task.PrivateData.UserResponseData, model.TaskStatusSuccess, created.ID, target.RuntimeModel); err != nil {
+			return fmt.Errorf("%s: task %s has invalid terminal user response: %w", target.CaseID, created.ID, err)
+		}
 		acceptedTargets = append(acceptedTargets, target)
 	}
 
@@ -306,6 +311,9 @@ func run() error {
 	if len(failedTask.PrivateData.UserResponseData) == 0 {
 		return fmt.Errorf("failure fixture task %s is missing terminal user response", failedCreated.ID)
 	}
+	if err := validateArkTerminalResponse(failedTask.PrivateData.UserResponseData, model.TaskStatusFailure, failedCreated.ID, failureTarget.RuntimeModel); err != nil {
+		return fmt.Errorf("failure fixture task %s has invalid terminal user response: %w", failedCreated.ID, err)
+	}
 	if !strings.Contains(string(failedTask.PrivateData.UserResponseData), "mock content policy rejection") {
 		return fmt.Errorf("failure fixture task %s is missing the public failure reason", failedCreated.ID)
 	}
@@ -331,6 +339,163 @@ func run() error {
 			result.ProfitComplete, result.CostRequests, result.RevenueNanoUSD, result.CostNanoUSD, result.GrossProfitNanoUSD)
 	}
 	printResult(result)
+	return nil
+}
+
+type arkTerminalResponse struct {
+	ID          string `json:"id"`
+	Model       string `json:"model"`
+	Status      string `json:"status"`
+	Resolution  string `json:"resolution"`
+	Ratio       string `json:"ratio"`
+	ServiceTier string `json:"service_tier"`
+	Content     *struct {
+		VideoURL string `json:"video_url"`
+	} `json:"content"`
+	Usage *struct {
+		CompletionTokens *int64 `json:"completion_tokens"`
+		TotalTokens      *int64 `json:"total_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	CreatedAt             *json.Number `json:"created_at"`
+	UpdatedAt             *json.Number `json:"updated_at"`
+	Seed                  *json.Number `json:"seed"`
+	Duration              *json.Number `json:"duration"`
+	FramesPerSecond       *json.Number `json:"framespersecond"`
+	ExecutionExpiresAfter *json.Number `json:"execution_expires_after"`
+	Priority              *json.Number `json:"priority"`
+	GenerateAudio         *bool        `json:"generate_audio"`
+	Draft                 *bool        `json:"draft"`
+}
+
+func validateArkTerminalResponse(data json.RawMessage, wantStatus model.TaskStatus, expectedID, expectedModel string) error {
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	allowedFields := map[string]struct{}{
+		"id": {}, "model": {}, "status": {}, "content": {}, "usage": {}, "error": {},
+		"created_at": {}, "updated_at": {}, "seed": {}, "resolution": {}, "ratio": {},
+		"duration": {}, "framespersecond": {}, "service_tier": {}, "execution_expires_after": {},
+		"generate_audio": {}, "draft": {}, "priority": {},
+	}
+	for field := range fields {
+		if _, ok := allowedFields[field]; !ok {
+			return fmt.Errorf("unexpected field %s", field)
+		}
+	}
+
+	var response arkTerminalResponse
+	if err := common.Unmarshal(data, &response); err != nil {
+		return err
+	}
+	for name, value := range map[string]string{
+		"id": response.ID, "model": response.Model, "status": response.Status,
+		"resolution": response.Resolution, "ratio": response.Ratio, "service_tier": response.ServiceTier,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("missing %s", name)
+		}
+	}
+	if expectedID != "" && response.ID != expectedID {
+		return fmt.Errorf("unexpected id %q", response.ID)
+	}
+	if expectedModel != "" && response.Model != expectedModel {
+		return fmt.Errorf("unexpected model %q", response.Model)
+	}
+	for _, integer := range []struct {
+		name    string
+		value   *json.Number
+		minimum int64
+		maximum int64
+	}{
+		{name: "created_at", value: response.CreatedAt, minimum: 0, maximum: 9223372036854775807},
+		{name: "updated_at", value: response.UpdatedAt, minimum: 0, maximum: 9223372036854775807},
+		{name: "seed", value: response.Seed, minimum: 0, maximum: 1<<31 - 1},
+		{name: "duration", value: response.Duration, minimum: 1, maximum: int64(relaycommon.MaxTaskDurationSeconds)},
+		{name: "framespersecond", value: response.FramesPerSecond, minimum: 1, maximum: 240},
+		{name: "execution_expires_after", value: response.ExecutionExpiresAfter, minimum: 1, maximum: 1<<31 - 1},
+		{name: "priority", value: response.Priority, minimum: 0, maximum: 1<<31 - 1},
+	} {
+		if err := validateArkInteger(integer.name, integer.value, integer.minimum, integer.maximum); err != nil {
+			return err
+		}
+	}
+	if response.GenerateAudio == nil {
+		return errors.New("missing generate_audio")
+	}
+	if response.Draft == nil {
+		return errors.New("missing draft")
+	}
+	if response.Usage == nil || response.Usage.CompletionTokens == nil || response.Usage.TotalTokens == nil {
+		return errors.New("missing usage")
+	}
+	if *response.Usage.CompletionTokens < 0 || *response.Usage.CompletionTokens > int64(relaycommon.MaxTokensLimit) ||
+		*response.Usage.TotalTokens < *response.Usage.CompletionTokens || *response.Usage.TotalTokens > int64(relaycommon.MaxTokensLimit) {
+		return errors.New("invalid usage")
+	}
+	if err := validateArkObjectFields(fields["usage"], "usage", "completion_tokens", "total_tokens"); err != nil {
+		return err
+	}
+
+	switch wantStatus {
+	case model.TaskStatusSuccess:
+		if response.Status != "succeeded" || response.Content == nil || strings.TrimSpace(response.Content.VideoURL) == "" {
+			return errors.New("successful response is missing content.video_url")
+		}
+		if response.Error != nil {
+			return errors.New("successful response must not contain error")
+		}
+		if err := validateArkObjectFields(fields["content"], "content", "video_url"); err != nil {
+			return err
+		}
+	case model.TaskStatusFailure:
+		validFailureStatus := response.Status == "failed" || response.Status == "expired" || response.Status == "cancelled"
+		if !validFailureStatus || response.Error == nil ||
+			strings.TrimSpace(response.Error.Code) == "" || strings.TrimSpace(response.Error.Message) == "" {
+			return errors.New("failed response is missing error")
+		}
+		if response.Content != nil {
+			return errors.New("failed response must not contain content")
+		}
+		if err := validateArkObjectFields(fields["error"], "error", "code", "message"); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported terminal task status %s", wantStatus)
+	}
+	return nil
+}
+
+func validateArkInteger(name string, value *json.Number, minimum, maximum int64) error {
+	if value == nil {
+		return fmt.Errorf("missing %s", name)
+	}
+	number, err := decimal.NewFromString(value.String())
+	if err != nil || !number.Equal(number.Truncate(0)) ||
+		number.LessThan(decimal.NewFromInt(minimum)) || number.GreaterThan(decimal.NewFromInt(maximum)) {
+		return fmt.Errorf("invalid %s", name)
+	}
+	return nil
+}
+
+func validateArkObjectFields(data json.RawMessage, name string, allowed ...string) error {
+	var fields map[string]json.RawMessage
+	if len(data) == 0 || common.Unmarshal(data, &fields) != nil {
+		return fmt.Errorf("invalid %s", name)
+	}
+	allowedFields := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		allowedFields[field] = struct{}{}
+	}
+	for field := range fields {
+		if _, ok := allowedFields[field]; !ok {
+			return fmt.Errorf("unexpected %s.%s", name, field)
+		}
+	}
 	return nil
 }
 

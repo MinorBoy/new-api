@@ -142,7 +142,7 @@ go test ./relay -run 'TestZ5API|TestTaskBilling|TestVideoRouteContract' -count=1
 - [ ] 只从本机环境变量读取 `Z5API_BASE_URL`、`Z5API_API_KEY`，不把值写入命令历史、日志、fixture或提交。
 - [ ] 通过 Ark POST 验收已由导入配置映射的模型，至少覆盖文生、首尾帧和图片/视频/音频混合中的一个；记录请求字段、四种状态、object URL、seconds、视频可读性、计费和退款。
 - [ ] 真实响应不符合设计时，先更新设计/计划并重跑受影响失败测试；不在实现中静默兼容未确认字段。
-- [ ] 没有凭据时运行本地验证并在报告中写明真实验收阻塞，渠道保持 disabled，不创建虚假通过报告。
+- [x] 没有凭据时运行本地验证并在报告中写明真实验收阻塞，渠道保持 disabled，不创建虚假通过报告。
 - [ ] 有真实结果时创建中文验收报告并脱敏，运行：
 
 ~~~~powershell

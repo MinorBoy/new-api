@@ -24,12 +24,12 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 
 interface TaskAuditDataDialogProps {
   title: string
-  data: unknown
+  formattedData: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-function formatAuditData(data: unknown): string {
+export function formatTaskAuditData(data: unknown): string {
   if (typeof data === 'string') {
     try {
       return JSON.stringify(JSON.parse(data), null, 2)
@@ -45,7 +45,6 @@ function formatAuditData(data: unknown): string {
 export function TaskAuditDataDialog(props: TaskAuditDataDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
-  const formattedData = formatAuditData(props.data)
 
   return (
     <Dialog
@@ -63,18 +62,18 @@ export function TaskAuditDataDialog(props: TaskAuditDataDialogProps) {
             variant='ghost'
             size='sm'
             className='absolute top-2 right-2 h-8 w-8 p-0'
-            onClick={() => copyToClipboard(formattedData)}
+            onClick={() => copyToClipboard(props.formattedData)}
             title={t('Copy to clipboard')}
             aria-label={t('Copy to clipboard')}
           >
-            {copiedText === formattedData ? (
+            {copiedText === props.formattedData ? (
               <Check className='size-4 text-green-600' />
             ) : (
               <Copy className='size-4' />
             )}
           </Button>
           <pre className='overflow-wrap-anywhere min-w-0 pr-10 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap'>
-            {formattedData || '-'}
+            {props.formattedData || '-'}
           </pre>
         </div>
       </ScrollArea>

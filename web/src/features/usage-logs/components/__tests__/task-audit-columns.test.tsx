@@ -79,6 +79,9 @@ await i18n.use(initReactI18next).init({
         'Request Data': 'Request Data',
         'Upstream Response (Create Task)': 'Upstream Response (Create Task)',
         'Task Details': 'Task Details',
+        'Copy to clipboard': 'Copy to clipboard',
+        'View the full data captured for this task.':
+          'View the full data captured for this task.',
       },
     },
   },
@@ -296,6 +299,59 @@ async function getRequestModelCellText(): Promise<string> {
   return text
 }
 
+async function renderRequestDataCell(data: unknown) {
+  let columns: ColumnDef<TaskLog>[] = []
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const log: TaskLog = {
+    id: 1,
+    user_id: 1,
+    platform: 'seedance',
+    task_id: 'task_1',
+    action: 'GENERATE',
+    channel_id: 1,
+    submit_time: 1,
+    status: 'SUCCESS',
+    user_request_data: data,
+  }
+
+  function ColumnsProbe() {
+    columns = useTaskLogsColumns(true)
+    return null
+  }
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ColumnsProbe />
+      </I18nextProvider>
+    )
+  })
+
+  const requestDataColumn = columns.find(
+    (column) =>
+      'accessorKey' in column && column.accessorKey === 'user_request_data'
+  )
+  if (typeof requestDataColumn?.cell !== 'function') {
+    throw new Error('Request data column must render a cell component')
+  }
+  const content = requestDataColumn.cell({ row: { original: log } } as never)
+
+  await act(async () => {
+    root.render(<I18nextProvider i18n={i18n}>{content}</I18nextProvider>)
+  })
+
+  return {
+    container,
+    root,
+    async cleanup() {
+      await act(async () => root.unmount())
+      container.remove()
+    },
+  }
+}
+
 describe('task audit columns', () => {
   after(() => {
     domWindow.close()
@@ -354,5 +410,58 @@ describe('task audit columns', () => {
       { text: 'View', title: 'View' },
       { text: 'View', title: 'View' },
     ])
+  })
+
+  test('shows the complete request JSON in a scrollable preview when the View action receives focus', async () => {
+    const mounted = await renderRequestDataCell({
+      model: 'seedance',
+      prompt: 'A cinematic city at night',
+    })
+    const trigger = mounted.container.querySelector<HTMLButtonElement>(
+      'button[title="View"]'
+    )
+    assert.ok(trigger)
+
+    await act(async () => trigger.focus())
+
+    const preview = document.querySelector('[data-slot="hover-card-content"]')
+    assert.ok(preview)
+    assert.match(preview.textContent ?? '', /"model": "seedance"/)
+    assert.match(
+      preview.textContent ?? '',
+      /"prompt": "A cinematic city at night"/
+    )
+    assert.ok(preview.querySelector('[data-slot="scroll-area"]'))
+    assert.ok(
+      preview.querySelector('button[aria-label="Copy to clipboard"]')
+    )
+
+    await mounted.cleanup()
+  })
+
+  test('keeps click as the full request data dialog action', async () => {
+    const mounted = await renderRequestDataCell({ model: 'seedance' })
+    const trigger = mounted.container.querySelector<HTMLButtonElement>(
+      'button[title="View"]'
+    )
+    assert.ok(trigger)
+
+    await act(async () => trigger.click())
+
+    const dialog = document.querySelector('[role="dialog"]')
+    assert.ok(dialog)
+    assert.match(dialog.textContent ?? '', /Request Data/)
+    assert.match(dialog.textContent ?? '', /"model": "seedance"/)
+
+    await mounted.cleanup()
+  })
+
+  test('does not render a preview or dialog action for empty request data', async () => {
+    const mounted = await renderRequestDataCell('')
+
+    assert.equal(mounted.container.textContent?.trim(), '-')
+    assert.equal(mounted.container.querySelector('button'), null)
+
+    await mounted.cleanup()
   })
 })

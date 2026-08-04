@@ -17,13 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Eye, Music } from 'lucide-react'
+import { Check, Copy, Eye, Music } from 'lucide-react'
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useMemo } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/hover-card'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -36,7 +45,10 @@ import {
   type AudioClip,
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
-import { TaskAuditDataDialog } from '../dialogs/task-audit-data-dialog'
+import {
+  formatTaskAuditData,
+  TaskAuditDataDialog,
+} from '../dialogs/task-audit-data-dialog'
 import { ModelBadge } from '../model-badge'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
@@ -94,7 +106,11 @@ function AudioPreviewCell({ log }: { log: TaskLog }) {
 
 function TaskAuditDataCell({ data, title }: { data: unknown; title: string }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const triggerId = useId()
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const formattedData = useMemo(() => formatTaskAuditData(data), [data])
+  const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
 
   if (data == null || data === '') {
     return <span className='text-muted-foreground/60 text-xs'>-</span>
@@ -102,20 +118,69 @@ function TaskAuditDataCell({ data, title }: { data: unknown; title: string }) {
 
   return (
     <>
-      <button
-        type='button'
-        className='text-foreground inline-flex max-w-full items-center gap-1 text-xs hover:underline'
-        onClick={() => setOpen(true)}
-        title={t('View')}
+      <HoverCard
+        open={previewOpen}
+        triggerId={triggerId}
+        onOpenChange={(open, eventDetails) => {
+          if (eventDetails.reason !== 'trigger-press') {
+            setPreviewOpen(open)
+          }
+        }}
       >
-        <Eye className='size-3 shrink-0' aria-hidden='true' />
-        <span className='truncate'>{t('View')}</span>
-      </button>
+        <HoverCardTrigger
+          id={triggerId}
+          delay={250}
+          closeDelay={150}
+          render={
+            <button
+              type='button'
+              className='text-foreground inline-flex max-w-full items-center gap-1 text-xs hover:underline focus-visible:underline'
+              onClick={() => {
+                setPreviewOpen(false)
+                setDialogOpen(true)
+              }}
+              onFocus={() => setPreviewOpen(true)}
+              title={t('View')}
+            />
+          }
+        >
+          <Eye className='size-3 shrink-0' aria-hidden='true' />
+          <span className='truncate'>{t('View')}</span>
+        </HoverCardTrigger>
+        <HoverCardContent
+          align='start'
+          className='w-[min(35rem,calc(100vw-2rem))] overflow-hidden p-0'
+        >
+          <div className='flex h-10 items-center justify-between gap-3 px-3'>
+            <span className='truncate text-sm font-medium'>{t(title)}</span>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='size-8 shrink-0 p-0'
+              onClick={() => copyToClipboard(formattedData)}
+              title={t('Copy to clipboard')}
+              aria-label={t('Copy to clipboard')}
+            >
+              {copiedText === formattedData ? (
+                <Check aria-hidden='true' />
+              ) : (
+                <Copy aria-hidden='true' />
+              )}
+            </Button>
+          </div>
+          <Separator />
+          <ScrollArea className='max-h-[min(26rem,calc(100vh-8rem))]'>
+            <pre className='overflow-wrap-anywhere min-w-0 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap'>
+              {formattedData}
+            </pre>
+          </ScrollArea>
+        </HoverCardContent>
+      </HoverCard>
       <TaskAuditDataDialog
-        data={data}
+        formattedData={formattedData}
         title={title}
-        open={open}
-        onOpenChange={setOpen}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
       />
     </>
   )

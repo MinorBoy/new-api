@@ -69,7 +69,8 @@ const (
 	ChannelTypeOmegaAI        = 208 // OmegaAI Seedance task protocol
 	ChannelTypeFourSToken     = 209 // 4stoken Seedance task protocol
 	ChannelTypeEightYes       = 210 // 8yes Seedance task protocol
-	ChannelTypeDummy          = 211 // this one is only for count, do not add any channel after this
+	ChannelTypeZ5API          = 211 // Z5API Seedance task protocol
+	ChannelTypeDummy          = 212 // this one is only for count, do not add any channel after this
 
 )
 
@@ -148,6 +149,7 @@ var ChannelBaseURLs = func() []string {
 	baseURLs[ChannelTypeOmegaAI] = "https://omegaai.xin"
 	baseURLs[ChannelTypeFourSToken] = "https://api.4stoken.cn"
 	baseURLs[ChannelTypeEightYes] = "https://8yes.cc"
+	baseURLs[ChannelTypeZ5API] = "https://z5api.com"
 	return baseURLs
 }()
 
@@ -220,6 +222,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeOmegaAI:        "OmegaAI",
 	ChannelTypeFourSToken:     "4stoken",
 	ChannelTypeEightYes:       "8yes",
+	ChannelTypeZ5API:          "Z5API",
 }
 
 func GetChannelTypeName(channelType int) string {

@@ -895,6 +895,18 @@ func TestEightYesTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
 	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeEightYes))
 }
 
+func TestZ5APITaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "Z5API", adaptor.GetChannelName())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeZ5API))
+}
+
 const newAPIVideoDetailedZeroUsage = `{
 	"code":"success",
 	"message":"",

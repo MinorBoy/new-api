@@ -315,6 +315,24 @@ func TestConfigImportBindingBindsImportedPaipuModelOutsideStaticCatalog(t *testi
 	require.NoError(t, err)
 }
 
+func TestConfigImportBindingBindsImportedZ5APIModelOutsideStaticCatalog(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "channel-z5api", channelRef: "CH-Z5API", channelType: constant.ChannelTypeZ5API,
+		models: []string{"sd-2-c6-imported"}, protocol: "task", providerHint: "z5api",
+	})
+	channel := &model.Channel{
+		Type: constant.ChannelTypeZ5API, Name: "Z5API", Models: "sd-2-c6-imported",
+		Group: "default", Key: "key", Status: common.ChannelStatusManuallyDisabled,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-z5api", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+	require.NoError(t, err)
+}
+
 func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

@@ -193,6 +193,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return newapivideo.NewFourSTokenTaskAdaptor()
 		case constant.ChannelTypeEightYes:
 			return newapivideo.NewEightYesTaskAdaptor()
+		case constant.ChannelTypeZ5API:
+			return newapivideo.NewZ5APITaskAdaptor()
 		case constant.ChannelTypeClmmMall:
 			return &taskclmmmall.TaskAdaptor{}
 		case constant.ChannelTypeSora, constant.ChannelTypeOpenAI:

@@ -273,3 +273,52 @@ test('writes a report for a relative output path in a new directory', async () =
     await fs.rm(directory, { recursive: true, force: true })
   }
 })
+
+test('unhides every populated cost and mapping row inherited from the base workbook', async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-template-visible-rows-')
+  )
+  const outputPath = path.join(directory, 'template.xlsx')
+  const reportPath = path.join(directory, 'template.report.json')
+  try {
+    const data = buildTemplateData(source, rules)
+    const cost = data.costs[0]
+    const mapping = data.mappings[0]
+    assert.ok(cost)
+    assert.ok(mapping)
+    data.costs = Array.from({ length: 220 }, (_, index) => ({
+      ...cost,
+      businessId: `COST-VISIBLE-${index + 1}`,
+    }))
+    data.mappings = Array.from({ length: 120 }, (_, index) => ({
+      ...mapping,
+      businessId: `MAP-VISIBLE-${index + 1}`,
+    }))
+
+    const result = await writeTemplateWorkbook({
+      basePath,
+      outputPath,
+      reportPath,
+      sourcePath: 'source.xlsx',
+      rulesPath: 'rules.json',
+      rules,
+      data,
+    })
+
+    assert.equal(result.hasFailures, false)
+    const written = new ExcelJS.Workbook()
+    await written.xlsx.readFile(outputPath)
+    const costSheet = written.getWorksheet('渠道成本')
+    const mappingSheet = written.getWorksheet('模型映射')
+    assert.ok(costSheet)
+    assert.ok(mappingSheet)
+    for (let row = 5; row < data.costs.length + 5; row += 1) {
+      assert.equal(costSheet.getRow(row).hidden, false, `渠道成本 row ${row}`)
+    }
+    for (let row = 5; row < data.mappings.length + 5; row += 1) {
+      assert.equal(mappingSheet.getRow(row).hidden, false, `模型映射 row ${row}`)
+    }
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})

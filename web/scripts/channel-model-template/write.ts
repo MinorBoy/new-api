@@ -207,6 +207,7 @@ function writeRows(
   clearDataRows(sheet, headers.length)
   for (const [rowOffset, values] of rows.entries()) {
     const row = sheet.getRow(rowOffset + 5)
+    row.hidden = false
     for (const [columnOffset, value] of values.entries()) {
       row.getCell(columnOffset + 1).value = value
     }

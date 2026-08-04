@@ -115,6 +115,53 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_references",
 		},
 		{
+			name: "z5api accepts imported omni reference route", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTargetWithMinimums("sd-2-c6-imported", []string{"720p"}, 1, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{}),
+		},
+		{
+			name: "z5api accepts imported text-only route", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTarget("sd-2-c6-imported", []string{"720p"}, 1, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
+		},
+		{
+			name: "z5api rejects ten images", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTarget("sd-2-c6-imported", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 10, Videos: 3, Audios: 3}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "z5api rejects four videos", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTarget("sd-2-c6-imported", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 9, Videos: 4, Audios: 3}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "z5api rejects four audios", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTarget("sd-2-c6-imported", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 4}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "z5api rejects an empty upstream model", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTarget("  ", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+			wantCode: "route_contract_model",
+		},
+		{
+			name: "z5api rejects an oversized duration", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTarget("sd-2-c6-imported", []string{"720p"}, 1, relaycommon.MaxTaskDurationSeconds+1, nil,
+				modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_duration",
+		},
+		{
+			name: "z5api rejects minimums above limits", channelType: constant.ChannelTypeZ5API,
+			target: videoContractTargetWithMinimums("sd-2-c6-imported", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 3}, modelrouting.ReferenceLimits{Images: 5}),
+			wantCode: "route_contract_references",
+		},
+		{
 			name: "clmm accepts imported audio capability", channelType: constant.ChannelTypeClmmMall,
 			target: videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
 		},

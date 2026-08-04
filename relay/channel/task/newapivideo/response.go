@@ -238,6 +238,10 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 		Nested:    &nested,
 		Usage:     direct.Usage,
 	}
+	if direct.Seconds != nil {
+		seconds := json.Number(*direct.Seconds)
+		nested.Duration = &seconds
+	}
 	if nested.CreatedAt != nil {
 		parsed.CreatedAt = *nested.CreatedAt
 	}
@@ -276,6 +280,9 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 }
 
 func directTaskVideoURL(task directTask) string {
+	if object := strings.TrimSpace(task.Object); strings.HasPrefix(strings.ToLower(object), "http://") || strings.HasPrefix(strings.ToLower(object), "https://") {
+		return object
+	}
 	for _, value := range []string{
 		task.VideoURL,
 		task.URL,

@@ -43,6 +43,8 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 		return nil
 	case constant.ChannelTypePaipu:
 		return validatePaipuVideoRoute(target)
+	case constant.ChannelTypeZ5API:
+		return validateZ5APIVideoRoute(target)
 	case constant.ChannelTypeClmmMall:
 		return validateClmmVideoRoute(target)
 	case constant.ChannelTypeDimensio:
@@ -66,6 +68,22 @@ func validatePaipuVideoRoute(target modelrouting.Target) error {
 	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 ||
 		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios {
 		return newVideoRouteContractError("route_contract_references", "Paipu route reference limits exceed the protocol")
+	}
+	return nil
+}
+
+func validateZ5APIVideoRoute(target modelrouting.Target) error {
+	if strings.TrimSpace(target.UpstreamModel) == "" {
+		return newVideoRouteContractError("route_contract_model", "Z5API mapped upstream model is required")
+	}
+	if !routeDurationWithin(target.Constraints.Durations, 1, relaycommon.MaxTaskDurationSeconds) {
+		return newVideoRouteContractError("route_contract_duration", "Z5API route duration exceeds the task protocol limit")
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios {
+		return newVideoRouteContractError("route_contract_references", "Z5API route reference limits exceed the protocol")
 	}
 	return nil
 }

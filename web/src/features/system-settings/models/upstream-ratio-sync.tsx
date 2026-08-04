@@ -33,6 +33,7 @@ import type {
   DifferencesMap,
   RatioType,
   RatioValue,
+  SeedanceTokenPrice,
   UpstreamChannel,
   UpstreamConfig,
 } from '../types'
@@ -60,6 +61,7 @@ import {
   deleteResolutionField,
   formatSyncValue,
   isDurationPrice,
+  isSeedanceTokenPrice,
   type ResolutionRemovalPlan,
   type ResolutionSelection,
   type ResolutionsMap,
@@ -83,6 +85,7 @@ type UpstreamRatioSyncProps = {
     'billing_setting.billing_mode': string
     'billing_setting.billing_expr': string
     'billing_setting.duration_price': string
+    'billing_setting.seedance_token_price': string
   }
 }
 
@@ -105,6 +108,7 @@ function optionKeyBySyncField(ratioType: string): string {
     billing_mode: 'billing_setting.billing_mode',
     billing_expr: 'billing_setting.billing_expr',
     duration_price: 'billing_setting.duration_price',
+    seedance_token_price: 'billing_setting.seedance_token_price',
   }
   if (explicit[ratioType]) return explicit[ratioType]
   return ratioType
@@ -316,6 +320,10 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       'billing_setting.duration_price': parseJsonRecord<DurationPrice>(
         modelRatios['billing_setting.duration_price']
       ),
+      'billing_setting.seedance_token_price':
+        parseJsonRecord<SeedanceTokenPrice>(
+          modelRatios['billing_setting.seedance_token_price']
+        ),
     }
   }, [modelRatios])
 
@@ -324,7 +332,16 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
   const getLocalBillingCategory = (
     model: string,
     currentRatios: ParsedRatios
-  ): 'price' | 'ratio' | 'duration' | null => {
+  ): 'price' | 'ratio' | 'duration' | 'seedance' | null => {
+    if (
+      currentRatios['billing_setting.billing_mode'][model] ===
+        'seedance_tokens' &&
+      isSeedanceTokenPrice(
+        currentRatios['billing_setting.seedance_token_price'][model]
+      )
+    ) {
+      return 'seedance'
+    }
     if (
       currentRatios['billing_setting.billing_mode'][model] === 'per_duration' &&
       isDurationPrice(currentRatios['billing_setting.duration_price'][model])
@@ -366,6 +383,9 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         'billing_setting.duration_price': {
           ...currentRatios['billing_setting.duration_price'],
         },
+        'billing_setting.seedance_token_price': {
+          ...currentRatios['billing_setting.seedance_token_price'],
+        },
       }
 
       Object.entries(resolutions).forEach(([model, ratios]) => {
@@ -373,6 +393,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         const hasPrice = selectedTypes.includes('model_price')
         const hasBaseRatio = selectedTypes.includes('model_ratio')
         const hasDuration = selectedTypes.includes('duration_price')
+        const hasSeedance = selectedTypes.includes('seedance_token_price')
         const hasTiered =
           ratios.billing_mode === 'tiered_expr' ||
           selectedTypes.includes('billing_expr')
@@ -386,21 +407,28 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
           delete finalRatios.AudioRatio[model]
           delete finalRatios.AudioCompletionRatio[model]
         }
-        if (hasBaseRatio || hasDuration) {
+        if (hasBaseRatio || hasDuration || hasSeedance) {
           delete finalRatios.ModelPrice[model]
         }
-        if (hasDuration) {
+        if (hasDuration || hasSeedance) {
           delete finalRatios.ModelRatio[model]
         }
         if (hasPrice || hasBaseRatio) {
           delete finalRatios['billing_setting.duration_price'][model]
+          delete finalRatios['billing_setting.seedance_token_price'][model]
           delete finalRatios['billing_setting.billing_expr'][model]
           finalRatios['billing_setting.billing_mode'][model] = 'ratio'
         } else if (hasDuration) {
           delete finalRatios['billing_setting.billing_expr'][model]
+          delete finalRatios['billing_setting.seedance_token_price'][model]
           finalRatios['billing_setting.billing_mode'][model] = 'per_duration'
+        } else if (hasSeedance) {
+          delete finalRatios['billing_setting.billing_expr'][model]
+          delete finalRatios['billing_setting.duration_price'][model]
+          finalRatios['billing_setting.billing_mode'][model] = 'seedance_tokens'
         } else if (hasTiered) {
           delete finalRatios['billing_setting.duration_price'][model]
+          delete finalRatios['billing_setting.seedance_token_price'][model]
         }
 
         Object.entries(ratios).forEach(([ratioType, value]) => {
@@ -450,12 +478,21 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
     const modelRatioLabel = t('Model ratio')
     const completionRatioLabel = t('Completion ratio')
     const durationPriceLabel = t('Duration price')
+    const seedanceTokenPriceLabel = t('Token prices')
 
     Object.entries(resolutions).forEach(([model, ratios]) => {
       const localCat = getLocalBillingCategory(model, currentRatios)
       const selectedTypes = Object.keys(ratios)
-      let newCat: 'price' | 'ratio' | 'duration' | 'auxiliary' | 'tiered'
-      if ('duration_price' in ratios) {
+      let newCat:
+        | 'price'
+        | 'ratio'
+        | 'duration'
+        | 'seedance'
+        | 'auxiliary'
+        | 'tiered'
+      if ('seedance_token_price' in ratios) {
+        newCat = 'seedance'
+      } else if ('duration_price' in ratios) {
         newCat = 'duration'
       } else if ('model_price' in ratios) {
         newCat = 'price'
@@ -482,6 +519,12 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
           currentDesc = isDurationPrice(currentDuration)
             ? `${durationPriceLabel}: ${formatSyncValue(currentDuration, t)}`
             : `${durationPriceLabel}: -`
+        } else if (localCat === 'seedance') {
+          const currentSeedance =
+            currentRatios['billing_setting.seedance_token_price'][model]
+          currentDesc = isSeedanceTokenPrice(currentSeedance)
+            ? `${seedanceTokenPriceLabel}: ${formatSyncValue(currentSeedance, t)}`
+            : `${seedanceTokenPriceLabel}: -`
         } else {
           currentDesc = `${modelRatioLabel}: ${currentRatios.ModelRatio[model] ?? '-'}\n${completionRatioLabel}: ${currentRatios.CompletionRatio[model] ?? '-'}`
         }
@@ -494,6 +537,11 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
           isDurationPrice(ratios.duration_price)
         ) {
           newDesc = `${durationPriceLabel}: ${formatSyncValue(ratios.duration_price, t)}`
+        } else if (
+          newCat === 'seedance' &&
+          isSeedanceTokenPrice(ratios.seedance_token_price)
+        ) {
+          newDesc = `${seedanceTokenPriceLabel}: ${formatSyncValue(ratios.seedance_token_price, t)}`
         } else {
           newDesc = `${modelRatioLabel}: ${ratios.model_ratio ?? '-'}\n${completionRatioLabel}: ${ratios.completion_ratio ?? '-'}`
         }

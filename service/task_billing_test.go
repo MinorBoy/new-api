@@ -303,46 +303,45 @@ func TestTaskBillingOtherIncludesDurationSnapshot(t *testing.T) {
 	assert.NotContains(t, other, "model_price")
 }
 
-func TestTaskBillingOtherUsesExplicitScenarioPriceSnapshot(t *testing.T) {
+func TestTaskBillingOtherIncludesSeedanceOfficialTokenSnapshot(t *testing.T) {
 	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		BillingMode: billing_setting.BillingModePerDuration,
-		DurationPrice: &types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
-			"720p:with_video": {
-				OutputPrice:            0.4,
-				Unit:                   types.DurationUnitSecond,
-				RoundingStepSeconds:    1,
-				MinimumDurationSeconds: 4,
-				PricingVersion:         "official-sheet-v1",
-				Source:                 "official_price_sheet",
-			},
-		}},
-		DurationSource:           types.DurationSourceRequest,
-		RequestedDurationSeconds: 5,
-		BillableDurationSeconds:  5,
-		DurationBilling: &types.DurationBillingBreakdown{
-			Scenario:              types.DurationScenarioWithVideo,
-			Resolution:            "720p",
-			OutputSeconds:         5,
-			BillableOutputSeconds: 5,
-			InputVideoDurationMS:  15000,
-			OutputPricePerSecond:  "0.4",
-			OutputCharge:          "2",
-			TotalCharge:           "2",
+		BillingMode: billing_setting.BillingModeSeedanceTokens,
+		GroupRatio:  1.25,
+		SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
+			Scenario:              types.SeedanceTokenScenarioWithVideo,
+			Resolution:            "480p",
+			PricePerMillion:       "1.917808219178082",
+			InputTokens:           30132,
+			OutputTokens:          40176,
+			TotalTokens:           70308,
+			InputVideoDurationMS:  3000,
+			OutputDurationSeconds: 4,
+			Width:                 864,
+			Height:                496,
+			FrameRate:             24,
+			PricingVersion:        "official-token-v1",
+			Source:                "sd官价!A1",
+			BaseCharge:            "0.134837260273972589256",
+			GroupRatio:            "1.25",
+			FinalCharge:           "0.16854657534246573657",
 		},
 	}
 
 	other := taskBillingOther(task)
 
-	assert.Equal(t, 0.4, other["duration_price"])
-	assert.Equal(t, types.DurationScenarioWithVideo, other["duration_pricing_scenario"])
-	assert.Equal(t, "720p", other["duration_pricing_resolution"])
-	assert.Equal(t, "0.4", other["output_price_per_second"])
-	assert.Equal(t, "2", other["output_duration_charge"])
-	assert.Equal(t, "2", other["duration_total_charge"])
-	assert.Equal(t, int64(15000), other["input_video_duration_ms"])
-	assert.NotContains(t, other, "input_video_charge")
-	assert.NotContains(t, other, "seedance_price_matrix")
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, other["billing_mode"])
+	assert.Equal(t, "1.917808219178082", other["price_per_million"])
+	assert.Equal(t, 30132, other["input_tokens"])
+	assert.Equal(t, 40176, other["output_tokens"])
+	assert.Equal(t, 70308, other["total_tokens"])
+	assert.Equal(t, 864, other["output_width"])
+	assert.Equal(t, 496, other["output_height"])
+	assert.Equal(t, 24, other["frame_rate"])
+	assert.Equal(t, "0.134837260273972589256", other["base_charge"])
+	assert.Equal(t, "0.16854657534246573657", other["final_charge"])
+	assert.NotContains(t, other, "model_price")
+	assert.NotContains(t, other, "duration_price")
 }
 
 func TestLogTaskConsumptionIncludesDurationSnapshot(t *testing.T) {
@@ -395,6 +394,52 @@ func TestLogTaskConsumptionIncludesDurationSnapshot(t *testing.T) {
 	assert.NotContains(t, other, "model_price")
 	assert.Equal(t, quota, getUserUsedQuota(t, userID))
 	assert.Equal(t, int64(quota), getChannelUsedQuota(t, channelID))
+}
+
+func TestLogTaskConsumptionIncludesSeedanceOfficialTokenSnapshot(t *testing.T) {
+	truncate(t)
+	const userID, channelID, quota = 45, 45, 84_273
+	seedUser(t, userID, 10_000_000)
+	seedChannel(t, channelID)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	c.Set("token_name", "seedance-token")
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		OriginModelName: modelrouting.Seedance20Mini,
+		UsingGroup:      "default",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "generate"},
+		PriceData: types.PriceData{
+			BillingMode: billing_setting.BillingModeSeedanceTokens,
+			Quota:       quota,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 1.25,
+			},
+			SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
+				Scenario: types.SeedanceTokenScenarioWithVideo, Resolution: "480p",
+				PricePerMillion: "1.917808219178082", InputTokens: 30132, OutputTokens: 40176, TotalTokens: 70308,
+				InputVideoDurationMS: 3000, OutputDurationSeconds: 4, Width: 864, Height: 496, FrameRate: 24,
+				PricingVersion: "official-token-v1", Source: "sd官价!A1",
+				BaseCharge: "0.134837260273972589256", GroupRatio: "1.25", FinalCharge: "0.16854657534246573657",
+			},
+		},
+	}
+
+	LogTaskConsumption(c, info)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, other["billing_mode"])
+	assert.Equal(t, "1.917808219178082", other["price_per_million"])
+	assert.Equal(t, float64(30132), other["input_tokens"])
+	assert.Equal(t, float64(40176), other["output_tokens"])
+	assert.Equal(t, float64(70308), other["total_tokens"])
+	assert.Equal(t, "0.16854657534246573657", other["final_charge"])
+	assert.NotContains(t, other, "model_price")
 }
 
 func TestCapabilityRoutingLogKeepsTargetAdminOnly(t *testing.T) {
@@ -1274,30 +1319,117 @@ func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
 	assert.Equal(t, int64(0), countLogs(t))
 }
 
-func TestSettle_SeedanceDurationBillingSkipsTokenSettlement(t *testing.T) {
+func TestSettle_SeedanceOfficialTokenBillingUsesFrozenTotalTokens(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
 	const userID, tokenID, channelID = 34, 34, 34
-	const initQuota, preConsumed, tokenRemain = 10000, 4000, 7000
+	const initQuota, preConsumed, tokenRemain = 100_000, 100_000, 100_000
 	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-seedance-duration", tokenRemain)
-	seedChannel(t, channelID)
+	seedToken(t, tokenID, userID, "sk-seedance-token", tokenRemain)
+	seedChannelWithUsage(t, channelID, preConsumed)
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	setDurationBillingContext(task)
-	task.PrivateData.BillingContext.UsageProfile = model.TaskUsageProfileSeedance
-	task.PrivateData.BillingContext.PerCallBilling = false
-	task.PrivateData.BillingContext.Resolution = "720p"
-	result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
+	task.Properties.OriginModelName = modelrouting.Seedance20Mini
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		BillingMode:              billing_setting.BillingModeSeedanceTokens,
+		GroupRatio:               1.25,
+		OriginModelName:          modelrouting.Seedance20Mini,
+		UpstreamModelName:        modelrouting.Seedance20Mini,
+		HasVideoInput:            true,
+		InputVideoDurationMS:     3000,
+		RequestedDurationSeconds: 4,
+		DurationResolution:       "480p",
+		Resolution:               "480p",
+		PerCallBilling:           true,
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		UsageSnapshotVersion:     model.TaskUsageSnapshotVersion1,
+		SeedanceTokenPrice: &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+			types.SeedanceTokenScenarioKey("480p", types.SeedanceTokenScenarioWithVideo): {
+				PricePerMillion: "1.917808219178082", Width: 864, Height: 496, FrameRate: 24,
+				PricingVersion: "official-token-v1", Source: "sd官价!A1",
+			},
+		}},
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	result := &relaycommon.TaskInfo{
+		Status:                  string(model.TaskStatusSuccess),
+		CompletionTokens:        40176,
+		CompletionTokensPresent: true,
+		TotalTokens:             70308,
+		TotalTokensPresent:      true,
+		DurationSeconds:         5,
+		DurationPresent:         true,
+	}
 	require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
 
-	settleTaskBillingOnComplete(ctx, &mockAdaptor{adjustReturn: 2000}, task, result)
+	settleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, result)
 
+	const expectedQuota = 84_273
+	assert.Equal(t, expectedQuota, task.Quota)
+	assert.Equal(t, initQuota+(preConsumed-expectedQuota), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+(preConsumed-expectedQuota), getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, 70308, task.PrivateData.BillingContext.BillingTokens)
+	assert.Equal(t, 30132, task.PrivateData.BillingContext.UsageInputTokens)
+	assert.Equal(t, 40176, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 70308, task.PrivateData.BillingContext.UsageTotalTokens)
+	assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
+	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenBilling)
+	assert.Equal(t, "1.917808219178082", task.PrivateData.BillingContext.SeedanceTokenBilling.PricePerMillion)
+	assert.Equal(t, 70308, task.PrivateData.BillingContext.SeedanceTokenBilling.TotalTokens)
+	assert.Equal(t, "0.134837260273972589256", task.PrivateData.BillingContext.SeedanceTokenBilling.BaseCharge)
+	assert.Equal(t, "0.16854657534246573657", task.PrivateData.BillingContext.SeedanceTokenBilling.FinalCharge)
+}
+
+func TestSettle_SeedanceOfficialTokenBillingAllowsZeroGroupRatio(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, tokenID, channelID = 35, 35, 35
+	const initQuota, tokenRemain = 100_000, 100_000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-seedance-token-free", tokenRemain)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, 0, tokenID, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = modelrouting.Seedance20Mini
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		BillingMode:              billing_setting.BillingModeSeedanceTokens,
+		GroupRatio:               0,
+		OriginModelName:          modelrouting.Seedance20Mini,
+		UpstreamModelName:        modelrouting.Seedance20Mini,
+		HasVideoInput:            true,
+		InputVideoDurationMS:     3000,
+		RequestedDurationSeconds: 4,
+		DurationResolution:       "480p",
+		Resolution:               "480p",
+		PerCallBilling:           true,
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		UsageSnapshotVersion:     model.TaskUsageSnapshotVersion1,
+		SeedanceTokenPrice: &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+			types.SeedanceTokenScenarioKey("480p", types.SeedanceTokenScenarioWithVideo): {
+				PricePerMillion: "1.917808219178082", Width: 864, Height: 496, FrameRate: 24,
+				PricingVersion: "official-token-v1", Source: "sd官价!A1",
+			},
+		}},
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	result := &relaycommon.TaskInfo{
+		Status:                  string(model.TaskStatusSuccess),
+		CompletionTokens:        40176,
+		CompletionTokensPresent: true,
+		TotalTokens:             70308,
+		TotalTokensPresent:      true,
+		DurationSeconds:         4,
+		DurationPresent:         true,
+	}
+	require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+	settleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, result)
+
+	assert.Equal(t, 0, task.Quota)
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, preConsumed, task.Quota)
-	assert.Equal(t, 129600, task.PrivateData.BillingContext.BillingTokens)
-	assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
-	assert.Equal(t, int64(0), countLogs(t))
+	assert.Equal(t, 70308, task.PrivateData.BillingContext.BillingTokens)
+	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenBilling)
+	assert.Equal(t, "0", task.PrivateData.BillingContext.SeedanceTokenBilling.GroupRatio)
+	assert.Equal(t, "0", task.PrivateData.BillingContext.SeedanceTokenBilling.FinalCharge)
 }
 
 func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {

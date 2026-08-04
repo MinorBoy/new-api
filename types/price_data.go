@@ -20,10 +20,12 @@ type PriceData struct {
 	DurationSource           string
 	RequestedDurationSeconds int
 	BillableDurationSeconds  int
-	DurationResolution       string                    `json:"duration_resolution,omitempty"`
-	HasVideoInput            bool                      `json:"has_video_input,omitempty"`
-	InputVideoDurationMS     int64                     `json:"input_video_duration_ms,omitempty"`
-	DurationBilling          *DurationBillingBreakdown `json:"duration_billing,omitempty"`
+	DurationResolution       string `json:"duration_resolution,omitempty"`
+	HasVideoInput            bool   `json:"has_video_input,omitempty"`
+	InputVideoDurationMS     int64  `json:"input_video_duration_ms,omitempty"`
+	SeedanceTokenPrice       *SeedanceTokenPrice
+	SeedanceTokenUsage       SeedanceTokenUsage
+	SeedanceTokenBilling     *SeedanceTokenBillingBreakdown `json:"seedance_token_billing,omitempty"`
 	ModelPrice               float64
 	ModelRatio               float64
 	CompletionRatio          float64

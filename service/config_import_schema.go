@@ -417,6 +417,11 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 				return err
 			}
 		}
+		if proposal.SeedanceTokenPrice != nil {
+			if err := validateConfigImportDecimal("sale_proposals.seedance_token_price.price_per_million", &proposal.SeedanceTokenPrice.PricePerMillion); err != nil {
+				return err
+			}
+		}
 	}
 	for index := range entities.CostRuleDrafts {
 		draft := &entities.CostRuleDrafts[index]

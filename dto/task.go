@@ -63,3 +63,20 @@ type TaskDto struct {
 type FetchReq struct {
 	IDs []string `json:"ids"`
 }
+
+type TaskFilterUserOption struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+}
+
+type TaskFilterChannelOption struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type TaskFilterOptions struct {
+	Channels      []TaskFilterChannelOption `json:"channels,omitempty"`
+	Statuses      []string                  `json:"statuses"`
+	RequestModels []string                  `json:"request_models"`
+	Users         []TaskFilterUserOption    `json:"users,omitempty"`
+}

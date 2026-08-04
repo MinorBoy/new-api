@@ -205,6 +205,59 @@ func TestMockVideoServerSupportsProviderSubmitAndPollingPaths(t *testing.T) {
 	require.Contains(t, directFailed.Body.String(), "mock content policy rejection")
 }
 
+func TestMockVideoServerPollingResponseIncludesOfficialArkTaskFields(t *testing.T) {
+	server := &mockVideoServer{models: map[string]string{
+		"upstream-task-001": "doubao-seedance-2-0-mini-260615",
+	}}
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/video/generations/upstream-task-001", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var response struct {
+		Data struct {
+			Data map[string]any `json:"data"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, float64(78674), response.Data.Data["seed"])
+	require.Equal(t, float64(24), response.Data.Data["framespersecond"])
+	require.Equal(t, "default", response.Data.Data["service_tier"])
+	require.Equal(t, float64(172800), response.Data.Data["execution_expires_after"])
+	require.Equal(t, true, response.Data.Data["generate_audio"])
+	createdAt, createdAtExists := response.Data.Data["created_at"]
+	require.True(t, createdAtExists)
+	updatedAt, updatedAtExists := response.Data.Data["updated_at"]
+	require.True(t, updatedAtExists)
+	require.GreaterOrEqual(t, updatedAt.(float64), createdAt.(float64))
+	require.Contains(t, response.Data.Data, "draft")
+	require.Equal(t, false, response.Data.Data["draft"])
+	require.Contains(t, response.Data.Data, "priority")
+	require.Equal(t, float64(0), response.Data.Data["priority"])
+}
+
+func TestMockVideoServerPollingResponseIncludesInputTokensForTokenPricedModel(t *testing.T) {
+	server := &mockVideoServer{models: map[string]string{
+		"upstream-task-001": "seedance-720p-token",
+	}}
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/video/generations/upstream-task-001", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var response struct {
+		Data struct {
+			Data struct {
+				Usage struct {
+					CompletionTokens int `json:"completion_tokens"`
+					TotalTokens      int `json:"total_tokens"`
+				} `json:"usage"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Positive(t, response.Data.Data.Usage.CompletionTokens)
+	require.Greater(t, response.Data.Data.Usage.TotalTokens, response.Data.Data.Usage.CompletionTokens)
+}
+
 func TestCleanupSeedDataOnlyRemovesSeedIdentityRows(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

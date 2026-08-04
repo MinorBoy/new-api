@@ -31,6 +31,7 @@ var configImportSeedanceSaleOptionKeys = []string{
 	"billing_setting.billing_mode",
 	"billing_setting.billing_expr",
 	"billing_setting.duration_price",
+	"billing_setting.seedance_token_price",
 }
 
 // ConfigImportRefreshKeys identifies cache domains affected by a publication.
@@ -575,7 +576,8 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 				patches[key] = make(map[string]any)
 			}
 			for modelName, value := range values {
-				if key == "billing_setting.duration_price" && configImportDurationPriceHasScenarios(value) {
+				if (key == "billing_setting.duration_price" && configImportDurationPriceHasScenarios(value)) ||
+					(key == "billing_setting.seedance_token_price" && configImportSeedanceTokenPriceHasScenarios(value)) {
 					if previous, exists := patches[key][modelName]; exists {
 						merged, mergeErr := mergeConfigImportDurationPriceValues(previous, value, modelName)
 						if mergeErr != nil {
@@ -652,6 +654,19 @@ func publishConfigImportSaleOptions(tx *gorm.DB, items []model.ConfigImportItem,
 					return configImportError("PUBLISH_PRICING_OPTION", "duration price for model %q is invalid: %v", modelName, validateErr)
 				}
 			}
+			if key == "billing_setting.seedance_token_price" && configImportSeedanceTokenPriceHasScenarios(value) {
+				encodedPrice, encodeErr := common.Marshal(value)
+				if encodeErr != nil {
+					return encodeErr
+				}
+				var tokenPrice types.SeedanceTokenPrice
+				if decodeErr := common.Unmarshal(encodedPrice, &tokenPrice); decodeErr != nil {
+					return configImportError("PUBLISH_PRICING_OPTION", "Seedance token price for model %q is invalid: %v", modelName, decodeErr)
+				}
+				if validateErr := tokenPrice.Validate(relaycommon.MaxTokensLimit); validateErr != nil {
+					return configImportError("PUBLISH_PRICING_OPTION", "Seedance token price for model %q is invalid: %v", modelName, validateErr)
+				}
+			}
 			current[modelName] = value
 		}
 		encoded, marshalErr := common.Marshal(current)
@@ -691,12 +706,12 @@ func configImportSeedanceSaleCleanupScope(db *gorm.DB, items []model.ConfigImpor
 			if !ok {
 				continue
 			}
-			rawDurationPrices, ok := optionPatches["billing_setting.duration_price"].(map[string]any)
+			rawTokenPrices, ok := optionPatches["billing_setting.seedance_token_price"].(map[string]any)
 			if !ok {
 				continue
 			}
-			for modelName, value := range rawDurationPrices {
-				if configImportDurationPriceHasScenarios(value) && seedancepricing.Family(modelName) != "" {
+			for modelName, value := range rawTokenPrices {
+				if configImportSeedanceTokenPriceHasScenarios(value) && seedancepricing.Family(modelName) != "" {
 					officialSale = true
 					models[strings.TrimSpace(modelName)] = struct{}{}
 				}
@@ -779,6 +794,15 @@ func configImportDurationPriceHasScenarios(value any) bool {
 		return false
 	}
 	scenarios, ok := durationPrice["scenarios"].(map[string]any)
+	return ok && len(scenarios) > 0
+}
+
+func configImportSeedanceTokenPriceHasScenarios(value any) bool {
+	tokenPrice, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	scenarios, ok := tokenPrice["scenarios"].(map[string]any)
 	return ok && len(scenarios) > 0
 }
 

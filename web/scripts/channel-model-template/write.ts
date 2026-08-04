@@ -406,7 +406,11 @@ function setFormula(
     result === undefined ? { formula } : { formula, result }
 }
 
-function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
+function writeFormulas(
+  workbook: ExcelJS.Workbook,
+  data: TemplateData,
+  tokenDivisor: number
+): void {
   const channels = workbook.getWorksheet('渠道')
   const skus = workbook.getWorksheet('模型SKU')
   const sales = workbook.getWorksheet('官方售价')
@@ -416,6 +420,7 @@ function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
   if (!channels || !skus || !sales || !costs || !mappings || !profits) {
     throw new Error('V1 formula sheets are unavailable')
   }
+  const skuById = new Map(data.skus.map((sku) => [sku.businessId, sku]))
   for (let row = 5; row < data.channels.length + 5; row += 1) {
     setFormula(
       channels,
@@ -435,7 +440,18 @@ function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
     setFormula(
       sales,
       `K${row}`,
-      `IFERROR(H${row}*I${row}*J${row}/'参数'!$B$7,"")`
+      `IFERROR(H${row}*I${row}*J${row}/'参数'!$B$7,"")`,
+      new Decimal(sale.outputWidth)
+        .mul(sale.outputHeight)
+        .mul(sale.frameRate)
+        .div(tokenDivisor)
+        .toNumber()
+    )
+    setFormula(
+      sales,
+      `L${row}`,
+      `IFERROR(G${row}*K${row}/'参数'!$B$8,"")`,
+      sale.nativePerSecond
     )
     setFormula(
       sales,
@@ -446,7 +462,7 @@ function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
     setFormula(
       sales,
       `N${row}`,
-      `IFERROR(L${row}*'参数'!$B$6,"")`,
+      `IFERROR(M${row}*K${row}/'参数'!$B$8,"")`,
       sale.usdPerSecond
     )
     setFormula(
@@ -474,45 +490,69 @@ function writeFormulas(workbook: ExcelJS.Workbook, data: TemplateData): void {
       `IF(A${row}="","",IF(COUNTIF($A$5:$A$1004,A${row})>1,"错误:重复映射ID",IF(OR(B${row}="",C${row}="",D${row}="",E${row}="",F${row}="",G${row}="",J${row}=""),"错误:必填项","OK")))`
     )
   }
-  for (let row = 5; row < data.profits.length + 5; row += 1) {
+  for (const [index, profit] of data.profits.entries()) {
+    const row = index + 5
+    const sku = skuById.get(profit.skuCode)
     setFormula(
       profits,
       `I${row}`,
-      `IFERROR(XLOOKUP(G${row},'模型SKU'!$A$5:$A$504,'模型SKU'!$E$5:$E$504),"")`
+      `IFERROR(XLOOKUP(G${row},'模型SKU'!$A$5:$A$504,'模型SKU'!$E$5:$E$504),"")`,
+      sku?.outputWidth ?? ''
     )
     setFormula(
       profits,
       `J${row}`,
-      `IFERROR(XLOOKUP(G${row},'模型SKU'!$A$5:$A$504,'模型SKU'!$F$5:$F$504),"")`
+      `IFERROR(XLOOKUP(G${row},'模型SKU'!$A$5:$A$504,'模型SKU'!$F$5:$F$504),"")`,
+      sku?.outputHeight ?? ''
     )
     setFormula(
       profits,
       `K${row}`,
-      `IFERROR(XLOOKUP(G${row},'模型SKU'!$A$5:$A$504,'模型SKU'!$G$5:$G$504),"")`
+      `IFERROR(XLOOKUP(G${row},'模型SKU'!$A$5:$A$504,'模型SKU'!$G$5:$G$504),"")`,
+      sku?.frameRate ?? ''
     )
     setFormula(
       profits,
       `L${row}`,
-      `IFERROR((E${row}+F${row})*I${row}*J${row}*K${row}/'参数'!$B$7,0)`
+      `IFERROR((E${row}+F${row})*I${row}*J${row}*K${row}/'参数'!$B$7,0)`,
+      profit.estimatedTokens
     )
     setFormula(
       profits,
       `N${row}`,
-      `IFERROR(XLOOKUP(C${row},'渠道成本'!$A$5:$A$1004,'渠道成本'!$U$5:$U$1004),"")`
+      `IFERROR(XLOOKUP(C${row},'渠道成本'!$A$5:$A$1004,'渠道成本'!$U$5:$U$1004),"")`,
+      profit.normalizedUsdUnitPrice
     )
     setFormula(
       profits,
       `O${row}`,
-      `IFERROR(XLOOKUP(B${row},'官方售价'!$A$5:$A$504,'官方售价'!$M$5:$M$504),"")`
+      `IFERROR(XLOOKUP(B${row},'官方售价'!$A$5:$A$504,'官方售价'!$M$5:$M$504)*L${row}/'参数'!$B$8,"")`,
+      profit.officialSaleUsd
     )
     setFormula(
       profits,
       `P${row}`,
-      `IF(M${row}="per_token",N${row}*L${row}/'参数'!$B$8,N${row})`
+      `IF(M${row}="per_token",N${row}*L${row}/'参数'!$B$8,IF(M${row}="per_duration",N${row}*F${row},N${row}))`,
+      profit.channelCostUsd
     )
-    setFormula(profits, `Q${row}`, `IFERROR(O${row}*D${row},"")`)
-    setFormula(profits, `R${row}`, `IFERROR(Q${row}-P${row},"")`)
-    setFormula(profits, `S${row}`, `IFERROR(R${row}/Q${row},"")`)
+    setFormula(
+      profits,
+      `Q${row}`,
+      `IFERROR(O${row}*D${row},"")`,
+      profit.userRevenueUsd
+    )
+    setFormula(
+      profits,
+      `R${row}`,
+      `IFERROR(Q${row}-P${row},"")`,
+      profit.grossProfitUsd
+    )
+    setFormula(
+      profits,
+      `S${row}`,
+      `IFERROR(R${row}/Q${row},"")`,
+      profit.grossMargin
+    )
   }
 }
 
@@ -646,7 +686,7 @@ export async function writeTemplateWorkbook(
   writeRows(profits, V1_HEADERS.利润测算, profitRows(input.data))
   writeRows(sources, V1_HEADERS.来源, sourceRows(input.data))
   writeRows(checks, V1_HEADERS.校验, issueRows(issues))
-  writeFormulas(workbook, input.data)
+  writeFormulas(workbook, input.data, input.rules.defaults.tokenDivisor)
   workbook.calcProperties.fullCalcOnLoad = true
   workbook.calcProperties.forceFullCalc = true
 

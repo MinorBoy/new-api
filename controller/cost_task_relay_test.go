@@ -167,7 +167,7 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 	assert.Equal(t, string(types.CostModePerDuration), task.PrivateData.BillingContext.UpstreamCostMode)
 }
 
-func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *testing.T) {
+func TestPersistSubmittedSeedanceTaskFreezesOfficialTokenBilling(t *testing.T) {
 	setupControllerTaskCostDB(t)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
@@ -176,15 +176,29 @@ func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *
 		UserId:          12,
 		OriginModelName: "doubao-seedance-2-0-260128",
 		PriceData: types.PriceData{
-			BillingMode:              billing_setting.BillingModeRatio,
+			BillingMode:              billing_setting.BillingModeSeedanceTokens,
 			Quota:                    100,
-			UsePrice:                 true,
 			RequestedDurationSeconds: 5,
+			HasVideoInput:            true,
+			SeedanceTokenPrice: &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+				"720p:with_video": {
+					PricePerMillion: "1.917808219178082", Width: 1248, Height: 704, FrameRate: 24,
+					PricingVersion: "official-token-v1", Source: "sd官价!A1",
+				},
+			}},
+			SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
+				Scenario: "with_video", Resolution: "720p", PricePerMillion: "1.917808219178082",
+				InputTokens: 64800, OutputTokens: 108000, TotalTokens: 172800,
+				Width: 1248, Height: 704, FrameRate: 24, PricingVersion: "official-token-v1",
+				Source: "sd官价!A1", BaseCharge: "0.3313972602739725696", GroupRatio: "1", FinalCharge: "0.3313972602739725696",
+			},
 		},
 		CostAttempt: &types.CostAttemptHandle{CostMode: types.CostModePerRequest},
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 73, ChannelType: constant.ChannelTypeNewAPIVideo},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
 			PublicTaskID:          "task-seedance-profile",
+			InputVideoDurationMS:  3000,
+			UsageInputTokens:      64800,
 			UsageCompletionTokens: 108000,
 			UsageTotalTokens:      172800,
 		},
@@ -203,9 +217,13 @@ func TestPersistSubmittedSeedanceTaskStoresUsageProfileWithoutPerCallBilling(t *
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
 	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
+	assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
 	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
 	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
-	assert.False(t, task.PrivateData.BillingContext.PerCallBilling)
+	assert.True(t, task.PrivateData.BillingContext.PerCallBilling)
+	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenPrice)
+	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenBilling)
+	assert.Equal(t, "0.3313972602739725696", task.PrivateData.BillingContext.SeedanceTokenBilling.FinalCharge)
 	assert.Equal(t, string(types.CostModePerRequest), task.PrivateData.BillingContext.UpstreamCostMode)
 }
 
@@ -218,9 +236,22 @@ func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *t
 		UserId:          12,
 		OriginModelName: "client-video-model",
 		PriceData: types.PriceData{
-			BillingMode:              billing_setting.BillingModePerDuration,
+			BillingMode:              billing_setting.BillingModeSeedanceTokens,
 			Quota:                    100,
 			RequestedDurationSeconds: 5,
+			HasVideoInput:            true,
+			SeedanceTokenPrice: &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+				"720p:with_video": {
+					PricePerMillion: "1.917808219178082", Width: 1248, Height: 704, FrameRate: 24,
+					PricingVersion: "official-token-v1", Source: "sd官价!A1",
+				},
+			}},
+			SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
+				Scenario: "with_video", Resolution: "720p", PricePerMillion: "1.917808219178082",
+				InputTokens: 64800, OutputTokens: 108000, TotalTokens: 172800,
+				Width: 1248, Height: 704, FrameRate: 24, PricingVersion: "official-token-v1",
+				Source: "sd官价!A1", BaseCharge: "0.3313972602739725696", GroupRatio: "1", FinalCharge: "0.3313972602739725696",
+			},
 		},
 		CostAttempt: &types.CostAttemptHandle{CostMode: types.CostModePerDuration},
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -229,6 +260,8 @@ func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *t
 		},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
 			PublicTaskID:          "task-mapped-seedance-profile",
+			InputVideoDurationMS:  3000,
+			UsageInputTokens:      64800,
 			UsageCompletionTokens: 108000,
 			UsageTotalTokens:      172800,
 		},
@@ -247,9 +280,10 @@ func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *t
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
 	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
+	assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
 	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
 	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
-	assert.False(t, task.PrivateData.BillingContext.PerCallBilling)
+	assert.True(t, task.PrivateData.BillingContext.PerCallBilling)
 }
 
 func TestHandleTaskCostCoverageFailureExcludesChannelAndRetries(t *testing.T) {

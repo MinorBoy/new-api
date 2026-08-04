@@ -220,6 +220,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 		}
 	}
 	seedanceTask := seedancepricing.Family(info.OriginModelName) != "" || seedancepricing.Family(info.UpstreamModelName) != ""
+	if seedanceTask && (info.PriceData.BillingMode != billing_setting.BillingModeSeedanceTokens ||
+		info.PriceData.SeedanceTokenPrice == nil) {
+		return nil, service.TaskErrorWrapperLocal(errors.New("Seedance requires official token pricing"), "seedance_sale_price_not_configured", http.StatusBadRequest)
+	}
 	seedanceHasVideoInput := false
 	if seedanceTask {
 		estimator, ok := adaptor.(channel.TaskDurationEstimator)
@@ -260,15 +264,27 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo, retryParam *se
 		if err := prepareSeedanceUsageSnapshot(info, requestedSeconds, resolutionProfile.Name, seedanceHasVideoInput); err != nil {
 			return nil, service.TaskErrorWrapperLocal(err, "video_usage_context_unavailable", http.StatusInternalServerError)
 		}
+		info.PriceData.SeedanceTokenUsage = types.SeedanceTokenUsage{
+			InputTokens:  info.TaskRelayInfo.UsageInputTokens,
+			OutputTokens: info.TaskRelayInfo.UsageCompletionTokens,
+			TotalTokens:  info.TaskRelayInfo.UsageTotalTokens,
+		}
 	}
 
-	// 6. per_duration delegates requested duration extraction to the adaptor and
-	// calculates the charge centrally. Legacy task billing remains unchanged.
-	if seedanceTask && (info.PriceData.BillingMode != billing_setting.BillingModePerDuration ||
-		info.PriceData.DurationPrice == nil || len(info.PriceData.DurationPrice.Scenarios) == 0) {
-		return nil, service.TaskErrorWrapperLocal(errors.New("Seedance requires explicit scenario duration pricing"), "seedance_sale_price_not_configured", http.StatusBadRequest)
-	}
-	if info.PriceData.BillingMode == billing_setting.BillingModePerDuration {
+	// 6. Seedance uses the official token formula. Generic per-duration billing
+	// remains available only to non-Seedance task models.
+	if info.PriceData.BillingMode == billing_setting.BillingModeSeedanceTokens {
+		if !seedanceTask {
+			return nil, service.TaskErrorWrapperLocal(errors.New("seedance_tokens billing requires a Seedance model"), "seedance_sale_price_not_configured", http.StatusBadRequest)
+		}
+		quota, clamp, err := taskSeedanceTokenQuota(&info.PriceData)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "seedance_billing_error", http.StatusBadRequest)
+		}
+		info.PriceData.BillableDurationSeconds = info.PriceData.RequestedDurationSeconds
+		info.PriceData.Quota = quota
+		noteTaskQuotaClamp(info, clamp)
+	} else if info.PriceData.BillingMode == billing_setting.BillingModePerDuration {
 		estimator, ok := adaptor.(channel.TaskDurationEstimator)
 		if !ok {
 			return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task adaptor %s does not support duration billing", adaptor.GetChannelName()), "duration_billing_not_supported", http.StatusBadRequest)
@@ -472,9 +488,11 @@ func prepareSeedanceUsageSnapshot(info *relaycommon.RelayInfo, requestedSeconds 
 	usage, err := service.CalculateSeedanceTaskUsage(&model.TaskBillingContext{
 		UsageProfile:             model.TaskUsageProfileSeedance,
 		RequestedDurationSeconds: requestedSeconds,
+		DurationResolution:       resolution,
 		Resolution:               resolution,
 		HasVideoInput:            hasVideoInput,
 		InputVideoDurationMS:     info.TaskRelayInfo.InputVideoDurationMS,
+		SeedanceTokenPrice:       info.PriceData.SeedanceTokenPrice,
 	}, service.SeedanceTerminalFacts{})
 	if err != nil {
 		return err
@@ -482,6 +500,7 @@ func prepareSeedanceUsageSnapshot(info *relaycommon.RelayInfo, requestedSeconds 
 	if !service.IsValidSeedanceUsage(int64(usage.CompletionTokens), int64(usage.TotalTokens)) {
 		return errors.New("calculated Seedance usage is invalid")
 	}
+	info.TaskRelayInfo.UsageInputTokens = usage.InputTokens
 	info.TaskRelayInfo.UsageCompletionTokens = usage.CompletionTokens
 	info.TaskRelayInfo.UsageTotalTokens = usage.TotalTokens
 	return nil
@@ -619,26 +638,6 @@ func taskDurationQuota(priceData *types.PriceData, requestedSeconds int) (int, i
 		return 0, 0, nil, fmt.Errorf("reserved duration ratio is not allowed for per_duration billing")
 	}
 
-	if len(priceData.DurationPrice.Scenarios) > 0 {
-		charge, err := priceData.DurationPrice.CalculateCharge(
-			requestedSeconds,
-			priceData.DurationResolution,
-			priceData.HasVideoInput,
-			priceData.InputVideoDurationMS,
-			relaycommon.MaxTaskDurationSeconds,
-		)
-		if err != nil {
-			return 0, 0, nil, err
-		}
-		groupRatio := decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio)
-		finalCharge := charge.TotalCharge.Mul(groupRatio)
-		priceData.DurationBilling = charge.Breakdown()
-		priceData.DurationBilling.GroupRatio = groupRatio.String()
-		priceData.DurationBilling.FinalCharge = finalCharge.String()
-		quotaDecimal := finalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
-		quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
-		return quota, charge.BillableOutputSeconds, clamp, nil
-	}
 	billableSeconds, err := priceData.DurationPrice.BillableSeconds(requestedSeconds, relaycommon.MaxTaskDurationSeconds)
 	if err != nil {
 		return 0, 0, nil, err
@@ -654,11 +653,44 @@ func taskDurationQuota(priceData *types.PriceData, requestedSeconds int) (int, i
 	return quota, billableSeconds, clamp, nil
 }
 
+func taskSeedanceTokenQuota(priceData *types.PriceData) (int, *common.QuotaClamp, error) {
+	if priceData == nil || priceData.SeedanceTokenPrice == nil {
+		return 0, nil, fmt.Errorf("Seedance token price is not configured")
+	}
+	charge, err := priceData.SeedanceTokenPrice.CalculateCharge(
+		priceData.DurationResolution,
+		priceData.HasVideoInput,
+		priceData.InputVideoDurationMS,
+		priceData.RequestedDurationSeconds,
+		priceData.SeedanceTokenUsage,
+		relaycommon.MaxTokensLimit,
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+	groupRatio := decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio)
+	finalCharge := charge.BaseCharge.Mul(groupRatio)
+	priceData.SeedanceTokenBilling = charge.Breakdown()
+	priceData.SeedanceTokenBilling.GroupRatio = groupRatio.String()
+	priceData.SeedanceTokenBilling.FinalCharge = finalCharge.String()
+	quota, clamp := common.QuotaFromDecimalChecked(finalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+	return quota, clamp, nil
+}
+
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) (int, bool) {
 	priceData := info.PriceData
 	if !priceData.ReplaceOtherRatios(ratios) {
 		return 0, false
+	}
+	if priceData.BillingMode == billing_setting.BillingModeSeedanceTokens {
+		quota, clamp, err := taskSeedanceTokenQuota(&priceData)
+		if err != nil {
+			return 0, false
+		}
+		noteTaskQuotaClamp(info, clamp)
+		info.PriceData.SeedanceTokenBilling = priceData.SeedanceTokenBilling
+		return quota, true
 	}
 	if priceData.BillingMode == billing_setting.BillingModePerDuration {
 		quota, _, clamp, err := taskDurationQuota(&priceData, priceData.RequestedDurationSeconds)
@@ -666,7 +698,6 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 			return 0, false
 		}
 		noteTaskQuotaClamp(info, clamp)
-		info.PriceData.DurationBilling = priceData.DurationBilling
 		return quota, true
 	}
 	quota, clamp := taskQuotaWithOtherRatios(priceData)

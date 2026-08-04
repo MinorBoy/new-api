@@ -185,24 +185,25 @@ type ConfigImportModelSKU struct {
 
 type ConfigImportSaleProposal struct {
 	ConfigImportAuthoritativeEntity
-	ModelSKURef          string                 `json:"model_sku_ref"`
-	Scenario             string                 `json:"scenario,omitempty"`
-	Resolution           string                 `json:"resolution,omitempty"`
-	Currency             string                 `json:"currency,omitempty"`
-	UnitPrice            *string                `json:"unit_price,omitempty"`
-	PricePerUnit         *string                `json:"price_per_unit,omitempty"`
-	MarginRatio          *string                `json:"margin_ratio,omitempty"`
-	Enabled              *bool                  `json:"enabled,omitempty"`
-	BillingMode          string                 `json:"billing_mode,omitempty"`
-	BillingExpr          string                 `json:"billing_expr,omitempty"`
-	TokenMode            string                 `json:"token_mode,omitempty"`
-	DurationPrice        *DurationPriceProposal `json:"duration_price,omitempty"`
-	SelectedGroups       []string               `json:"selected_groups,omitempty"`
-	GroupPrices          map[string]string      `json:"group_prices,omitempty"`
-	InputPerMillion      *string                `json:"input_per_million,omitempty"`
-	OutputPerMillion     *string                `json:"output_per_million,omitempty"`
-	CompletionPerMillion *string                `json:"completion_per_million,omitempty"`
-	TotalPerMillion      *string                `json:"total_per_million,omitempty"`
+	ModelSKURef          string                      `json:"model_sku_ref"`
+	Scenario             string                      `json:"scenario,omitempty"`
+	Resolution           string                      `json:"resolution,omitempty"`
+	Currency             string                      `json:"currency,omitempty"`
+	UnitPrice            *string                     `json:"unit_price,omitempty"`
+	PricePerUnit         *string                     `json:"price_per_unit,omitempty"`
+	MarginRatio          *string                     `json:"margin_ratio,omitempty"`
+	Enabled              *bool                       `json:"enabled,omitempty"`
+	BillingMode          string                      `json:"billing_mode,omitempty"`
+	BillingExpr          string                      `json:"billing_expr,omitempty"`
+	TokenMode            string                      `json:"token_mode,omitempty"`
+	DurationPrice        *DurationPriceProposal      `json:"duration_price,omitempty"`
+	SeedanceTokenPrice   *SeedanceTokenPriceProposal `json:"seedance_token_price,omitempty"`
+	SelectedGroups       []string                    `json:"selected_groups,omitempty"`
+	GroupPrices          map[string]string           `json:"group_prices,omitempty"`
+	InputPerMillion      *string                     `json:"input_per_million,omitempty"`
+	OutputPerMillion     *string                     `json:"output_per_million,omitempty"`
+	CompletionPerMillion *string                     `json:"completion_per_million,omitempty"`
+	TotalPerMillion      *string                     `json:"total_per_million,omitempty"`
 }
 
 // DurationPriceProposal is kept decimal-safe at the contract boundary. The
@@ -215,6 +216,15 @@ type DurationPriceProposal struct {
 	MinimumDurationSeconds int    `json:"minimum_duration_seconds"`
 	PricingVersion         string `json:"pricing_version,omitempty"`
 	Source                 string `json:"source,omitempty"`
+}
+
+type SeedanceTokenPriceProposal struct {
+	PricePerMillion string `json:"price_per_million"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+	FrameRate       int    `json:"frame_rate"`
+	PricingVersion  string `json:"pricing_version"`
+	Source          string `json:"source"`
 }
 
 type ConfigImportCostRuleDraft struct {

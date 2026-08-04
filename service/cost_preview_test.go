@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +70,42 @@ func TestPreviewFinalUserQuotaUsesDurationBilling(t *testing.T) {
 	quota, err := PreviewFinalUserQuota(ctx, info, UserBillingPreviewInput{DurationSeconds: &duration})
 	require.NoError(t, err)
 	assert.Equal(t, int64(600_000), quota)
+}
+
+func TestPreviewFinalUserQuotaSeedanceTokenAndDurationInputsAgree(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+
+	price := types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+		types.SeedanceTokenScenarioKey("480p", types.SeedanceTokenScenarioWithVideo): {
+			PricePerMillion: "1.917808219178082", Width: 864, Height: 496, FrameRate: 24,
+			PricingVersion: "official-token-v1", Source: "sd官价!A1",
+		},
+	}}
+	newInfo := func() *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{PriceData: types.PriceData{
+			BillingMode:              billing_setting.BillingModeSeedanceTokens,
+			SeedanceTokenPrice:       &price,
+			RequestedDurationSeconds: 4,
+			DurationResolution:       "480p",
+			HasVideoInput:            true,
+			InputVideoDurationMS:     3000,
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 1.25},
+		}}
+	}
+	duration := 4
+
+	durationQuota, err := PreviewFinalUserQuota(ctx, newInfo(), UserBillingPreviewInput{DurationSeconds: &duration})
+	require.NoError(t, err)
+	tokenQuota, err := PreviewFinalUserQuota(ctx, newInfo(), UserBillingPreviewInput{Usage: &relaydto.Usage{
+		PromptTokens: 30132, CompletionTokens: 40176, TotalTokens: 70308,
+	}, DurationSeconds: &duration})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(84_273), durationQuota)
+	assert.Equal(t, durationQuota, tokenQuota)
 }
 
 func TestPreviewFinalUserQuotaUsesTextSettlement(t *testing.T) {

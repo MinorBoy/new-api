@@ -18,6 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { DurationPrice } from './models/model-pricing-core'
 
+export type SeedanceTokenPriceScenario = {
+  price_per_million: string
+  width: number
+  height: number
+  frame_rate: number
+  pricing_version: string
+  source: string
+}
+
+export type SeedanceTokenPrice = {
+  scenarios: Record<string, SeedanceTokenPriceScenario>
+}
+
 export type SystemOption = {
   key: string
   value: string
@@ -221,6 +234,7 @@ export type ModelSettings = {
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
   'billing_setting.duration_price': string
+  'billing_setting.seedance_token_price': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -277,6 +291,7 @@ export type BillingSettings = {
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
   'billing_setting.duration_price': string
+  'billing_setting.seedance_token_price': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -410,8 +425,9 @@ export type RatioType =
   | 'billing_mode'
   | 'billing_expr'
   | 'duration_price'
+  | 'seedance_token_price'
 
-export type RatioValue = number | string | DurationPrice
+export type RatioValue = number | string | DurationPrice | SeedanceTokenPrice
 
 export type RatioDifference = {
   current: RatioValue | null

@@ -6,11 +6,9 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 )
-
-const maxSeedanceFrameRate = 240
 
 type SeedanceTerminalFacts struct {
 	DurationSeconds        int
@@ -22,6 +20,7 @@ type SeedanceTerminalFacts struct {
 }
 
 type SeedanceTaskUsage struct {
+	InputTokens      int
 	CompletionTokens int
 	TotalTokens      int
 }
@@ -41,10 +40,13 @@ func IsValidSeedanceUpstreamUsage(completionTokens, totalTokens int64) bool {
 
 func PersistedSeedanceTaskUsage(bc *model.TaskBillingContext) (SeedanceTaskUsage, bool) {
 	if bc == nil || bc.UsageSnapshotVersion != model.TaskUsageSnapshotVersion1 ||
-		!IsValidSeedanceUsage(int64(bc.UsageCompletionTokens), int64(bc.UsageTotalTokens)) {
+		!IsValidSeedanceUsage(int64(bc.UsageCompletionTokens), int64(bc.UsageTotalTokens)) ||
+		bc.UsageInputTokens < 0 || bc.UsageInputTokens > relaycommon.MaxTokensLimit ||
+		bc.UsageInputTokens+bc.UsageCompletionTokens != bc.UsageTotalTokens {
 		return SeedanceTaskUsage{}, false
 	}
 	return SeedanceTaskUsage{
+		InputTokens:      bc.UsageInputTokens,
 		CompletionTokens: bc.UsageCompletionTokens,
 		TotalTokens:      bc.UsageTotalTokens,
 	}, true
@@ -57,9 +59,10 @@ func applySeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo, usag
 	result.TotalTokensPresent = true
 	result.UsageSource = source
 	billingContext := task.PrivateData.BillingContext
+	billingContext.UsageInputTokens = usage.InputTokens
 	billingContext.UsageCompletionTokens = usage.CompletionTokens
 	billingContext.UsageTotalTokens = usage.TotalTokens
-	billingContext.BillingTokens = usage.CompletionTokens
+	billingContext.BillingTokens = usage.TotalTokens
 	billingContext.UsageSource = source
 }
 
@@ -71,27 +74,41 @@ func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) 
 	if billingContext == nil || billingContext.UsageProfile != model.TaskUsageProfileSeedance {
 		return nil
 	}
+	if result.UpstreamUsageCostMeter == nil && result.BillingClamp == nil &&
+		(result.CompletionTokensPresent || result.TotalTokensPresent) {
+		meter := types.CostMeter{Source: types.CostMeterUpstreamUsage}
+		if result.CompletionTokensPresent {
+			completionTokens := int64(result.CompletionTokens)
+			meter.OutputTokens = &completionTokens
+			meter.CompletionTokens = &completionTokens
+		}
+		if result.TotalTokensPresent {
+			totalTokens := int64(result.TotalTokens)
+			meter.TotalTokens = &totalTokens
+		}
+		result.UpstreamUsageCostMeter = &meter
+	}
 
+	calculatedUsage, calculationErr := CalculateSeedanceTaskUsage(billingContext, SeedanceTerminalFacts{})
+	upstreamInputTokens := result.TotalTokens - result.CompletionTokens
+	upstreamUsageMatchesFormula := calculationErr == nil &&
+		upstreamInputTokens == calculatedUsage.InputTokens &&
+		result.CompletionTokens == calculatedUsage.CompletionTokens &&
+		result.TotalTokens == calculatedUsage.TotalTokens
 	if result.BillingClamp == nil &&
 		result.CompletionTokensPresent && result.TotalTokensPresent &&
-		IsValidSeedanceUpstreamUsage(int64(result.CompletionTokens), int64(result.TotalTokens)) {
+		IsValidSeedanceUpstreamUsage(int64(result.CompletionTokens), int64(result.TotalTokens)) &&
+		upstreamUsageMatchesFormula {
 		applySeedanceTaskUsage(task, result, SeedanceTaskUsage{
+			InputTokens:      upstreamInputTokens,
 			CompletionTokens: result.CompletionTokens,
 			TotalTokens:      result.TotalTokens,
 		}, model.TaskUsageSourceUpstream)
 		return nil
 	}
 
-	usage, err := CalculateSeedanceTaskUsage(billingContext, SeedanceTerminalFacts{
-		DurationSeconds:        result.DurationSeconds,
-		DurationPresent:        result.DurationPresent,
-		Resolution:             result.Resolution,
-		ResolutionPresent:      result.ResolutionPresent,
-		FramesPerSecond:        result.FramesPerSecond,
-		FramesPerSecondPresent: result.FramesPerSecondPresent,
-	})
-	if err == nil {
-		applySeedanceTaskUsage(task, result, usage, model.TaskUsageSourceLocalCalculated)
+	if calculationErr == nil {
+		applySeedanceTaskUsage(task, result, calculatedUsage, model.TaskUsageSourceLocalCalculated)
 		return nil
 	}
 	if usage, ok := PersistedSeedanceTaskUsage(billingContext); ok {
@@ -104,33 +121,14 @@ func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) 
 	return nil
 }
 
-func CalculateSeedanceTaskUsage(billingContext *model.TaskBillingContext, terminal SeedanceTerminalFacts) (SeedanceTaskUsage, error) {
+func CalculateSeedanceTaskUsage(billingContext *model.TaskBillingContext, _ SeedanceTerminalFacts) (SeedanceTaskUsage, error) {
 	if billingContext == nil {
 		return SeedanceTaskUsage{}, fmt.Errorf("billing context is unavailable")
 	}
 
 	durationSeconds := billingContext.RequestedDurationSeconds
-	if terminal.DurationPresent && terminal.DurationSeconds > 0 && terminal.DurationSeconds <= relaycommon.MaxTaskDurationSeconds {
-		durationSeconds = terminal.DurationSeconds
-	}
 	if durationSeconds <= 0 || durationSeconds > relaycommon.MaxTaskDurationSeconds {
 		return SeedanceTaskUsage{}, fmt.Errorf("output duration is out of range")
-	}
-
-	resolution := strings.TrimSpace(billingContext.Resolution)
-	if terminal.ResolutionPresent {
-		if _, ok := seedancepricing.Profile(terminal.Resolution); ok {
-			resolution = terminal.Resolution
-		}
-	}
-	profile, ok := seedancepricing.Profile(resolution)
-	if !ok {
-		return SeedanceTaskUsage{}, fmt.Errorf("output resolution is unsupported")
-	}
-
-	frameRate := profile.FrameRateNum
-	if terminal.FramesPerSecondPresent && terminal.FramesPerSecond > 0 && terminal.FramesPerSecond <= maxSeedanceFrameRate {
-		frameRate = int64(terminal.FramesPerSecond)
 	}
 
 	inputDurationMS := billingContext.InputVideoDurationMS
@@ -141,18 +139,43 @@ func CalculateSeedanceTaskUsage(billingContext *model.TaskBillingContext, termin
 		return SeedanceTaskUsage{}, fmt.Errorf("reference video duration is out of range")
 	}
 
-	_, completionTokens, totalTokens, err := EstimateSeedanceTokens(ProfitRoutingFacts{
+	resolution := strings.TrimSpace(billingContext.DurationResolution)
+	if resolution == "" {
+		resolution = strings.TrimSpace(billingContext.Resolution)
+	}
+	width := 0
+	height := 0
+	frameRate := 0
+	if billingContext.SeedanceTokenBilling != nil {
+		width = billingContext.SeedanceTokenBilling.Width
+		height = billingContext.SeedanceTokenBilling.Height
+		frameRate = billingContext.SeedanceTokenBilling.FrameRate
+	} else if billingContext.SeedanceTokenPrice != nil {
+		scenario, ok := billingContext.SeedanceTokenPrice.ScenarioFor(resolution, billingContext.HasVideoInput)
+		if !ok {
+			return SeedanceTaskUsage{}, fmt.Errorf("frozen Seedance token pricing scenario is unavailable")
+		}
+		width = scenario.Width
+		height = scenario.Height
+		frameRate = scenario.FrameRate
+	}
+	if width <= 0 || height <= 0 || frameRate <= 0 {
+		return SeedanceTaskUsage{}, fmt.Errorf("frozen Seedance token pricing geometry is unavailable")
+	}
+
+	inputTokens, completionTokens, totalTokens, err := EstimateSeedanceTokens(ProfitRoutingFacts{
 		OutputDurationSeconds: durationSeconds,
 		InputDurationMS:       inputDurationMS,
-		Width:                 profile.Width,
-		Height:                profile.Height,
-		FrameRateNum:          frameRate,
+		Width:                 width,
+		Height:                height,
+		FrameRateNum:          int64(frameRate),
 		FrameRateDen:          1,
 	})
 	if err != nil {
 		return SeedanceTaskUsage{}, err
 	}
 	return SeedanceTaskUsage{
+		InputTokens:      int(inputTokens),
 		CompletionTokens: int(completionTokens),
 		TotalTokens:      int(totalTokens),
 	}, nil

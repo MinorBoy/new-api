@@ -87,50 +87,18 @@ func TestValidateDurationPriceJSONString(t *testing.T) {
 	}
 }
 
-func TestValidateDurationPriceJSONStringProtectsImportedSeedancePrices(t *testing.T) {
-	originalPrices := billingSetting.DurationPrice
-	t.Cleanup(func() { billingSetting.DurationPrice = originalPrices })
-
-	modelName := "doubao-seedance-2-0-mini-260615"
-	officialPrice := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
-		"720p:no_video": {
-			OutputPrice: 0.06808219178082191, Unit: types.DurationUnitSecond,
-			RoundingStepSeconds: 1, PricingVersion: "official-sheet-v1",
-			Source: "SRC-OFFICIAL-SEEDANCE-2-0-MINI!19",
-		},
-	}}
-	billingSetting.DurationPrice = types.NewRWMap[string, types.DurationPrice]()
-	billingSetting.DurationPrice.Set(modelName, officialPrice)
-
-	unchanged, err := common.Marshal(map[string]types.DurationPrice{
-		modelName: officialPrice,
-		"video":   {Price: 1.5, Unit: types.DurationUnitMinute, RoundingStepSeconds: 5, MinimumDurationSeconds: 10},
-	})
-	require.NoError(t, err)
-	require.NoError(t, ValidateDurationPriceJSONString(string(unchanged)))
-
-	modifiedPrice := officialPrice
-	modifiedPrice.Scenarios = map[string]types.DurationPriceScenario{
-		"720p:no_video": {
-			OutputPrice: 9, Unit: types.DurationUnitSecond,
-			RoundingStepSeconds: 1, PricingVersion: "official-sheet-v1",
-			Source: "SRC-OFFICIAL-SEEDANCE-2-0-MINI!19",
-		},
-	}
-	modified, err := common.Marshal(map[string]types.DurationPrice{modelName: modifiedPrice})
-	require.NoError(t, err)
-	assert.ErrorContains(t, ValidateDurationPriceJSONString(string(modified)), "must be updated through config import")
-
-	assert.ErrorContains(t, ValidateDurationPriceJSONString(`{"video":{"price":1,"unit":"second","rounding_step_seconds":1}}`), "cannot be removed outside config import")
-}
-
 func TestValidateDurationPriceJSONStringRejectsDirectSeedanceAddition(t *testing.T) {
 	originalPrices := billingSetting.DurationPrice
 	t.Cleanup(func() { billingSetting.DurationPrice = originalPrices })
 	billingSetting.DurationPrice = types.NewRWMap[string, types.DurationPrice]()
 
-	raw := `{"doubao-seedance-2-0-260128":{"scenarios":{"720p:no_video":{"output_price":1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"pricing_version":"official-sheet-v1","source":"SRC-OFFICIAL-SEEDANCE-2-0!11"}}}}`
-	assert.ErrorContains(t, ValidateDurationPriceJSONString(raw), "must be created through config import")
+	raw := `{"doubao-seedance-2-0-260128":{"price":1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`
+	assert.ErrorContains(t, ValidateDurationPriceJSONString(raw), "does not support per_duration pricing")
+}
+
+func TestValidateDurationPriceJSONStringRejectsRemovedScenarioContract(t *testing.T) {
+	raw := `{"video":{"price":1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"scenarios":{"720p:no_video":{"output_price":9}}}}`
+	assert.ErrorContains(t, ValidateDurationPriceJSONString(raw), "scenarios is no longer supported")
 }
 
 func TestValidateBillingModeJSONStringProtectsImportedSeedanceModes(t *testing.T) {

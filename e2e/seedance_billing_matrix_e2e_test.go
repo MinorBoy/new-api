@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -69,19 +70,18 @@ func silenceSeedanceBillingLogs(t *testing.T) {
 }
 
 type seedanceBillingCase struct {
-	ID                       string
-	Model                    string
-	Resolution               string
-	RequestDuration          *int
-	TerminalDuration         int
-	VideoDurations           []int
-	HasReferenceImage        bool
-	HasReferenceVideo        bool
-	GenerateAudio            bool
-	ServiceTier              string
-	Draft                    bool
-	CompletionTokens         int
-	ExpectedUnitUSDPerSecond float64
+	ID                string
+	Model             string
+	Resolution        string
+	RequestDuration   *int
+	TerminalDuration  int
+	VideoDurations    []int
+	HasReferenceImage bool
+	HasReferenceVideo bool
+	GenerateAudio     bool
+	ServiceTier       string
+	Draft             bool
+	CompletionTokens  int
 }
 
 type seedanceBillingMock struct {
@@ -190,91 +190,88 @@ func seedanceBillingReferenceDuration(rawURL string) (int, bool) {
 	return duration, true
 }
 
-func seedanceBillingOfficialUnitUSDPerSecond(modelID, resolution string, hasVideo bool) (float64, bool) {
+func seedanceBillingOfficialTokenScenario(modelID, resolution string, hasVideo bool) (types.SeedanceTokenPriceScenario, bool) {
+	geometry := map[string][2]int{
+		"480p":  {864, 496},
+		"720p":  {1280, 720},
+		"1080p": {1920, 1080},
+		"4k":    {3840, 2160},
+	}
+	dimensions, ok := geometry[resolution]
+	if !ok {
+		return types.SeedanceTokenPriceScenario{}, false
+	}
+	priceCNYPerMillion := int64(0)
 	switch modelID {
 	case "doubao-seedance-2-0-260128":
 		switch resolution {
-		case "480p":
+		case "480p", "720p":
+			priceCNYPerMillion = 46
 			if hasVideo {
-				return 0.0384931506849315, true
+				priceCNYPerMillion = 28
 			}
-			return 0.0632876712328767, true
-		case "720p":
-			if hasVideo {
-				return 0.0828767123287671, true
-			}
-			return 0.136164383561644, true
 		case "1080p":
+			priceCNYPerMillion = 51
 			if hasVideo {
-				return 0.206438356164384, true
+				priceCNYPerMillion = 31
 			}
-			return 0.33958904109589, true
 		case "4k":
+			priceCNYPerMillion = 26
 			if hasVideo {
-				return 0.426027397260274, true
+				priceCNYPerMillion = 16
 			}
-			return 0.692328767123288, true
 		}
 	case "doubao-seedance-2-0-fast-260128":
-		switch resolution {
-		case "480p":
+		if resolution == "480p" || resolution == "720p" {
+			priceCNYPerMillion = 37
 			if hasVideo {
-				return 0.0302739726027397, true
+				priceCNYPerMillion = 22
 			}
-			return 0.050958904109589, true
-		case "720p":
-			if hasVideo {
-				return 0.0650684931506849, true
-			}
-			return 0.109452054794521, true
 		}
 	case "doubao-seedance-2-0-mini-260615":
-		switch resolution {
-		case "480p":
+		if resolution == "480p" || resolution == "720p" {
+			priceCNYPerMillion = 23
 			if hasVideo {
-				return 0.0193150684931507, true
+				priceCNYPerMillion = 14
 			}
-			return 0.0316438356164384, true
-		case "720p":
-			if hasVideo {
-				return 0.0413698630136986, true
-			}
-			return 0.0680821917808219, true
 		}
 	}
-	return 0, false
+	if priceCNYPerMillion == 0 {
+		return types.SeedanceTokenPriceScenario{}, false
+	}
+	return types.SeedanceTokenPriceScenario{
+		PricePerMillion: decimal.NewFromInt(priceCNYPerMillion).Div(decimal.RequireFromString("7.3")).String(),
+		Width:           dimensions[0],
+		Height:          dimensions[1],
+		FrameRate:       24,
+		PricingVersion:  "official-token-v1",
+		Source:          "sd官价!A6:K14",
+	}, true
 }
 
-func seedanceBillingOfficialDurationPrices() map[string]types.DurationPrice {
+func seedanceBillingOfficialTokenPrices() map[string]types.SeedanceTokenPrice {
 	modelResolutions := map[string][]string{
 		"doubao-seedance-2-0-260128":      {"480p", "720p", "1080p", "4k"},
 		"doubao-seedance-2-0-fast-260128": {"480p", "720p"},
 		"doubao-seedance-2-0-mini-260615": {"480p", "720p"},
 	}
-	prices := make(map[string]types.DurationPrice, len(modelResolutions))
+	prices := make(map[string]types.SeedanceTokenPrice, len(modelResolutions))
 	for modelID, resolutions := range modelResolutions {
-		scenarios := make(map[string]types.DurationPriceScenario, len(resolutions)*2)
+		scenarios := make(map[string]types.SeedanceTokenPriceScenario, len(resolutions)*2)
 		for _, resolution := range resolutions {
 			for _, hasVideo := range []bool{false, true} {
-				price, ok := seedanceBillingOfficialUnitUSDPerSecond(modelID, resolution, hasVideo)
+				scenarioPrice, ok := seedanceBillingOfficialTokenScenario(modelID, resolution, hasVideo)
 				if !ok {
-					panic("missing explicit Seedance official USD per-second price")
+					panic("missing explicit Seedance official token price")
 				}
-				scenario := types.DurationScenarioNoVideo
+				scenario := types.SeedanceTokenScenarioNoVideo
 				if hasVideo {
-					scenario = types.DurationScenarioWithVideo
+					scenario = types.SeedanceTokenScenarioWithVideo
 				}
-				scenarios[types.DurationScenarioKey(resolution, scenario)] = types.DurationPriceScenario{
-					OutputPrice:            price,
-					Unit:                   types.DurationUnitSecond,
-					RoundingStepSeconds:    1,
-					MinimumDurationSeconds: 0,
-					PricingVersion:         "official-sheet-v1",
-					Source:                 "官方售价!e2e",
-				}
+				scenarios[types.SeedanceTokenScenarioKey(resolution, scenario)] = scenarioPrice
 			}
 		}
-		prices[modelID] = types.DurationPrice{Scenarios: scenarios}
+		prices[modelID] = types.SeedanceTokenPrice{Scenarios: scenarios}
 	}
 	return prices
 }
@@ -294,7 +291,7 @@ func seedanceBillingExplicitCases() []seedanceBillingCase {
 			for duration := 4; duration <= 15; duration++ {
 				for _, hasVideo := range []bool{false, true} {
 					for _, hasImage := range []bool{false, true} {
-						unitUSDPerSecond, ok := seedanceBillingOfficialUnitUSDPerSecond(modelConfig.model, resolution, hasVideo)
+						_, ok := seedanceBillingOfficialTokenScenario(modelConfig.model, resolution, hasVideo)
 						if !ok {
 							panic("missing explicit Seedance billing oracle")
 						}
@@ -303,7 +300,6 @@ func seedanceBillingExplicitCases() []seedanceBillingCase {
 							Model: modelConfig.model, Resolution: resolution,
 							RequestDuration: common.GetPointer(duration), TerminalDuration: duration,
 							HasReferenceImage: hasImage, HasReferenceVideo: hasVideo,
-							ExpectedUnitUSDPerSecond: unitUSDPerSecond,
 						})
 					}
 				}
@@ -341,14 +337,14 @@ func seedanceBillingDurationModeCases() []seedanceBillingCase {
 		for _, resolution := range modelConfig.resolutions {
 			for _, hasImage := range []bool{false, true} {
 				for _, hasVideo := range []bool{false, true} {
-					unitUSDPerSecond, ok := seedanceBillingOfficialUnitUSDPerSecond(modelConfig.model, resolution, hasVideo)
+					_, ok := seedanceBillingOfficialTokenScenario(modelConfig.model, resolution, hasVideo)
 					if !ok {
 						panic("missing duration-mode Seedance billing oracle")
 					}
 					appendModeCases(seedanceBillingCase{
 						ID:    fmt.Sprintf("%s/%s/image-%t/video-%t", modelConfig.model, resolution, hasImage, hasVideo),
 						Model: modelConfig.model, Resolution: resolution,
-						HasReferenceImage: hasImage, HasReferenceVideo: hasVideo, ExpectedUnitUSDPerSecond: unitUSDPerSecond,
+						HasReferenceImage: hasImage, HasReferenceVideo: hasVideo,
 					})
 				}
 			}
@@ -397,17 +393,18 @@ func setupSeedanceBillingE2E(t *testing.T) *seedanceBillingE2EEnv {
 	originalBillingConfig, err := config.ConfigToMap(billingConfig)
 	require.NoError(t, err)
 	billingModes := make(map[string]string)
-	durationPrices := seedanceBillingOfficialDurationPrices()
-	for modelID := range durationPrices {
-		billingModes[modelID] = billing_setting.BillingModePerDuration
+	tokenPrices := seedanceBillingOfficialTokenPrices()
+	for modelID := range tokenPrices {
+		billingModes[modelID] = billing_setting.BillingModeSeedanceTokens
 	}
 	modeJSON, err := common.Marshal(billingModes)
 	require.NoError(t, err)
-	priceJSON, err := common.Marshal(durationPrices)
+	priceJSON, err := common.Marshal(tokenPrices)
 	require.NoError(t, err)
 	require.NoError(t, config.UpdateConfigFromMap(billingConfig, map[string]string{
-		billing_setting.BillingModeField:   string(modeJSON),
-		billing_setting.DurationPriceField: string(priceJSON),
+		billing_setting.BillingModeField:        string(modeJSON),
+		billing_setting.DurationPriceField:      "{}",
+		billing_setting.SeedanceTokenPriceField: string(priceJSON),
 	}))
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(billingConfig, originalBillingConfig))
@@ -471,11 +468,53 @@ func setupSeedanceBillingE2E(t *testing.T) *seedanceBillingE2EEnv {
 	}
 }
 
-func seedanceBillingExpectedDurationQuota(priceUSDPerSecond float64, outputSeconds int, groupRatio float64) int {
-	return common.QuotaFromDecimal(decimal.NewFromFloat(priceUSDPerSecond).
-		Mul(decimal.NewFromInt(int64(outputSeconds))).
-		Mul(decimal.NewFromFloat(groupRatio)).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+func seedanceBillingExpectedTokenQuota(
+	t *testing.T,
+	modelID string,
+	resolution string,
+	hasVideo bool,
+	inputVideoDurationMS int64,
+	outputSeconds int,
+	usage *types.SeedanceTokenUsage,
+	groupRatio float64,
+) (int, *types.SeedanceTokenBillingBreakdown) {
+	t.Helper()
+	scenarioPrice, ok := seedanceBillingOfficialTokenScenario(modelID, resolution, hasVideo)
+	require.True(t, ok)
+	if usage == nil {
+		inputTokens, outputTokens, totalTokens, err := service.EstimateSeedanceTokens(service.ProfitRoutingFacts{
+			OutputDurationSeconds: outputSeconds,
+			InputDurationMS:       inputVideoDurationMS,
+			Width:                 scenarioPrice.Width,
+			Height:                scenarioPrice.Height,
+			FrameRateNum:          int64(scenarioPrice.FrameRate),
+			FrameRateDen:          1,
+		})
+		require.NoError(t, err)
+		usage = &types.SeedanceTokenUsage{
+			InputTokens:  int(inputTokens),
+			OutputTokens: int(outputTokens),
+			TotalTokens:  int(totalTokens),
+		}
+	}
+	price := types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+		types.SeedanceTokenScenarioKey(resolution, map[bool]string{false: types.SeedanceTokenScenarioNoVideo, true: types.SeedanceTokenScenarioWithVideo}[hasVideo]): scenarioPrice,
+	}}
+	charge, err := price.CalculateCharge(
+		resolution,
+		hasVideo,
+		inputVideoDurationMS,
+		outputSeconds,
+		*usage,
+		relaycommon.MaxTokensLimit,
+	)
+	require.NoError(t, err)
+	group := decimal.NewFromFloat(groupRatio)
+	finalCharge := charge.BaseCharge.Mul(group)
+	breakdown := charge.Breakdown()
+	breakdown.GroupRatio = group.String()
+	breakdown.FinalCharge = finalCharge.String()
+	return common.QuotaFromDecimal(finalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit))), breakdown
 }
 
 func seedanceBillingDomainSnapshotFor(t *testing.T, env *seedanceBillingE2EEnv, targetTaskIDs ...string) seedanceBillingDomainSnapshot {
@@ -698,18 +737,18 @@ func seedanceBillingAssertDomainDelta(t *testing.T, expected, before, after seed
 	require.Equal(t, expected, after.delta(before))
 }
 
-func seedanceBillingExpectedDomainDelta(preConsume, finalQuota, completionTokens int) seedanceBillingDomainSnapshot {
+func seedanceBillingExpectedDomainDelta(preConsume, finalQuota, billingTokens int) seedanceBillingDomainSnapshot {
 	expected := seedanceBillingDomainSnapshot{
 		TaskCount: 1, TaskQuota: finalQuota,
 		UserQuota: -finalQuota, UserUsedQuota: finalQuota, UserRequestCount: 1,
 		ChannelUsedQuota: int64(finalQuota), TokenRemainQuota: -finalQuota, TokenUsedQuota: finalQuota,
 		QuotaDataCount: 1, QuotaDataQuota: finalQuota,
-		TaskBillingTokens: completionTokens, SignedLogQuota: finalQuota,
+		TaskBillingTokens: billingTokens, SignedLogQuota: finalQuota,
 	}
 	quotaDelta := finalQuota - preConsume
 	switch {
 	case quotaDelta > 0:
-		expected.QuotaDataTokenUsed = completionTokens
+		expected.QuotaDataTokenUsed = billingTokens
 		expected.LogCount = 2
 		expected.ConsumeLogCount = 2
 		expected.ConsumeLogQuota = finalQuota
@@ -717,10 +756,10 @@ func seedanceBillingExpectedDomainDelta(preConsume, finalQuota, completionTokens
 		expected.SettlementConsumeLogCount = 1
 		expected.SettlementConsumeLogQuota = quotaDelta
 		expected.SettlementSignedLogQuota = quotaDelta
-		expected.SettlementLogBillingTokens = completionTokens
+		expected.SettlementLogBillingTokens = billingTokens
 		expected.SettlementLogBillingTokensPresent = true
 	case quotaDelta < 0:
-		expected.QuotaDataTokenUsed = completionTokens
+		expected.QuotaDataTokenUsed = billingTokens
 		expected.LogCount = 2
 		expected.ConsumeLogCount = 1
 		expected.ConsumeLogQuota = preConsume
@@ -730,9 +769,10 @@ func seedanceBillingExpectedDomainDelta(preConsume, finalQuota, completionTokens
 		expected.SettlementRefundLogCount = 1
 		expected.SettlementRefundLogQuota = -quotaDelta
 		expected.SettlementSignedLogQuota = quotaDelta
-		expected.SettlementLogBillingTokens = completionTokens
+		expected.SettlementLogBillingTokens = billingTokens
 		expected.SettlementLogBillingTokensPresent = true
 	default:
+		expected.QuotaDataTokenUsed = billingTokens
 		expected.LogCount = 1
 		expected.ConsumeLogCount = 1
 		expected.ConsumeLogQuota = preConsume
@@ -868,6 +908,7 @@ func (m *seedanceBillingMock) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			TerminalDuration:  effectiveDuration,
 			VideoDurations:    append([]int(nil), videoDurations...),
 			HasReferenceImage: hasReferenceImage,
+			HasReferenceVideo: videoCount > 0,
 			GenerateAudio:     generateAudio,
 			ServiceTier:       serviceTier,
 			Draft:             upstreamRequest.Draft,
@@ -902,12 +943,16 @@ func (m *seedanceBillingMock) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		const createdAt = int64(1780000000)
+		totalTokens := task.CompletionTokens
+		if task.HasReferenceVideo {
+			totalTokens += 97
+		}
 		encodedResponse, err := common.Marshal(map[string]any{
 			"id":                      task.ID,
 			"model":                   task.Model,
 			"status":                  "succeeded",
 			"content":                 map[string]string{"video_url": "http://" + r.Host + "/videos/" + task.ID + ".mp4"},
-			"usage":                   map[string]int{"completion_tokens": task.CompletionTokens, "total_tokens": task.CompletionTokens + 97},
+			"usage":                   map[string]int{"completion_tokens": task.CompletionTokens, "total_tokens": totalTokens},
 			"created_at":              createdAt,
 			"updated_at":              createdAt + 1,
 			"seed":                    int64(900000 + len(task.ID)),
@@ -1441,40 +1486,45 @@ func TestSeedanceBillingUpstreamDurationRefundE2E(t *testing.T) {
 		channelUsedQuota int64
 	}
 	testCases := []struct {
-		id          string
-		videoURLs   []string
-		wantMessage string
+		id                   string
+		videoURLs            []string
+		inputVideoDurationMS int64
+		wantMessage          string
 	}{
 		{
-			id:          "one-1s",
-			videoURLs:   []string{"https://mock.example/reference-1s.mp4"},
-			wantMessage: "each video_url.url must encode a duration from 2 to 15 seconds",
+			id:                   "one-1s",
+			videoURLs:            []string{"https://mock.example/reference-1s.mp4"},
+			inputVideoDurationMS: 1000,
+			wantMessage:          "each video_url.url must encode a duration from 2 to 15 seconds",
 		},
 		{
-			id:          "one-16s",
-			videoURLs:   []string{"https://mock.example/reference-16s.mp4"},
-			wantMessage: "each video_url.url must encode a duration from 2 to 15 seconds",
+			id:                   "one-16s",
+			videoURLs:            []string{"https://mock.example/reference-16s.mp4"},
+			inputVideoDurationMS: 16000,
+			wantMessage:          "each video_url.url must encode a duration from 2 to 15 seconds",
 		},
 		{
-			id:          "two-8s-plus-8s",
-			videoURLs:   []string{"https://mock.example/reference-8s-1.mp4", "https://mock.example/reference-8s-2.mp4"},
-			wantMessage: "total reference video duration must not exceed 15 seconds",
+			id:                   "two-8s-plus-8s",
+			videoURLs:            []string{"https://mock.example/reference-8s-1.mp4", "https://mock.example/reference-8s-2.mp4"},
+			inputVideoDurationMS: 16000,
+			wantMessage:          "total reference video duration must not exceed 15 seconds",
 		},
 		{
-			id:          "three-6s-plus-5s-plus-5s",
-			videoURLs:   []string{"https://mock.example/reference-6s-1.mp4", "https://mock.example/reference-5s-2.mp4", "https://mock.example/reference-5s-3.mp4"},
-			wantMessage: "total reference video duration must not exceed 15 seconds",
+			id:                   "three-6s-plus-5s-plus-5s",
+			videoURLs:            []string{"https://mock.example/reference-6s-1.mp4", "https://mock.example/reference-5s-2.mp4", "https://mock.example/reference-5s-3.mp4"},
+			inputVideoDurationMS: 16000,
+			wantMessage:          "total reference video duration must not exceed 15 seconds",
 		},
 	}
 
 	require.Len(t, testCases, 4)
-	priceUSDPerSecond, ok := seedanceBillingOfficialUnitUSDPerSecond("doubao-seedance-2-0-260128", "720p", true)
-	require.True(t, ok)
-	expectedPreConsume := seedanceBillingExpectedDurationQuota(priceUSDPerSecond, 5, 1)
 	seen := make(map[string]struct{}, len(testCases))
 	executed := 0
 	for _, testCase := range testCases {
 		caseID := testCase.id
+		expectedPreConsume, _ := seedanceBillingExpectedTokenQuota(
+			t, "doubao-seedance-2-0-260128", "720p", true, testCase.inputVideoDurationMS, 5, nil, 1,
+		)
 		_, duplicate := seen[caseID]
 		require.False(t, duplicate, caseID)
 		seen[caseID] = struct{}{}
@@ -1554,18 +1604,22 @@ func TestSeedanceBillingUpstreamDurationRefundE2E(t *testing.T) {
 }
 
 func TestSeedanceBillingOfficialScenarioPrices(t *testing.T) {
-	prices := seedanceBillingOfficialDurationPrices()
+	prices := seedanceBillingOfficialTokenPrices()
 
 	require.Len(t, prices, 3)
 	assert.Len(t, prices["doubao-seedance-2-0-260128"].Scenarios, 8)
 	assert.Len(t, prices["doubao-seedance-2-0-fast-260128"].Scenarios, 4)
 	assert.Len(t, prices["doubao-seedance-2-0-mini-260615"].Scenarios, 4)
-	for modelID, durationPrice := range prices {
-		for scenarioKey, scenarioPrice := range durationPrice.Scenarios {
-			assert.Positive(t, scenarioPrice.OutputPrice, "%s/%s", modelID, scenarioKey)
-			assert.Equal(t, types.DurationUnitSecond, scenarioPrice.Unit, "%s/%s", modelID, scenarioKey)
-			assert.Equal(t, 1, scenarioPrice.RoundingStepSeconds, "%s/%s", modelID, scenarioKey)
-			assert.Zero(t, scenarioPrice.MinimumDurationSeconds, "%s/%s", modelID, scenarioKey)
+	for modelID, tokenPrice := range prices {
+		for scenarioKey, scenarioPrice := range tokenPrice.Scenarios {
+			pricePerMillion, err := decimal.NewFromString(scenarioPrice.PricePerMillion)
+			require.NoError(t, err, "%s/%s", modelID, scenarioKey)
+			assert.True(t, pricePerMillion.IsPositive(), "%s/%s", modelID, scenarioKey)
+			assert.Positive(t, scenarioPrice.Width, "%s/%s", modelID, scenarioKey)
+			assert.Positive(t, scenarioPrice.Height, "%s/%s", modelID, scenarioKey)
+			assert.Equal(t, 24, scenarioPrice.FrameRate, "%s/%s", modelID, scenarioKey)
+			assert.Equal(t, "official-token-v1", scenarioPrice.PricingVersion, "%s/%s", modelID, scenarioKey)
+			assert.Equal(t, "sd官价!A6:K14", scenarioPrice.Source, "%s/%s", modelID, scenarioKey)
 		}
 	}
 }
@@ -1692,35 +1746,56 @@ func TestSeedanceBillingDurationModesE2E(t *testing.T) {
 			assert.Empty(t, mockTask.VideoDurations, caseID)
 		}
 
-		completionTokens := 100000 + testCase.TerminalDuration*1000
+		upstreamCompletionTokens := 100000 + testCase.TerminalDuration*1000
 		if testCase.HasReferenceVideo {
-			completionTokens += 210
+			upstreamCompletionTokens += 210
 		}
 		if testCase.HasReferenceImage {
-			completionTokens++
+			upstreamCompletionTokens++
 		}
-		require.Equal(t, completionTokens, mockTask.CompletionTokens, caseID)
-		expectedPreConsume := seedanceBillingExpectedDurationQuota(testCase.ExpectedUnitUSDPerSecond, 5, 1)
-		expectedFinalQuota := expectedPreConsume
+		require.Equal(t, upstreamCompletionTokens, mockTask.CompletionTokens, caseID)
+		inputVideoDurationMS := int64(0)
+		if testCase.HasReferenceVideo {
+			inputVideoDurationMS = 2000
+		}
+		expectedPreConsume, expectedPreBilling := seedanceBillingExpectedTokenQuota(
+			t, testCase.Model, testCase.Resolution, testCase.HasReferenceVideo, inputVideoDurationMS, 5, nil, 1,
+		)
+		expectedFinalQuota, expectedFinalBilling := seedanceBillingExpectedTokenQuota(
+			t,
+			testCase.Model,
+			testCase.Resolution,
+			testCase.HasReferenceVideo,
+			inputVideoDurationMS,
+			5,
+			nil,
+			1,
+		)
+		userCompletionTokens := expectedFinalBilling.OutputTokens
+		userTotalTokens := expectedFinalBilling.TotalTokens
 		require.Equal(t, expectedPreConsume, task.Quota, caseID)
 		require.NotNil(t, task.PrivateData.BillingContext, caseID)
 		billingContext := task.PrivateData.BillingContext
-		assert.Equal(t, billing_setting.BillingModePerDuration, billingContext.BillingMode, caseID)
+		assert.Equal(t, billing_setting.BillingModeSeedanceTokens, billingContext.BillingMode, caseID)
 		assert.Equal(t, testCase.Resolution, billingContext.Resolution, caseID)
 		assert.Equal(t, testCase.HasReferenceVideo, billingContext.HasVideoInput, caseID)
 		assert.Empty(t, billingContext.OtherRatios, caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_input", caseID)
+		require.NotNil(t, billingContext.SeedanceTokenPrice, caseID)
+		require.Equal(t, expectedPreBilling, billingContext.SeedanceTokenBilling, caseID)
 		assert.Zero(t, task.PrivateData.BillingContext.BillingTokens, caseID)
 
 		summary := service.RunTaskPollingOnce(context.Background(), nil)
 		require.Equal(t, 1, summary.UnfinishedTasks, caseID)
 		require.NoError(t, model.DB.Where("task_id = ?", created.ID).First(&task).Error, caseID)
 		assert.Equal(t, string(model.TaskStatusSuccess), string(task.Status), caseID)
-		require.Equal(t, expectedFinalQuota, task.Quota, caseID)
+		require.Equal(t, expectedFinalQuota, task.Quota, "%s: billing=%+v context=%+v", caseID, task.PrivateData.BillingContext.SeedanceTokenBilling, task.PrivateData.BillingContext)
 		require.NotNil(t, task.PrivateData.BillingContext, caseID)
-		assert.Equal(t, completionTokens, task.PrivateData.BillingContext.BillingTokens, caseID)
-		assert.Empty(t, task.PrivateData.BillingContext.OtherRatios, caseID)
-		assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "video_input", caseID)
+		billingContext = task.PrivateData.BillingContext
+		assert.Equal(t, userTotalTokens, billingContext.BillingTokens, caseID)
+		require.Equal(t, expectedFinalBilling, billingContext.SeedanceTokenBilling, caseID)
+		assert.Empty(t, billingContext.OtherRatios, caseID)
+		assert.NotContains(t, billingContext.OtherRatios, "video_input", caseID)
 
 		status, terminalBody := performJSONRequest(t, env.Router, http.MethodGet, "/api/v3/contents/generations/tasks/"+created.ID, "Bearer e2e-1", "")
 		require.Equal(t, http.StatusOK, status, "%s: %s", caseID, terminalBody)
@@ -1732,15 +1807,15 @@ func TestSeedanceBillingDurationModesE2E(t *testing.T) {
 			Duration int `json:"duration"`
 		}
 		require.NoError(t, common.Unmarshal(terminalBody, &terminal), caseID)
-		assert.Equal(t, completionTokens, terminal.Usage.CompletionTokens, caseID)
-		assert.Equal(t, completionTokens+97, terminal.Usage.TotalTokens, caseID)
+		assert.Equal(t, userCompletionTokens, terminal.Usage.CompletionTokens, caseID)
+		assert.Equal(t, userTotalTokens, terminal.Usage.TotalTokens, caseID)
 		assert.Equal(t, testCase.TerminalDuration, terminal.Duration, caseID)
 
 		after := seedanceBillingDomainSnapshotFor(t, env, created.ID)
-		expectedDelta := seedanceBillingExpectedDomainDelta(expectedPreConsume, expectedFinalQuota, completionTokens)
+		expectedDelta := seedanceBillingExpectedDomainDelta(expectedPreConsume, expectedFinalQuota, userTotalTokens)
 		require.Equal(t, expectedDelta, after.delta(before), caseID)
 		classID := strings.TrimSuffix(strings.TrimSuffix(caseID, "/mode-omitted"), "/mode-smart")
-		result := durationModeResult{preConsume: expectedPreConsume, quota: expectedFinalQuota, tokens: completionTokens, duration: testCase.TerminalDuration}
+		result := durationModeResult{preConsume: expectedPreConsume, quota: expectedFinalQuota, tokens: userTotalTokens, duration: testCase.TerminalDuration}
 		if previous, ok := resultsByClass[classID]; ok {
 			omitted, smart := previous, result
 			if testCase.RequestDuration != nil {
@@ -1749,7 +1824,7 @@ func TestSeedanceBillingDurationModesE2E(t *testing.T) {
 			assert.Equal(t, omitted.preConsume, smart.preConsume, caseID)
 			assert.Equal(t, 5, omitted.duration, caseID)
 			assert.Equal(t, 7, smart.duration, caseID)
-			assert.Equal(t, omitted.tokens+2000, smart.tokens, caseID)
+			assert.Equal(t, omitted.tokens, smart.tokens, caseID)
 			assert.Equal(t, omitted.quota, smart.quota, caseID)
 		} else {
 			resultsByClass[classID] = result
@@ -1815,21 +1890,38 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 			assert.Empty(t, mockTask.VideoDurations, caseID)
 		}
 
-		completionTokens := 100000 + testCase.TerminalDuration*1000
+		upstreamCompletionTokens := 100000 + testCase.TerminalDuration*1000
 		if testCase.HasReferenceVideo {
-			completionTokens += 210
+			upstreamCompletionTokens += 210
 		}
 		if testCase.HasReferenceImage {
-			completionTokens++
+			upstreamCompletionTokens++
 		}
-		require.Equal(t, completionTokens, mockTask.CompletionTokens, caseID)
+		require.Equal(t, upstreamCompletionTokens, mockTask.CompletionTokens, caseID)
 
-		expectedPreConsume := seedanceBillingExpectedDurationQuota(testCase.ExpectedUnitUSDPerSecond, testCase.TerminalDuration, 1)
-		expectedFinalQuota := expectedPreConsume
+		inputVideoDurationMS := int64(0)
+		if testCase.HasReferenceVideo {
+			inputVideoDurationMS = 2000
+		}
+		expectedPreConsume, expectedPreBilling := seedanceBillingExpectedTokenQuota(
+			t, testCase.Model, testCase.Resolution, testCase.HasReferenceVideo, inputVideoDurationMS, testCase.TerminalDuration, nil, 1,
+		)
+		expectedFinalQuota, expectedFinalBilling := seedanceBillingExpectedTokenQuota(
+			t,
+			testCase.Model,
+			testCase.Resolution,
+			testCase.HasReferenceVideo,
+			inputVideoDurationMS,
+			testCase.TerminalDuration,
+			nil,
+			1,
+		)
+		userCompletionTokens := expectedFinalBilling.OutputTokens
+		userTotalTokens := expectedFinalBilling.TotalTokens
 		require.Equal(t, expectedPreConsume, task.Quota, caseID)
 		require.NotNil(t, task.PrivateData.BillingContext, caseID)
 		billingContext := task.PrivateData.BillingContext
-		assert.Equal(t, billing_setting.BillingModePerDuration, billingContext.BillingMode, caseID)
+		assert.Equal(t, billing_setting.BillingModeSeedanceTokens, billingContext.BillingMode, caseID)
 		assert.Equal(t, testCase.Model, billingContext.OriginModelName, caseID)
 		assert.Equal(t, testCase.Model, billingContext.UpstreamModelName, caseID)
 		assert.Equal(t, testCase.HasReferenceVideo, billingContext.HasVideoInput, caseID)
@@ -1845,14 +1937,8 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 		require.Equal(t, testCase.Resolution, billingContext.Resolution, caseID)
 		require.Empty(t, billingContext.OtherRatios, caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_input", caseID)
-		require.NotNil(t, billingContext.DurationPrice, caseID)
-		scenario := types.DurationScenarioNoVideo
-		if testCase.HasReferenceVideo {
-			scenario = types.DurationScenarioWithVideo
-		}
-		scenarioPrice, configured := billingContext.DurationPrice.Scenarios[types.DurationScenarioKey(testCase.Resolution, scenario)]
-		require.True(t, configured, caseID)
-		assert.InDelta(t, testCase.ExpectedUnitUSDPerSecond, scenarioPrice.OutputPrice, 1e-15, caseID)
+		require.NotNil(t, billingContext.SeedanceTokenPrice, caseID)
+		require.Equal(t, expectedPreBilling, billingContext.SeedanceTokenBilling, caseID)
 		assert.Zero(t, billingContext.BillingTokens, caseID)
 
 		summary := service.RunTaskPollingOnce(context.Background(), nil)
@@ -1867,17 +1953,13 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 		require.NoError(t, model.DB.Where("task_id = ?", publicTaskID).First(&task).Error, caseID)
 		assert.Equal(t, string(model.TaskStatusSuccess), string(task.Status), caseID)
 		assert.Equal(t, "100%", task.Progress, caseID)
-		require.Equal(t, expectedFinalQuota, task.Quota, caseID)
+		require.Equal(t, expectedFinalQuota, task.Quota, "%s: billing=%+v", caseID, task.PrivateData.BillingContext.SeedanceTokenBilling)
 		require.NotNil(t, task.PrivateData.BillingContext, caseID)
 		billingContext = task.PrivateData.BillingContext
-		require.Equal(t, completionTokens, billingContext.BillingTokens, caseID)
+		require.Equal(t, userTotalTokens, billingContext.BillingTokens, caseID)
 		require.Empty(t, billingContext.OtherRatios, caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_input", caseID)
-		require.NotNil(t, billingContext.DurationBilling, caseID)
-		assert.Equal(t, scenario, billingContext.DurationBilling.Scenario, caseID)
-		assert.Equal(t, testCase.Resolution, billingContext.DurationBilling.Resolution, caseID)
-		assert.Equal(t, testCase.TerminalDuration, billingContext.DurationBilling.BillableOutputSeconds, caseID)
-		assert.Equal(t, decimal.NewFromFloat(testCase.ExpectedUnitUSDPerSecond).String(), billingContext.DurationBilling.OutputPricePerSecond, caseID)
+		require.Equal(t, expectedFinalBilling, billingContext.SeedanceTokenBilling, caseID)
 
 		status, terminalBody := performJSONRequest(t, env.Router, http.MethodGet, "/api/v3/contents/generations/tasks/"+publicTaskID, "Bearer e2e-1", "")
 		require.Equal(t, http.StatusOK, status, "%s: %s", caseID, terminalBody)
@@ -1913,8 +1995,8 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 		assert.Equal(t, testCase.Model, terminal.Model, caseID)
 		assert.Equal(t, "succeeded", terminal.Status, caseID)
 		assert.Equal(t, env.Server.URL+"/videos/"+upstreamTaskID+".mp4", terminal.Content.VideoURL, caseID)
-		assert.Equal(t, completionTokens, terminal.Usage.CompletionTokens, caseID)
-		assert.Equal(t, completionTokens+97, terminal.Usage.TotalTokens, caseID)
+		assert.Equal(t, userCompletionTokens, terminal.Usage.CompletionTokens, caseID)
+		assert.Equal(t, userTotalTokens, terminal.Usage.TotalTokens, caseID)
 		assert.Equal(t, int64(1780000000), terminal.CreatedAt, caseID)
 		assert.Equal(t, int64(1780000001), terminal.UpdatedAt, caseID)
 		assert.Positive(t, terminal.Seed, caseID)
@@ -1929,7 +2011,7 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 		assert.Zero(t, terminal.Priority, caseID)
 
 		after := seedanceBillingDomainSnapshotFor(t, env, publicTaskID)
-		expectedDelta := seedanceBillingExpectedDomainDelta(expectedPreConsume, expectedFinalQuota, completionTokens)
+		expectedDelta := seedanceBillingExpectedDomainDelta(expectedPreConsume, expectedFinalQuota, userTotalTokens)
 		seedanceBillingAssertDomainDelta(t, expectedDelta, before, after)
 
 		logs := seedanceBillingLogsAfter(t, env, before.LastLogID)
@@ -1941,9 +2023,14 @@ func TestSeedanceBillingExplicitMatrixE2E(t *testing.T) {
 		assert.Equal(t, float64(1), logs[0].Other["group_ratio"], caseID)
 		assert.NotContains(t, logs[0].Other, "model_ratio", caseID)
 		assert.NotContains(t, logs[0].Other, "video_input", caseID)
-		assert.Equal(t, testCase.ExpectedUnitUSDPerSecond, logs[0].Other["duration_price"], caseID)
-		assert.Equal(t, scenario, logs[0].Other["duration_pricing_scenario"], caseID)
-		assert.Equal(t, testCase.Resolution, logs[0].Other["duration_pricing_resolution"], caseID)
+		assert.Equal(t, billing_setting.BillingModeSeedanceTokens, logs[0].Other["billing_mode"], caseID)
+		assert.Equal(t, expectedPreBilling.PricePerMillion, logs[0].Other["price_per_million"], caseID)
+		assert.Equal(t, float64(expectedPreBilling.InputTokens), logs[0].Other["input_tokens"], caseID)
+		assert.Equal(t, float64(expectedPreBilling.OutputTokens), logs[0].Other["output_tokens"], caseID)
+		assert.Equal(t, float64(expectedPreBilling.TotalTokens), logs[0].Other["total_tokens"], caseID)
+		assert.Equal(t, expectedPreBilling.BaseCharge, logs[0].Other["base_charge"], caseID)
+		assert.Equal(t, expectedPreBilling.FinalCharge, logs[0].Other["final_charge"], caseID)
+		assert.NotContains(t, logs[0].Other, "duration_price", caseID)
 		if t.Failed() {
 			t.FailNow()
 		}
@@ -1958,9 +2045,6 @@ func TestSeedanceBillingReferenceVideoProfilesE2E(t *testing.T) {
 	env := setupSeedanceBillingE2E(t)
 	profiles := seedanceBillingReferenceVideoProfiles()
 	const modelID = "doubao-seedance-2-0-260128"
-	priceUSDPerSecond, ok := seedanceBillingOfficialUnitUSDPerSecond(modelID, "720p", true)
-	require.True(t, ok)
-	expectedQuota := seedanceBillingExpectedDurationQuota(priceUSDPerSecond, 5, 1)
 	executed := 0
 
 	for profileIndex, profile := range profiles {
@@ -1970,10 +2054,26 @@ func TestSeedanceBillingReferenceVideoProfilesE2E(t *testing.T) {
 		for _, duration := range profile {
 			totalVideoDuration += duration
 		}
-		completionTokens := 100000 + 5000 + totalVideoDuration*100 + len(profile)*10
+		upstreamCompletionTokens := 100000 + 5000 + totalVideoDuration*100 + len(profile)*10
 		if hasReferenceImage {
-			completionTokens++
+			upstreamCompletionTokens++
 		}
+		inputVideoDurationMS := int64(totalVideoDuration * 1000)
+		expectedPreQuota, expectedPreBilling := seedanceBillingExpectedTokenQuota(
+			t, modelID, "720p", true, inputVideoDurationMS, 5, nil, 1,
+		)
+		expectedFinalQuota, expectedFinalBilling := seedanceBillingExpectedTokenQuota(
+			t,
+			modelID,
+			"720p",
+			true,
+			inputVideoDurationMS,
+			5,
+			nil,
+			1,
+		)
+		userCompletionTokens := expectedFinalBilling.OutputTokens
+		userTotalTokens := expectedFinalBilling.TotalTokens
 		before := seedanceBillingDomainSnapshotFor(t, env)
 		requestsBefore := env.Mock.snapshot()
 		expectedRequest, requestBody := seedanceBillingReferenceVideoRequest(t, profile, hasReferenceImage, caseID)
@@ -2011,12 +2111,12 @@ func TestSeedanceBillingReferenceVideoProfilesE2E(t *testing.T) {
 		assert.Equal(t, 5, mockTask.TerminalDuration, caseID)
 		assert.Equal(t, hasReferenceImage, mockTask.HasReferenceImage, caseID)
 		assert.Equal(t, profile, mockTask.VideoDurations, caseID)
-		require.Equal(t, completionTokens, mockTask.CompletionTokens, caseID)
+		require.Equal(t, upstreamCompletionTokens, mockTask.CompletionTokens, caseID)
 
-		require.Equal(t, expectedQuota, task.Quota, caseID)
+		require.Equal(t, expectedPreQuota, task.Quota, caseID)
 		require.NotNil(t, task.PrivateData.BillingContext, caseID)
 		billingContext := task.PrivateData.BillingContext
-		assert.Equal(t, billing_setting.BillingModePerDuration, billingContext.BillingMode, caseID)
+		assert.Equal(t, billing_setting.BillingModeSeedanceTokens, billingContext.BillingMode, caseID)
 		assert.Equal(t, modelID, billingContext.OriginModelName, caseID)
 		assert.Equal(t, modelID, billingContext.UpstreamModelName, caseID)
 		assert.True(t, billingContext.HasVideoInput, caseID)
@@ -2025,6 +2125,8 @@ func TestSeedanceBillingReferenceVideoProfilesE2E(t *testing.T) {
 		assert.NotContains(t, billingContext.OtherRatios, "video_count", caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_duration", caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "reference_image", caseID)
+		require.NotNil(t, billingContext.SeedanceTokenPrice, caseID)
+		require.Equal(t, expectedPreBilling, billingContext.SeedanceTokenBilling, caseID)
 		assert.Zero(t, billingContext.BillingTokens, caseID)
 
 		summary := service.RunTaskPollingOnce(context.Background(), nil)
@@ -2038,21 +2140,17 @@ func TestSeedanceBillingReferenceVideoProfilesE2E(t *testing.T) {
 
 		require.NoError(t, model.DB.Where("task_id = ?", created.ID).First(&task).Error, caseID)
 		assert.Equal(t, string(model.TaskStatusSuccess), string(task.Status), caseID)
-		require.Equal(t, expectedQuota, task.Quota, caseID)
+		require.Equal(t, expectedFinalQuota, task.Quota, "%s: billing=%+v", caseID, task.PrivateData.BillingContext.SeedanceTokenBilling)
 		require.NotNil(t, task.PrivateData.BillingContext, caseID)
 		billingContext = task.PrivateData.BillingContext
 		assert.True(t, billingContext.HasVideoInput, caseID)
-		require.Equal(t, completionTokens, billingContext.BillingTokens, caseID)
+		require.Equal(t, userTotalTokens, billingContext.BillingTokens, caseID)
 		require.Empty(t, billingContext.OtherRatios, caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_input", caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_count", caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "video_duration", caseID)
 		assert.NotContains(t, billingContext.OtherRatios, "reference_image", caseID)
-		require.NotNil(t, billingContext.DurationBilling, caseID)
-		assert.Equal(t, types.DurationScenarioWithVideo, billingContext.DurationBilling.Scenario, caseID)
-		assert.Equal(t, 5, billingContext.DurationBilling.BillableOutputSeconds, caseID)
-		assert.Equal(t, int64(totalVideoDuration*1000), billingContext.DurationBilling.InputVideoDurationMS, caseID)
-		assert.Equal(t, decimal.NewFromFloat(priceUSDPerSecond).String(), billingContext.DurationBilling.OutputPricePerSecond, caseID)
+		require.Equal(t, expectedFinalBilling, billingContext.SeedanceTokenBilling, caseID)
 
 		status, terminalBody := performJSONRequest(t, env.Router, http.MethodGet, "/api/v3/contents/generations/tasks/"+created.ID, "Bearer e2e-1", "")
 		require.Equal(t, http.StatusOK, status, "%s: %s", caseID, terminalBody)
@@ -2067,24 +2165,26 @@ func TestSeedanceBillingReferenceVideoProfilesE2E(t *testing.T) {
 		require.NoError(t, common.Unmarshal(terminalBody, &terminal), caseID)
 		assert.Equal(t, created.ID, terminal.ID, caseID)
 		assert.Equal(t, modelID, terminal.Model, caseID)
-		assert.Equal(t, completionTokens, terminal.Usage.CompletionTokens, caseID)
-		assert.NotEqual(t, completionTokens, terminal.Usage.TotalTokens, caseID)
+		assert.Equal(t, userCompletionTokens, terminal.Usage.CompletionTokens, caseID)
+		assert.Equal(t, userTotalTokens, terminal.Usage.TotalTokens, caseID)
 
 		after := seedanceBillingDomainSnapshotFor(t, env, created.ID)
-		expectedDelta := seedanceBillingExpectedDomainDelta(expectedQuota, expectedQuota, completionTokens)
+		expectedDelta := seedanceBillingExpectedDomainDelta(expectedPreQuota, expectedFinalQuota, userTotalTokens)
 		seedanceBillingAssertDomainDelta(t, expectedDelta, before, after)
 		logs := seedanceBillingLogsAfter(t, env, before.LastLogID)
 		require.Len(t, logs, int(expectedDelta.LogCount), caseID)
 		assert.Equal(t, model.LogTypeConsume, logs[0].Type, caseID)
-		assert.Equal(t, expectedQuota, logs[0].Quota, caseID)
+		assert.Equal(t, expectedPreQuota, logs[0].Quota, caseID)
 		assert.Equal(t, true, logs[0].Other["is_task"], caseID)
 		assert.Equal(t, "/v1/video/generations", logs[0].Other["request_path"], caseID)
 		assert.Equal(t, float64(1), logs[0].Other["group_ratio"], caseID)
 		assert.NotContains(t, logs[0].Other, "model_ratio", caseID)
 		assert.NotContains(t, logs[0].Other, "video_input", caseID)
-		assert.Equal(t, priceUSDPerSecond, logs[0].Other["duration_price"], caseID)
-		assert.Equal(t, types.DurationScenarioWithVideo, logs[0].Other["duration_pricing_scenario"], caseID)
+		assert.Equal(t, billing_setting.BillingModeSeedanceTokens, logs[0].Other["billing_mode"], caseID)
+		assert.Equal(t, expectedPreBilling.PricePerMillion, logs[0].Other["price_per_million"], caseID)
+		assert.Equal(t, float64(expectedPreBilling.TotalTokens), logs[0].Other["total_tokens"], caseID)
 		assert.Equal(t, int64(totalVideoDuration*1000), int64(logs[0].Other["input_video_duration_ms"].(float64)), caseID)
+		assert.NotContains(t, logs[0].Other, "duration_price", caseID)
 
 		if t.Failed() {
 			t.FailNow()
@@ -2123,10 +2223,10 @@ func TestSeedanceBillingEnvironment(t *testing.T) {
 		var abilities []model.Ability
 		require.NoError(t, model.DB.Where("channel_id = ?", env.Channel.Id).Order("model").Find(&abilities).Error)
 		require.Len(t, abilities, 3)
-		for modelID, expectedPrice := range seedanceBillingOfficialDurationPrices() {
+		for modelID, expectedPrice := range seedanceBillingOfficialTokenPrices() {
 			assert.Contains(t, seededChannel.Models, modelID)
-			assert.Equal(t, billing_setting.BillingModePerDuration, billing_setting.GetBillingMode(modelID), modelID)
-			actualPrice, configured := billing_setting.GetDurationPrice(modelID)
+			assert.Equal(t, billing_setting.BillingModeSeedanceTokens, billing_setting.GetBillingMode(modelID), modelID)
+			actualPrice, configured := billing_setting.GetSeedanceTokenPrice(modelID)
 			assert.True(t, configured, modelID)
 			assert.Equal(t, expectedPrice, actualPrice, modelID)
 		}
@@ -2151,10 +2251,13 @@ func TestSeedanceBillingEnvironment(t *testing.T) {
 
 		var task model.Task
 		require.NoError(t, model.DB.Where("task_id = ?", createResponse.ID).First(&task).Error)
-		priceUSDPerSecond, ok := seedanceBillingOfficialUnitUSDPerSecond("doubao-seedance-2-0-260128", "720p", false)
-		require.True(t, ok)
-		expectedQuota := seedanceBillingExpectedDurationQuota(priceUSDPerSecond, 5, 1)
+		expectedQuota, expectedBilling := seedanceBillingExpectedTokenQuota(
+			t, "doubao-seedance-2-0-260128", "720p", false, 0, 5, nil, 1,
+		)
 		assert.Equal(t, expectedQuota, task.Quota)
+		require.NotNil(t, task.PrivateData.BillingContext)
+		assert.Equal(t, billing_setting.BillingModeSeedanceTokens, task.PrivateData.BillingContext.BillingMode)
+		assert.Equal(t, expectedBilling, task.PrivateData.BillingContext.SeedanceTokenBilling)
 		after := seedanceBillingDomainSnapshotFor(t, env, createResponse.ID)
 		delta := after.delta(before)
 		assert.Equal(t, int64(1), delta.TaskCount)
@@ -2182,13 +2285,6 @@ func TestSeedanceBillingEnvironment(t *testing.T) {
 		assert.Zero(t, delta.SettlementSignedLogQuota)
 		assert.Zero(t, delta.SettlementLogBillingTokens)
 		assert.False(t, delta.SettlementLogBillingTokensPresent)
-
-		assert.Equal(t,
-			common.QuotaFromDecimal(decimal.NewFromFloat(priceUSDPerSecond).
-				Mul(decimal.NewFromInt(5)).
-				Mul(decimal.NewFromFloat(common.QuotaPerUnit))),
-			seedanceBillingExpectedDurationQuota(priceUSDPerSecond, 5, 1),
-		)
 	})
 
 	assert.Equal(t, originalRetryTimes, common.RetryTimes)

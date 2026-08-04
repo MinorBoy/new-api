@@ -22,7 +22,22 @@ import type { Table } from '@tanstack/react-table'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Combobox } from '@/components/ui/combobox'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+import { TASK_STATUS_MAPPINGS } from '../constants'
 import { useAutoSearch } from '../hooks/use-auto-search'
+import {
+  useTaskLogFilterOptions,
+  type TaskLogFilterOption,
+} from '../hooks/use-task-log-filter-options'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/time-range'
 import type { DrawingLogFilters, LogCategory, TaskLogFilters } from '../types'
@@ -42,6 +57,49 @@ type TaskLogsFilters = DrawingLogFilters | TaskLogFilters
 interface TaskLogsFilterBarProps<TData> {
   table: Table<TData>
   logCategory: TaskLikeLogCategory
+}
+
+interface TaskLogSelectFilterProps {
+  value?: string
+  ariaLabel: string
+  allLabel: string
+  options: TaskLogFilterOption[]
+  onValueChange: (value: string) => void
+}
+
+const ALL_TASK_FILTER_VALUE = '__all__'
+
+function TaskLogSelectFilter(props: TaskLogSelectFilterProps) {
+  const selectedLabel =
+    props.options.find((option) => option.value === props.value)?.label ??
+    props.allLabel
+
+  return (
+    <Select
+      value={props.value || ALL_TASK_FILTER_VALUE}
+      onValueChange={(value) =>
+        props.onValueChange(
+          value === ALL_TASK_FILTER_VALUE ? '' : (value ?? '')
+        )
+      }
+    >
+      <SelectTrigger aria-label={props.ariaLabel}>
+        <SelectValue>{selectedLabel}</SelectValue>
+      </SelectTrigger>
+      <SelectContent align='start'>
+        <SelectGroup>
+          <SelectItem value={ALL_TASK_FILTER_VALUE}>
+            {props.allLabel}
+          </SelectItem>
+          {props.options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
 }
 
 function getFilterValue(
@@ -93,6 +151,12 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   )
   const { schedule, flush, cancel } = useAutoSearch(submitFilters)
   const composingFieldsRef = useRef<Set<'filter' | 'channel'>>(new Set())
+  const taskFilterOptions = useTaskLogFilterOptions({
+    isAdmin,
+    startTime: filters.startTime,
+    endTime: filters.endTime,
+    enabled: props.logCategory === 'task',
+  })
 
   useEffect(() => {
     const { start, end } = getDefaultTimeRange()
@@ -114,6 +178,13 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         : {
             ...baseFilters,
             ...(searchParams.filter ? { taskId: searchParams.filter } : {}),
+            ...(searchParams.status ? { status: searchParams.status } : {}),
+            ...(searchParams.requestModel
+              ? { requestModel: searchParams.requestModel }
+              : {}),
+            ...(isAdmin && searchParams.userId
+              ? { userId: searchParams.userId }
+              : {}),
           }
 
     cancel()
@@ -124,6 +195,10 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     searchParams.endTime,
     searchParams.channel,
     searchParams.filter,
+    searchParams.status,
+    searchParams.requestModel,
+    searchParams.userId,
+    isAdmin,
     cancel,
   ])
 
@@ -170,11 +245,18 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   }, [flush])
 
   const filterValue = getFilterValue(filters, props.logCategory)
+  const taskFilters =
+    props.logCategory === 'task' ? (filters as TaskLogFilters) : undefined
   const placeholder =
     props.logCategory === 'drawing'
       ? t('Filter by MjProxy task ID')
       : t('Filter by task ID')
-  const hasAdditionalFilters = !!filterValue || !!filters.channel
+  const hasAdditionalFilters =
+    !!filterValue ||
+    !!filters.channel ||
+    !!taskFilters?.status ||
+    !!taskFilters?.requestModel ||
+    !!taskFilters?.userId
   const dateRangeFilter = (
     <LogsFilterField wide>
       <CompactDateTimeRangePicker
@@ -200,19 +282,96 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       />
     </LogsFilterField>
   )
-  const channelFilter = isAdmin ? (
+  const drawingChannelFilter =
+    isAdmin && props.logCategory === 'drawing' ? (
+      <LogsFilterField>
+        <LogsFilterInput
+          aria-label={t('Channel ID')}
+          placeholder={t('Channel ID')}
+          value={filters.channel || ''}
+          onChange={(e) => handleTextChange('channel', e.target.value)}
+          onCompositionStart={() => handleCompositionStart('channel')}
+          onCompositionEnd={(e) =>
+            handleCompositionEnd('channel', e.currentTarget.value)
+          }
+        />
+      </LogsFilterField>
+    ) : null
+  const channelFilter =
+    isAdmin && taskFilters ? (
+      <LogsFilterField>
+        <TaskLogSelectFilter
+          options={taskFilterOptions.channelOptions}
+          value={taskFilters.channel}
+          ariaLabel={t('Channel ID')}
+          allLabel={t('All channels')}
+          onValueChange={(value) =>
+            handleImmediateChange({ channel: value || undefined })
+          }
+        />
+      </LogsFilterField>
+    ) : null
+  const statusFilter = taskFilters ? (
     <LogsFilterField>
-      <LogsFilterInput
-        placeholder={t('Channel ID')}
-        value={filters.channel || ''}
-        onChange={(e) => handleTextChange('channel', e.target.value)}
-        onCompositionStart={() => handleCompositionStart('channel')}
-        onCompositionEnd={(e) =>
-          handleCompositionEnd('channel', e.currentTarget.value)
+      <TaskLogSelectFilter
+        ariaLabel={t('Status')}
+        allLabel={t('All statuses')}
+        value={taskFilters.status}
+        options={taskFilterOptions.statusOptions.map((status) => ({
+          value: status,
+          label: t(TASK_STATUS_MAPPINGS[status]?.label ?? status),
+        }))}
+        onValueChange={(value) =>
+          handleImmediateChange({ status: value || undefined })
         }
       />
     </LogsFilterField>
   ) : null
+  const requestModelFilter = taskFilters ? (
+    <LogsFilterField>
+      <TaskLogSelectFilter
+        ariaLabel={t('Request Model')}
+        allLabel={t('All models')}
+        value={taskFilters.requestModel}
+        options={taskFilterOptions.requestModelOptions}
+        onValueChange={(value) =>
+          handleImmediateChange({ requestModel: value || undefined })
+        }
+      />
+    </LogsFilterField>
+  ) : null
+  const userFilter =
+    isAdmin && taskFilters ? (
+      <LogsFilterField>
+        <Combobox
+          options={[
+            { value: ALL_TASK_FILTER_VALUE, label: t('All users') },
+            ...taskFilterOptions.userOptions,
+          ]}
+          ariaLabel={t('User')}
+          placeholder={t('User')}
+          value={taskFilters.userId || ALL_TASK_FILTER_VALUE}
+          onValueChange={(value) =>
+            handleImmediateChange({
+              userId:
+                value && value !== ALL_TASK_FILTER_VALUE ? value : undefined,
+            })
+          }
+          allowCustomValue={false}
+          openOnFocus
+          className='h-8 min-w-0 text-sm leading-5'
+        />
+      </LogsFilterField>
+    ) : null
+
+  const taskSpecificFilters = (
+    <>
+      {channelFilter}
+      {statusFilter}
+      {requestModelFilter}
+      {userFilter}
+    </>
+  )
 
   return (
     <LogsFilterToolbar
@@ -221,17 +380,27 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         <>
           {dateRangeFilter}
           {taskIdFilter}
-          {channelFilter}
+          {drawingChannelFilter}
+          {taskSpecificFilters}
         </>
       }
       mobilePinnedFilters={dateRangeFilter}
       mobileFilters={
         <>
           {taskIdFilter}
-          {channelFilter}
+          {drawingChannelFilter}
+          {taskSpecificFilters}
         </>
       }
-      mobileFilterCount={[filterValue, filters.channel].filter(Boolean).length}
+      mobileFilterCount={
+        [
+          filterValue,
+          filters.channel,
+          taskFilters?.status,
+          taskFilters?.requestModel,
+          taskFilters?.userId,
+        ].filter(Boolean).length
+      }
       hasActiveFilters={hasAdditionalFilters}
       onReset={handleReset}
     />

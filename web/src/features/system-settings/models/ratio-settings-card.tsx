@@ -136,6 +136,7 @@ const createGroupSchema = (t: Translate) =>
   })
 
 type ModelFormValues = z.infer<ReturnType<typeof createModelSchema>>
+type ModelDefaults = ModelFormValues & { SeedanceTokenPrice: string }
 type GroupFormValues = z.infer<ReturnType<typeof createGroupSchema>>
 type RatioTabId =
   | 'models'
@@ -145,7 +146,7 @@ type RatioTabId =
   | 'upstream-sync'
 
 type RatioSettingsCardProps = {
-  modelDefaults: ModelFormValues
+  modelDefaults: ModelDefaults
   groupDefaults: GroupFormValues
   toolPricesDefault: string
   titleKey?: string
@@ -459,6 +460,8 @@ export function RatioSettingsCard({
           'billing_setting.billing_mode': modelDefaults.BillingMode,
           'billing_setting.billing_expr': modelDefaults.BillingExpr,
           'billing_setting.duration_price': modelDefaults.DurationPrice,
+          'billing_setting.seedance_token_price':
+            modelDefaults.SeedanceTokenPrice,
         }}
       />
     )

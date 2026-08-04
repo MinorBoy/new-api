@@ -542,6 +542,7 @@ func TestSeedanceTaskPollingPersistsLocallyCalculatedUsage(t *testing.T) {
 		UsageProfile:             model.TaskUsageProfileSeedance,
 		RequestedDurationSeconds: 5,
 		Resolution:               "720p",
+		SeedanceTokenBilling:     seedanceTokenBilling720p(),
 	}
 	require.NoError(t, task.Update())
 	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
@@ -618,6 +619,7 @@ func TestSeedanceLocalUsageDoesNotBecomeSupplierTokenMeter(t *testing.T) {
 		UsageProfile:             model.TaskUsageProfileSeedance,
 		RequestedDurationSeconds: 5,
 		Resolution:               "720p",
+		SeedanceTokenBilling:     seedanceTokenBilling720p(),
 	}
 	require.NoError(t, model.DB.Create(task).Error)
 	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
@@ -630,6 +632,44 @@ func TestSeedanceLocalUsageDoesNotBecomeSupplierTokenMeter(t *testing.T) {
 	attempt := loadCostAttempt(t, handle.AttemptID)
 	assert.Equal(t, string(types.CostAttemptSettlementFailed), attempt.Status)
 	assert.Nil(t, attempt.CostNanoUSD)
+	assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+	assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
+}
+
+func TestSeedanceLocalSaleUsagePreservesAuthoritativeSupplierTokenMeter(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	task.Platform = constant.TaskPlatform("kling")
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "30%"
+	task.PrivateData.UpstreamTaskID = "upstream-cost-independent-usage"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+		SeedanceTokenBilling:     seedanceTokenBilling720p(),
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	duration := "10"
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status:                  string(model.TaskStatusSuccess),
+		Url:                     "https://x/video.mp4",
+		CompletionTokens:        200_000,
+		TotalTokens:             250_000,
+		CompletionTokensPresent: true,
+		TotalTokensPresent:      true,
+		CostMeter: &types.CostMeter{
+			Source: types.CostMeterUpstreamActual, DurationSeconds: &duration,
+		},
+	}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(250_000_000), *attempt.CostNanoUSD)
 	assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
 	assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
 }

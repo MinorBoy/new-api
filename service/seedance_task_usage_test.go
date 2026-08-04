@@ -5,9 +5,20 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func seedanceTokenBilling720p() *types.SeedanceTokenBillingBreakdown {
+	return &types.SeedanceTokenBillingBreakdown{
+		Scenario:   types.SeedanceTokenScenarioNoVideo,
+		Resolution: "720p",
+		Width:      1280,
+		Height:     720,
+		FrameRate:  24,
+	}
+}
 
 func TestCalculateSeedanceTaskUsage(t *testing.T) {
 	tests := []struct {
@@ -23,8 +34,9 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
-			want: SeedanceTaskUsage{CompletionTokens: 108000, TotalTokens: 108000},
+			want: SeedanceTaskUsage{InputTokens: 0, CompletionTokens: 108000, TotalTokens: 108000},
 		},
 		{
 			name: "reference video",
@@ -34,25 +46,27 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				Resolution:               "720p",
 				HasVideoInput:            true,
 				InputVideoDurationMS:     3000,
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
-			want: SeedanceTaskUsage{CompletionTokens: 108000, TotalTokens: 172800},
+			want: SeedanceTaskUsage{InputTokens: 64800, CompletionTokens: 108000, TotalTokens: 172800},
 		},
 		{
-			name: "valid terminal facts take precedence",
+			name: "terminal facts do not replace frozen pricing facts",
 			context: model.TaskBillingContext{
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
 			facts: SeedanceTerminalFacts{
-				DurationSeconds:        5,
+				DurationSeconds:        6,
 				DurationPresent:        true,
 				Resolution:             "720p",
 				ResolutionPresent:      true,
 				FramesPerSecond:        30,
 				FramesPerSecondPresent: true,
 			},
-			want: SeedanceTaskUsage{CompletionTokens: 135000, TotalTokens: 135000},
+			want: SeedanceTaskUsage{InputTokens: 0, CompletionTokens: 108000, TotalTokens: 108000},
 		},
 		{
 			name: "invalid terminal facts fall back to request snapshot",
@@ -60,6 +74,7 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
 			facts: SeedanceTerminalFacts{
 				DurationPresent:        true,
@@ -68,7 +83,7 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				FramesPerSecond:        241,
 				FramesPerSecondPresent: true,
 			},
-			want: SeedanceTaskUsage{CompletionTokens: 108000, TotalTokens: 108000},
+			want: SeedanceTaskUsage{InputTokens: 0, CompletionTokens: 108000, TotalTokens: 108000},
 		},
 		{
 			name: "reference duration is required",
@@ -77,6 +92,7 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
 				HasVideoInput:            true,
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
 			wantError: "reference video duration is unavailable",
 		},
@@ -86,6 +102,7 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				RequestedDurationSeconds: 3601,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
 			wantError: "output duration is out of range",
 		},
@@ -104,6 +121,37 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 	}
 }
 
+func TestCalculateSeedanceTaskUsageUsesFrozenOfficialPriceGeometry(t *testing.T) {
+	price := &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+		"720p:no_video": {
+			PricePerMillion: "2",
+			Width:           640,
+			Height:          360,
+			FrameRate:       30,
+			PricingVersion:  "official-token-v1",
+			Source:          "official-sheet",
+		},
+	}}
+	usage, err := CalculateSeedanceTaskUsage(&model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+		SeedanceTokenPrice:       price,
+	}, SeedanceTerminalFacts{
+		Resolution:             "1080p",
+		ResolutionPresent:      true,
+		FramesPerSecond:        60,
+		FramesPerSecondPresent: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, SeedanceTaskUsage{
+		InputTokens:      0,
+		CompletionTokens: 33750,
+		TotalTokens:      33750,
+	}, usage)
+}
+
 func TestPersistedSeedanceTaskUsage(t *testing.T) {
 	tests := []struct {
 		name string
@@ -115,10 +163,11 @@ func TestPersistedSeedanceTaskUsage(t *testing.T) {
 			name: "version one snapshot",
 			bc: &model.TaskBillingContext{
 				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+				UsageInputTokens:      64800,
 				UsageCompletionTokens: 108000,
 				UsageTotalTokens:      172800,
 			},
-			want: SeedanceTaskUsage{CompletionTokens: 108000, TotalTokens: 172800},
+			want: SeedanceTaskUsage{InputTokens: 64800, CompletionTokens: 108000, TotalTokens: 172800},
 			ok:   true,
 		},
 		{
@@ -141,6 +190,15 @@ func TestPersistedSeedanceTaskUsage(t *testing.T) {
 				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
 				UsageCompletionTokens: 108000,
 				UsageTotalTokens:      100000,
+			},
+		},
+		{
+			name: "inconsistent input snapshot",
+			bc: &model.TaskBillingContext{
+				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
+				UsageInputTokens:      64000,
+				UsageCompletionTokens: 108000,
+				UsageTotalTokens:      172800,
 			},
 		},
 		{
@@ -176,6 +234,7 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			}},
 		}
 		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
@@ -188,16 +247,46 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 		assert.True(t, result.TotalTokensPresent)
 		assert.Equal(t, model.TaskUsageSourceLocalCalculated, result.UsageSource)
 		assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+		assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
 		assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
 	})
 
-	t.Run("preserves authoritative usage", func(t *testing.T) {
+	t.Run("preserves upstream usage matching frozen formula", func(t *testing.T) {
 		task := &model.Task{
 			Status: model.TaskStatusSuccess,
 			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
+			}},
+		}
+		result := &relaycommon.TaskInfo{
+			Status:                  string(model.TaskStatusSuccess),
+			CompletionTokens:        108000,
+			CompletionTokensPresent: true,
+			TotalTokens:             108000,
+			TotalTokensPresent:      true,
+		}
+
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.Equal(t, 108000, result.TotalTokens)
+		assert.Equal(t, model.TaskUsageSourceUpstream, result.UsageSource)
+		assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
+		assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
+		assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
+	})
+
+	t.Run("recalculates upstream usage that differs from frozen formula", func(t *testing.T) {
+		task := &model.Task{
+			Status: model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+				UsageProfile:             model.TaskUsageProfileSeedance,
+				RequestedDurationSeconds: 5,
+				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			}},
 		}
 		result := &relaycommon.TaskInfo{
@@ -210,41 +299,75 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 
 		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
 
-		assert.Equal(t, 108900, result.CompletionTokens)
-		assert.Equal(t, 108900, result.TotalTokens)
-		assert.Equal(t, model.TaskUsageSourceUpstream, result.UsageSource)
-		assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
-		assert.Equal(t, 108900, task.PrivateData.BillingContext.BillingTokens)
+		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.Equal(t, 108000, result.TotalTokens)
+		assert.Equal(t, model.TaskUsageSourceLocalCalculated, result.UsageSource)
+		assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
+		assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
+		assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
 	})
 
-	t.Run("authoritative usage replaces persisted pair", func(t *testing.T) {
+	t.Run("reference video rejects upstream usage without input tokens", func(t *testing.T) {
+		task := &model.Task{
+			Status: model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+				UsageProfile:             model.TaskUsageProfileSeedance,
+				RequestedDurationSeconds: 5,
+				Resolution:               "720p",
+				HasVideoInput:            true,
+				InputVideoDurationMS:     3000,
+				SeedanceTokenBilling:     seedanceTokenBilling720p(),
+			}},
+		}
+		result := &relaycommon.TaskInfo{
+			Status:                  string(model.TaskStatusSuccess),
+			CompletionTokens:        108900,
+			CompletionTokensPresent: true,
+			TotalTokens:             108900,
+			TotalTokensPresent:      true,
+		}
+
+		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
+
+		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.Equal(t, 172800, result.TotalTokens)
+		assert.Equal(t, model.TaskUsageSourceLocalCalculated, result.UsageSource)
+		assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
+		assert.Equal(t, 172800, task.PrivateData.BillingContext.BillingTokens)
+	})
+
+	t.Run("inconsistent upstream usage cannot replace persisted pair", func(t *testing.T) {
 		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
-			UsageCompletionTokens: 108000, UsageTotalTokens: 108000,
+			UsageInputTokens: 64800, UsageCompletionTokens: 108000, UsageTotalTokens: 172800,
+			HasVideoInput: true, InputVideoDurationMS: 3000,
 		}}}
 		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), CompletionTokens: 108900, CompletionTokensPresent: true, TotalTokens: 109000, TotalTokensPresent: true}
 		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
-		assert.Equal(t, 108900, task.PrivateData.BillingContext.UsageCompletionTokens)
-		assert.Equal(t, 109000, task.PrivateData.BillingContext.UsageTotalTokens)
-		assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
+		assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+		assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
+		assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
+		assert.Equal(t, 172800, task.PrivateData.BillingContext.BillingTokens)
+		assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
 	})
 
-	t.Run("terminal calculation replaces request fallback", func(t *testing.T) {
+	t.Run("terminal geometry cannot replace frozen pricing geometry", func(t *testing.T) {
 		bc := &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
 			RequestedDurationSeconds: 5, Resolution: "720p", UsageCompletionTokens: 108000, UsageTotalTokens: 108000,
+			SeedanceTokenBilling: seedanceTokenBilling720p(),
 		}
 		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
 		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), FramesPerSecond: 30, FramesPerSecondPresent: true}
 		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
-		assert.Equal(t, 135000, bc.UsageCompletionTokens)
-		assert.Equal(t, 135000, bc.UsageTotalTokens)
+		assert.Equal(t, 108000, bc.UsageCompletionTokens)
+		assert.Equal(t, 108000, bc.UsageTotalTokens)
 	})
 
 	t.Run("broken request facts use persisted fallback", func(t *testing.T) {
 		bc := &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
-			UsageCompletionTokens: 108000, UsageTotalTokens: 172800, HasVideoInput: true,
+			UsageInputTokens: 64800, UsageCompletionTokens: 108000, UsageTotalTokens: 172800, HasVideoInput: true,
 		}
 		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
 		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}

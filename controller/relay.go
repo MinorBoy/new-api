@@ -796,16 +796,23 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		usageProfile = model.TaskUsageProfileSeedance
 	}
 	usageSnapshotVersion := 0
+	usageInputTokens := 0
 	usageCompletionTokens := 0
 	usageTotalTokens := 0
 	if usageProfile == model.TaskUsageProfileSeedance {
 		if relayInfo.TaskRelayInfo == nil || !service.IsValidSeedanceUsage(
 			int64(relayInfo.TaskRelayInfo.UsageCompletionTokens),
 			int64(relayInfo.TaskRelayInfo.UsageTotalTokens),
-		) {
+		) || relayInfo.TaskRelayInfo.UsageInputTokens < 0 ||
+			relayInfo.TaskRelayInfo.UsageInputTokens+relayInfo.TaskRelayInfo.UsageCompletionTokens != relayInfo.TaskRelayInfo.UsageTotalTokens {
 			return errors.New("submitted Seedance task is missing its usage snapshot")
 		}
+		if relayInfo.PriceData.BillingMode != billing_setting.BillingModeSeedanceTokens ||
+			relayInfo.PriceData.SeedanceTokenPrice == nil || relayInfo.PriceData.SeedanceTokenBilling == nil {
+			return errors.New("submitted Seedance task is missing its official token billing snapshot")
+		}
 		usageSnapshotVersion = model.TaskUsageSnapshotVersion1
+		usageInputTokens = relayInfo.TaskRelayInfo.UsageInputTokens
 		usageCompletionTokens = relayInfo.TaskRelayInfo.UsageCompletionTokens
 		usageTotalTokens = relayInfo.TaskRelayInfo.UsageTotalTokens
 	}
@@ -816,7 +823,8 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		RequestedDurationSeconds: relayInfo.PriceData.RequestedDurationSeconds,
 		BillableDurationSeconds:  relayInfo.PriceData.BillableDurationSeconds,
 		DurationResolution:       relayInfo.PriceData.DurationResolution,
-		DurationBilling:          relayInfo.PriceData.DurationBilling,
+		SeedanceTokenPrice:       relayInfo.PriceData.SeedanceTokenPrice,
+		SeedanceTokenBilling:     relayInfo.PriceData.SeedanceTokenBilling,
 		ModelPrice:               relayInfo.PriceData.ModelPrice,
 		GroupRatio:               relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:               relayInfo.PriceData.ModelRatio,
@@ -832,11 +840,13 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		UpstreamCostMode:         upstreamCostMode,
 		UsageProfile:             usageProfile,
 		UsageSnapshotVersion:     usageSnapshotVersion,
+		UsageInputTokens:         usageInputTokens,
 		UsageCompletionTokens:    usageCompletionTokens,
 		UsageTotalTokens:         usageTotalTokens,
-		PerCallBilling: usageProfile == "" && (common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
-			relayInfo.PriceData.UsePrice ||
-			relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration),
+		PerCallBilling: relayInfo.PriceData.BillingMode == billing_setting.BillingModeSeedanceTokens ||
+			(usageProfile == "" && (common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
+				relayInfo.PriceData.UsePrice ||
+				relayInfo.PriceData.BillingMode == billing_setting.BillingModePerDuration)),
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

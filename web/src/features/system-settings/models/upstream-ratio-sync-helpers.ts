@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { RatioType, RatioValue } from '../types'
+import type { RatioType, RatioValue, SeedanceTokenPrice } from '../types'
 import {
   MODELS_DEV_PRESET_ID,
   MODELS_DEV_PRESET_NAME,
@@ -75,6 +75,7 @@ export const SYNC_FIELD_ORDER: RatioType[] = [
   'billing_mode',
   'billing_expr',
   'duration_price',
+  'seedance_token_price',
 ]
 
 export const NUMERIC_SYNC_FIELDS = new Set<string>([
@@ -134,6 +135,13 @@ export function getPreferredSyncField(
   ) {
     return 'duration_price'
   }
+  const seedanceValue = ratioTypes.seedance_token_price?.upstreams?.[sourceName]
+  if (
+    ratioType !== 'seedance_token_price' &&
+    isSelectableUpstreamValue(seedanceValue)
+  ) {
+    return 'seedance_token_price'
+  }
   return ratioType
 }
 
@@ -168,9 +176,10 @@ export function getAlignedRatioTypes(
 
 export function getBillingCategory(
   ratioType: string
-): 'price' | 'ratio' | 'duration' | 'tiered' {
+): 'price' | 'ratio' | 'duration' | 'seedance' | 'tiered' {
   if (ratioType === 'model_price') return 'price'
   if (ratioType === 'duration_price') return 'duration'
+  if (ratioType === 'seedance_token_price') return 'seedance'
   if (ratioType === 'billing_mode' || ratioType === 'billing_expr') {
     return 'tiered'
   }
@@ -277,7 +286,7 @@ function applyResolutionSelectionToDraft(
 
   Object.keys(newModelRes).forEach((rt) => {
     if (isAuxiliaryRatioSelection) return
-    if (category === 'duration') {
+    if (category === 'duration' || category === 'seedance') {
       if (rt === 'model_price' || rt === 'model_ratio') {
         delete newModelRes[rt]
       }
@@ -298,11 +307,17 @@ function applyResolutionSelectionToDraft(
   ) {
     delete newModelRes['billing_expr']
     delete newModelRes['duration_price']
+    delete newModelRes['seedance_token_price']
     newModelRes['billing_mode'] = 'ratio'
   } else if (category === 'duration') {
     delete newModelRes['billing_expr']
+    delete newModelRes['seedance_token_price']
+  } else if (category === 'seedance') {
+    delete newModelRes['billing_expr']
+    delete newModelRes['duration_price']
   } else if (category === 'tiered') {
     delete newModelRes['duration_price']
+    delete newModelRes['seedance_token_price']
   }
 
   newModelRes[finalType] = finalValue
@@ -325,6 +340,14 @@ function applyResolutionSelectionToDraft(
       modelDiffs.duration_price?.upstreams?.[selection.sourceName]
     if (isSelectableUpstreamValue(durationValue)) {
       newModelRes['duration_price'] = durationValue
+    }
+  }
+  if (category === 'seedance' && modelDiffs) {
+    newModelRes['billing_mode'] = 'seedance_tokens'
+    const seedanceValue =
+      modelDiffs.seedance_token_price?.upstreams?.[selection.sourceName]
+    if (isSelectableUpstreamValue(seedanceValue)) {
+      newModelRes['seedance_token_price'] = seedanceValue
     }
   }
 }
@@ -455,9 +478,11 @@ export function applyResolutionRemovalPlan(
       delete draft[ratioType]
       if (ratioType === 'billing_expr') delete draft['billing_mode']
       if (ratioType === 'duration_price') delete draft['billing_mode']
+      if (ratioType === 'seedance_token_price') delete draft['billing_mode']
       if (ratioType === 'billing_mode') {
         delete draft['billing_expr']
         delete draft['duration_price']
+        delete draft['seedance_token_price']
       }
     })
     const hasBasePricing =
@@ -486,10 +511,29 @@ export function isDurationPrice(value: unknown): value is DurationPrice {
   )
 }
 
+export function isSeedanceTokenPrice(
+  value: unknown
+): value is SeedanceTokenPrice {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<SeedanceTokenPrice>
+  return Boolean(
+    candidate.scenarios &&
+    typeof candidate.scenarios === 'object' &&
+    Object.keys(candidate.scenarios).length > 0
+  )
+}
+
 export function formatSyncValue(
   value: RatioValue,
   t: (key: string) => string
 ): string {
-  if (!isDurationPrice(value)) return String(value)
-  return `$${value.price} / ${t(value.unit)} · ${t('Rounding step')}: ${value.rounding_step_seconds}s · ${t('Minimum billable duration')}: ${value.minimum_duration_seconds}s`
+  if (isDurationPrice(value)) {
+    return `$${value.price} / ${t(value.unit)} · ${t('Rounding step')}: ${value.rounding_step_seconds}s · ${t('Minimum billable duration')}: ${value.minimum_duration_seconds}s`
+  }
+  if (isSeedanceTokenPrice(value)) {
+    return Object.entries(value.scenarios)
+      .map(([scenario, price]) => `${scenario}: $${price.price_per_million}/1M`)
+      .join(' · ')
+  }
+  return String(value)
 }

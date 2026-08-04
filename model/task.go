@@ -133,33 +133,35 @@ const (
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	BillingMode              string                          `json:"billing_mode,omitempty"`
-	DurationPrice            *types.DurationPrice            `json:"duration_price,omitempty"`
-	DurationSource           string                          `json:"duration_source,omitempty"`
-	RequestedDurationSeconds int                             `json:"requested_duration_seconds,omitempty"`
-	BillableDurationSeconds  int                             `json:"billable_duration_seconds,omitempty"`
-	DurationResolution       string                          `json:"duration_resolution,omitempty"`
-	InputVideoDurationMS     int64                           `json:"input_video_duration_ms,omitempty"`
-	DurationBilling          *types.DurationBillingBreakdown `json:"duration_billing,omitempty"`
-	ModelPrice               float64                         `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio               float64                         `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio               float64                         `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios              map[string]float64              `json:"other_ratios,omitempty"`      // 附加倍率（分辨率等）
-	OriginModelName          string                          `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	UpstreamModelName        string                          `json:"upstream_model_name,omitempty"`
-	HasVideoInput            bool                            `json:"has_video_input,omitempty"`
-	GenerateAudio            *bool                           `json:"generate_audio,omitempty"`
-	Draft                    bool                            `json:"draft,omitempty"`
-	ServiceTier              string                          `json:"service_tier,omitempty"`
-	Resolution               string                          `json:"resolution,omitempty"`
-	BillingTokens            int                             `json:"billing_tokens,omitempty"`
-	UsageSnapshotVersion     int                             `json:"usage_snapshot_version,omitempty"`
-	UsageCompletionTokens    int                             `json:"usage_completion_tokens,omitempty"`
-	UsageTotalTokens         int                             `json:"usage_total_tokens,omitempty"`
-	UpstreamCostMode         string                          `json:"upstream_cost_mode,omitempty"`
-	PerCallBilling           bool                            `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算
-	UsageProfile             string                          `json:"usage_profile,omitempty"`
-	UsageSource              string                          `json:"usage_source,omitempty"`
+	BillingMode              string                               `json:"billing_mode,omitempty"`
+	DurationPrice            *types.DurationPrice                 `json:"duration_price,omitempty"`
+	DurationSource           string                               `json:"duration_source,omitempty"`
+	RequestedDurationSeconds int                                  `json:"requested_duration_seconds,omitempty"`
+	BillableDurationSeconds  int                                  `json:"billable_duration_seconds,omitempty"`
+	DurationResolution       string                               `json:"duration_resolution,omitempty"`
+	InputVideoDurationMS     int64                                `json:"input_video_duration_ms,omitempty"`
+	SeedanceTokenPrice       *types.SeedanceTokenPrice            `json:"seedance_token_price,omitempty"`
+	SeedanceTokenBilling     *types.SeedanceTokenBillingBreakdown `json:"seedance_token_billing,omitempty"`
+	ModelPrice               float64                              `json:"model_price,omitempty"`       // 模型单价
+	GroupRatio               float64                              `json:"group_ratio,omitempty"`       // 分组倍率
+	ModelRatio               float64                              `json:"model_ratio,omitempty"`       // 模型倍率
+	OtherRatios              map[string]float64                   `json:"other_ratios,omitempty"`      // 附加倍率（分辨率等）
+	OriginModelName          string                               `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
+	UpstreamModelName        string                               `json:"upstream_model_name,omitempty"`
+	HasVideoInput            bool                                 `json:"has_video_input,omitempty"`
+	GenerateAudio            *bool                                `json:"generate_audio,omitempty"`
+	Draft                    bool                                 `json:"draft,omitempty"`
+	ServiceTier              string                               `json:"service_tier,omitempty"`
+	Resolution               string                               `json:"resolution,omitempty"`
+	BillingTokens            int                                  `json:"billing_tokens,omitempty"`
+	UsageSnapshotVersion     int                                  `json:"usage_snapshot_version,omitempty"`
+	UsageInputTokens         int                                  `json:"usage_input_tokens,omitempty"`
+	UsageCompletionTokens    int                                  `json:"usage_completion_tokens,omitempty"`
+	UsageTotalTokens         int                                  `json:"usage_total_tokens,omitempty"`
+	UpstreamCostMode         string                               `json:"upstream_cost_mode,omitempty"`
+	PerCallBilling           bool                                 `json:"per_call_billing,omitempty"` // 按次计费：跳过轮询阶段的差额结算
+	UsageProfile             string                               `json:"usage_profile,omitempty"`
+	UsageSource              string                               `json:"usage_source,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -218,12 +220,129 @@ type SyncTaskQueryParams struct {
 	Platform       constant.TaskPlatform
 	ChannelID      string
 	TaskID         string
+	RequestModel   string
 	UserID         string
 	Action         string
 	Status         string
 	StartTimestamp int64
 	EndTimestamp   int64
 	UserIDs        []int
+}
+
+func taskRequestModelExpression() string {
+	switch {
+	case common.UsingMainDatabase(common.DatabaseTypePostgreSQL):
+		return "properties ->> 'origin_model_name'"
+	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
+		return "JSON_UNQUOTE(JSON_EXTRACT(properties, '$.origin_model_name'))"
+	default:
+		return "json_extract(properties, '$.origin_model_name')"
+	}
+}
+
+func applyTaskQueryFilters(query *gorm.DB, queryParams SyncTaskQueryParams) *gorm.DB {
+	if queryParams.ChannelID != "" {
+		query = query.Where("channel_id = ?", queryParams.ChannelID)
+	}
+	if queryParams.Platform != "" {
+		query = query.Where("platform = ?", queryParams.Platform)
+	}
+	if queryParams.UserID != "" {
+		query = query.Where("user_id = ?", queryParams.UserID)
+	}
+	if len(queryParams.UserIDs) != 0 {
+		query = query.Where("user_id in (?)", queryParams.UserIDs)
+	}
+	if queryParams.TaskID != "" {
+		query = query.Where("task_id = ?", queryParams.TaskID)
+	}
+	if queryParams.RequestModel != "" {
+		query = query.Where(taskRequestModelExpression()+" = ?", queryParams.RequestModel)
+	}
+	if queryParams.Action != "" {
+		query = query.Where("action = ?", queryParams.Action)
+	}
+	if queryParams.Status != "" {
+		query = query.Where("status = ?", queryParams.Status)
+	}
+	if queryParams.StartTimestamp != 0 {
+		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
+	}
+	if queryParams.EndTimestamp != 0 {
+		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
+	}
+	return query
+}
+
+type TaskFilterOptions struct {
+	ChannelIDs    []int
+	Statuses      []TaskStatus
+	RequestModels []string
+	UserIDs       []int
+}
+
+func taskFilterOptionsQuery(userID int, startTimestamp int64, endTimestamp int64) *gorm.DB {
+	query := DB.Model(&Task{})
+	if userID > 0 {
+		query = query.Where("user_id = ?", userID)
+	}
+	if startTimestamp != 0 {
+		query = query.Where("submit_time >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		query = query.Where("submit_time <= ?", endTimestamp)
+	}
+	return query
+}
+
+func GetTaskFilterOptions(userID int, startTimestamp int64, endTimestamp int64, includeAdminDimensions bool) (TaskFilterOptions, error) {
+	options := TaskFilterOptions{
+		ChannelIDs:    []int{},
+		Statuses:      []TaskStatus{},
+		RequestModels: []string{},
+		UserIDs:       []int{},
+	}
+
+	if includeAdminDimensions {
+		if err := taskFilterOptionsQuery(userID, startTimestamp, endTimestamp).
+			Distinct("channel_id").Order("channel_id").Pluck("channel_id", &options.ChannelIDs).Error; err != nil {
+			return TaskFilterOptions{}, err
+		}
+		if err := taskFilterOptionsQuery(userID, startTimestamp, endTimestamp).
+			Distinct("user_id").Order("user_id").Pluck("user_id", &options.UserIDs).Error; err != nil {
+			return TaskFilterOptions{}, err
+		}
+	}
+
+	if err := taskFilterOptionsQuery(userID, startTimestamp, endTimestamp).
+		Where("status IS NOT NULL").
+		Where("status <> ''").
+		Distinct("status").Order("status").Pluck("status", &options.Statuses).Error; err != nil {
+		return TaskFilterOptions{}, err
+	}
+
+	requestModelExpression := taskRequestModelExpression()
+	rows, err := taskFilterOptionsQuery(userID, startTimestamp, endTimestamp).
+		Select("DISTINCT " + requestModelExpression + " AS request_model").
+		Where(requestModelExpression + " IS NOT NULL").
+		Where(requestModelExpression + " <> ''").
+		Order("request_model").Rows()
+	if err != nil {
+		return TaskFilterOptions{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var requestModel string
+		if err := rows.Scan(&requestModel); err != nil {
+			return TaskFilterOptions{}, err
+		}
+		options.RequestModels = append(options.RequestModels, requestModel)
+	}
+	if err := rows.Err(); err != nil {
+		return TaskFilterOptions{}, err
+	}
+
+	return options, nil
 }
 
 func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
@@ -278,33 +397,8 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 
 func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
 	var tasks []*Task
-	var err error
-
-	// 初始化查询构建器
-	query := DB.Where("user_id = ?", userId)
-
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.StartTimestamp != 0 {
-		// 假设您已将前端传来的时间戳转换为数据库所需的时间格式，并处理了时间戳的验证和解析
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
-
-	// 获取数据
-	err = query.Omit("channel_id").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
+	query := applyTaskQueryFilters(DB.Where("user_id = ?", userId), queryParams)
+	err := query.Omit("channel_id").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -314,42 +408,8 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 
 func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*Task {
 	var tasks []*Task
-	var err error
-
-	// 初始化查询构建器
-	query := DB
-
-	// 添加过滤条件
-	if queryParams.ChannelID != "" {
-		query = query.Where("channel_id = ?", queryParams.ChannelID)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.UserID != "" {
-		query = query.Where("user_id = ?", queryParams.UserID)
-	}
-	if len(queryParams.UserIDs) != 0 {
-		query = query.Where("user_id in (?)", queryParams.UserIDs)
-	}
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
-
-	// 获取数据
-	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
+	query := applyTaskQueryFilters(DB, queryParams)
+	err := query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -580,34 +640,7 @@ type TaskQuotaUsage struct {
 // TaskCountAllTasks returns total tasks that match the given query params (admin usage)
 func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{})
-	if queryParams.ChannelID != "" {
-		query = query.Where("channel_id = ?", queryParams.ChannelID)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.UserID != "" {
-		query = query.Where("user_id = ?", queryParams.UserID)
-	}
-	if len(queryParams.UserIDs) != 0 {
-		query = query.Where("user_id in (?)", queryParams.UserIDs)
-	}
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
+	query := applyTaskQueryFilters(DB.Model(&Task{}), queryParams)
 	_ = query.Count(&total).Error
 	return total
 }
@@ -615,25 +648,7 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 // TaskCountAllUserTask returns total tasks for given user
 func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{}).Where("user_id = ?", userId)
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
+	query := applyTaskQueryFilters(DB.Model(&Task{}).Where("user_id = ?", userId), queryParams)
 	_ = query.Count(&total).Error
 	return total
 }

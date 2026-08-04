@@ -24,6 +24,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { TextWriter, Uint8ArrayReader, ZipReader } from '@zip.js/zip.js'
+import ExcelJS from 'exceljs'
 
 import { convertWorkbook } from '../../../src/channel-config-converter/conversion'
 import { buildTemplateData } from '../build'
@@ -130,6 +131,7 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
   const outputPath = path.join(directory, 'template.xlsx')
   const reportPath = path.join(directory, 'template.report.json')
   try {
+    const data = buildTemplateData(source, rules)
     const result = await writeTemplateWorkbook({
       basePath,
       outputPath,
@@ -137,7 +139,7 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
       sourcePath: 'source.xlsx',
       rulesPath: 'rules.json',
       rules,
-      data: buildTemplateData(source, rules),
+      data,
     })
     const bytes = await fs.readFile(outputPath)
     const converted = await convertWorkbook(
@@ -156,39 +158,70 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
         billingMode: proposal.billing_mode,
         currency: proposal.currency,
         scenario: proposal.scenario,
-        durationPrice: proposal.duration_price,
+        seedanceTokenPrice: proposal.seedance_token_price,
       })),
       [
         {
           businessID: 'SALE-SEEDANCE-2-0-720P-NOV',
-          billingMode: 'per_duration',
+          billingMode: 'seedance_tokens',
           currency: 'USD',
           scenario: 'no_video',
-          durationPrice: {
-            price: '0.136164383561643822',
-            unit: 'second',
-            rounding_step_seconds: 1,
-            minimum_duration_seconds: 0,
-            pricing_version: 'official-sheet-v1',
+          seedanceTokenPrice: {
+            price_per_million: '6.301369863013698',
+            width: 1280,
+            height: 720,
+            frame_rate: 24,
+            pricing_version: 'official-token-v1',
             source: 'SRC-OFFICIAL-SEEDANCE-2-0!5',
           },
         },
         {
           businessID: 'SALE-SEEDANCE-2-0-720P-VID',
-          billingMode: 'per_duration',
+          billingMode: 'seedance_tokens',
           currency: 'USD',
           scenario: 'with_video',
-          durationPrice: {
-            price: '0.082876712328767115',
-            unit: 'second',
-            rounding_step_seconds: 1,
-            minimum_duration_seconds: 0,
-            pricing_version: 'official-sheet-v1',
+          seedanceTokenPrice: {
+            price_per_million: '3.835616438356164',
+            width: 1280,
+            height: 720,
+            frame_rate: 24,
+            pricing_version: 'official-token-v1',
             source: 'SRC-OFFICIAL-SEEDANCE-2-0!6',
           },
         },
       ]
     )
+
+    const written = new ExcelJS.Workbook()
+    await written.xlsx.readFile(outputPath)
+    const saleSheet = written.getWorksheet('官方售价')
+    const profitSheet = written.getWorksheet('利润测算')
+    assert.ok(saleSheet)
+    assert.ok(profitSheet)
+    assert.deepEqual(saleSheet.getCell('K5').value, {
+      formula: `IFERROR(H5*I5*J5/'参数'!$B$7,"")`,
+      result: 21600,
+    })
+    assert.deepEqual(saleSheet.getCell('L5').value, {
+      formula: `IFERROR(G5*K5/'参数'!$B$8,"")`,
+      result: data.sales[0]?.nativePerSecond,
+    })
+    assert.deepEqual(saleSheet.getCell('N5').value, {
+      formula: `IFERROR(M5*K5/'参数'!$B$8,"")`,
+      result: data.sales[0]?.usdPerSecond,
+    })
+    assert.deepEqual(profitSheet.getCell('O5').value, {
+      formula: `IFERROR(XLOOKUP(B5,'官方售价'!$A$5:$A$504,'官方售价'!$M$5:$M$504)*L5/'参数'!$B$8,"")`,
+      result: data.profits[0]?.officialSaleUsd,
+    })
+    assert.deepEqual(profitSheet.getCell('P5').value, {
+      formula: `IF(M5="per_token",N5*L5/'参数'!$B$8,IF(M5="per_duration",N5*F5,N5))`,
+      result: data.profits[0]?.channelCostUsd,
+    })
+    assert.deepEqual(profitSheet.getCell('Q5').value, {
+      formula: `IFERROR(O5*D5,"")`,
+      result: data.profits[0]?.userRevenueUsd,
+    })
     const reader = new ZipReader(
       new Uint8ArrayReader(await fs.readFile(outputPath))
     )

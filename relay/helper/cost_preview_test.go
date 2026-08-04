@@ -51,13 +51,14 @@ func TestCostPreviewUserBillingQuotaSupportsTextDurationAndExpressionModes(t *te
 	savedModes := billing_setting.GetBillingModeCopy()
 	savedExpressions := billing_setting.GetBillingExprCopy()
 	savedDurations := billing_setting.GetDurationPriceCopy()
+	savedSeedancePrices := billing_setting.GetSeedanceTokenPriceCopy()
 	originalQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 500_000
 	t.Cleanup(func() {
 		common.QuotaPerUnit = originalQuotaPerUnit
 		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
 		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedGroups))
-		restoreCostPreviewBillingConfig(t, savedModes, savedExpressions, savedDurations)
+		restoreCostPreviewBillingConfig(t, savedModes, savedExpressions, savedDurations, savedSeedancePrices)
 	})
 
 	prices, err := common.Marshal(map[string]float64{"preview-text": 0.2})
@@ -80,6 +81,7 @@ func TestCostPreviewUserBillingQuotaSupportsTextDurationAndExpressionModes(t *te
 				RoundingStepSeconds: 1, MinimumDurationSeconds: 4,
 			},
 		},
+		nil,
 	)
 
 	tests := []struct {
@@ -127,60 +129,62 @@ func TestCostPreviewUserBillingQuotaSupportsTextDurationAndExpressionModes(t *te
 	}
 }
 
-func TestCostPreviewUserBillingQuotaUsesSeedanceScenarioFacts(t *testing.T) {
+func TestCostPreviewUserBillingQuotaSupportsSeedanceTokenAndDurationInputs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	savedPrices := ratio_setting.ModelPrice2JSONString()
 	savedGroups := ratio_setting.GroupRatio2JSONString()
 	savedModes := billing_setting.GetBillingModeCopy()
 	savedExpressions := billing_setting.GetBillingExprCopy()
 	savedDurations := billing_setting.GetDurationPriceCopy()
+	savedSeedancePrices := billing_setting.GetSeedanceTokenPriceCopy()
 	originalQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 500_000
 	t.Cleanup(func() {
 		common.QuotaPerUnit = originalQuotaPerUnit
 		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
 		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedGroups))
-		restoreCostPreviewBillingConfig(t, savedModes, savedExpressions, savedDurations)
+		restoreCostPreviewBillingConfig(t, savedModes, savedExpressions, savedDurations, savedSeedancePrices)
 	})
 
 	groups, err := common.Marshal(map[string]float64{"preview-group": 2})
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(groups)))
 	configureCostPreviewBilling(t,
-		map[string]string{"doubao-seedance-2-0-260128": billing_setting.BillingModePerDuration},
+		map[string]string{"doubao-seedance-2-0-mini-260615": billing_setting.BillingModeSeedanceTokens},
 		nil,
-		map[string]types.DurationPrice{
-			"doubao-seedance-2-0-260128": {
-				Scenarios: map[string]types.DurationPriceScenario{
-					"720p:with_video": {
-						OutputPrice: 0.2, Unit: types.DurationUnitSecond,
-						RoundingStepSeconds: 1, PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
+		nil,
+		map[string]types.SeedanceTokenPrice{
+			"doubao-seedance-2-0-mini-260615": {
+				Scenarios: map[string]types.SeedanceTokenPriceScenario{
+					"480p:with_video": {
+						PricePerMillion: "1.917808219178082", Width: 864, Height: 496, FrameRate: 24,
+						PricingVersion: "official-token-v1", Source: "sd官价!A1",
 					},
 				},
 			},
 		},
 	)
 
-	var input dto.CostPreviewRequest
-	require.NoError(t, common.UnmarshalJsonStr(`{
-		"origin_model":"doubao-seedance-2-0-260128",
-		"user_group":"preview-group",
-		"duration_seconds":6,
-		"resolution":"720p",
-		"has_video_input":true,
-		"input_video_duration_ms":5000
-	}`, &input))
-	input.RelayMode = relayconstant.RelayModeVideoSubmit
+	duration := 4
+	baseInput := dto.CostPreviewRequest{
+		OriginModel: "doubao-seedance-2-0-mini-260615", UserGroup: "preview-group",
+		RelayMode: relayconstant.RelayModeVideoSubmit, DurationSeconds: &duration,
+		Resolution: "480p", HasVideoInput: true, InputVideoDurationMS: 3000,
+	}
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-
-	quota, snapshot, err := PreviewUserBillingQuota(ctx, input)
-
+	durationQuota, snapshot, err := PreviewUserBillingQuota(ctx, baseInput)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1_200_000), quota)
+
+	baseInput.Usage = &relaydto.Usage{PromptTokens: 30132, CompletionTokens: 40176, TotalTokens: 70308}
+	tokenQuota, _, err := PreviewUserBillingQuota(ctx, baseInput)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(134_837), durationQuota)
+	assert.Equal(t, durationQuota, tokenQuota)
 	assert.Equal(t, "500000", snapshot)
 }
 
-func configureCostPreviewBilling(t *testing.T, modes map[string]string, expressions map[string]string, durations map[string]types.DurationPrice) {
+func configureCostPreviewBilling(t *testing.T, modes map[string]string, expressions map[string]string, durations map[string]types.DurationPrice, seedancePrices map[string]types.SeedanceTokenPrice) {
 	t.Helper()
 	modesJSON, err := common.Marshal(modes)
 	require.NoError(t, err)
@@ -188,16 +192,19 @@ func configureCostPreviewBilling(t *testing.T, modes map[string]string, expressi
 	require.NoError(t, err)
 	durationsJSON, err := common.Marshal(durations)
 	require.NoError(t, err)
+	seedancePricesJSON, err := common.Marshal(seedancePrices)
+	require.NoError(t, err)
 	require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
-		billing_setting.BillingModeField:   string(modesJSON),
-		billing_setting.BillingExprField:   string(expressionsJSON),
-		billing_setting.DurationPriceField: string(durationsJSON),
+		billing_setting.BillingModeField:        string(modesJSON),
+		billing_setting.BillingExprField:        string(expressionsJSON),
+		billing_setting.DurationPriceField:      string(durationsJSON),
+		billing_setting.SeedanceTokenPriceField: string(seedancePricesJSON),
 	}))
 }
 
-func restoreCostPreviewBillingConfig(t *testing.T, modes map[string]string, expressions map[string]string, durations map[string]types.DurationPrice) {
+func restoreCostPreviewBillingConfig(t *testing.T, modes map[string]string, expressions map[string]string, durations map[string]types.DurationPrice, seedancePrices map[string]types.SeedanceTokenPrice) {
 	t.Helper()
-	configureCostPreviewBilling(t, modes, expressions, durations)
+	configureCostPreviewBilling(t, modes, expressions, durations, seedancePrices)
 }
 
 func costPreviewIntPointer(value int) *int {

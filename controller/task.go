@@ -22,6 +22,8 @@ func GetAllTask(c *gin.Context) {
 	queryParams := model.SyncTaskQueryParams{
 		Platform:       constant.TaskPlatform(c.Query("platform")),
 		TaskID:         c.Query("task_id"),
+		RequestModel:   c.Query("request_model"),
+		UserID:         c.Query("user_id"),
 		Status:         c.Query("status"),
 		Action:         c.Query("action"),
 		StartTimestamp: startTimestamp,
@@ -47,6 +49,7 @@ func GetUserTask(c *gin.Context) {
 	queryParams := model.SyncTaskQueryParams{
 		Platform:       constant.TaskPlatform(c.Query("platform")),
 		TaskID:         c.Query("task_id"),
+		RequestModel:   c.Query("request_model"),
 		Status:         c.Query("status"),
 		Action:         c.Query("action"),
 		StartTimestamp: startTimestamp,
@@ -58,6 +61,64 @@ func GetUserTask(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tasksToDto(items, false))
 	common.ApiSuccess(c, pageInfo)
+}
+
+func GetAllTaskFilterOptions(c *gin.Context) {
+	getTaskFilterOptions(c, 0, true)
+}
+
+func GetUserTaskFilterOptions(c *gin.Context) {
+	getTaskFilterOptions(c, c.GetInt("id"), false)
+}
+
+func getTaskFilterOptions(c *gin.Context, userID int, includeAdminDimensions bool) {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	options, err := model.GetTaskFilterOptions(userID, startTimestamp, endTimestamp, includeAdminDimensions)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	response := dto.TaskFilterOptions{
+		Statuses:      make([]string, len(options.Statuses)),
+		RequestModels: options.RequestModels,
+	}
+	for i, status := range options.Statuses {
+		response.Statuses[i] = string(status)
+	}
+
+	if includeAdminDimensions {
+		response.Channels = make([]dto.TaskFilterChannelOption, 0, len(options.ChannelIDs))
+		if len(options.ChannelIDs) > 0 {
+			channels, err := model.GetChannelsByIds(options.ChannelIDs)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			channelNames := make(map[int]string, len(channels))
+			for _, channel := range channels {
+				channelNames[channel.Id] = channel.Name
+			}
+			for _, channelID := range options.ChannelIDs {
+				response.Channels = append(response.Channels, dto.TaskFilterChannelOption{
+					ID:   channelID,
+					Name: channelNames[channelID],
+				})
+			}
+		}
+		response.Users = make([]dto.TaskFilterUserOption, 0, len(options.UserIDs))
+		for _, optionUserID := range options.UserIDs {
+			userOption := dto.TaskFilterUserOption{ID: optionUserID}
+			user, err := model.GetUserCache(optionUserID)
+			if err == nil {
+				userOption.Username = user.Username
+			}
+			response.Users = append(response.Users, userOption)
+		}
+	}
+
+	common.ApiSuccess(c, response)
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {

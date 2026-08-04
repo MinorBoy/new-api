@@ -96,13 +96,15 @@ export function UpstreamRatioSyncTable({
       const hasOtherRatio = RATIO_SYNC_FIELDS.some((rt) => rt in ratioTypes)
       const hasBaseRatio = 'model_ratio' in ratioTypes
       const hasDuration = 'duration_price' in ratioTypes
+      const hasSeedance = 'seedance_token_price' in ratioTypes
       return {
         key: model,
         model,
         ratioTypes,
         billingConflict:
           (hasPrice && hasOtherRatio) ||
-          (hasDuration && (hasPrice || hasBaseRatio)),
+          (hasDuration && (hasPrice || hasBaseRatio || hasSeedance)) ||
+          (hasSeedance && (hasPrice || hasBaseRatio)),
       }
     })
   }, [differences])

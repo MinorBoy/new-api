@@ -150,6 +150,32 @@ func withDurationBillingConfig(t *testing.T, modes map[string]string, prices map
 	model.InvalidatePricingCache()
 }
 
+func withSeedanceTokenBillingConfig(t *testing.T, modes map[string]string, prices map[string]types.SeedanceTokenPrice) {
+	t.Helper()
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		if strings.HasPrefix(key, "billing_setting.") {
+			saved[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+		model.InvalidatePricingCache()
+	})
+
+	modeBytes, err := common.Marshal(modes)
+	require.NoError(t, err)
+	priceBytes, err := common.Marshal(prices)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":         string(modeBytes),
+		"billing_setting.seedance_token_price": string(priceBytes),
+	}))
+	model.InvalidatePricingCache()
+}
+
 func TestListModelsIncludesDurationBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	db := setupModelListControllerTestDB(t)
@@ -188,6 +214,56 @@ func TestListModelsIncludesDurationBillingModel(t *testing.T) {
 	assert.Equal(t, billing_setting.BillingModePerDuration, pricing.BillingMode)
 	require.NotNil(t, pricing.DurationPrice)
 	assert.Equal(t, rule, *pricing.DurationPrice)
+	assert.Zero(t, pricing.ModelPrice)
+	assert.Zero(t, pricing.ModelRatio)
+	assert.Zero(t, pricing.CompletionRatio)
+	assert.Equal(t, 1, pricing.QuotaType)
+}
+
+func TestListModelsIncludesSeedanceTokenBillingContract(t *testing.T) {
+	withSelfUseModeDisabled(t)
+	db := setupModelListControllerTestDB(t)
+
+	const modelName = modelrouting.Seedance20Mini
+	price := types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+		"480p:with_video": {
+			PricePerMillion: "1.917808219178082",
+			Width:           864,
+			Height:          496,
+			FrameRate:       24,
+			PricingVersion:  "official-token-v1",
+			Source:          "SRC-OFFICIAL-SEEDANCE-2-0-MINI!18",
+		},
+	}}
+	withSeedanceTokenBillingConfig(t,
+		map[string]string{modelName: billing_setting.BillingModeSeedanceTokens},
+		map[string]types.SeedanceTokenPrice{modelName: price},
+	)
+	require.NoError(t, db.Create(&model.User{
+		Id: 1006, Username: "seedance-token-model-user", Password: "password",
+		Group: "default", Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 1006, Type: constant.ChannelTypeOpenAI, Name: "seedance-token-model-channel",
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelName, ChannelId: 1006, Enabled: true,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1006)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	ids := decodeListModelsResponse(t, recorder)
+	require.Contains(t, ids, modelName)
+	pricing, ok := pricingByModelName(model.GetPricing())[modelName]
+	require.True(t, ok)
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, pricing.BillingMode)
+	require.NotNil(t, pricing.SeedanceTokenPrice)
+	assert.Equal(t, price, *pricing.SeedanceTokenPrice)
 	assert.Zero(t, pricing.ModelPrice)
 	assert.Zero(t, pricing.ModelRatio)
 	assert.Zero(t, pricing.CompletionRatio)

@@ -28,6 +28,8 @@ import type {
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
+  GetTaskLogFilterOptionsParams,
+  GetTaskLogFilterOptionsResponse,
   UserInfo,
 } from './types'
 
@@ -132,3 +134,17 @@ export const getAllTaskLogs = (params: GetTaskLogsParams) =>
 
 export const getUserTaskLogs = (params: GetTaskLogsParams) =>
   fetchLogs('/api/task', params, false)
+
+export async function getTaskLogFilterOptions(
+  params: GetTaskLogFilterOptionsParams,
+  isAdmin: boolean
+): Promise<GetTaskLogFilterOptionsResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const path = isAdmin
+    ? '/api/task/filter-options'
+    : '/api/task/self/filter-options'
+  const res = await api.get(`${path}?${queryParams}`)
+  return res.data
+}

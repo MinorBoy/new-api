@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -42,6 +41,20 @@ func (seedanceTaskTestBilling) NeedsRefund() bool        { return false }
 func (seedanceTaskTestBilling) GetPreConsumedQuota() int { return 0 }
 func (seedanceTaskTestBilling) Reserve(int) error        { return nil }
 
+func seedanceTokenBillingSnapshot720p(hasVideoInput bool) *types.SeedanceTokenBillingBreakdown {
+	scenario := types.SeedanceTokenScenarioNoVideo
+	if hasVideoInput {
+		scenario = types.SeedanceTokenScenarioWithVideo
+	}
+	return &types.SeedanceTokenBillingBreakdown{
+		Scenario:   scenario,
+		Resolution: "720p",
+		Width:      1280,
+		Height:     720,
+		FrameRate:  24,
+	}
+}
+
 func configureSeedanceDurationPricing(t *testing.T, prices map[string]types.DurationPrice) {
 	t.Helper()
 	saved := map[string]string{}
@@ -68,76 +81,52 @@ func configureSeedanceDurationPricing(t *testing.T, prices map[string]types.Dura
 	}))
 }
 
-func TestSeedanceDurationPricingUsesExplicitOutputPriceFor720pText(t *testing.T) {
-	price := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
-		"720p:no_video": {
-			OutputPrice: 0.4, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1,
-			PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
-		},
-	}}
-	priceData := types.PriceData{
-		BillingMode:        billing_setting.BillingModePerDuration,
-		DurationPrice:      &price,
-		DurationResolution: "720p",
-		GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
-	}
+func configureSeedanceTokenPricing(t *testing.T, prices map[string]types.SeedanceTokenPrice) {
+	t.Helper()
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
 
-	quota, _, _, err := taskDurationQuota(&priceData, 5)
+	modes := make(map[string]string, len(prices))
+	for modelName := range prices {
+		modes[modelName] = billing_setting.BillingModeSeedanceTokens
+	}
+	modeJSON, err := common.Marshal(modes)
 	require.NoError(t, err)
-	assert.Equal(t, 1_000_000, quota)
+	priceJSON, err := common.Marshal(prices)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":         string(modeJSON),
+		"billing_setting.seedance_token_price": string(priceJSON),
+		"group_ratio_setting.group_ratio":      `{"default":1}`,
+	}))
 }
 
-func TestSeedanceDurationPricingIgnoresReferenceVideoDurationForSale(t *testing.T) {
-	price := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
-		"720p:with_video": {
-			OutputPrice: 0.4,
-			Unit:        types.DurationUnitSecond, RoundingStepSeconds: 1,
-			PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
-		},
-	}}
-	priceData := types.PriceData{
-		BillingMode:          billing_setting.BillingModePerDuration,
-		DurationPrice:        &price,
-		DurationResolution:   "720p",
-		HasVideoInput:        true,
-		InputVideoDurationMS: 5000,
-		GroupRatioInfo:       types.GroupRatioInfo{GroupRatio: 1},
-	}
-	quota, _, _, err := taskDurationQuota(&priceData, 5)
-	require.NoError(t, err)
-	assert.Equal(t, 1_000_000, quota)
-	assert.NotContains(t, priceData.OtherRatios(), "seedance_price_matrix")
-	assert.NotContains(t, priceData.OtherRatios(), "video_input")
-}
-
-func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
+func TestDimensioSeedanceTokenBillingUsesOriginModelPrice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
 
 	const originModel = "client-seedance-vip"
 	const upstreamModel = "jmg-video-seedance-2.0-vip"
-	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
+	configureSeedanceTokenPricing(t, map[string]types.SeedanceTokenPrice{
 		originModel: {
-			Scenarios: map[string]types.DurationPriceScenario{
+			Scenarios: map[string]types.SeedanceTokenPriceScenario{
 				"720p:no_video": {
-					OutputPrice:            0.1,
-					Unit:                   types.DurationUnitSecond,
-					RoundingStepSeconds:    1,
-					MinimumDurationSeconds: 4,
-					PricingVersion:         "official-sheet-v1",
-					Source:                 "official_price_sheet",
+					PricePerMillion: "1", Width: 1280, Height: 720, FrameRate: 24,
+					PricingVersion: "official-token-v1", Source: "sd官价!A1",
 				},
 			},
 		},
 		upstreamModel: {
-			Scenarios: map[string]types.DurationPriceScenario{
+			Scenarios: map[string]types.SeedanceTokenPriceScenario{
 				"720p:no_video": {
-					OutputPrice:            9,
-					Unit:                   types.DurationUnitSecond,
-					RoundingStepSeconds:    1,
-					MinimumDurationSeconds: 4,
-					PricingVersion:         "official-sheet-v1",
-					Source:                 "official_price_sheet",
+					PricePerMillion: "9", Width: 1280, Height: 720, FrameRate: 24,
+					PricingVersion: "official-token-v1", Source: "sd官价!A2",
 				},
 			},
 		},
@@ -186,12 +175,15 @@ func TestDimensioDurationBillingUsesOriginModelPrice(t *testing.T) {
 	require.Nil(t, taskErr)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(1), upstreamCalls.Load())
-	assert.Equal(t, 300_000, result.Quota)
+	assert.Equal(t, 64_800, result.Quota)
 	assert.Equal(t, originModel, info.OriginModelName)
 	assert.Equal(t, upstreamModel, info.UpstreamModelName)
-	assert.Equal(t, billing_setting.BillingModePerDuration, info.PriceData.BillingMode)
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, info.PriceData.BillingMode)
 	assert.Equal(t, 6, info.PriceData.RequestedDurationSeconds)
 	assert.Equal(t, 6, info.PriceData.BillableDurationSeconds)
+	require.NotNil(t, info.PriceData.SeedanceTokenBilling)
+	assert.Equal(t, "1", info.PriceData.SeedanceTokenBilling.PricePerMillion)
+	assert.Equal(t, 129600, info.PriceData.SeedanceTokenBilling.TotalTokens)
 	assert.NotContains(t, info.PriceData.OtherRatios(), "seconds")
 	var upstreamRequest map[string]interface{}
 	capturedBody := <-capturedBodyCh
@@ -334,21 +326,17 @@ func TestTaskModel2DtoHidesMegaByAIDataWithoutRoutingFromUsers(t *testing.T) {
 	assert.Equal(t, task.Data, adminDTO.Data)
 }
 
-func TestDimensioDurationBillingSaturationStopsBeforeUpstream(t *testing.T) {
+func TestDimensioSeedanceTokenBillingSaturationStopsBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
 
 	const originModel = "client-seedance-overflow"
-	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
+	configureSeedanceTokenPricing(t, map[string]types.SeedanceTokenPrice{
 		originModel: {
-			Scenarios: map[string]types.DurationPriceScenario{
+			Scenarios: map[string]types.SeedanceTokenPriceScenario{
 				"720p:no_video": {
-					OutputPrice:            math.MaxFloat64,
-					Unit:                   types.DurationUnitSecond,
-					RoundingStepSeconds:    1,
-					MinimumDurationSeconds: 4,
-					PricingVersion:         "official-sheet-v1",
-					Source:                 "official_price_sheet",
+					PricePerMillion: strings.Repeat("9", 1000), Width: 1280, Height: 720, FrameRate: 24,
+					PricingVersion: "official-token-v1", Source: "sd官价!A1",
 				},
 			},
 		},
@@ -716,6 +704,7 @@ func TestDimensioTaskFetchTranslatesStoredResponse(t *testing.T) {
 			BillingContext: &model.TaskBillingContext{
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
+				SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(false),
 				UpstreamCostMode:         string(types.CostModePerDuration),
 			},
 		},
@@ -950,6 +939,7 @@ func TestSeedanceTaskResponseCalculatesUsageForPerDurationUpstream(t *testing.T)
 		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			RequestedDurationSeconds: 5,
 			Resolution:               "720p",
+			SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(false),
 			UpstreamCostMode:         string(types.CostModePerDuration),
 		}},
 		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
@@ -1000,7 +990,7 @@ func TestSeedanceTaskResponseUsesPersistedFinalUsage(t *testing.T) {
 		Status: model.TaskStatusSuccess, Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
 		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
-			UsageCompletionTokens: 108900, UsageTotalTokens: 109000, UsageSource: model.TaskUsageSourceUpstream,
+			UsageInputTokens: 100, UsageCompletionTokens: 108900, UsageTotalTokens: 109000, UsageSource: model.TaskUsageSourceUpstream,
 		}},
 		Data: json.RawMessage(`{"status":"succeeded","content":{"video_url":"https://x/video.mp4"}}`),
 	}
@@ -1038,6 +1028,7 @@ func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
 			Resolution:               "720p",
 			HasVideoInput:            true,
 			InputVideoDurationMS:     3000,
+			SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(true),
 			UpstreamCostMode:         string(types.CostModePerRequest),
 		}},
 		Data: json.RawMessage(newAPIVideoDetailedZeroUsage),
@@ -1052,7 +1043,7 @@ func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
 	assert.EqualValues(t, 172800, usage["total_tokens"])
 }
 
-func TestSeedanceTaskResponseUsesUpstreamFrameRateForUsage(t *testing.T) {
+func TestSeedanceTaskResponseKeepsFrozenFrameRateForLocalUsage(t *testing.T) {
 	data := strings.Replace(newAPIVideoDetailedZeroUsage, `"framespersecond":24`, `"framespersecond":30`, 1)
 	task := &model.Task{
 		TaskID:     "task_public_frame_rate_usage",
@@ -1062,6 +1053,7 @@ func TestSeedanceTaskResponseUsesUpstreamFrameRateForUsage(t *testing.T) {
 		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			RequestedDurationSeconds: 5,
 			Resolution:               "720p",
+			SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(false),
 			UpstreamCostMode:         string(types.CostModePerDuration),
 		}},
 		Data: json.RawMessage(data),
@@ -1072,8 +1064,8 @@ func TestSeedanceTaskResponseUsesUpstreamFrameRateForUsage(t *testing.T) {
 	require.NoError(t, err)
 	usage, ok := response["usage"].(map[string]interface{})
 	require.True(t, ok)
-	assert.EqualValues(t, 135000, usage["completion_tokens"])
-	assert.EqualValues(t, 135000, usage["total_tokens"])
+	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 108000, usage["total_tokens"])
 }
 
 func TestSeedanceTaskResponsePreservesAuthoritativeUsage(t *testing.T) {
@@ -1125,6 +1117,7 @@ func TestSeedanceTaskResponseReplacesOverLimitUpstreamUsageWithSettledUsage(t *t
 			UsageTotalTokens:         108000,
 			RequestedDurationSeconds: 5,
 			Resolution:               "720p",
+			SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(false),
 		}},
 		Data: json.RawMessage(data),
 	}
@@ -1201,6 +1194,7 @@ func TestSeedanceTaskResponseHandlesUntrustedInputs(t *testing.T) {
 					Resolution:               "720p",
 					HasVideoInput:            tt.hasVideoInput,
 					InputVideoDurationMS:     tt.inputDuration,
+					SeedanceTokenBilling:     seedanceTokenBillingSnapshot720p(tt.hasVideoInput),
 					UpstreamCostMode:         string(tt.costMode),
 				}},
 				Data: json.RawMessage(data),
@@ -1485,61 +1479,30 @@ func TestNewAPIVideoDurationFixedModePreservesFractionalValue(t *testing.T) {
 	assert.NotEqual(t, billing_setting.BillingModePerDuration, info.PriceData.BillingMode)
 }
 
-func TestNewAPIVideoDurationPerDurationMode(t *testing.T) {
+func TestNewAPIVideoGenericPerDurationModeRemainsSupported(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
 	configureSeedanceDurationPricing(t, map[string]types.DurationPrice{
 		"client-video": {Price: 0.1, Unit: types.DurationUnitSecond, RoundingStepSeconds: 1, MinimumDurationSeconds: 1},
 	})
 
-	tests := []struct {
-		name              string
-		body              string
-		wantSuccess       bool
-		wantSeconds       int
-		wantUpstreamValue string
-	}{
-		{name: "fractional duration", body: `{"model":"client-video","prompt":"text","duration":5.5}`},
-		{name: "integer seconds five", body: `{"model":"client-video","prompt":"text","seconds":"5"}`, wantSuccess: true, wantSeconds: 5, wantUpstreamValue: "5"},
-		{name: "numeric seconds", body: `{"model":"client-video","prompt":"text","seconds":5}`},
-		{name: "integer seconds ten", body: `{"model":"client-video","prompt":"text","seconds":"10"}`, wantSuccess: true, wantSeconds: 10, wantUpstreamValue: "10"},
-		{name: "duration only", body: `{"model":"client-video","prompt":"text","duration":10}`},
-		{name: "duration overflow", body: `{"model":"client-video","prompt":"text","duration":3601}`},
-		{name: "metadata bypass", body: `{"model":"client-video","prompt":"text","duration":5,"metadata":{"duration":3601}}`},
-	}
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"upstream-task","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","prompt":"text","seconds":"5"}`, server.URL)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var upstreamCalls atomic.Int32
-			var capturedBody []byte
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				upstreamCalls.Add(1)
-				capturedBody, _ = io.ReadAll(r.Body)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"upstream-task","status":"queued"}`))
-			}))
-			t.Cleanup(server.Close)
-			c, info := newNewAPIVideoRelayContext(tt.body, server.URL)
+	result, taskErr := RelayTaskSubmit(c, info, nil)
 
-			result, taskErr := RelayTaskSubmit(c, info, nil)
-
-			if !tt.wantSuccess {
-				assert.Nil(t, result)
-				require.NotNil(t, taskErr)
-				assert.Equal(t, int32(0), upstreamCalls.Load())
-				return
-			}
-			require.Nil(t, taskErr)
-			require.NotNil(t, result)
-			assert.Equal(t, int32(1), upstreamCalls.Load())
-			assert.Equal(t, tt.wantSeconds, info.PriceData.RequestedDurationSeconds)
-			assert.Equal(t, tt.wantSeconds, info.PriceData.BillableDurationSeconds)
-			assert.NotContains(t, info.PriceData.OtherRatios(), "seconds")
-			var upstream map[string]interface{}
-			require.NoError(t, common.Unmarshal(capturedBody, &upstream))
-			assert.Equal(t, tt.wantUpstreamValue, upstream["seconds"])
-		})
-	}
+	require.Nil(t, taskErr)
+	require.NotNil(t, result)
+	assert.Equal(t, int32(1), upstreamCalls.Load())
+	assert.Equal(t, billing_setting.BillingModePerDuration, info.PriceData.BillingMode)
+	assert.Equal(t, 5, info.PriceData.RequestedDurationSeconds)
+	assert.Equal(t, 5, info.PriceData.BillableDurationSeconds)
 }
 
 func TestSeedanceTaskFetchPreservesOfficialFailedTaskFields(t *testing.T) {

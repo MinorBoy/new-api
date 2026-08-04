@@ -793,22 +793,29 @@ func truncateBase64(s string) string {
 }
 
 // settleTaskBillingOnComplete 任务完成时的统一计费调整。
-// 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
-//  2. 权威 completion_tokens（或兼容回退 total_tokens）→ 按 token 重算
-//  3. 都不满足 → 保持预扣额度不变
+// 优先级：1. Seedance 使用冻结官方 Token 合同与 total_tokens 结算
+//  2. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
+//  3. 通用任务使用权威 completion_tokens（或兼容回退 total_tokens）重算
+//  4. 都不满足 → 保持预扣额度不变
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		if bc.BillingMode == billing_setting.BillingModePerDuration {
 			logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按时长计费，跳过 token 差额结算", task.TaskID))
 			return
 		}
-		if bc.PerCallBilling {
+		if bc.PerCallBilling && bc.BillingMode != billing_setting.BillingModeSeedanceTokens {
 			logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
 			return
 		}
 	}
 	// 1. 优先让 adaptor 决定最终额度
 	actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult)
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.BillingMode == billing_setting.BillingModeSeedanceTokens {
+		if err := recalculateSeedanceTaskQuota(ctx, task, taskResult.BillingClamp); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("任务 %s Seedance 官方 Token 结算失败: %s", task.TaskID, err.Error()))
+		}
+		return
+	}
 	tokens, hasTokens, clamp := taskBillingTokensChecked(taskResult)
 	if hasTokens && task.PrivateData.BillingContext != nil {
 		task.PrivateData.BillingContext.BillingTokens = tokens

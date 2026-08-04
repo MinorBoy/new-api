@@ -310,6 +310,7 @@
     "All anomalies": "Tất cả bất thường",
     "All API tokens": "Tất cả khóa API",
     "All categories": "Tất cả danh mục",
+    "All channels": "Tất cả kênh",
     "All conditions must match before this tier is used.": "Tất cả điều kiện phải khớp trước khi tầng này được sử dụng.",
     "All edits are overwrite operations. Leave fields empty to keep current values unchanged.": "Tất cả các chỉnh sửa đều là thao tác ghi đè. Để trống các trường để giữ nguyên giá trị hiện tại.",
     "All files exceed the maximum size.": "Tất cả các tệp vượt quá kích thước tối đa.",

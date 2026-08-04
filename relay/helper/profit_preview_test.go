@@ -47,7 +47,7 @@ func TestPreviewRoutingRevenueMatchesUserBillingChain(t *testing.T) {
 	assert.Equal(t, "500000", routingSnapshot)
 }
 
-func TestPreviewRoutingRevenueUsesExplicitSeedanceScenarioWithoutReferenceDurationMultiplier(t *testing.T) {
+func TestPreviewRoutingRevenueUsesOfficialSeedanceTokenFormula(t *testing.T) {
 	common.OptionMapRWMutex.Lock()
 	previousOptionMap := common.OptionMap
 	common.OptionMap = make(map[string]string)
@@ -66,8 +66,11 @@ func TestPreviewRoutingRevenueUsesExplicitSeedanceScenarioWithoutReferenceDurati
 		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
 	})
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":   `{"doubao-seedance-2-0-mini-260615":"per_duration"}`,
-		"billing_setting.duration_price": `{"doubao-seedance-2-0-mini-260615":{"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"scenarios":{"720p:no_video":{"output_price":1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"pricing_version":"official-sheet-v1","source":"official_price_sheet"},"720p:with_video":{"output_price":0.8,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"pricing_version":"official-sheet-v1","source":"official_price_sheet"}}}}`,
+		"billing_setting.billing_mode": `{"doubao-seedance-2-0-mini-260615":"seedance_tokens"}`,
+		"billing_setting.seedance_token_price": `{"doubao-seedance-2-0-mini-260615":{"scenarios":{` +
+			`"720p:no_video":{"price_per_million":"3.150684931506849","width":1280,"height":720,"frame_rate":24,"pricing_version":"official-token-v1","source":"SRC-OFFICIAL-SEEDANCE-2-0-MINI!17"},` +
+			`"720p:with_video":{"price_per_million":"1.917808219178082","width":1280,"height":720,"frame_rate":24,"pricing_version":"official-token-v1","source":"SRC-OFFICIAL-SEEDANCE-2-0-MINI!18"}}}}`,
+		"group_ratio_setting.group_ratio": `{"default":1}`,
 	}))
 
 	textQuota, _, err := PreviewRoutingRevenueWithSeedanceInput("doubao-seedance-2-0-mini-260615", "default", "/v1/video/generations", relayconstant.RelayModeVideoSubmit, intPointer(5), 42, "720p", false, 0)
@@ -76,9 +79,9 @@ func TestPreviewRoutingRevenueUsesExplicitSeedanceScenarioWithoutReferenceDurati
 	require.NoError(t, err)
 	longVideoQuota, _, err := PreviewRoutingRevenueWithSeedanceInput("doubao-seedance-2-0-mini-260615", "default", "/v1/video/generations", relayconstant.RelayModeVideoSubmit, intPointer(5), 42, "720p", true, 15000)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2500000), textQuota)
-	assert.Equal(t, int64(2000000), videoQuota)
-	assert.Equal(t, videoQuota, longVideoQuota)
+	assert.Equal(t, int64(170137), textQuota)
+	assert.Equal(t, int64(207123), videoQuota)
+	assert.Equal(t, int64(414247), longVideoQuota)
 }
 
 func intPointer(value int) *int { return &value }

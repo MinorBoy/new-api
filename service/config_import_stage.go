@@ -2237,6 +2237,16 @@ func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]
 					continue
 				}
 			}
+			if recomputed.SeedanceTokenPrice != nil {
+				if _, err := configImportSeedanceScenarioTokenPrice(recomputed); err != nil {
+					item.State = string(types.ConfigImportItemStateConflict)
+					item.ConflictReason = "PRICING_SEEDANCE_TOKEN_INVALID"
+					if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+						return issues, persistErr
+					}
+					continue
+				}
+			}
 			canonicalModel := canonicalModelsBySKU[recomputed.ModelSKURef]
 			if canonicalModel == "" {
 				canonicalModel = recomputed.ModelSKURef
@@ -2319,19 +2329,19 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 	patches := make(map[string]any)
 	isSeedance := seedancepricing.Family(canonicalModel) != ""
 	if isSeedance {
-		if proposal.DurationPrice == nil || strings.TrimSpace(proposal.Scenario) == "" || strings.TrimSpace(proposal.Resolution) == "" {
-			return nil, configImportError("PRICING_SEEDANCE_SCENARIO_REQUIRED", "Seedance sale proposal requires resolution, scenario, and explicit duration price")
+		if proposal.SeedanceTokenPrice == nil || strings.TrimSpace(proposal.Scenario) == "" || strings.TrimSpace(proposal.Resolution) == "" {
+			return nil, configImportError("PRICING_SEEDANCE_SCENARIO_REQUIRED", "Seedance sale proposal requires resolution, scenario, and official token price")
 		}
-		durationPrice, err := configImportSeedanceScenarioDurationPrice(proposal)
+		tokenPrice, err := configImportSeedanceScenarioTokenPrice(proposal)
 		if err != nil {
 			return nil, err
 		}
 		models := configImportSeedancePricingModels(canonicalModel)
 		modes := make(map[string]string, len(models))
-		prices := make(map[string]types.DurationPrice, len(models))
+		prices := make(map[string]types.SeedanceTokenPrice, len(models))
 		for _, modelName := range models {
-			modes[modelName] = billing_setting.BillingModePerDuration
-			prices[modelName] = durationPrice
+			modes[modelName] = billing_setting.BillingModeSeedanceTokens
+			prices[modelName] = tokenPrice
 		}
 		expressions := make(map[string]string, len(models))
 		for _, modelName := range models {
@@ -2339,7 +2349,12 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 		}
 		patches["billing_setting.billing_mode"] = modes
 		patches["billing_setting.billing_expr"] = expressions
-		patches["billing_setting.duration_price"] = prices
+		patches["billing_setting.seedance_token_price"] = prices
+		durationCleanup := make(map[string]any, len(models))
+		for _, modelName := range models {
+			durationCleanup[modelName] = nil
+		}
+		patches["billing_setting.duration_price"] = durationCleanup
 		for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio"} {
 			cleanup := make(map[string]any, len(models))
 			for _, modelName := range models {
@@ -2386,51 +2401,50 @@ func configImportSaleOptionPatches(proposal types.ConfigImportSaleProposal, cano
 	return patches, nil
 }
 
-func configImportSeedanceScenarioDurationPrice(proposal types.ConfigImportSaleProposal) (types.DurationPrice, error) {
-	if proposal.DurationPrice == nil {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_SCENARIO_REQUIRED", "Seedance explicit duration price is required")
+func configImportSeedanceScenarioTokenPrice(proposal types.ConfigImportSaleProposal) (types.SeedanceTokenPrice, error) {
+	if proposal.SeedanceTokenPrice == nil {
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_SCENARIO_REQUIRED", "Seedance official token price is required")
 	}
-	pricingVersion := strings.TrimSpace(proposal.DurationPrice.PricingVersion)
-	source := strings.TrimSpace(proposal.DurationPrice.Source)
+	pricingVersion := strings.TrimSpace(proposal.SeedanceTokenPrice.PricingVersion)
+	source := strings.TrimSpace(proposal.SeedanceTokenPrice.Source)
 	if pricingVersion == "" || source == "" {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_AUDIT_REQUIRED", "Seedance official duration price requires pricing_version and source")
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_AUDIT_REQUIRED", "Seedance official token price requires pricing_version and source")
 	}
 	if !strings.EqualFold(strings.TrimSpace(proposal.Currency), "USD") {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_OFFICIAL_CURRENCY", "Seedance official sale price currency must be USD")
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_OFFICIAL_CURRENCY", "Seedance official sale price currency must be USD")
 	}
 	sourceRef := strings.TrimSpace(proposal.SourceRef)
-	if pricingVersion != "official-sheet-v1" || strings.TrimSpace(proposal.Sheet) != "官方售价" ||
+	if pricingVersion != "official-token-v1" || strings.TrimSpace(proposal.Sheet) != "官方售价" ||
 		!strings.HasPrefix(sourceRef, "SRC-OFFICIAL-SEEDANCE-") || proposal.Row == nil || *proposal.Row <= 0 ||
 		source != fmt.Sprintf("%s!%d", sourceRef, *proposal.Row) {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_OFFICIAL_SOURCE", "Seedance sale price must reference an official pricing sheet row")
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_OFFICIAL_SOURCE", "Seedance sale price must reference an official pricing sheet row")
 	}
 	scenario := strings.ToLower(strings.TrimSpace(proposal.Scenario))
-	if scenario != types.DurationScenarioNoVideo && scenario != types.DurationScenarioWithVideo {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_SCENARIO_INVALID", "unsupported Seedance pricing scenario %q", proposal.Scenario)
+	if scenario != types.SeedanceTokenScenarioNoVideo && scenario != types.SeedanceTokenScenarioWithVideo {
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_SCENARIO_INVALID", "unsupported Seedance pricing scenario %q", proposal.Scenario)
 	}
 	resolution := strings.ToLower(strings.TrimSpace(proposal.Resolution))
 	if resolution == "" {
-		return types.DurationPrice{}, configImportError("PRICING_SEEDANCE_RESOLUTION_REQUIRED", "Seedance pricing resolution is required")
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_RESOLUTION_REQUIRED", "Seedance pricing resolution is required")
 	}
-	price, err := decimal.NewFromString(strings.TrimSpace(proposal.DurationPrice.Price))
-	if err != nil || price.IsNegative() {
-		return types.DurationPrice{}, configImportError("PRICING_DECIMAL", "duration output price is not a non-negative decimal")
+	price, err := decimal.NewFromString(strings.TrimSpace(proposal.SeedanceTokenPrice.PricePerMillion))
+	if err != nil || !price.IsPositive() {
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_DECIMAL", "Seedance price_per_million is not a positive decimal")
 	}
-	outputPrice, _ := price.Float64()
-	durationPrice := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
-		types.DurationScenarioKey(resolution, scenario): {
-			OutputPrice:            outputPrice,
-			Unit:                   strings.TrimSpace(proposal.DurationPrice.Unit),
-			RoundingStepSeconds:    proposal.DurationPrice.RoundingStepSeconds,
-			MinimumDurationSeconds: proposal.DurationPrice.MinimumDurationSeconds,
-			PricingVersion:         pricingVersion,
-			Source:                 source,
+	tokenPrice := types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+		types.SeedanceTokenScenarioKey(resolution, scenario): {
+			PricePerMillion: price.String(),
+			Width:           proposal.SeedanceTokenPrice.Width,
+			Height:          proposal.SeedanceTokenPrice.Height,
+			FrameRate:       proposal.SeedanceTokenPrice.FrameRate,
+			PricingVersion:  pricingVersion,
+			Source:          source,
 		},
 	}}
-	if err := durationPrice.Validate(relaycommon.MaxTaskDurationSeconds); err != nil {
-		return types.DurationPrice{}, configImportError("PRICING_DURATION_INVALID", "%v", err)
+	if err := tokenPrice.Validate(relaycommon.MaxTokensLimit); err != nil {
+		return types.SeedanceTokenPrice{}, configImportError("PRICING_SEEDANCE_TOKEN_INVALID", "%v", err)
 	}
-	return durationPrice, nil
+	return tokenPrice, nil
 }
 
 func configImportSeedancePricingModels(canonicalModel string) []string {
@@ -2610,12 +2624,20 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 		}
 		proposal.DurationPrice.Price = price.String()
 	}
+	if proposal.SeedanceTokenPrice != nil {
+		price, err := decimal.NewFromString(strings.TrimSpace(proposal.SeedanceTokenPrice.PricePerMillion))
+		if err != nil || !price.IsPositive() {
+			return proposal, nil, configImportError("PRICING_DECIMAL", "Seedance price_per_million is not a positive decimal")
+		}
+		proposal.SeedanceTokenPrice.PricePerMillion = price.String()
+	}
 	hasExpression := strings.TrimSpace(proposal.BillingExpr) != ""
 	hasDuration := proposal.DurationPrice != nil
+	hasSeedanceToken := proposal.SeedanceTokenPrice != nil
 	hasToken := proposal.InputPerMillion != nil || proposal.OutputPerMillion != nil || proposal.CompletionPerMillion != nil || proposal.TotalPerMillion != nil
 	hasFixedPrice := proposal.UnitPrice != nil || proposal.PricePerUnit != nil
 	modeCount := 0
-	for _, present := range []bool{hasExpression, hasDuration, hasToken, hasFixedPrice} {
+	for _, present := range []bool{hasExpression, hasDuration, hasSeedanceToken, hasToken, hasFixedPrice} {
 		if present {
 			modeCount++
 		}
@@ -2636,7 +2658,7 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 			issues = append(issues, model.ConfigImportIssue{Severity: string(types.ConfigImportIssueSeverityWarning), Code: "PRICING_NEGATIVE_MARGIN", BusinessID: proposal.BusinessID, Message: "sale price is below recomputed cost", ResolutionStatus: "open"})
 		}
 	}
-	if !hasExpression {
+	if !hasExpression && !hasSeedanceToken {
 		tokenExpr, err := configImportTokenPricingExpression(proposal)
 		if err != nil {
 			return proposal, nil, err
@@ -2648,6 +2670,8 @@ func recomputeConfigImportSaleProposal(proposal types.ConfigImportSaleProposal, 
 	expectedMode := billing_setting.BillingModeRatio
 	if proposal.BillingExpr != "" {
 		expectedMode = billing_setting.BillingModeTieredExpr
+	} else if proposal.SeedanceTokenPrice != nil {
+		expectedMode = billing_setting.BillingModeSeedanceTokens
 	} else if proposal.DurationPrice != nil {
 		expectedMode = billing_setting.BillingModePerDuration
 	}

@@ -110,7 +110,7 @@ func pollNewAPIVideoTask(t *testing.T, publicID string) model.Task {
 	return task
 }
 
-func assertNewAPIVideoLifecycleQueries(t *testing.T, engine http.Handler, publicID string) {
+func assertNewAPIVideoLifecycleQueries(t *testing.T, engine http.Handler, publicID string, completionTokens, totalTokens int) {
 	t.Helper()
 	status, openAI := performJSONRequest(t, engine, http.MethodGet, "/v1/video/generations/"+publicID, "Bearer e2e-1", "")
 	require.Equal(t, http.StatusOK, status, string(openAI))
@@ -131,7 +131,7 @@ func assertNewAPIVideoLifecycleQueries(t *testing.T, engine http.Handler, public
 	assert.Equal(t, publicID, arkResponse["id"])
 	assert.Equal(t, "doubao-seedance-2-0-260128", arkResponse["model"])
 	assert.Equal(t, "succeeded", arkResponse["status"])
-	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(216900), "total_tokens": float64(216900)}, arkResponse["usage"])
+	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(completionTokens), "total_tokens": float64(totalTokens)}, arkResponse["usage"])
 }
 
 func assertNewAPIVideoE2EPublicBody(t *testing.T, body []byte) {
@@ -174,7 +174,7 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	assert.Contains(t, string(task.Data), `"origin_model_name":"doubao-seedance-2-0-260128"`)
 	assert.Contains(t, string(task.Data), `"upstream_model_name":"seedance-720p-token"`)
 	require.NotNil(t, task.PrivateData.BillingContext)
-	assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
+	assert.Equal(t, 216000, task.PrivateData.BillingContext.BillingTokens)
 	assertNewAPIVideoE2EPublicBody(t, task.PrivateData.UserResponseData)
 	var terminalResponse map[string]interface{}
 	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
@@ -185,7 +185,7 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	require.Len(t, requests, 2)
 	assert.Equal(t, http.MethodGet, requests[1].Method)
 	assert.Equal(t, "/v1/video/generations/upstream-task", requests[1].Path)
-	assertNewAPIVideoLifecycleQueries(t, engine, publicID)
+	assertNewAPIVideoLifecycleQueries(t, engine, publicID, 216000, 216000)
 }
 
 func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
@@ -221,13 +221,13 @@ func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
 	task := pollNewAPIVideoTask(t, publicID)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 	require.NotNil(t, task.PrivateData.BillingContext)
-	assert.Equal(t, 216900, task.PrivateData.BillingContext.BillingTokens)
+	assert.Equal(t, 324000, task.PrivateData.BillingContext.BillingTokens)
 	assertNewAPIVideoE2EPublicBody(t, task.PrivateData.UserResponseData)
 	var terminalResponse map[string]interface{}
 	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
 	assert.Equal(t, publicID, terminalResponse["id"])
 	assert.Equal(t, "succeeded", terminalResponse["status"])
-	assertNewAPIVideoLifecycleQueries(t, engine, publicID)
+	assertNewAPIVideoLifecycleQueries(t, engine, publicID, 216000, 324000)
 
 	invalid := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"first_frame"}]}`
 	status, invalidResponse := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", invalid)

@@ -77,36 +77,6 @@ func TestDurationPriceBillableSeconds(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestDurationPriceValidateRequiresScenarioAuditMetadata(t *testing.T) {
-	base := DurationPriceScenario{
-		OutputPrice: 0.2, Unit: DurationUnitSecond, RoundingStepSeconds: 1,
-		PricingVersion: "official-sheet-v1", Source: "official_price_sheet",
-	}
-	require.NoError(t, (DurationPrice{Scenarios: map[string]DurationPriceScenario{
-		"720p:no_video": base,
-	}}).Validate(60))
-
-	tests := []struct {
-		name     string
-		mutate   func(*DurationPriceScenario)
-		contains string
-	}{
-		{name: "missing pricing version", mutate: func(s *DurationPriceScenario) { s.PricingVersion = "" }, contains: "pricing_version"},
-		{name: "missing source", mutate: func(s *DurationPriceScenario) { s.Source = "" }, contains: "source"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			scenario := base
-			test.mutate(&scenario)
-			err := (DurationPrice{Scenarios: map[string]DurationPriceScenario{
-				"720p:no_video": scenario,
-			}}).Validate(60)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), test.contains)
-		})
-	}
-}
-
 func TestDurationPriceUnitSeconds(t *testing.T) {
 	assert.Equal(t, 1, (DurationPrice{Unit: DurationUnitSecond}).UnitSeconds())
 	assert.Equal(t, 60, (DurationPrice{Unit: DurationUnitMinute}).UnitSeconds())

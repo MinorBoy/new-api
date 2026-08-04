@@ -563,9 +563,36 @@ export async function buildImportDocument(
     const price = optionalDecimal(sale, 'native_unit_price', '原币/1M')
     const scenario = field(sale, 'scenario', '定价场景').toLowerCase()
     const resolution = sku ? field(sku, 'resolution', '分辨率档位') : ''
+    const usdPerMillion = optionalDecimal(sale, 'USD/1M')
     const usdPerSecond = optionalDecimal(sale, 'USD/基准秒')
     const nativePerSecond = optionalDecimal(sale, '原币/基准秒')
     const saleLocation = sourceLocation(sale)
+    const canonicalModel = sku
+      ? field(sku, 'canonical_model', '模型').toLowerCase()
+      : ''
+    const outputWidth = sku ? Number(field(sku, 'output_width', '输出宽')) : 0
+    const outputHeight = sku ? Number(field(sku, 'output_height', '输出高')) : 0
+    const frameRate = sku ? Number(field(sku, 'frame_rate', '帧率')) : 0
+    const seedanceTokenPrice =
+      canonicalModel.includes('seedance') &&
+      usdPerMillion &&
+      scenario &&
+      resolution &&
+      Number.isSafeInteger(outputWidth) &&
+      outputWidth > 0 &&
+      Number.isSafeInteger(outputHeight) &&
+      outputHeight > 0 &&
+      Number.isSafeInteger(frameRate) &&
+      frameRate > 0
+        ? {
+            price_per_million: usdPerMillion,
+            width: outputWidth,
+            height: outputHeight,
+            frame_rate: frameRate,
+            pricing_version: 'official-token-v1',
+            source: `${source}!${saleLocation.row}`,
+          }
+        : undefined
     let durationPrice:
       | {
           price: string
@@ -587,19 +614,28 @@ export async function buildImportDocument(
       }
     }
     let pricingFields: Record<string, unknown> = {}
-    if (durationPrice) {
+    if (seedanceTokenPrice) {
+      pricingFields = { seedance_token_price: seedanceTokenPrice }
+    } else if (durationPrice) {
       pricingFields = { duration_price: durationPrice }
     } else if (price) {
       pricingFields = { total_per_million: price }
     } else if (nativePerSecond) {
       pricingFields = { price_per_unit: nativePerSecond }
     }
+    let billingMode = field(sale, 'billing_mode', '计费模式')
+    let currency = field(sale, 'currency', '币种')
+    if (seedanceTokenPrice) {
+      billingMode = 'seedance_tokens'
+      currency = 'USD'
+    } else if (durationPrice) {
+      billingMode = 'per_duration'
+      currency = 'USD'
+    }
     entities.sale_proposals.push(
       await authoritativeEntity(sale, source, {
-        billing_mode: durationPrice
-          ? 'per_duration'
-          : field(sale, 'billing_mode', '计费模式'),
-        currency: durationPrice ? 'USD' : field(sale, 'currency', '币种'),
+        billing_mode: billingMode,
+        currency,
         model_sku_ref: skuRef,
         ...(scenario ? { scenario } : {}),
         ...(resolution ? { resolution } : {}),

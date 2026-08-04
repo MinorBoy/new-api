@@ -77,61 +77,41 @@ func TestTaskDurationQuota(t *testing.T) {
 	}
 }
 
-func TestTaskDurationQuotaUsesExplicitScenarioCharges(t *testing.T) {
-	var priceData types.PriceData
-	require.NoError(t, common.UnmarshalJsonStr(`{
-		"BillingMode":"per_duration",
-		"DurationPrice":{
-			"price":1,
-			"unit":"second",
-			"rounding_step_seconds":1,
-			"scenarios":{
-				"720p:with_video":{
-					"output_price":0.4,
-					"unit":"second",
-					"rounding_step_seconds":1,
-					"pricing_version":"sd-2026-08-03",
-					"source":"sd官价!7"
-				}
-			}
+func TestTaskSeedanceTokenQuotaUsesOfficialFormulaTokens(t *testing.T) {
+	price := types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+		"480p:with_video": {
+			PricePerMillion: "1.917808219178082",
+			Width:           864,
+			Height:          496,
+			FrameRate:       24,
+			PricingVersion:  "official-token-v1",
+			Source:          "SRC-OFFICIAL-SEEDANCE-2-0-MINI!18",
 		},
-		"duration_resolution":"720p",
-		"has_video_input":true,
-		"input_video_duration_ms":2000,
-		"GroupRatioInfo":{"GroupRatio":1.5}
-	}`, &priceData))
-	quota, billable, clamp, err := taskDurationQuota(&priceData, 4)
+	}}
+	priceData := types.PriceData{
+		BillingMode:              "seedance_tokens",
+		SeedanceTokenPrice:       &price,
+		RequestedDurationSeconds: 4,
+		DurationResolution:       "480p",
+		HasVideoInput:            true,
+		InputVideoDurationMS:     3000,
+		SeedanceTokenUsage: types.SeedanceTokenUsage{
+			InputTokens:  30132,
+			OutputTokens: 40176,
+			TotalTokens:  70308,
+		},
+		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1.25},
+	}
+
+	quota, clamp, err := taskSeedanceTokenQuota(&priceData)
 
 	require.NoError(t, err)
-	assert.Equal(t, 4, billable)
-	assert.Equal(t, 1_200_000, quota)
+	assert.Equal(t, 84_273, quota)
 	assert.Nil(t, clamp)
-	encoded, marshalErr := common.Marshal(priceData)
-	require.NoError(t, marshalErr)
-	assert.Contains(t, string(encoded), `"output_charge":"1.6"`)
-	assert.Contains(t, string(encoded), `"group_ratio":"1.5"`)
-	assert.Contains(t, string(encoded), `"final_charge":"2.4"`)
-}
-
-func TestTaskDurationQuotaRejectsMissingExplicitScenarioPrice(t *testing.T) {
-	var priceData types.PriceData
-	require.NoError(t, common.UnmarshalJsonStr(`{
-		"BillingMode":"per_duration",
-		"DurationPrice":{
-			"price":1,
-			"unit":"second",
-			"rounding_step_seconds":1,
-			"scenarios":{
-				"720p:no_video":{"output_price":0.4,"unit":"second","rounding_step_seconds":1,"pricing_version":"official-sheet-v1","source":"official_price_sheet"}
-			}
-		},
-		"duration_resolution":"1080p"
-	}`, &priceData))
-
-	_, _, _, err := taskDurationQuota(&priceData, 4)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "explicit duration pricing scenario")
+	require.NotNil(t, priceData.SeedanceTokenBilling)
+	assert.Equal(t, "0.134837260273972589256", priceData.SeedanceTokenBilling.BaseCharge)
+	assert.Equal(t, "1.25", priceData.SeedanceTokenBilling.GroupRatio)
+	assert.Equal(t, "0.16854657534246573657", priceData.SeedanceTokenBilling.FinalCharge)
 }
 
 func TestTaskDurationQuotaRejectsReservedDurationRatios(t *testing.T) {

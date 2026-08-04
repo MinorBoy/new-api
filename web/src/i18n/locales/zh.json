@@ -310,6 +310,7 @@
     "All anomalies": "全部异常",
     "All API tokens": "全部 API 密钥",
     "All categories": "全部分类",
+    "All channels": "全部渠道",
     "All conditions must match before this tier is used.": "所有条件都匹配后才会使用此阶梯。",
     "All edits are overwrite operations. Leave fields empty to keep current values unchanged.": "所有编辑都是覆盖操作。留空字段将保持当前值不变。",
     "All files exceed the maximum size.": "所有文件都超过最大尺寸。",

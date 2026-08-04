@@ -93,18 +93,18 @@ test('builds the corrected v1 import document without unresolved contracts', asy
   )
 })
 
-test('builds explicit Seedance official sale contracts from USD per second prices', async () => {
+test('builds explicit Seedance official token sale contracts from USD per million prices', async () => {
   const bytes = await fs.readFile(fixturePath)
   const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))
   const expectedPrices = new Map([
-    ['SALE-SEEDANCE-2-0-1080P-NOV', '0.34'],
-    ['SALE-SEEDANCE-2-0-1080P-VID', '0.21'],
+    ['SALE-SEEDANCE-2-0-1080P-NOV', '6.3'],
+    ['SALE-SEEDANCE-2-0-1080P-VID', '3.8'],
   ])
 
   for (const sale of extracted.saleProposals) {
     const price = expectedPrices.get(sale.businessId)
     if (price) {
-      sale.fields['USD/基准秒'] = {
+      sale.fields['USD/1M'] = {
         value: price,
         formula: null,
         formulaResult: null,
@@ -123,17 +123,19 @@ test('builds explicit Seedance official sale contracts from USD per second price
       (item) => item.business_id === businessID
     )
     assert.ok(proposal)
-    assert.equal(proposal.billing_mode, 'per_duration')
+    assert.equal(proposal.billing_mode, 'seedance_tokens')
     assert.equal(
       proposal.scenario,
       businessID.endsWith('-NOV') ? 'no_video' : 'with_video'
     )
     assert.equal(proposal.resolution, '1080p')
 
-    const durationPrice = proposal.duration_price as Record<string, unknown>
-    assert.equal(durationPrice.price, price)
-    assert.equal(durationPrice.unit, 'second')
-    assert.equal('input_video_price' in proposal, false)
-    assert.equal('input_video_price' in durationPrice, false)
+    const tokenPrice = proposal.seedance_token_price as Record<string, unknown>
+    assert.equal(tokenPrice.price_per_million, price)
+    assert.equal(tokenPrice.width, 1920)
+    assert.equal(tokenPrice.height, 1080)
+    assert.equal(tokenPrice.frame_rate, 24)
+    assert.equal(tokenPrice.pricing_version, 'official-token-v1')
+    assert.equal('duration_price' in proposal, false)
   }
 })

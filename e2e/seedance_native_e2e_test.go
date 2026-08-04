@@ -26,24 +26,21 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
-	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const (
-	e2eUserID                        = 1001
-	e2eOtherUserID                   = 1002
-	e2eChannelID                     = 1
-	e2eToken                         = "e2e"
-	upstreamTaskID                   = "cgt-mock-seedance-2-0"
-	failedUpstreamTaskID             = "cgt-20260717171624-cr2n9"
-	seedanceE2E720NoVideoUSDSecond   = 0.136164383561643822
-	seedanceE2E720WithVideoUSDSecond = 0.082876712328767115
-	seedance20MultimodalRequestBody  = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"全程使用视频1的第一视角构图，全程使用音频1作为背景音乐。第一人称视角果茶宣传广告，seedance牌「苹苹安安」苹果果茶限定款。"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-1.jpg"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-2.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"}],"generate_audio":true,"ratio":"16:9","duration":11,"watermark":true}`
-	successUpstreamTaskResponse      = `{"id":"cgt-mock-seedance-2-0","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"},"usage":{"completion_tokens":108900,"total_tokens":108900},"created_at":1779348818,"updated_at":1779348874,"seed":78674,"resolution":"720p","ratio":"16:9","duration":5,"framespersecond":24,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
-	failedUpstreamTaskResponse       = `{"id":"cgt-20260717171624-cr2n9","model":"doubao-seedance-2-0-260128","status":"failed","error":{"code":"OutputVideoSensitiveContentDetected.PolicyViolation","message":"The request failed because the output video may be related to copyright restrictions. Request id: 02178427978698300000000000000000000ffffac1923a9fc42b8"},"created_at":1784279786,"updated_at":1784280145,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
-	dimensioMultimodalRequestBody    = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://mock.example/reference-image.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"},{"type":"text","text":"参考图中主体、参考视频动作和参考音频节奏，镜头缓慢向前推进"}],"ratio":"16:9","duration":6,"resolution":"720p","intelligent_ratio":false,"face_grid":true}`
+	e2eUserID                       = 1001
+	e2eOtherUserID                  = 1002
+	e2eChannelID                    = 1
+	e2eToken                        = "e2e"
+	upstreamTaskID                  = "cgt-mock-seedance-2-0"
+	failedUpstreamTaskID            = "cgt-20260717171624-cr2n9"
+	seedance20MultimodalRequestBody = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"全程使用视频1的第一视角构图，全程使用音频1作为背景音乐。第一人称视角果茶宣传广告，seedance牌「苹苹安安」苹果果茶限定款。"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-1.jpg"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-2.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"}],"generate_audio":true,"ratio":"16:9","duration":11,"watermark":true}`
+	successUpstreamTaskResponse     = `{"id":"cgt-mock-seedance-2-0","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"},"usage":{"completion_tokens":108000,"total_tokens":216000},"created_at":1779348818,"updated_at":1779348874,"seed":78674,"resolution":"720p","ratio":"16:9","duration":5,"framespersecond":24,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
+	failedUpstreamTaskResponse      = `{"id":"cgt-20260717171624-cr2n9","model":"doubao-seedance-2-0-260128","status":"failed","error":{"code":"OutputVideoSensitiveContentDetected.PolicyViolation","message":"The request failed because the output video may be related to copyright restrictions. Request id: 02178427978698300000000000000000000ffffac1923a9fc42b8"},"created_at":1784279786,"updated_at":1784280145,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
+	dimensioMultimodalRequestBody   = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://mock.example/reference-image.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"},{"type":"text","text":"参考图中主体、参考视频动作和参考音频节奏，镜头缓慢向前推进"}],"ratio":"16:9","duration":6,"resolution":"720p","intelligent_ratio":false,"face_grid":true}`
 )
 
 type mockArkRequest struct {
@@ -303,18 +300,19 @@ func seedSeedanceE2ESalePricing(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, config.UpdateConfigFromMap(billingConfig, originalBillingConfig))
 	})
-	durationPrices := seedanceBillingOfficialDurationPrices()
-	billingModes := make(map[string]string, len(durationPrices))
-	for modelID := range durationPrices {
-		billingModes[modelID] = billing_setting.BillingModePerDuration
+	tokenPrices := seedanceBillingOfficialTokenPrices()
+	billingModes := make(map[string]string, len(tokenPrices))
+	for modelID := range tokenPrices {
+		billingModes[modelID] = billing_setting.BillingModeSeedanceTokens
 	}
 	modeJSON, err := common.Marshal(billingModes)
 	require.NoError(t, err)
-	priceJSON, err := common.Marshal(durationPrices)
+	priceJSON, err := common.Marshal(tokenPrices)
 	require.NoError(t, err)
 	require.NoError(t, config.UpdateConfigFromMap(billingConfig, map[string]string{
-		billing_setting.BillingModeField:   string(modeJSON),
-		billing_setting.DurationPriceField: string(priceJSON),
+		billing_setting.BillingModeField:        string(modeJSON),
+		billing_setting.DurationPriceField:      "{}",
+		billing_setting.SeedanceTokenPriceField: string(priceJSON),
 	}))
 }
 
@@ -345,37 +343,9 @@ func seedSecondSeedanceE2EChannel(t *testing.T, upstreamURL string) {
 	require.NoError(t, secondChannel.Insert())
 }
 
-func seedDimensioE2EData(t *testing.T, upstreamURL, upstreamModel string, pricePerSecond float64, resolution string) {
+func seedDimensioE2EData(t *testing.T, upstreamURL, upstreamModel string) {
 	t.Helper()
 	seedSeedanceE2EData(t, upstreamURL)
-	billingConfig := config.GlobalConfig.Get("billing_setting")
-	originalBillingConfig, err := config.ConfigToMap(billingConfig)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, config.UpdateConfigFromMap(billingConfig, originalBillingConfig))
-	})
-	durationRule := types.DurationPrice{Scenarios: map[string]types.DurationPriceScenario{
-		types.DurationScenarioKey(resolution, types.DurationScenarioWithVideo): {
-			OutputPrice:            pricePerSecond,
-			Unit:                   types.DurationUnitSecond,
-			RoundingStepSeconds:    1,
-			MinimumDurationSeconds: 4,
-			PricingVersion:         "official-sheet-v1",
-			Source:                 "官方售价!e2e",
-		},
-	}}
-	modeJSON, err := common.Marshal(map[string]string{
-		"doubao-seedance-2-0-260128": billing_setting.BillingModePerDuration,
-	})
-	require.NoError(t, err)
-	priceJSON, err := common.Marshal(map[string]types.DurationPrice{
-		"doubao-seedance-2-0-260128": durationRule,
-	})
-	require.NoError(t, err)
-	require.NoError(t, config.UpdateConfigFromMap(billingConfig, map[string]string{
-		billing_setting.BillingModeField:   string(modeJSON),
-		billing_setting.DurationPriceField: string(priceJSON),
-	}))
 
 	ratios := ratio_setting.GetModelRatioCopy()
 	delete(ratios, "doubao-seedance-2-0-260128")
@@ -401,10 +371,12 @@ func seedanceE2ERouter() *gin.Engine {
 	return engine
 }
 
-func seedanceE2EExpectedQuota(pricePerSecond float64, seconds int) int {
-	return common.QuotaFromDecimal(decimal.NewFromFloat(pricePerSecond).
-		Mul(decimal.NewFromInt(int64(seconds))).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+func seedanceE2EExpectedMultimodalQuota(t *testing.T) int {
+	t.Helper()
+	quota, _ := seedanceBillingExpectedTokenQuota(
+		t, "doubao-seedance-2-0-260128", "720p", true, 5000, 11, nil, 1,
+	)
+	return quota
 }
 
 func performJSONRequest(t *testing.T, engine http.Handler, method, path, authorization, body string) (int, []byte) {
@@ -421,11 +393,10 @@ func performJSONRequest(t *testing.T, engine http.Handler, method, path, authori
 func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 	models := []struct {
 		name, upstreamModel, resolution string
-		pricePerSecond                  float64
 	}{
-		{"fast_vip_720p", "jmg-video-seedance-2.0-fast-vip", "720p", 0.48 / 7.3},
-		{"mini_720p", "jmg-video-seedance-2.0-mini", "720p", 0.39 / 7.3},
-		{"vip_1080p", "jmg-video-seedance-2.0-vip", "1080p", 0.62 / 7.3},
+		{"fast_vip_720p", "jmg-video-seedance-2.0-fast-vip", "720p"},
+		{"mini_720p", "jmg-video-seedance-2.0-mini", "720p"},
+		{"vip_1080p", "jmg-video-seedance-2.0-vip", "1080p"},
 	}
 	terminalCases := []struct {
 		name, response, arkStatus, errorCode, errorMessage string
@@ -441,15 +412,15 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 	for _, modelCase := range models {
 		for _, terminalCase := range terminalCases {
 			t.Run(modelCase.name+"/"+terminalCase.name, func(t *testing.T) {
-				expectedQuota := common.QuotaFromDecimal(decimal.NewFromFloat(modelCase.pricePerSecond).
-					Mul(decimal.NewFromInt(6)).
-					Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+				expectedQuota, expectedBilling := seedanceBillingExpectedTokenQuota(
+					t, "doubao-seedance-2-0-260128", modelCase.resolution, true, 5000, 6, nil, 1,
+				)
 				setupSeedanceE2EDB(t)
 				setupSeedanceE2EVideoMetadata(t)
 				mock := &mockDimensioServer{terminalResponse: terminalCase.response}
 				mockServer := httptest.NewServer(mock)
 				t.Cleanup(mockServer.Close)
-				seedDimensioE2EData(t, mockServer.URL, modelCase.upstreamModel, modelCase.pricePerSecond, modelCase.resolution)
+				seedDimensioE2EData(t, mockServer.URL, modelCase.upstreamModel)
 				engine := seedanceE2ERouter()
 				service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 					return relay.GetTaskAdaptor(platform)
@@ -492,17 +463,15 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 				assert.Equal(t, "dim-upstream", task.PrivateData.UpstreamTaskID)
 				require.NotNil(t, task.PrivateData.BillingContext)
 				assert.Equal(t, modelCase.upstreamModel, task.PrivateData.BillingContext.UpstreamModelName)
-				assert.Equal(t, billing_setting.BillingModePerDuration, task.PrivateData.BillingContext.BillingMode)
-				assert.Equal(t, types.DurationSourceRequest, task.PrivateData.BillingContext.DurationSource)
+				assert.Equal(t, billing_setting.BillingModeSeedanceTokens, task.PrivateData.BillingContext.BillingMode)
 				assert.Equal(t, 6, task.PrivateData.BillingContext.RequestedDurationSeconds)
 				assert.Equal(t, 6, task.PrivateData.BillingContext.BillableDurationSeconds)
 				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "seconds")
 				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "duration")
 				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "seedance_price_matrix")
 				assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "video_input")
-				require.NotNil(t, task.PrivateData.BillingContext.DurationPrice)
-				scenarioPrice := task.PrivateData.BillingContext.DurationPrice.Scenarios[types.DurationScenarioKey(modelCase.resolution, types.DurationScenarioWithVideo)]
-				assert.Equal(t, modelCase.pricePerSecond, scenarioPrice.OutputPrice)
+				require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenPrice)
+				assert.Equal(t, expectedBilling, task.PrivateData.BillingContext.SeedanceTokenBilling)
 				preConsumedQuota := task.Quota
 				assert.Equal(t, expectedQuota, preConsumedQuota)
 
@@ -549,7 +518,6 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 				model.CacheQuotaDataLock.Unlock()
 				require.Len(t, quotaDataSnapshot, 1)
 				assert.Equal(t, 1, quotaDataSnapshot[0].Count)
-				assert.Zero(t, quotaDataSnapshot[0].TokenUsed)
 
 				if terminalCase.retryable {
 					assert.NotEqual(t, model.TaskStatusFailure, task.Status)
@@ -560,6 +528,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					assert.Equal(t, int64(preConsumedQuota), channel.UsedQuota)
 					assert.Equal(t, preConsumedQuota, token.UsedQuota)
 					assert.Equal(t, preConsumedQuota, quotaDataSnapshot[0].Quota)
+					assert.Zero(t, quotaDataSnapshot[0].TokenUsed)
 				} else if terminalCase.failure {
 					errorFields, ok := arkResponse["error"].(map[string]interface{})
 					require.True(t, ok)
@@ -572,6 +541,7 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					assert.Zero(t, channel.UsedQuota)
 					assert.Zero(t, token.UsedQuota)
 					assert.Zero(t, quotaDataSnapshot[0].Quota)
+					assert.Zero(t, quotaDataSnapshot[0].TokenUsed)
 
 					var refundLog model.Log
 					require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeRefund).Order("id DESC").First(&refundLog).Error)
@@ -579,14 +549,13 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					assert.Equal(t, "doubao-seedance-2-0-260128", refundLog.ModelName)
 					var refundOther map[string]interface{}
 					require.NoError(t, common.UnmarshalJsonStr(refundLog.Other, &refundOther))
-					assert.Equal(t, billing_setting.BillingModePerDuration, refundOther["billing_mode"])
-					assert.Equal(t, types.DurationSourceRequest, refundOther["duration_source"])
-					assert.Equal(t, float64(6), refundOther["requested_duration_seconds"])
-					assert.Equal(t, float64(6), refundOther["billable_duration_seconds"])
-					assert.InDelta(t, modelCase.pricePerSecond, refundOther["duration_price"], 1e-12)
-					assert.Equal(t, string(types.DurationUnitSecond), refundOther["duration_unit"])
-					assert.Equal(t, float64(1), refundOther["rounding_step_seconds"])
-					assert.Equal(t, float64(4), refundOther["minimum_duration_seconds"])
+					assert.Equal(t, billing_setting.BillingModeSeedanceTokens, refundOther["billing_mode"])
+					assert.Equal(t, expectedBilling.PricePerMillion, refundOther["price_per_million"])
+					assert.Equal(t, float64(expectedBilling.InputTokens), refundOther["input_tokens"])
+					assert.Equal(t, float64(expectedBilling.OutputTokens), refundOther["output_tokens"])
+					assert.Equal(t, float64(expectedBilling.TotalTokens), refundOther["total_tokens"])
+					assert.Equal(t, expectedBilling.FinalCharge, refundOther["final_charge"])
+					assert.NotContains(t, refundOther, "duration_price")
 					assert.NotContains(t, refundOther, "seedance_price_matrix")
 					assert.NotContains(t, refundOther, "video_input")
 					assert.NotContains(t, refundOther, "resolution_ratio")
@@ -603,6 +572,9 @@ func TestDimensioSeedance20MultimodalLifecycleE2E(t *testing.T) {
 					assert.Equal(t, int64(preConsumedQuota), channel.UsedQuota)
 					assert.Equal(t, preConsumedQuota, token.UsedQuota)
 					assert.Equal(t, preConsumedQuota, quotaDataSnapshot[0].Quota)
+					assert.Equal(t, expectedBilling.TotalTokens, quotaDataSnapshot[0].TokenUsed)
+					assert.Equal(t, expectedBilling.TotalTokens, task.PrivateData.BillingContext.BillingTokens)
+					assert.Equal(t, expectedBilling, task.PrivateData.BillingContext.SeedanceTokenBilling)
 				}
 				var refundLogCount int64
 				require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeRefund).Count(&refundLogCount).Error)
@@ -686,8 +658,18 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 	assert.Equal(t, "default", task.PrivateData.BillingContext.ServiceTier)
 	assert.NotContains(t, task.PrivateData.BillingContext.OtherRatios, "video_input")
 	preConsumedQuota := task.Quota
-	expectedQuota := seedanceE2EExpectedQuota(seedanceE2E720WithVideoUSDSecond, 11)
+	expectedQuota := seedanceE2EExpectedMultimodalQuota(t)
 	assert.Equal(t, expectedQuota, preConsumedQuota)
+	expectedFinalQuota, expectedFinalBilling := seedanceBillingExpectedTokenQuota(
+		t,
+		"doubao-seedance-2-0-260128",
+		"720p",
+		true,
+		5000,
+		11,
+		&types.SeedanceTokenUsage{InputTokens: 108000, OutputTokens: 237600, TotalTokens: 345600},
+		1,
+	)
 	t.Logf("提交后内部任务状态: status=%s progress=%s platform=%s unfinished=%d", task.Status, task.Progress, task.Platform, len(model.GetAllUnFinishSyncTasks(100)))
 
 	status, queryResponse := performJSONRequest(t, engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+publicID, "Bearer e2e-1", "")
@@ -711,8 +693,9 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 	assert.Equal(t, "https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx", task.PrivateData.ResultURL)
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, "720p", task.PrivateData.BillingContext.Resolution)
-	assert.Equal(t, 108900, task.PrivateData.BillingContext.BillingTokens)
-	assert.Equal(t, expectedQuota, task.Quota)
+	assert.Equal(t, 345600, task.PrivateData.BillingContext.BillingTokens)
+	assert.Equal(t, expectedFinalBilling, task.PrivateData.BillingContext.SeedanceTokenBilling)
+	assert.Equal(t, expectedFinalQuota, task.Quota)
 	t.Logf("轮询后任务数据: %s", task.Data)
 
 	var billedUser model.User
@@ -738,7 +721,7 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 	for _, quotaData := range quotaDataSnapshot {
 		assert.Equal(t, 1, quotaData.Count)
 		assert.Equal(t, task.Quota, quotaData.Quota)
-		assert.Zero(t, quotaData.TokenUsed)
+		assert.Equal(t, 345600, quotaData.TokenUsed)
 		assert.Equal(t, e2eUserID, quotaData.UserID)
 		assert.Equal(t, e2eChannelID, quotaData.ChannelID)
 		assert.Equal(t, 1, quotaData.TokenID)
@@ -755,7 +738,7 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 	assert.Equal(t, "doubao-seedance-2-0-260128", successfulFields["model"])
 	assert.Equal(t, "succeeded", successfulFields["status"])
 	assert.Equal(t, map[string]interface{}{"video_url": "https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"}, successfulFields["content"])
-	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(108900), "total_tokens": float64(108900)}, successfulFields["usage"])
+	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(237600), "total_tokens": float64(345600)}, successfulFields["usage"])
 	assert.Equal(t, float64(1779348818), successfulFields["created_at"])
 	assert.Equal(t, float64(1779348874), successfulFields["updated_at"])
 	assert.Equal(t, float64(78674), successfulFields["seed"])
@@ -835,7 +818,7 @@ func TestSeedanceNativeFailedTaskResponseAndRefundE2E(t *testing.T) {
 	var task model.Task
 	require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
 	preConsumedQuota := task.Quota
-	require.Equal(t, seedanceE2EExpectedQuota(seedanceE2E720WithVideoUSDSecond, 11), preConsumedQuota)
+	require.Equal(t, seedanceE2EExpectedMultimodalQuota(t), preConsumedQuota)
 
 	summary := service.RunTaskPollingOnce(context.Background(), nil)
 	assert.Equal(t, 1, summary.UnfinishedTasks)
@@ -1001,7 +984,7 @@ func TestSeedanceNativeRetriesNextChannelWithARKResponseE2E(t *testing.T) {
 	require.NoError(t, model.DB.Where("task_id = ?", publicID).First(&task).Error)
 	assert.Equal(t, 2, task.ChannelId)
 	assert.Equal(t, "cgt-channel-b-success", task.PrivateData.UpstreamTaskID)
-	assert.Equal(t, seedanceE2EExpectedQuota(seedanceE2E720WithVideoUSDSecond, 11), task.Quota)
+	assert.Equal(t, seedanceE2EExpectedMultimodalQuota(t), task.Quota)
 	var billedUser model.User
 	var billedChannelA model.Channel
 	var billedChannelB model.Channel

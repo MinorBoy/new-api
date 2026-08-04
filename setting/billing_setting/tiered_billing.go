@@ -12,26 +12,30 @@ import (
 )
 
 const (
-	BillingModeRatio       = "ratio"
-	BillingModeTieredExpr  = "tiered_expr"
-	BillingModePerDuration = "per_duration"
-	BillingModeField       = "billing_mode"
-	BillingExprField       = "billing_expr"
-	DurationPriceField     = "duration_price"
+	BillingModeRatio          = "ratio"
+	BillingModeTieredExpr     = "tiered_expr"
+	BillingModePerDuration    = "per_duration"
+	BillingModeSeedanceTokens = "seedance_tokens"
+	BillingModeField          = "billing_mode"
+	BillingExprField          = "billing_expr"
+	DurationPriceField        = "duration_price"
+	SeedanceTokenPriceField   = "seedance_token_price"
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr, billing_setting.duration_price
 type BillingSetting struct {
-	BillingMode   *types.RWMap[string, string]              `json:"billing_mode"`
-	BillingExpr   *types.RWMap[string, string]              `json:"billing_expr"`
-	DurationPrice *types.RWMap[string, types.DurationPrice] `json:"duration_price"`
+	BillingMode        *types.RWMap[string, string]                   `json:"billing_mode"`
+	BillingExpr        *types.RWMap[string, string]                   `json:"billing_expr"`
+	DurationPrice      *types.RWMap[string, types.DurationPrice]      `json:"duration_price"`
+	SeedanceTokenPrice *types.RWMap[string, types.SeedanceTokenPrice] `json:"seedance_token_price"`
 }
 
 var billingSetting = BillingSetting{
-	BillingMode:   types.NewRWMap[string, string](),
-	BillingExpr:   types.NewRWMap[string, string](),
-	DurationPrice: types.NewRWMap[string, types.DurationPrice](),
+	BillingMode:        types.NewRWMap[string, string](),
+	BillingExpr:        types.NewRWMap[string, string](),
+	DurationPrice:      types.NewRWMap[string, types.DurationPrice](),
+	SeedanceTokenPrice: types.NewRWMap[string, types.SeedanceTokenPrice](),
 }
 
 func init() {
@@ -94,7 +98,7 @@ func GetBillingExprCopy() map[string]string {
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {
-	extra := make(map[string]any, 3)
+	extra := make(map[string]any, 4)
 	if modes := GetBillingModeCopy(); len(modes) > 0 {
 		extra[BillingModeField] = modes
 	}
@@ -103,6 +107,9 @@ func GetPricingSyncData(base map[string]any) map[string]any {
 	}
 	if prices := GetDurationPriceCopy(); len(prices) > 0 {
 		extra[DurationPriceField] = prices
+	}
+	if prices := GetSeedanceTokenPriceCopy(); len(prices) > 0 {
+		extra[SeedanceTokenPriceField] = prices
 	}
 	return lo.Assign(base, extra)
 }

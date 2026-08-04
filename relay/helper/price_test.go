@@ -57,6 +57,42 @@ func TestModelPriceHelperPerCallBuildsDurationPriceData(t *testing.T) {
 	assert.True(t, HasModelBillingConfig("duration-alias"))
 }
 
+func TestModelPriceHelperPerCallBuildsSeedanceTokenPriceData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"doubao-seedance-2-0-mini-260615":"seedance_tokens"}`,
+		"billing_setting.seedance_token_price": `{"doubao-seedance-2-0-mini-260615":{"scenarios":{"480p:with_video":{` +
+			`"price_per_million":"1.917808219178082","width":864,"height":496,"frame_rate":24,` +
+			`"pricing_version":"official-token-v1","source":"SRC-OFFICIAL-SEEDANCE-2-0-MINI!18"}}}}`,
+		"group_ratio_setting.group_ratio": `{"default":1.25}`,
+	}))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "doubao-seedance-2-0-mini-260615",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+
+	priceData, err := ModelPriceHelperPerCall(ctx, info)
+
+	require.NoError(t, err)
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, priceData.BillingMode)
+	require.NotNil(t, priceData.SeedanceTokenPrice)
+	assert.Equal(t, "1.917808219178082", priceData.SeedanceTokenPrice.Scenarios["480p:with_video"].PricePerMillion)
+	assert.Equal(t, 1.25, priceData.GroupRatioInfo.GroupRatio)
+	assert.False(t, priceData.FreeModel)
+	assert.True(t, HasModelBillingConfig("doubao-seedance-2-0-mini-260615"))
+}
+
 func TestModelPriceHelperPerCallDoesNotTreatPricedScenarioAsFree(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -75,9 +111,8 @@ func TestModelPriceHelperPerCallDoesNotTreatPricedScenarioAsFree(t *testing.T) {
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"billing_setting.billing_mode": `{"scenario-duration":"per_duration"}`,
-		"billing_setting.duration_price": `{"scenario-duration":{"scenarios":{"720p:no_video":{` +
-			`"output_price":0.1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,` +
-			`"pricing_version":"official-sheet-v1","source":"official_price_sheet"}}}}`,
+		"billing_setting.duration_price": `{"scenario-duration":{` +
+			`"price":0.1,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`,
 		"group_ratio_setting.group_ratio": `{"default":1}`,
 	}))
 

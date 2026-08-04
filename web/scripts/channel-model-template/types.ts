@@ -110,7 +110,7 @@ export type SaleRow = {
   clientModel: string
   skuCode: string
   scenario: 'no_video' | 'with_video'
-  billingMode: 'per_token' | 'per_duration'
+  billingMode: 'seedance_tokens' | 'per_token' | 'per_duration'
   currency: string
   nativePerMillion: string
   outputWidth: number

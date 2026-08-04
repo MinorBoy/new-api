@@ -67,6 +67,9 @@ export interface DrawingLogFilters extends CommonFilters {
  */
 export interface TaskLogFilters extends CommonFilters {
   taskId?: string
+  status?: string
+  requestModel?: string
+  userId?: string
 }
 
 /**
@@ -404,8 +407,39 @@ export interface GetTaskLogsParams {
   page_size?: number
   channel_id?: string
   task_id?: string
+  status?: string
+  request_model?: string
+  user_id?: string
   start_timestamp?: number
   end_timestamp?: number
+}
+
+export interface TaskLogFilterUser {
+  id: number
+  username: string
+}
+
+export interface TaskLogFilterChannel {
+  id: number
+  name: string
+}
+
+export interface TaskLogFilterOptionsData {
+  channels?: TaskLogFilterChannel[]
+  statuses?: string[]
+  request_models?: string[]
+  users?: TaskLogFilterUser[]
+}
+
+export interface GetTaskLogFilterOptionsParams {
+  start_timestamp?: number
+  end_timestamp?: number
+}
+
+export interface GetTaskLogFilterOptionsResponse {
+  success: boolean
+  message?: string
+  data?: TaskLogFilterOptionsData
 }
 
 // ============================================================================

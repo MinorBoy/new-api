@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -45,32 +46,73 @@ func PreviewFinalUserQuota(ctx *gin.Context, info *relaycommon.RelayInfo, input 
 	if previewInfo.PriceData.FreeModel {
 		return 0, nil
 	}
+	if previewInfo.PriceData.BillingMode == billing_setting.BillingModeSeedanceTokens {
+		if previewInfo.PriceData.SeedanceTokenPrice == nil {
+			return 0, errors.New("Seedance token price is unavailable")
+		}
+		requestedSeconds := previewInfo.PriceData.RequestedDurationSeconds
+		if input.DurationSeconds != nil {
+			requestedSeconds = *input.DurationSeconds
+		}
+		scenario, ok := previewInfo.PriceData.SeedanceTokenPrice.ScenarioFor(
+			previewInfo.PriceData.DurationResolution,
+			previewInfo.PriceData.HasVideoInput,
+		)
+		if !ok {
+			return 0, fmt.Errorf(
+				"Seedance token price scenario is unavailable for resolution %s and video_input=%t",
+				previewInfo.PriceData.DurationResolution,
+				previewInfo.PriceData.HasVideoInput,
+			)
+		}
+		usage := types.SeedanceTokenUsage{}
+		if input.Usage != nil {
+			usage = types.SeedanceTokenUsage{
+				InputTokens:  input.Usage.PromptTokens,
+				OutputTokens: input.Usage.CompletionTokens,
+				TotalTokens:  input.Usage.TotalTokens,
+			}
+		} else {
+			inputTokens, outputTokens, totalTokens, err := EstimateSeedanceTokens(ProfitRoutingFacts{
+				OutputDurationSeconds: requestedSeconds,
+				InputDurationMS:       previewInfo.PriceData.InputVideoDurationMS,
+				Width:                 scenario.Width,
+				Height:                scenario.Height,
+				FrameRateNum:          int64(scenario.FrameRate),
+				FrameRateDen:          1,
+			})
+			if err != nil {
+				return 0, err
+			}
+			usage = types.SeedanceTokenUsage{
+				InputTokens:  int(inputTokens),
+				OutputTokens: int(outputTokens),
+				TotalTokens:  int(totalTokens),
+			}
+		}
+		charge, err := previewInfo.PriceData.SeedanceTokenPrice.CalculateCharge(
+			previewInfo.PriceData.DurationResolution,
+			previewInfo.PriceData.HasVideoInput,
+			previewInfo.PriceData.InputVideoDurationMS,
+			requestedSeconds,
+			usage,
+			relaycommon.MaxTokensLimit,
+		)
+		if err != nil {
+			return 0, err
+		}
+		finalCharge := charge.BaseCharge.Mul(decimal.NewFromFloat(previewInfo.PriceData.GroupRatioInfo.GroupRatio))
+		quota, clamp := common.QuotaFromDecimalChecked(finalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+		if clamp != nil {
+			return 0, fmt.Errorf("billing preview quota is out of range: %w", clamp)
+		}
+		return int64(quota), nil
+	}
 
 	if previewInfo.PriceData.DurationPrice != nil {
 		requestedSeconds := previewInfo.PriceData.RequestedDurationSeconds
 		if input.DurationSeconds != nil {
 			requestedSeconds = *input.DurationSeconds
-		}
-		if len(previewInfo.PriceData.DurationPrice.Scenarios) > 0 {
-			charge, err := previewInfo.PriceData.DurationPrice.CalculateCharge(
-				requestedSeconds,
-				previewInfo.PriceData.DurationResolution,
-				previewInfo.PriceData.HasVideoInput,
-				previewInfo.PriceData.InputVideoDurationMS,
-				relaycommon.MaxTaskDurationSeconds,
-			)
-			if err != nil {
-				return 0, err
-			}
-			previewInfo.PriceData.DurationBilling = charge.Breakdown()
-			quotaDecimal := charge.TotalCharge.
-				Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-				Mul(decimal.NewFromFloat(previewInfo.PriceData.GroupRatioInfo.GroupRatio))
-			quota, clamp := common.QuotaFromDecimalChecked(quotaDecimal)
-			if clamp != nil {
-				return 0, fmt.Errorf("billing preview quota is out of range: %w", clamp)
-			}
-			return int64(quota), nil
 		}
 		billableSeconds, err := previewInfo.PriceData.DurationPrice.BillableSeconds(requestedSeconds, relaycommon.MaxTaskDurationSeconds)
 		if err != nil {

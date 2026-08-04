@@ -186,7 +186,24 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 // ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hosttypes.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
-	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModePerDuration {
+	billingMode := billing_setting.GetBillingMode(info.OriginModelName)
+	if billingMode == billing_setting.BillingModeSeedanceTokens {
+		seedanceTokenPrice, ok := billing_setting.GetSeedanceTokenPrice(info.OriginModelName)
+		if !ok {
+			return hosttypes.PriceData{}, fmt.Errorf("model %s is configured as seedance_tokens but has no Seedance token price", info.OriginModelName)
+		}
+		if err := seedanceTokenPrice.Validate(relaycommon.MaxTokensLimit); err != nil {
+			return hosttypes.PriceData{}, fmt.Errorf("model %s has invalid Seedance token price: %w", info.OriginModelName, err)
+		}
+		freeModel := !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && groupRatioInfo.GroupRatio == 0
+		return hosttypes.PriceData{
+			FreeModel:          freeModel,
+			BillingMode:        billing_setting.BillingModeSeedanceTokens,
+			SeedanceTokenPrice: &seedanceTokenPrice,
+			GroupRatioInfo:     groupRatioInfo,
+		}, nil
+	}
+	if billingMode == billing_setting.BillingModePerDuration {
 		durationPrice, ok := billing_setting.GetDurationPrice(info.OriginModelName)
 		if !ok {
 			return hosttypes.PriceData{}, fmt.Errorf("model %s is configured as per_duration but has no duration price", info.OriginModelName)
@@ -195,18 +212,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 			return hosttypes.PriceData{}, fmt.Errorf("model %s has invalid duration price: %w", info.OriginModelName, err)
 		}
 
-		freeModel := groupRatioInfo.GroupRatio == 0
-		if len(durationPrice.Scenarios) == 0 {
-			freeModel = freeModel || durationPrice.Price == 0
-		} else if !freeModel {
-			freeModel = true
-			for _, scenario := range durationPrice.Scenarios {
-				if scenario.OutputPrice > 0 {
-					freeModel = false
-					break
-				}
-			}
-		}
+		freeModel := groupRatioInfo.GroupRatio == 0 || durationPrice.Price == 0
 		freeModel = !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && freeModel
 		return hosttypes.PriceData{
 			FreeModel:      freeModel,
@@ -283,7 +289,12 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 }
 
 func HasModelBillingConfig(modelName string) bool {
-	if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModePerDuration {
+	billingMode := billing_setting.GetBillingMode(modelName)
+	if billingMode == billing_setting.BillingModeSeedanceTokens {
+		price, ok := billing_setting.GetSeedanceTokenPrice(modelName)
+		return ok && price.Validate(relaycommon.MaxTokensLimit) == nil
+	}
+	if billingMode == billing_setting.BillingModePerDuration {
 		durationPrice, ok := billing_setting.GetDurationPrice(modelName)
 		return ok && durationPrice.Validate(relaycommon.MaxTaskDurationSeconds) == nil
 	}

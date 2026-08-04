@@ -40,7 +40,7 @@ func TestConfigImportStagePersistsCostDraftWithoutActivatingConfiguration(t *tes
 	assert.Empty(t, detail.Issues)
 }
 
-func TestConfigImportSeedanceSaleStagesExplicitScenarioPrice(t *testing.T) {
+func TestConfigImportSeedanceSaleStagesOfficialTokenScenarioPrice(t *testing.T) {
 	var proposal types.ConfigImportSaleProposal
 	require.NoError(t, common.UnmarshalJsonStr(`{
 		"business_id":"sale-mini-720-with-video",
@@ -51,13 +51,13 @@ func TestConfigImportSeedanceSaleStagesExplicitScenarioPrice(t *testing.T) {
 		"scenario":"with_video",
 		"resolution":"720p",
 		"currency":"USD",
-		"billing_mode":"per_duration",
-		"duration_price":{
-			"price":"0.08",
-			"unit":"second",
-			"rounding_step_seconds":1,
-			"minimum_duration_seconds":4,
-			"pricing_version":"official-sheet-v1",
+		"billing_mode":"seedance_tokens",
+		"seedance_token_price":{
+			"price_per_million":"1.917808219178082",
+			"width":1280,
+			"height":720,
+			"frame_rate":24,
+			"pricing_version":"official-token-v1",
 			"source":"SRC-OFFICIAL-SEEDANCE-2-0-MINI!7"
 		}
 	}`, &proposal))
@@ -68,26 +68,29 @@ func TestConfigImportSeedanceSaleStagesExplicitScenarioPrice(t *testing.T) {
 	encoded, marshalErr := common.Marshal(patches)
 	require.NoError(t, marshalErr)
 	assert.Contains(t, string(encoded), `"720p:with_video"`)
-	assert.Contains(t, string(encoded), `"output_price":0.08`)
-	assert.NotContains(t, string(encoded), `"input_video_price"`)
-	assert.Contains(t, string(encoded), `"pricing_version":"official-sheet-v1"`)
+	assert.Contains(t, string(encoded), `"price_per_million":"1.917808219178082"`)
+	assert.Contains(t, string(encoded), `"width":1280`)
+	assert.Contains(t, string(encoded), `"height":720`)
+	assert.Contains(t, string(encoded), `"frame_rate":24`)
+	assert.Contains(t, string(encoded), `"pricing_version":"official-token-v1"`)
+	assert.NotContains(t, string(encoded), `"duration_price"`)
 }
 
 func TestConfigImportSeedanceSaleRejectsMissingOfficialPriceAuditFields(t *testing.T) {
 	base := configImportOfficialSeedanceSaleProposalForTest()
 	tests := []struct {
 		name   string
-		mutate func(*types.DurationPriceProposal)
+		mutate func(*types.SeedanceTokenPriceProposal)
 	}{
-		{name: "pricing version", mutate: func(price *types.DurationPriceProposal) { price.PricingVersion = "" }},
-		{name: "source", mutate: func(price *types.DurationPriceProposal) { price.Source = "" }},
+		{name: "pricing version", mutate: func(price *types.SeedanceTokenPriceProposal) { price.PricingVersion = "" }},
+		{name: "source", mutate: func(price *types.SeedanceTokenPriceProposal) { price.Source = "" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			proposal := base
-			price := *base.DurationPrice
-			proposal.DurationPrice = &price
-			test.mutate(proposal.DurationPrice)
+			price := *base.SeedanceTokenPrice
+			proposal.SeedanceTokenPrice = &price
+			test.mutate(proposal.SeedanceTokenPrice)
 
 			_, err := configImportSaleOptionPatches(proposal, modelrouting.Seedance20)
 
@@ -105,11 +108,13 @@ func TestConfigImportSeedanceSaleRejectsNonOfficialUSDSource(t *testing.T) {
 		expectCode string
 	}{
 		{name: "currency", mutate: func(proposal *types.ConfigImportSaleProposal) { proposal.Currency = "CNY" }, expectCode: "PRICING_SEEDANCE_OFFICIAL_CURRENCY"},
-		{name: "pricing version", mutate: func(proposal *types.ConfigImportSaleProposal) { proposal.DurationPrice.PricingVersion = "custom-v1" }, expectCode: "PRICING_SEEDANCE_OFFICIAL_SOURCE"},
+		{name: "pricing version", mutate: func(proposal *types.ConfigImportSaleProposal) {
+			proposal.SeedanceTokenPrice.PricingVersion = "custom-v1"
+		}, expectCode: "PRICING_SEEDANCE_OFFICIAL_SOURCE"},
 		{name: "sheet", mutate: func(proposal *types.ConfigImportSaleProposal) { proposal.Sheet = "渠道成本" }, expectCode: "PRICING_SEEDANCE_OFFICIAL_SOURCE"},
 		{name: "source reference", mutate: func(proposal *types.ConfigImportSaleProposal) { proposal.SourceRef = "SRC-CH-1" }, expectCode: "PRICING_SEEDANCE_OFFICIAL_SOURCE"},
 		{name: "source row", mutate: func(proposal *types.ConfigImportSaleProposal) {
-			proposal.DurationPrice.Source = "SRC-OFFICIAL-SEEDANCE-2-0!99"
+			proposal.SeedanceTokenPrice.Source = "SRC-OFFICIAL-SEEDANCE-2-0!99"
 		}, expectCode: "PRICING_SEEDANCE_OFFICIAL_SOURCE"},
 		{name: "missing row", mutate: func(proposal *types.ConfigImportSaleProposal) { proposal.Row = nil }, expectCode: "PRICING_SEEDANCE_OFFICIAL_SOURCE"},
 	}
@@ -137,17 +142,17 @@ func configImportOfficialSeedanceSaleProposalForTest() types.ConfigImportSalePro
 			Row:        &row,
 		},
 		ModelSKURef: "sku-seedance",
-		Scenario:    types.DurationScenarioNoVideo,
+		Scenario:    types.SeedanceTokenScenarioNoVideo,
 		Resolution:  "720p",
 		Currency:    "USD",
-		BillingMode: billing_setting.BillingModePerDuration,
-		DurationPrice: &types.DurationPriceProposal{
-			Price:                  "0.08",
-			Unit:                   types.DurationUnitSecond,
-			RoundingStepSeconds:    1,
-			MinimumDurationSeconds: 0,
-			PricingVersion:         "official-sheet-v1",
-			Source:                 "SRC-OFFICIAL-SEEDANCE-2-0!5",
+		BillingMode: billing_setting.BillingModeSeedanceTokens,
+		SeedanceTokenPrice: &types.SeedanceTokenPriceProposal{
+			PricePerMillion: "1.917808219178082",
+			Width:           1280,
+			Height:          720,
+			FrameRate:       24,
+			PricingVersion:  "official-token-v1",
+			Source:          "SRC-OFFICIAL-SEEDANCE-2-0!5",
 		},
 	}
 }
@@ -352,11 +357,11 @@ func TestConfigImportPricingStagesTokenPricesAsVersionedExpression(t *testing.T)
 	assert.Equal(t, map[string]string{"canonical-model": recomputed.BillingExpr}, patches["billing_setting.billing_expr"])
 }
 
-func TestConfigImportSeedanceSaleStagesExplicitDurationPriceForMiniAliases(t *testing.T) {
+func TestConfigImportSeedanceSaleStagesOfficialTokenPriceForMiniAliases(t *testing.T) {
 	proposal := configImportOfficialSeedanceSaleProposalForTest()
 	proposal.BusinessID = "sale-seedance-mini"
 	proposal.ModelSKURef = "sku-mini"
-	proposal.DurationPrice.Price = "0.31"
+	proposal.SeedanceTokenPrice.PricePerMillion = "1.91"
 
 	recomputed, _, err := recomputeConfigImportSaleProposal(proposal, "0")
 	require.NoError(t, err)
@@ -365,20 +370,24 @@ func TestConfigImportSeedanceSaleStagesExplicitDurationPriceForMiniAliases(t *te
 
 	miniAliases := []string{modelrouting.Seedance20Mini, "doubao-seedance-2-0-mini-260128"}
 	assert.Equal(t, map[string]string{
-		miniAliases[0]: billing_setting.BillingModePerDuration,
-		miniAliases[1]: billing_setting.BillingModePerDuration,
+		miniAliases[0]: billing_setting.BillingModeSeedanceTokens,
+		miniAliases[1]: billing_setting.BillingModeSeedanceTokens,
 	}, patches["billing_setting.billing_mode"])
-	prices, ok := patches["billing_setting.duration_price"].(map[string]types.DurationPrice)
+	prices, ok := patches["billing_setting.seedance_token_price"].(map[string]types.SeedanceTokenPrice)
 	require.True(t, ok)
 	for _, modelName := range miniAliases {
 		price, found := prices[modelName]
 		require.True(t, found)
 		scenarioPrice, found := price.Scenarios["720p:no_video"]
 		require.True(t, found)
-		assert.Equal(t, 0.31, scenarioPrice.OutputPrice)
-		assert.Equal(t, types.DurationUnitSecond, scenarioPrice.Unit)
-		assert.Equal(t, 1, scenarioPrice.RoundingStepSeconds)
+		assert.Equal(t, "1.91", scenarioPrice.PricePerMillion)
+		assert.Equal(t, 1280, scenarioPrice.Width)
+		assert.Equal(t, 720, scenarioPrice.Height)
+		assert.Equal(t, 24, scenarioPrice.FrameRate)
 	}
+	durationCleanup, ok := patches["billing_setting.duration_price"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, map[string]any{miniAliases[0]: nil, miniAliases[1]: nil}, durationCleanup)
 	assert.Equal(t, map[string]string{
 		miniAliases[0]: "",
 		miniAliases[1]: "",

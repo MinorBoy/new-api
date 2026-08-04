@@ -23,7 +23,6 @@ import (
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -263,29 +262,25 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			hasVideoInput := target.RequestRefs.Videos > 0
 			require.Equal(t, hasVideoInput, task.PrivateData.BillingContext.HasVideoInput, target.CaseID)
 			require.Equal(t, importedMaterialMatrixGroupRatio, task.PrivateData.BillingContext.GroupRatio, target.CaseID)
-			require.NotNil(t, task.PrivateData.BillingContext.DurationBilling, target.CaseID)
-			durationPrice, ok := billing_setting.GetDurationPrice(target.RuntimeModel)
-			require.True(t, ok, target.CaseID)
-			charge, err := durationPrice.CalculateCharge(
-				target.Duration,
-				target.Resolution,
-				hasVideoInput,
-				task.PrivateData.BillingContext.InputVideoDurationMS,
-				relaycommon.MaxTaskDurationSeconds,
-			)
+			require.Equal(t, billing_setting.BillingModeSeedanceTokens, task.PrivateData.BillingContext.BillingMode, target.CaseID)
+			require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenPrice, target.CaseID)
+			require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenBilling, target.CaseID)
+			seedanceBilling := task.PrivateData.BillingContext.SeedanceTokenBilling
+			expectedFinalCharge, err := decimal.NewFromString(seedanceBilling.FinalCharge)
 			require.NoError(t, err, target.CaseID)
-			expectedFinalCharge := charge.TotalCharge.Mul(decimal.NewFromFloat(importedMaterialMatrixGroupRatio))
 			expectedQuota := common.QuotaFromDecimal(expectedFinalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
 			require.Equal(t, expectedQuota, task.Quota, target.CaseID)
-			require.Equal(t, "official-sheet-v1", task.PrivateData.BillingContext.DurationBilling.PricingVersion, target.CaseID)
-			require.Equal(t, charge.OutputCharge.String(), task.PrivateData.BillingContext.DurationBilling.OutputCharge, target.CaseID)
-			require.Equal(t, expectedFinalCharge.String(), task.PrivateData.BillingContext.DurationBilling.FinalCharge, target.CaseID)
+			require.Equal(t, "official-token-v1", seedanceBilling.PricingVersion, target.CaseID)
+			require.Equal(t, target.Resolution, seedanceBilling.Resolution, target.CaseID)
+			require.Equal(t, target.Duration, seedanceBilling.OutputDurationSeconds, target.CaseID)
+			require.Positive(t, seedanceBilling.OutputTokens, target.CaseID)
+			require.Equal(t, seedanceBilling.InputTokens+seedanceBilling.OutputTokens, seedanceBilling.TotalTokens, target.CaseID)
 			if hasVideoInput {
-				alternate, alternateErr := durationPrice.CalculateCharge(
-					target.Duration, target.Resolution, true, 1, relaycommon.MaxTaskDurationSeconds,
-				)
-				require.NoError(t, alternateErr, target.CaseID)
-				require.Equal(t, charge.TotalCharge.String(), alternate.TotalCharge.String(), target.CaseID)
+				require.Positive(t, seedanceBilling.InputVideoDurationMS, target.CaseID)
+				require.Positive(t, seedanceBilling.InputTokens, target.CaseID)
+			} else {
+				require.Zero(t, seedanceBilling.InputVideoDurationMS, target.CaseID)
+				require.Zero(t, seedanceBilling.InputTokens, target.CaseID)
 			}
 			require.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion, target.CaseID)
 			require.Positive(t, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
@@ -316,7 +311,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.GreaterOrEqual(t, publicTask.Usage.TotalTokens, publicTask.Usage.CompletionTokens, target.CaseID)
 			require.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, publicTask.Usage.CompletionTokens, target.CaseID)
 			require.Equal(t, task.PrivateData.BillingContext.UsageTotalTokens, publicTask.Usage.TotalTokens, target.CaseID)
-			require.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, task.PrivateData.BillingContext.BillingTokens, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.UsageTotalTokens, task.PrivateData.BillingContext.BillingTokens, target.CaseID)
 			require.NotContains(t, string(single), "usage_source", target.CaseID)
 
 			after := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
@@ -375,17 +370,11 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.UpstreamModel, costAttempt.BillableUpstreamModel, target.CaseID)
 			require.Equal(t, target.CostVariantKey, costAttempt.CostVariantKey, target.CaseID)
 			require.Equal(t, string(target.CostMode), costAttempt.CostMode, target.CaseID)
-			if target.CostMode == types.CostModePerToken && task.PrivateData.BillingContext.UsageSource == model.TaskUsageSourceLocalCalculated {
-				require.Equal(t, string(types.CostAttemptSettlementFailed), costAttempt.Status, target.CaseID)
-				require.Nil(t, costAttempt.CostNanoUSD, target.CaseID)
-				require.NotContains(t, costAttempt.ActualMeterJSON, "completion_tokens", target.CaseID)
-				require.NotContains(t, costAttempt.ActualMeterJSON, "total_tokens", target.CaseID)
-			} else {
-				require.Equal(t, string(types.CostAttemptSettled), costAttempt.Status, target.CaseID)
-				require.NotNil(t, costAttempt.CostNanoUSD, target.CaseID)
-				if target.CostMode == types.CostModePerToken {
-					require.Contains(t, costAttempt.ActualMeterJSON, "total_tokens", target.CaseID)
-				}
+			require.Equal(t, string(types.CostAttemptSettled), costAttempt.Status, target.CaseID)
+			require.NotNil(t, costAttempt.CostNanoUSD, target.CaseID)
+			if target.CostMode == types.CostModePerToken {
+				require.Contains(t, costAttempt.ActualMeterJSON, "completion_tokens", target.CaseID)
+				require.Contains(t, costAttempt.ActualMeterJSON, "total_tokens", target.CaseID)
 			}
 			var attemptConfig types.CostRuleConfigV1
 			require.NoError(t, common.UnmarshalJsonStr(costAttempt.RuleConfigJSON, &attemptConfig), target.CaseID)

@@ -19,7 +19,6 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,16 +51,34 @@ type capabilityRecordingServer struct {
 	requests       []mockArkRequest
 	submitStatus   int
 	submitResponse string
+	submittedModel string
 }
 
 func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	var submittedModel string
+	if r.Method == http.MethodPost && isVideoSubmitPath(r.URL.Path) {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if common.Unmarshal(body, &request) == nil {
+			submittedModel = request.Model
+		}
+	}
 	m.mu.Lock()
 	m.requests = append(m.requests, mockArkRequest{
 		Method: r.Method, Path: r.URL.Path, Authorization: r.Header.Get("Authorization"),
 		ContentType: r.Header.Get("Content-Type"), Body: append([]byte(nil), body...),
 	})
+	if submittedModel != "" {
+		m.submittedModel = submittedModel
+	}
+	lastSubmittedModel := m.submittedModel
 	m.mu.Unlock()
+	pollingResponse := newAPIVideoPollingResponse
+	if strings.HasSuffix(lastSubmittedModel, "-token") {
+		pollingResponse = strings.Replace(pollingResponse, `"total_tokens":216900`, `"total_tokens":281700`, 1)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	switch {
@@ -75,9 +92,9 @@ func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Req
 		}
 		_, _ = w.Write([]byte(response))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/video/generations/"):
-		_, _ = w.Write([]byte(newAPIVideoPollingResponse))
+		_, _ = w.Write([]byte(pollingResponse))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/task/"):
-		_, _ = w.Write([]byte(newAPIVideoPollingResponse))
+		_, _ = w.Write([]byte(pollingResponse))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/tasks/"):
 		_, _ = w.Write([]byte(`{"task_id":"upstream-task","status":"completed","progress":100,"result":{"url":"https://example.com/video.mp4"}}`))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
@@ -87,6 +104,33 @@ func (m *capabilityRecordingServer) ServeHTTP(w http.ResponseWriter, r *http.Req
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func TestCapabilityRecordingServerReportsInputTokensForTokenPricedModel(t *testing.T) {
+	server := &capabilityRecordingServer{}
+	submit := httptest.NewRecorder()
+	server.ServeHTTP(submit, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/video/generations",
+		strings.NewReader(`{"model":"seedance-720p-token"}`),
+	))
+	require.Equal(t, http.StatusOK, submit.Code)
+
+	poll := httptest.NewRecorder()
+	server.ServeHTTP(poll, httptest.NewRequest(http.MethodGet, "/v1/video/generations/upstream-task", nil))
+	require.Equal(t, http.StatusOK, poll.Code)
+	var response struct {
+		Data struct {
+			Data struct {
+				Usage struct {
+					CompletionTokens int `json:"completion_tokens"`
+					TotalTokens      int `json:"total_tokens"`
+				} `json:"usage"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(poll.Body.Bytes(), &response))
+	require.Greater(t, response.Data.Data.Usage.TotalTokens, response.Data.Data.Usage.CompletionTokens)
 }
 
 func isVideoSubmitPath(path string) bool {
@@ -429,11 +473,13 @@ func TestSeedanceCapabilityRoutingPrivacyAndBillingE2E(t *testing.T) {
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, modelrouting.Seedance20, task.PrivateData.BillingContext.OriginModelName)
 	assert.Zero(t, task.PrivateData.BillingContext.ModelRatio)
-	assert.Equal(t, billing_setting.BillingModePerDuration, task.PrivateData.BillingContext.BillingMode)
-	require.NotNil(t, task.PrivateData.BillingContext.DurationBilling)
-	assert.Equal(t, "1080p", task.PrivateData.BillingContext.DurationBilling.Resolution)
-	assert.Equal(t, types.DurationScenarioWithVideo, task.PrivateData.BillingContext.DurationBilling.Scenario)
-	assert.Equal(t, "official-sheet-v1", task.PrivateData.BillingContext.DurationBilling.PricingVersion)
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, task.PrivateData.BillingContext.BillingMode)
+	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenBilling)
+	assert.Equal(t, "1080p", task.PrivateData.BillingContext.SeedanceTokenBilling.Resolution)
+	assert.Equal(t, "with_video", task.PrivateData.BillingContext.SeedanceTokenBilling.Scenario)
+	assert.Equal(t, "official-token-v1", task.PrivateData.BillingContext.SeedanceTokenBilling.PricingVersion)
+	assert.Positive(t, task.PrivateData.BillingContext.SeedanceTokenBilling.TotalTokens)
+	assert.Equal(t, task.PrivateData.BillingContext.SeedanceTokenBilling.TotalTokens, task.PrivateData.BillingContext.BillingTokens)
 	assert.Positive(t, task.Quota)
 
 	status, single := performJSONRequest(t, env.engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+publicID, "Bearer e2e", "")

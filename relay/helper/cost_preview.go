@@ -62,7 +62,8 @@ func previewUserBillingQuotaForUserWithSeedanceInput(userId int, input dto.CostP
 		if priceErr != nil {
 			return 0, "", priceErr
 		}
-		if priceData.BillingMode == billing_setting.BillingModePerDuration {
+		if priceData.BillingMode == billing_setting.BillingModePerDuration ||
+			priceData.BillingMode == billing_setting.BillingModeSeedanceTokens {
 			priceData.DurationResolution = resolution
 			priceData.HasVideoInput = hasVideoInput
 			priceData.InputVideoDurationMS = inputDurationMS

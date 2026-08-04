@@ -75,6 +75,7 @@ var pricingSyncFields = []string{
 	billing_setting.BillingModeField,
 	billing_setting.BillingExprField,
 	billing_setting.DurationPriceField,
+	billing_setting.SeedanceTokenPriceField,
 }
 
 var numericPricingSyncFields = map[string]bool{
@@ -104,6 +105,8 @@ func valueMap(value any) map[string]any {
 		return lo.MapValues(typed, func(value string, _ string) any { return value })
 	case map[string]types.DurationPrice:
 		return lo.MapValues(typed, func(value types.DurationPrice, _ string) any { return value })
+	case map[string]types.SeedanceTokenPrice:
+		return lo.MapValues(typed, func(value types.SeedanceTokenPrice, _ string) any { return value })
 	default:
 		return nil
 	}
@@ -148,6 +151,26 @@ func normalizeSyncValue(field string, value any) any {
 				return value
 			}
 			var price types.DurationPrice
+			if err := common.Unmarshal(data, &price); err == nil {
+				return price
+			}
+		}
+	}
+	if field == billing_setting.SeedanceTokenPriceField {
+		switch typed := value.(type) {
+		case types.SeedanceTokenPrice:
+			return typed
+		case *types.SeedanceTokenPrice:
+			if typed == nil {
+				return nil
+			}
+			return *typed
+		default:
+			data, err := common.Marshal(value)
+			if err != nil {
+				return value
+			}
+			var price types.SeedanceTokenPrice
 			if err := common.Unmarshal(data, &price); err == nil {
 				return price
 			}
@@ -404,19 +427,20 @@ func FetchUpstreamRatios(c *gin.Context) {
 
 			// 如果不是 type1，则尝试按 type2 (/api/pricing) 解析
 			var pricingItems []struct {
-				ModelName            string               `json:"model_name"`
-				QuotaType            int                  `json:"quota_type"`
-				ModelRatio           float64              `json:"model_ratio"`
-				ModelPrice           float64              `json:"model_price"`
-				CompletionRatio      float64              `json:"completion_ratio"`
-				CacheRatio           *float64             `json:"cache_ratio"`
-				CreateCacheRatio     *float64             `json:"create_cache_ratio"`
-				ImageRatio           *float64             `json:"image_ratio"`
-				AudioRatio           *float64             `json:"audio_ratio"`
-				AudioCompletionRatio *float64             `json:"audio_completion_ratio"`
-				BillingMode          string               `json:"billing_mode"`
-				BillingExpr          string               `json:"billing_expr"`
-				DurationPrice        *types.DurationPrice `json:"duration_price"`
+				ModelName            string                    `json:"model_name"`
+				QuotaType            int                       `json:"quota_type"`
+				ModelRatio           float64                   `json:"model_ratio"`
+				ModelPrice           float64                   `json:"model_price"`
+				CompletionRatio      float64                   `json:"completion_ratio"`
+				CacheRatio           *float64                  `json:"cache_ratio"`
+				CreateCacheRatio     *float64                  `json:"create_cache_ratio"`
+				ImageRatio           *float64                  `json:"image_ratio"`
+				AudioRatio           *float64                  `json:"audio_ratio"`
+				AudioCompletionRatio *float64                  `json:"audio_completion_ratio"`
+				BillingMode          string                    `json:"billing_mode"`
+				BillingExpr          string                    `json:"billing_expr"`
+				DurationPrice        *types.DurationPrice      `json:"duration_price"`
+				SeedanceTokenPrice   *types.SeedanceTokenPrice `json:"seedance_token_price"`
 			}
 			if err := common.Unmarshal(body.Data, &pricingItems); err != nil {
 				logger.LogWarn(c.Request.Context(), "unrecognized data format from "+chItem.Name+": "+err.Error())
@@ -435,20 +459,25 @@ func FetchUpstreamRatios(c *gin.Context) {
 			billingModeMap := make(map[string]string)
 			billingExprMap := make(map[string]string)
 			durationPriceMap := make(map[string]types.DurationPrice)
+			seedanceTokenPriceMap := make(map[string]types.SeedanceTokenPrice)
 
 			for _, item := range pricingItems {
 				if item.ModelName == "" {
 					continue
 				}
 				isDuration := item.BillingMode == billing_setting.BillingModePerDuration && item.DurationPrice != nil
+				isSeedanceTokens := item.BillingMode == billing_setting.BillingModeSeedanceTokens && item.SeedanceTokenPrice != nil
 				if isDuration {
 					billingModeMap[item.ModelName] = billing_setting.BillingModePerDuration
 					durationPriceMap[item.ModelName] = *item.DurationPrice
+				} else if isSeedanceTokens {
+					billingModeMap[item.ModelName] = billing_setting.BillingModeSeedanceTokens
+					seedanceTokenPriceMap[item.ModelName] = *item.SeedanceTokenPrice
 				} else if item.BillingMode == billing_setting.BillingModeTieredExpr && strings.TrimSpace(item.BillingExpr) != "" {
 					billingModeMap[item.ModelName] = billing_setting.BillingModeTieredExpr
 					billingExprMap[item.ModelName] = item.BillingExpr
 				}
-				if !isDuration {
+				if !isDuration && !isSeedanceTokens {
 					if item.QuotaType == 1 {
 						modelPriceMap[item.ModelName] = item.ModelPrice
 					} else {
@@ -522,6 +551,9 @@ func FetchUpstreamRatios(c *gin.Context) {
 			}
 			if len(durationPriceMap) > 0 {
 				converted[billing_setting.DurationPriceField] = valueMap(durationPriceMap)
+			}
+			if len(seedanceTokenPriceMap) > 0 {
+				converted[billing_setting.SeedanceTokenPriceField] = valueMap(seedanceTokenPriceMap)
 			}
 
 			ch <- upstreamResult{Name: uniqueName, Data: converted}

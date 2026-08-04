@@ -48,17 +48,19 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	saleProposal.SourceRef = "SRC-OFFICIAL-SEEDANCE-2-0"
 	saleProposal.Sheet = "官方售价"
 	saleProposal.Row = &row
-	saleProposal.Scenario = types.DurationScenarioNoVideo
+	saleProposal.Scenario = types.SeedanceTokenScenarioNoVideo
 	saleProposal.Resolution = "720p"
 	saleProposal.Currency = "USD"
-	saleProposal.BillingMode = billing_setting.BillingModePerDuration
-	saleProposal.DurationPrice = &types.DurationPriceProposal{
-		Price:               "0.31",
-		Unit:                types.DurationUnitSecond,
-		RoundingStepSeconds: 1,
-		PricingVersion:      "official-sheet-v1",
-		Source:              "SRC-OFFICIAL-SEEDANCE-2-0!5",
+	saleProposal.BillingMode = billing_setting.BillingModeSeedanceTokens
+	saleProposal.SeedanceTokenPrice = &types.SeedanceTokenPriceProposal{
+		PricePerMillion: "1.91",
+		Width:           1280,
+		Height:          720,
+		FrameRate:       24,
+		PricingVersion:  "official-token-v1",
+		Source:          "SRC-OFFICIAL-SEEDANCE-2-0!5",
 	}
+	saleProposal.DurationPrice = nil
 	saleJSON, err := common.Marshal(saleProposal)
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).Where("id = ?", saleItem.ID).Update("canonical_json", string(saleJSON)).Error)
@@ -96,15 +98,15 @@ func TestPublishConfigImportBatchAppliesSaleMappingAndRouteProposals(t *testing.
 	require.NoError(t, model.DB.Where("key = ?", "billing_setting.billing_mode").First(&billingModeOption).Error)
 	var billingModes map[string]string
 	require.NoError(t, common.UnmarshalJsonStr(billingModeOption.Value, &billingModes))
-	assert.Equal(t, billing_setting.BillingModePerDuration, billingModes[runtimeModel])
+	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, billingModes[runtimeModel])
 
-	var durationPriceOption model.Option
-	require.NoError(t, model.DB.Where("key = ?", "billing_setting.duration_price").First(&durationPriceOption).Error)
-	var durationPrices map[string]types.DurationPrice
-	require.NoError(t, common.UnmarshalJsonStr(durationPriceOption.Value, &durationPrices))
-	expectedScenario := durationPrices[runtimeModel].Scenarios["720p:no_video"]
-	assert.Equal(t, 0.31, expectedScenario.OutputPrice)
-	assert.Equal(t, types.DurationUnitSecond, expectedScenario.Unit)
+	var tokenPriceOption model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.seedance_token_price").First(&tokenPriceOption).Error)
+	var tokenPrices map[string]types.SeedanceTokenPrice
+	require.NoError(t, common.UnmarshalJsonStr(tokenPriceOption.Value, &tokenPrices))
+	expectedScenario := tokenPrices[runtimeModel].Scenarios["720p:no_video"]
+	assert.Equal(t, "1.91", expectedScenario.PricePerMillion)
+	assert.Equal(t, 1280, expectedScenario.Width)
 	var saved model.Channel
 	require.NoError(t, model.DB.First(&saved, channel.Id).Error)
 	var savedMapping map[string]string
@@ -329,7 +331,7 @@ func TestPublishConfigImportSaleOptionsDeletesLegacySeedancePriceMaps(t *testing
 
 	refresh := ConfigImportRefreshKeys{}
 	require.NoError(t, publishConfigImportSaleOptions(model.DB, []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-no-video", runtimeModel, types.DurationScenarioNoVideo, "0.31"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-no-video", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.91"),
 	}, &refresh))
 
 	for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio"} {
@@ -345,12 +347,13 @@ func TestPublishConfigImportSaleOptionsDeletesUnpublishedSeedanceSupplierPrices(
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
 	providerModel := "jimeng-video-seedance-2.0-vip"
 	options := map[string]string{
-		"ModelPrice":                     fmt.Sprintf(`{%q:9,"unrelated-model":2}`, providerModel),
-		"ModelRatio":                     fmt.Sprintf(`{%q:9,"unrelated-model":2}`, providerModel),
-		"CompletionRatio":                fmt.Sprintf(`{%q:9,"unrelated-model":2}`, providerModel),
-		"billing_setting.billing_mode":   fmt.Sprintf(`{%q:"per_duration","unrelated-model":"ratio"}`, providerModel),
-		"billing_setting.billing_expr":   fmt.Sprintf(`{%q:"v1:tier(\"legacy\", c)","unrelated-model":"v1:tier(\"keep\", c)"}`, providerModel),
-		"billing_setting.duration_price": fmt.Sprintf(`{%q:{"price":0.2,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4},"unrelated-model":{"price":0.3,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`, providerModel),
+		"ModelPrice":                           fmt.Sprintf(`{%q:9,"unrelated-model":2}`, providerModel),
+		"ModelRatio":                           fmt.Sprintf(`{%q:9,"unrelated-model":2}`, providerModel),
+		"CompletionRatio":                      fmt.Sprintf(`{%q:9,"unrelated-model":2}`, providerModel),
+		"billing_setting.billing_mode":         fmt.Sprintf(`{%q:"per_duration","unrelated-model":"ratio"}`, providerModel),
+		"billing_setting.billing_expr":         fmt.Sprintf(`{%q:"v1:tier(\"legacy\", c)","unrelated-model":"v1:tier(\"keep\", c)"}`, providerModel),
+		"billing_setting.duration_price":       fmt.Sprintf(`{%q:{"price":0.2,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4},"unrelated-model":{"price":0.3,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`, providerModel),
+		"billing_setting.seedance_token_price": fmt.Sprintf(`{%q:{"scenarios":{"720p:no_video":{"price_per_million":"9","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1","source":"legacy"}}},"unrelated-model":{"scenarios":{"720p:no_video":{"price_per_million":"2","width":1280,"height":720,"frame_rate":24,"pricing_version":"keep-token-v1","source":"keep"}}}}`, providerModel),
 	}
 	for key, value := range options {
 		require.NoError(t, model.DB.Create(&model.Option{Key: key, Value: value}).Error)
@@ -358,7 +361,7 @@ func TestPublishConfigImportSaleOptionsDeletesUnpublishedSeedanceSupplierPrices(
 
 	refresh := ConfigImportRefreshKeys{}
 	require.NoError(t, publishConfigImportSaleOptions(model.DB, []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-official", modelrouting.Seedance20, types.DurationScenarioNoVideo, "0.31"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-official", modelrouting.Seedance20, types.SeedanceTokenScenarioNoVideo, "1.91"),
 	}, &refresh))
 
 	for key := range options {
@@ -370,10 +373,10 @@ func TestPublishConfigImportSaleOptionsDeletesUnpublishedSeedanceSupplierPrices(
 		assert.Contains(t, values, "unrelated-model", key)
 	}
 
-	var durationPriceOption model.Option
-	require.NoError(t, model.DB.Where("key = ?", "billing_setting.duration_price").First(&durationPriceOption).Error)
-	var prices map[string]types.DurationPrice
-	require.NoError(t, common.UnmarshalJsonStr(durationPriceOption.Value, &prices))
+	var tokenPriceOption model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.seedance_token_price").First(&tokenPriceOption).Error)
+	var prices map[string]types.SeedanceTokenPrice
+	require.NoError(t, common.UnmarshalJsonStr(tokenPriceOption.Value, &prices))
 	require.Contains(t, prices, modelrouting.Seedance20)
 	assert.Contains(t, prices[modelrouting.Seedance20].Scenarios, "720p:no_video")
 }
@@ -383,12 +386,13 @@ func TestPublishConfigImportSaleOptionsDeletesMappedSeedanceUpstreamAliasPrices(
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
 	upstreamAlias := "video-2.0-mini"
 	options := map[string]string{
-		"ModelPrice":                     fmt.Sprintf(`{%q:9}`, upstreamAlias),
-		"ModelRatio":                     fmt.Sprintf(`{%q:9}`, upstreamAlias),
-		"CompletionRatio":                fmt.Sprintf(`{%q:9}`, upstreamAlias),
-		"billing_setting.billing_mode":   fmt.Sprintf(`{%q:"per_duration"}`, upstreamAlias),
-		"billing_setting.billing_expr":   fmt.Sprintf(`{%q:"v1:tier(\"legacy\", c)"}`, upstreamAlias),
-		"billing_setting.duration_price": fmt.Sprintf(`{%q:{"price":0.2,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4}}`, upstreamAlias),
+		"ModelPrice":                           fmt.Sprintf(`{%q:9}`, upstreamAlias),
+		"ModelRatio":                           fmt.Sprintf(`{%q:9}`, upstreamAlias),
+		"CompletionRatio":                      fmt.Sprintf(`{%q:9}`, upstreamAlias),
+		"billing_setting.billing_mode":         fmt.Sprintf(`{%q:"per_duration"}`, upstreamAlias),
+		"billing_setting.billing_expr":         fmt.Sprintf(`{%q:"v1:tier(\"legacy\", c)"}`, upstreamAlias),
+		"billing_setting.duration_price":       fmt.Sprintf(`{%q:{"price":0.2,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4}}`, upstreamAlias),
+		"billing_setting.seedance_token_price": fmt.Sprintf(`{%q:{"scenarios":{"720p:no_video":{"price_per_million":"9","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1","source":"legacy"}}}}`, upstreamAlias),
 	}
 	for key, value := range options {
 		require.NoError(t, model.DB.Create(&model.Option{Key: key, Value: value}).Error)
@@ -401,7 +405,7 @@ func TestPublishConfigImportSaleOptionsDeletesMappedSeedanceUpstreamAliasPrices(
 	require.NoError(t, err)
 
 	items := []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-official", modelrouting.Seedance20Mini, types.DurationScenarioNoVideo, "0.31"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-official", modelrouting.Seedance20Mini, types.SeedanceTokenScenarioNoVideo, "1.91"),
 		{EntityType: "model_mappings", BusinessID: "mapping-mini", CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew)},
 	}
 	require.NoError(t, publishConfigImportSaleOptions(model.DB, items, &ConfigImportRefreshKeys{}))
@@ -421,19 +425,20 @@ func TestPublishConfigImportSaleOptionsDeletesAliasFromPreviouslyPublishedImport
 	retiredAlias := "retired-video-2.0-provider"
 	seedPublishedSeedanceAliasImport(t, retiredAlias)
 	options := map[string]string{
-		"ModelPrice":                     fmt.Sprintf(`{%q:9,"unrelated-model":2}`, retiredAlias),
-		"ModelRatio":                     fmt.Sprintf(`{%q:9,"unrelated-model":2}`, retiredAlias),
-		"CompletionRatio":                fmt.Sprintf(`{%q:9,"unrelated-model":2}`, retiredAlias),
-		"billing_setting.billing_mode":   fmt.Sprintf(`{%q:"per_duration","unrelated-model":"ratio"}`, retiredAlias),
-		"billing_setting.billing_expr":   fmt.Sprintf(`{%q:"v1:tier(\"legacy\", c)","unrelated-model":"v1:tier(\"keep\", c)"}`, retiredAlias),
-		"billing_setting.duration_price": fmt.Sprintf(`{%q:{"price":0.2,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4},"unrelated-model":{"price":0.3,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`, retiredAlias),
+		"ModelPrice":                           fmt.Sprintf(`{%q:9,"unrelated-model":2}`, retiredAlias),
+		"ModelRatio":                           fmt.Sprintf(`{%q:9,"unrelated-model":2}`, retiredAlias),
+		"CompletionRatio":                      fmt.Sprintf(`{%q:9,"unrelated-model":2}`, retiredAlias),
+		"billing_setting.billing_mode":         fmt.Sprintf(`{%q:"per_duration","unrelated-model":"ratio"}`, retiredAlias),
+		"billing_setting.billing_expr":         fmt.Sprintf(`{%q:"v1:tier(\"legacy\", c)","unrelated-model":"v1:tier(\"keep\", c)"}`, retiredAlias),
+		"billing_setting.duration_price":       fmt.Sprintf(`{%q:{"price":0.2,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":4},"unrelated-model":{"price":0.3,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}`, retiredAlias),
+		"billing_setting.seedance_token_price": fmt.Sprintf(`{%q:{"scenarios":{"720p:no_video":{"price_per_million":"9","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1","source":"legacy"}}},"unrelated-model":{"scenarios":{"720p:no_video":{"price_per_million":"2","width":1280,"height":720,"frame_rate":24,"pricing_version":"keep-token-v1","source":"keep"}}}}`, retiredAlias),
 	}
 	for key, value := range options {
 		require.NoError(t, model.DB.Create(&model.Option{Key: key, Value: value}).Error)
 	}
 
 	require.NoError(t, publishConfigImportSaleOptions(model.DB, []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-current", modelrouting.Seedance20, types.DurationScenarioNoVideo, "0.31"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-current", modelrouting.Seedance20, types.SeedanceTokenScenarioNoVideo, "1.91"),
 	}, &ConfigImportRefreshKeys{}))
 
 	for key := range options {
@@ -457,18 +462,18 @@ func TestConfigImportBaselineTracksUnchangedOfficialSaleHistoricalAliases(t *tes
 		CreatedBy: 42, BaselineJSON: "{}", SummaryJSON: "{}",
 	}
 	require.NoError(t, model.DB.Create(&currentBatch).Error)
-	currentSale := configImportSeedanceDurationPriceSaleItem(t, "sale-current", modelrouting.Seedance20, types.DurationScenarioNoVideo, "0.31")
+	currentSale := configImportSeedanceTokenPriceSaleItem(t, "sale-current", modelrouting.Seedance20, types.SeedanceTokenScenarioNoVideo, "1.91")
 	currentSale.BatchID = currentBatch.ID
 	currentSale.State = string(types.ConfigImportItemStateUnchanged)
 	require.NoError(t, model.DB.Create(&currentSale).Error)
-	for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio", "billing_setting.billing_mode", "billing_setting.billing_expr", "billing_setting.duration_price"} {
+	for _, key := range configImportSeedanceSaleOptionKeys {
 		require.NoError(t, model.DB.Create(&model.Option{Key: key, Value: fmt.Sprintf(`{%q:9}`, retiredAlias)}).Error)
 	}
 
 	baseline, err := captureConfigImportBaseline(model.DB, currentBatch.ID)
 	require.NoError(t, err)
 
-	for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio", "billing_setting.billing_mode", "billing_setting.billing_expr", "billing_setting.duration_price"} {
+	for _, key := range configImportSeedanceSaleOptionKeys {
 		assert.Contains(t, baseline.Options, key+"|"+retiredAlias, key)
 	}
 }
@@ -482,7 +487,7 @@ func TestConfigImportBaselineTracksCurrentSeedanceKeysOutsideImportHistory(t *te
 		CreatedBy: 42, BaselineJSON: "{}", SummaryJSON: "{}",
 	}
 	require.NoError(t, model.DB.Create(&currentBatch).Error)
-	currentSale := configImportSeedanceDurationPriceSaleItem(t, "sale-current", modelrouting.Seedance20, types.DurationScenarioNoVideo, "0.31")
+	currentSale := configImportSeedanceTokenPriceSaleItem(t, "sale-current", modelrouting.Seedance20, types.SeedanceTokenScenarioNoVideo, "1.91")
 	currentSale.BatchID = currentBatch.ID
 	currentSale.State = string(types.ConfigImportItemStateUnchanged)
 	require.NoError(t, model.DB.Create(&currentSale).Error)
@@ -511,7 +516,7 @@ func TestPublishConfigImportSaleOptionsUnchangedSeedanceProposalDeletesLegacyPri
 			Value: fmt.Sprintf(`{"%s":9,"unrelated-model":2}`, runtimeModel),
 		}).Error)
 	}
-	item := configImportSeedanceDurationPriceSaleItem(t, "sale-no-video", runtimeModel, types.DurationScenarioNoVideo, "0.31")
+	item := configImportSeedanceTokenPriceSaleItem(t, "sale-no-video", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.91")
 	item.State = string(types.ConfigImportItemStateUnchanged)
 
 	refresh := ConfigImportRefreshKeys{}
@@ -525,13 +530,13 @@ func TestPublishConfigImportSaleOptionsUnchangedSeedanceProposalDeletesLegacyPri
 	}
 }
 
-func TestPublishConfigImportSaleOptionsMergesSeedanceDurationPriceScenarios(t *testing.T) {
+func TestPublishConfigImportSaleOptionsMergesSeedanceTokenPriceScenarios(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
 	runtimeModel := modelrouting.Seedance20
 	items := []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-no-video", runtimeModel, types.DurationScenarioNoVideo, "0.31"),
-		configImportSeedanceDurationPriceSaleItem(t, "sale-with-video", runtimeModel, types.DurationScenarioWithVideo, "0.47"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-no-video", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.91"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-with-video", runtimeModel, types.SeedanceTokenScenarioWithVideo, "1.23"),
 	}
 
 	refresh := ConfigImportRefreshKeys{}
@@ -541,67 +546,69 @@ func TestPublishConfigImportSaleOptionsMergesSeedanceDurationPriceScenarios(t *t
 	require.NoError(t, tx.Commit().Error)
 
 	var option model.Option
-	require.NoError(t, model.DB.Where("key = ?", "billing_setting.duration_price").First(&option).Error)
-	var prices map[string]types.DurationPrice
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.seedance_token_price").First(&option).Error)
+	var prices map[string]types.SeedanceTokenPrice
 	require.NoError(t, common.UnmarshalJsonStr(option.Value, &prices))
 	price, found := prices[runtimeModel]
 	require.True(t, found)
 	require.Len(t, price.Scenarios, 2)
-	assert.Equal(t, 0.31, price.Scenarios["720p:no_video"].OutputPrice)
-	assert.Equal(t, 0.47, price.Scenarios["720p:with_video"].OutputPrice)
-	assert.Equal(t, types.DurationUnitSecond, price.Scenarios["720p:no_video"].Unit)
-	assert.Equal(t, types.DurationUnitSecond, price.Scenarios["720p:with_video"].Unit)
+	assert.Equal(t, "1.91", price.Scenarios["720p:no_video"].PricePerMillion)
+	assert.Equal(t, "1.23", price.Scenarios["720p:with_video"].PricePerMillion)
+	assert.Equal(t, 1280, price.Scenarios["720p:no_video"].Width)
+	assert.Equal(t, 24, price.Scenarios["720p:with_video"].FrameRate)
 }
 
-func TestPublishConfigImportSaleOptionsUpdatesOneSeedanceScenarioWithoutDeletingOthers(t *testing.T) {
+func TestPublishConfigImportSaleOptionsReplacesStaleSeedanceTokenScenarios(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
 	runtimeModel := modelrouting.Seedance20
-	initialDurationPrice := fmt.Sprintf(`{
+	initialTokenPrice := fmt.Sprintf(`{
 		%q:{
-			"unit":"",
-			"rounding_step_seconds":0,
-			"minimum_duration_seconds":0,
 			"scenarios":{
-				"720p:no_video":{"output_price":0.20,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"pricing_version":"official-sheet-v1","source":"official_price_sheet"},
-				"720p:with_video":{"output_price":0.47,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"pricing_version":"official-sheet-v1","source":"official_price_sheet"}
+				"720p:no_video":{"price_per_million":"9","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1","source":"legacy"},
+				"720p:with_video":{"price_per_million":"8","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1","source":"legacy"}
 			}
 		}
 	}`, runtimeModel)
-	require.NoError(t, model.DB.Create(&model.Option{Key: "billing_setting.duration_price", Value: initialDurationPrice}).Error)
+	require.NoError(t, model.DB.Create(&model.Option{Key: "billing_setting.seedance_token_price", Value: initialTokenPrice}).Error)
 
 	refresh := ConfigImportRefreshKeys{}
 	require.NoError(t, publishConfigImportSaleOptions(model.DB, []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-no-video", runtimeModel, types.DurationScenarioNoVideo, "0.31"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-no-video", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.91"),
 	}, &refresh))
 
 	var option model.Option
-	require.NoError(t, model.DB.Where("key = ?", "billing_setting.duration_price").First(&option).Error)
-	var prices map[string]types.DurationPrice
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.seedance_token_price").First(&option).Error)
+	var prices map[string]types.SeedanceTokenPrice
 	require.NoError(t, common.UnmarshalJsonStr(option.Value, &prices))
 	price := prices[runtimeModel]
-	require.Len(t, price.Scenarios, 2)
-	assert.Equal(t, 0.31, price.Scenarios["720p:no_video"].OutputPrice)
-	assert.Equal(t, 0.47, price.Scenarios["720p:with_video"].OutputPrice)
+	require.Len(t, price.Scenarios, 1)
+	assert.Equal(t, "1.91", price.Scenarios["720p:no_video"].PricePerMillion)
+	assert.NotContains(t, price.Scenarios, "720p:with_video")
 }
 
-func TestPublishConfigImportSaleOptionsRejectsPublishedSeedanceScenarioWithoutAuditMetadata(t *testing.T) {
+func TestPublishConfigImportSaleOptionsReplacesInvalidPublishedSeedanceTokenSnapshot(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
 	runtimeModel := modelrouting.Seedance20
 	require.NoError(t, model.DB.Create(&model.Option{
-		Key: "billing_setting.duration_price",
+		Key: "billing_setting.seedance_token_price",
 		Value: fmt.Sprintf(`{%q:{"scenarios":{
-			"720p:with_video":{"output_price":0.47,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"pricing_version":"official-sheet-v1"}
+			"720p:with_video":{"price_per_million":"9","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1"}
 		}}}`, runtimeModel),
 	}).Error)
 
 	err := publishConfigImportSaleOptions(model.DB, []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-no-video", runtimeModel, types.DurationScenarioNoVideo, "0.31"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-no-video", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.91"),
 	}, &ConfigImportRefreshKeys{})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "source is required")
+	require.NoError(t, err)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.seedance_token_price").First(&option).Error)
+	var prices map[string]types.SeedanceTokenPrice
+	require.NoError(t, common.UnmarshalJsonStr(option.Value, &prices))
+	assert.Equal(t, "1.91", prices[runtimeModel].Scenarios["720p:no_video"].PricePerMillion)
+	assert.NotContains(t, prices[runtimeModel].Scenarios, "720p:with_video")
 }
 
 func TestPublishConfigImportSaleOptionsOverwritesFlatDurationPrice(t *testing.T) {
@@ -643,20 +650,19 @@ func TestPublishConfigImportSaleOptionsOverwritesFlatDurationPrice(t *testing.T)
 	require.NoError(t, common.UnmarshalJsonStr(option.Value, &prices))
 	price := prices["ordinary-video"]
 	assert.Equal(t, 0.18, price.Price)
-	assert.Empty(t, price.Scenarios)
 }
 
-func TestPublishConfigImportSaleOptionsRejectsConflictingSeedanceDurationPriceWithoutPartialWrite(t *testing.T) {
+func TestPublishConfigImportSaleOptionsRejectsConflictingSeedanceTokenPriceWithoutPartialWrite(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
-	initialDurationPrice := `{"existing-model":{"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0,"scenarios":{"720p:no_video":{"output_price":0.12,"unit":"second","rounding_step_seconds":1,"minimum_duration_seconds":0}}}}`
+	initialTokenPrice := `{"existing-model":{"scenarios":{"720p:no_video":{"price_per_million":"1","width":1280,"height":720,"frame_rate":24,"pricing_version":"official-token-v1","source":"official"}}}}`
 	initialBillingMode := `{"existing-model":"per_duration"}`
-	require.NoError(t, model.DB.Create(&model.Option{Key: "billing_setting.duration_price", Value: initialDurationPrice}).Error)
+	require.NoError(t, model.DB.Create(&model.Option{Key: "billing_setting.seedance_token_price", Value: initialTokenPrice}).Error)
 	require.NoError(t, model.DB.Create(&model.Option{Key: "billing_setting.billing_mode", Value: initialBillingMode}).Error)
 	runtimeModel := modelrouting.Seedance20
 	items := []model.ConfigImportItem{
-		configImportSeedanceDurationPriceSaleItem(t, "sale-first", runtimeModel, types.DurationScenarioNoVideo, "0.31"),
-		configImportSeedanceDurationPriceSaleItem(t, "sale-conflict", runtimeModel, types.DurationScenarioNoVideo, "0.32"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-first", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.91"),
+		configImportSeedanceTokenPriceSaleItem(t, "sale-conflict", runtimeModel, types.SeedanceTokenScenarioNoVideo, "1.92"),
 	}
 
 	refresh := ConfigImportRefreshKeys{}
@@ -666,9 +672,9 @@ func TestPublishConfigImportSaleOptionsRejectsConflictingSeedanceDurationPriceWi
 	assert.Equal(t, "PUBLISH_PRICING_CONFLICT", schemaErr.Code)
 	assert.Empty(t, refresh.OptionKeys)
 
-	var durationPriceOption model.Option
-	require.NoError(t, model.DB.Where("key = ?", "billing_setting.duration_price").First(&durationPriceOption).Error)
-	assert.Equal(t, initialDurationPrice, durationPriceOption.Value)
+	var tokenPriceOption model.Option
+	require.NoError(t, model.DB.Where("key = ?", "billing_setting.seedance_token_price").First(&tokenPriceOption).Error)
+	assert.Equal(t, initialTokenPrice, tokenPriceOption.Value)
 	var billingModeOption model.Option
 	require.NoError(t, model.DB.Where("key = ?", "billing_setting.billing_mode").First(&billingModeOption).Error)
 	assert.Equal(t, initialBillingMode, billingModeOption.Value)
@@ -677,12 +683,12 @@ func TestPublishConfigImportSaleOptionsRejectsConflictingSeedanceDurationPriceWi
 	assert.Zero(t, billingExprCount)
 }
 
-func configImportSeedanceDurationPriceSaleItem(t *testing.T, businessID, runtimeModel, scenario, price string) model.ConfigImportItem {
+func configImportSeedanceTokenPriceSaleItem(t *testing.T, businessID, runtimeModel, scenario, price string) model.ConfigImportItem {
 	t.Helper()
 	proposal := configImportOfficialSeedanceSaleProposalForTest()
 	proposal.BusinessID = businessID
 	proposal.Scenario = scenario
-	proposal.DurationPrice.Price = price
+	proposal.SeedanceTokenPrice.PricePerMillion = price
 	patches, err := configImportSaleOptionPatches(proposal, runtimeModel)
 	require.NoError(t, err)
 	document := map[string]any{

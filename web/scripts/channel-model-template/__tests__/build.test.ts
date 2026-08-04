@@ -20,6 +20,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import Decimal from 'decimal.js'
+
 import { buildTemplateData } from '../build'
 import { parseRules } from '../rules'
 import { readSourceWorkbook, type SourceWorkbook } from '../source'
@@ -317,28 +319,55 @@ test('uses the configured exchange rate for official sale previews', () => {
   )
 })
 
-test('keeps explicit no-video and with-video official USD per-second prices', () => {
+test('keeps exact official USD per-million token prices for both scenarios', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(), rules)
+  const tokensPerSecond = new Decimal(1280).mul(720).mul(24).div(1024)
 
   assert.deepEqual(
     output.sales.map((sale) => ({
       scenario: sale.scenario,
       billingMode: sale.billingMode,
+      nativePerSecond: sale.nativePerSecond,
+      usdPerMillion: sale.usdPerMillion,
       usdPerSecond: sale.usdPerSecond,
     })),
     [
       {
         scenario: 'no_video',
-        billingMode: 'per_duration',
-        usdPerSecond: '0.136164383561643822',
+        billingMode: 'seedance_tokens',
+        nativePerSecond: '0.9936',
+        usdPerMillion: '6.301369863013698',
+        usdPerSecond: new Decimal('6.301369863013698')
+          .mul(tokensPerSecond)
+          .div(1_000_000)
+          .toFixed(),
       },
       {
         scenario: 'with_video',
-        billingMode: 'per_duration',
-        usdPerSecond: '0.082876712328767115',
+        billingMode: 'seedance_tokens',
+        nativePerSecond: '0.6048',
+        usdPerMillion: '3.835616438356164',
+        usdPerSecond: new Decimal('3.835616438356164')
+          .mul(tokensPerSecond)
+          .div(1_000_000)
+          .toFixed(),
       },
     ]
   )
+})
+
+test('calculates official sale preview from total tokens instead of treating USD per million as a request price', () => {
+  const output = buildTemplateData(sourceWithOfficialPrice(), rules)
+  const sale = output.sales.find((item) => item.scenario === 'with_video')
+  const profit = output.profits.find((item) => item.scenario === 'with_video')
+
+  assert.ok(sale)
+  assert.ok(profit)
+  const expected = new Decimal(sale.usdPerMillion)
+    .mul(profit.estimatedTokens)
+    .div(1_000_000)
+  assert.equal(profit.officialSaleUsd, expected.toFixed())
+  assert.notEqual(profit.officialSaleUsd, sale.usdPerMillion)
 })
 
 test('uses a registered source ID for generated cost rows', () => {

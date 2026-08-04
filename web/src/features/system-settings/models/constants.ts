@@ -68,6 +68,7 @@ export const RATIO_TYPE_OPTIONS = [
   { label: 'Audio completion ratio', value: 'audio_completion_ratio' },
   { label: 'Fixed price', value: 'model_price' },
   { label: 'Duration price', value: 'duration_price' },
+  { label: 'Token prices', value: 'seedance_token_price' },
   { label: 'Expression billing', value: 'billing_expr' },
 ] as const
 

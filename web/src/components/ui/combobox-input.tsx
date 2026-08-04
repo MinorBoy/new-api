@@ -37,6 +37,7 @@ interface ComboboxInputProps {
   emptyText?: string
   className?: string
   id?: string
+  ariaLabel?: string
   allowCustomValue?: boolean
   openOnFocus?: boolean
   onCompositionStart?: React.CompositionEventHandler<HTMLInputElement>
@@ -51,6 +52,7 @@ export function ComboboxInput({
   emptyText = 'No option found.',
   className,
   id,
+  ariaLabel,
   allowCustomValue = false,
   openOnFocus = true,
   onCompositionStart,
@@ -169,6 +171,7 @@ export function ComboboxInput({
         id={id}
         type='text'
         role='combobox'
+        aria-label={ariaLabel}
         aria-expanded={open}
         aria-haspopup='listbox'
         aria-autocomplete='list'

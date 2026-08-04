@@ -48,6 +48,7 @@ type LegacyComboboxProps = {
   allowCustomValue?: boolean
   className?: string
   id?: string
+  ariaLabel?: string
   openOnFocus?: boolean
   onCompositionStart?: React.CompositionEventHandler<HTMLInputElement>
   onCompositionEnd?: React.CompositionEventHandler<HTMLInputElement>
@@ -66,6 +67,7 @@ function Combobox(
     return (
       <LegacyComboboxInput
         id={props.id}
+        ariaLabel={props.ariaLabel}
         options={props.options}
         value={props.value ?? ''}
         onValueChange={(value) => props.onValueChange?.(value)}

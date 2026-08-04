@@ -34,6 +34,7 @@ func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
 		inputVideoDurationMS int64
 		resolution           string
 		hasVideoInput        bool
+		wantInputTokens      int
 		wantCompletionTokens int
 		wantTotalTokens      int
 		wantErr              string
@@ -49,6 +50,7 @@ func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
 			inputVideoDurationMS: 3000,
 			resolution:           "720p",
 			hasVideoInput:        true,
+			wantInputTokens:      64800,
 			wantCompletionTokens: 108000,
 			wantTotalTokens:      172800,
 		},
@@ -61,7 +63,7 @@ func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
 		{
 			name:       "unsupported resolution",
 			resolution: "bad",
-			wantErr:    "output resolution is unsupported",
+			wantErr:    "frozen Seedance token pricing scenario is unavailable",
 		},
 	}
 
@@ -71,6 +73,16 @@ func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
 				TaskRelayInfo: &relaycommon.TaskRelayInfo{
 					InputVideoDurationMS: test.inputVideoDurationMS,
 				},
+				PriceData: types.PriceData{SeedanceTokenPrice: &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+					"720p:no_video": {
+						PricePerMillion: "2", Width: 1280, Height: 720, FrameRate: 24,
+						PricingVersion: "official-token-v1", Source: "official-sheet",
+					},
+					"720p:with_video": {
+						PricePerMillion: "2", Width: 1280, Height: 720, FrameRate: 24,
+						PricingVersion: "official-token-v1", Source: "official-sheet",
+					},
+				}}},
 			}
 
 			err := prepareSeedanceUsageSnapshot(info, 5, test.resolution, test.hasVideoInput)
@@ -80,6 +92,7 @@ func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
+			assert.Equal(t, test.wantInputTokens, info.TaskRelayInfo.UsageInputTokens)
 			assert.Equal(t, test.wantCompletionTokens, info.TaskRelayInfo.UsageCompletionTokens)
 			assert.Equal(t, test.wantTotalTokens, info.TaskRelayInfo.UsageTotalTokens)
 		})

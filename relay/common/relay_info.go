@@ -874,6 +874,7 @@ type TaskRelayInfo struct {
 	// InputVideoDurationMS is the aggregate duration of reference videos used to
 	// calculate Ark-compatible terminal usage without retaining their URLs.
 	InputVideoDurationMS  int64
+	UsageInputTokens      int
 	UsageCompletionTokens int
 	UsageTotalTokens      int
 
@@ -989,6 +990,7 @@ type TaskInfo struct {
 	UsageSource             string               `json:"-"`
 	BillingClamp            *common.QuotaClamp   `json:"-"`
 	CostMeter               *hosttypes.CostMeter `json:"-"`
+	UpstreamUsageCostMeter  *hosttypes.CostMeter `json:"-"`
 }
 
 func FailTaskInfo(reason string) *TaskInfo {

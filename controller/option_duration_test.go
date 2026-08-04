@@ -174,7 +174,88 @@ func TestUpdateOptionRejectsSeedanceBillingModeOverrideBeforePersistence(t *test
 	assert.Equal(t, originalValue, persisted.Value)
 }
 
-func TestGetOptionsReturnsOnlyConfiguredDurationBilling(t *testing.T) {
+func TestUpdateOptionRejectsSeedanceTokenPriceOverrideBeforePersistence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalDB := model.DB
+	originalLogDB := model.LOG_DB
+	originalRedisEnabled := common.RedisEnabled
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLogDB
+		common.RedisEnabled = originalRedisEnabled
+		sqlDB, sqlErr := db.DB()
+		if sqlErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}, &model.Log{}))
+
+	savedBillingOptions := make(map[string]string)
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		if strings.HasPrefix(key, "billing_setting.") {
+			savedBillingOptions[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(savedBillingOptions)) })
+
+	const optionKey = "billing_setting.seedance_token_price"
+	const originalValue = `{"doubao-seedance-2-0-260128":{"scenarios":{"720p:no_video":{"price_per_million":"1.91","width":1280,"height":720,"frame_rate":24,"pricing_version":"official-token-v1","source":"SRC-OFFICIAL-SEEDANCE-2-0!7"}}}}`
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{optionKey: originalValue}))
+	require.NoError(t, db.Create(&model.Option{Key: optionKey, Value: originalValue}).Error)
+
+	common.OptionMapRWMutex.Lock()
+	optionMapWasNil := common.OptionMap == nil
+	if optionMapWasNil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousValue, hadPreviousValue := common.OptionMap[optionKey]
+	common.OptionMap[optionKey] = originalValue
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if optionMapWasNil {
+			common.OptionMap = nil
+			return
+		}
+		if hadPreviousValue {
+			common.OptionMap[optionKey] = previousValue
+		} else {
+			delete(common.OptionMap, optionKey)
+		}
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/option/", strings.NewReader(
+		`{"key":"billing_setting.seedance_token_price","value":"{\"doubao-seedance-2-0-260128\":{\"scenarios\":{\"720p:no_video\":{\"price_per_million\":\"9\",\"width\":1280,\"height\":720,\"frame_rate\":24,\"pricing_version\":\"official-token-v1\",\"source\":\"SRC-OFFICIAL-SEEDANCE-2-0!7\"}}}}"}`,
+	))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateOption(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "config import")
+
+	var persisted model.Option
+	require.NoError(t, db.First(&persisted, "key = ?", optionKey).Error)
+	assert.Equal(t, originalValue, persisted.Value)
+}
+
+func TestGetOptionsReturnsConfiguredBillingContracts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	savedBillingOptions := make(map[string]string)
@@ -190,11 +271,15 @@ func TestGetOptionsReturnsOnlyConfiguredDurationBilling(t *testing.T) {
 
 	const modeKey = "billing_setting.billing_mode"
 	const priceKey = "billing_setting.duration_price"
+	const tokenPriceKey = "billing_setting.seedance_token_price"
 	const oldModeJSON = `{"legacy-model":"tiered_expr"}`
 	const oldPriceJSON = `{"legacy-video":{"price":2,"unit":"minute","rounding_step_seconds":5,"minimum_duration_seconds":10}}`
+	const oldTokenPriceJSON = `{"legacy-seedance":{"scenarios":{"720p:no_video":{"price_per_million":"9","width":1280,"height":720,"frame_rate":24,"pricing_version":"legacy-token-v1","source":"legacy"}}}}`
+	const configuredTokenPriceJSON = `{"doubao-seedance-2-0-260128":{"scenarios":{"720p:no_video":{"price_per_million":"1.91","width":1280,"height":720,"frame_rate":24,"pricing_version":"official-token-v1","source":"SRC-OFFICIAL-SEEDANCE-2-0!7"}}}}`
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		modeKey:  oldModeJSON,
-		priceKey: oldPriceJSON,
+		modeKey:       oldModeJSON,
+		priceKey:      oldPriceJSON,
+		tokenPriceKey: configuredTokenPriceJSON,
 	}))
 
 	common.OptionMapRWMutex.Lock()
@@ -204,8 +289,10 @@ func TestGetOptionsReturnsOnlyConfiguredDurationBilling(t *testing.T) {
 	}
 	previousMode, hadPreviousMode := common.OptionMap[modeKey]
 	previousPrice, hadPreviousPrice := common.OptionMap[priceKey]
+	previousTokenPrice, hadPreviousTokenPrice := common.OptionMap[tokenPriceKey]
 	common.OptionMap[modeKey] = oldModeJSON
 	common.OptionMap[priceKey] = oldPriceJSON
+	common.OptionMap[tokenPriceKey] = oldTokenPriceJSON
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
 		common.OptionMapRWMutex.Lock()
@@ -223,6 +310,11 @@ func TestGetOptionsReturnsOnlyConfiguredDurationBilling(t *testing.T) {
 			common.OptionMap[priceKey] = previousPrice
 		} else {
 			delete(common.OptionMap, priceKey)
+		}
+		if hadPreviousTokenPrice {
+			common.OptionMap[tokenPriceKey] = previousTokenPrice
+		} else {
+			delete(common.OptionMap, tokenPriceKey)
 		}
 	})
 
@@ -254,4 +346,9 @@ func TestGetOptionsReturnsOnlyConfiguredDurationBilling(t *testing.T) {
 	require.NoError(t, common.UnmarshalJsonStr(values[priceKey], &prices))
 	assert.Equal(t, 2.0, prices["legacy-video"].Price)
 	assert.NotContains(t, prices, "jimeng-video-seedance-2.0-vip")
+
+	var tokenPrices map[string]types.SeedanceTokenPrice
+	require.NoError(t, common.UnmarshalJsonStr(values[tokenPriceKey], &tokenPrices))
+	assert.Equal(t, "1.91", tokenPrices["doubao-seedance-2-0-260128"].Scenarios["720p:no_video"].PricePerMillion)
+	assert.NotContains(t, tokenPrices, "legacy-seedance")
 }

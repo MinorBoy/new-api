@@ -481,34 +481,37 @@ function buildSales(
           scenario === 'no_video' ? '不含视频 元/M' : '包含视频 元/M'
         )
       )
-      const nativePerSecond = decimalString(
-        numericField(
-          official,
-          scenario === 'no_video' ? '不含视频 元/秒' : '包含视频 元/秒'
-        )
-      )
       const currencyToUsd = new Decimal(rules.defaults.currencyToUsd)
+      const tokensPerSecond = new Decimal(sku.outputWidth)
+        .mul(sku.outputHeight)
+        .mul(sku.frameRate)
+        .div(rules.defaults.tokenDivisor)
+      const nativePerSecond = new Decimal(nativePerMillion)
+        .mul(tokensPerSecond)
+        .div(1_000_000)
+      const usdPerMillion = new Decimal(nativePerMillion).mul(currencyToUsd)
       rows.push({
         businessId: `SALE-${slug(sku.model)}-${slug(sku.resolution)}-${scenarioCode(scenario)}`,
         clientModel: sku.model,
         skuCode: sku.businessId,
         scenario,
-        billingMode: 'per_duration',
+        billingMode: 'seedance_tokens',
         currency: rules.defaults.currency,
         nativePerMillion,
         outputWidth: sku.outputWidth,
         outputHeight: sku.outputHeight,
         frameRate: sku.frameRate,
-        nativePerSecond,
-        usdPerMillion: new Decimal(nativePerMillion)
-          .mul(currencyToUsd)
+        nativePerSecond: nativePerSecond.toFixed(),
+        usdPerMillion: usdPerMillion.toFixed(),
+        usdPerSecond: usdPerMillion
+          .mul(tokensPerSecond)
+          .div(1_000_000)
           .toFixed(),
-        usdPerSecond: new Decimal(nativePerSecond).mul(currencyToUsd).toFixed(),
         status: 'active',
         sourceId,
         sourceSheet: official.location.sheet,
         sourceRow: official.location.row,
-        note: '由官方售价工作表生成；USD/基准秒为显式场景输出单价，参考视频时长不参与用户售价。',
+        note: '由官方售价工作表生成；用户售价按官方 USD/1M Token 与总 Token 计算。',
       })
     }
   }
@@ -787,23 +790,26 @@ function buildProfits(
   return costs.map((cost) => {
     const sale = salesByKey.get(`${cost.skuCode}\u0000${cost.scenario}`)
     const sku = skuById.get(cost.skuCode)
-    const inputSeconds = sku?.minDurationSeconds ?? 0
+    const inputSeconds =
+      cost.scenario === 'with_video' ? (sku?.minDurationSeconds ?? 0) : 0
     const outputSeconds = sku?.minDurationSeconds ?? 0
-    const tokenCount = Math.floor(
-      ((inputSeconds + outputSeconds) *
-        (sku?.outputWidth ?? 0) *
-        (sku?.outputHeight ?? 0) *
-        (sku?.frameRate ?? 0)) /
-        1024
-    )
-    const saleUsd = new Decimal(sale?.usdPerMillion ?? sale?.usdPerSecond ?? 0)
+    const tokenCount = new Decimal(inputSeconds + outputSeconds)
+      .mul(sku?.outputWidth ?? 0)
+      .mul(sku?.outputHeight ?? 0)
+      .mul(sku?.frameRate ?? 0)
+      .div(1024)
+      .ceil()
+      .toNumber()
+    const saleUsd = new Decimal(sale?.usdPerMillion ?? 0)
+      .mul(tokenCount)
+      .div(1_000_000)
     const revenue = saleUsd.mul(groupRatio)
-    const channelCost =
-      cost.mode === 'per_token'
-        ? new Decimal(cost.normalizedUsdUnitPrice)
-            .mul(tokenCount)
-            .div(1_000_000)
-        : new Decimal(cost.normalizedUsdUnitPrice)
+    let channelCost = new Decimal(cost.normalizedUsdUnitPrice)
+    if (cost.mode === 'per_token') {
+      channelCost = channelCost.mul(tokenCount).div(1_000_000)
+    } else if (cost.mode === 'per_duration') {
+      channelCost = channelCost.mul(outputSeconds)
+    }
     const profit = revenue.sub(channelCost)
     return {
       businessId: `PROFIT-${cost.businessId}`,

@@ -27,6 +27,16 @@ func TestTaskPrivateDataValueRetainsSeedanceUsageSnapshot(t *testing.T) {
 	privateData := TaskPrivateData{BillingContext: &TaskBillingContext{
 		InputVideoDurationMS: 2500,
 		UpstreamCostMode:     string(types.CostModePerDuration),
+		UsageInputTokens:     25000,
+		SeedanceTokenPrice: &types.SeedanceTokenPrice{Scenarios: map[string]types.SeedanceTokenPriceScenario{
+			"480p:with_video": {
+				PricePerMillion: "1.917808219178082", Width: 864, Height: 496, FrameRate: 24,
+				PricingVersion: "official-token-v1", Source: "SRC-OFFICIAL-SEEDANCE-2-0-MINI!18",
+			},
+		}},
+		SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
+			Scenario: "with_video", TotalTokens: 65000, FinalCharge: "0.1558219178082191625",
+		},
 	}}
 
 	value, err := privateData.Value()
@@ -40,4 +50,8 @@ func TestTaskPrivateDataValueRetainsSeedanceUsageSnapshot(t *testing.T) {
 	require.NotNil(t, decoded.BillingContext)
 	assert.Equal(t, int64(2500), decoded.BillingContext.InputVideoDurationMS)
 	assert.Equal(t, string(types.CostModePerDuration), decoded.BillingContext.UpstreamCostMode)
+	assert.Equal(t, 25000, decoded.BillingContext.UsageInputTokens)
+	require.NotNil(t, decoded.BillingContext.SeedanceTokenPrice)
+	require.NotNil(t, decoded.BillingContext.SeedanceTokenBilling)
+	assert.Equal(t, "0.1558219178082191625", decoded.BillingContext.SeedanceTokenBilling.FinalCharge)
 }

@@ -94,6 +94,8 @@ func GetOptions(c *gin.Context) {
 			}
 		case "billing_setting.duration_price":
 			value = billing_setting.DurationPrice2JSONString()
+		case "billing_setting.seedance_token_price":
+			value = billing_setting.SeedanceTokenPrice2JSONString()
 		}
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
@@ -394,6 +396,15 @@ func UpdateOption(c *gin.Context) {
 		}
 	case "billing_setting.duration_price":
 		err = billing_setting.ValidateDurationPriceJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "billing_setting.seedance_token_price":
+		err = billing_setting.ValidateSeedanceTokenPriceJSONString(option.Value.(string))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

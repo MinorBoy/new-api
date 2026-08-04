@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -49,7 +50,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other := make(map[string]interface{})
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
-	if info.PriceData.BillingMode != billing_setting.BillingModePerDuration {
+	if info.PriceData.BillingMode != billing_setting.BillingModePerDuration &&
+		info.PriceData.BillingMode != billing_setting.BillingModeSeedanceTokens {
 		other["model_price"] = info.PriceData.ModelPrice
 	}
 	if info.PriceData.ModelRatio > 0 {
@@ -63,8 +65,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		info.PriceData.DurationSource,
 		info.PriceData.RequestedDurationSeconds,
 		info.PriceData.BillableDurationSeconds,
-		info.PriceData.DurationBilling,
 	)
+	appendSeedanceTokenBillingOther(other, info.PriceData.BillingMode, info.PriceData.SeedanceTokenBilling)
 	if resolutionRatio, ok := info.PriceData.OtherRatios()["resolution"]; ok {
 		other["resolution_ratio"] = resolutionRatio
 	}
@@ -221,6 +223,10 @@ func loadAsyncCostTaskAttempt(ctx context.Context, costRequestID int64, task *mo
 }
 
 func asyncTaskCostMeter(attempt *model.CostAccountingAttempt, result *relaycommon.TaskInfo) types.CostMeter {
+	if types.CostMeterSource(attempt.MeterSource) == types.CostMeterUpstreamUsage &&
+		result.UpstreamUsageCostMeter != nil {
+		return *result.UpstreamUsageCostMeter
+	}
 	meter := types.CostMeter{}
 	if result.CostMeter != nil {
 		meter = *result.CostMeter
@@ -369,14 +375,16 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
 	if bc := task.PrivateData.BillingContext; bc != nil {
-		if bc.BillingMode != billing_setting.BillingModePerDuration {
+		if bc.BillingMode != billing_setting.BillingModePerDuration &&
+			bc.BillingMode != billing_setting.BillingModeSeedanceTokens {
 			other["model_price"] = bc.ModelPrice
 		}
 		if bc.ModelRatio > 0 {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
-		appendDurationBillingOther(other, bc.BillingMode, bc.DurationPrice, bc.DurationSource, bc.RequestedDurationSeconds, bc.BillableDurationSeconds, bc.DurationBilling)
+		appendDurationBillingOther(other, bc.BillingMode, bc.DurationPrice, bc.DurationSource, bc.RequestedDurationSeconds, bc.BillableDurationSeconds)
+		appendSeedanceTokenBillingOther(other, bc.BillingMode, bc.SeedanceTokenBilling)
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				if k == "resolution" {
@@ -411,7 +419,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	return other
 }
 
-func appendDurationBillingOther(other map[string]interface{}, mode string, price *types.DurationPrice, source string, requested, billable int, breakdown *types.DurationBillingBreakdown) {
+func appendDurationBillingOther(other map[string]interface{}, mode string, price *types.DurationPrice, source string, requested, billable int) {
 	if mode != billing_setting.BillingModePerDuration || price == nil {
 		return
 	}
@@ -419,30 +427,32 @@ func appendDurationBillingOther(other map[string]interface{}, mode string, price
 	other["duration_source"] = source
 	other["requested_duration_seconds"] = requested
 	other["billable_duration_seconds"] = billable
-	if breakdown == nil {
-		other["duration_price"] = price.Price
-		other["duration_unit"] = price.Unit
-		other["rounding_step_seconds"] = price.RoundingStepSeconds
-		other["minimum_duration_seconds"] = price.MinimumDurationSeconds
+	other["duration_price"] = price.Price
+	other["duration_unit"] = price.Unit
+	other["rounding_step_seconds"] = price.RoundingStepSeconds
+	other["minimum_duration_seconds"] = price.MinimumDurationSeconds
+}
+
+func appendSeedanceTokenBillingOther(other map[string]interface{}, mode string, breakdown *types.SeedanceTokenBillingBreakdown) {
+	if mode != billing_setting.BillingModeSeedanceTokens || breakdown == nil {
 		return
 	}
-	if outputPrice, err := strconv.ParseFloat(breakdown.OutputPricePerSecond, 64); err == nil {
-		other["duration_price"] = outputPrice
-	}
-	other["duration_unit"] = types.DurationUnitSecond
-	other["rounding_step_seconds"] = breakdown.RoundingStepSeconds
-	other["minimum_duration_seconds"] = breakdown.MinimumDurationSeconds
-	other["duration_pricing_scenario"] = breakdown.Scenario
-	other["duration_pricing_resolution"] = breakdown.Resolution
-	other["duration_pricing_version"] = breakdown.PricingVersion
-	other["duration_pricing_source"] = breakdown.Source
-	other["output_price_per_second"] = breakdown.OutputPricePerSecond
-	other["output_duration_charge"] = breakdown.OutputCharge
-	other["duration_total_charge"] = breakdown.FinalCharge
-	if breakdown.FinalCharge == "" {
-		other["duration_total_charge"] = breakdown.TotalCharge
-	}
+	other["billing_mode"] = mode
+	other["seedance_pricing_scenario"] = breakdown.Scenario
+	other["seedance_pricing_resolution"] = breakdown.Resolution
+	other["seedance_pricing_version"] = breakdown.PricingVersion
+	other["seedance_pricing_source"] = breakdown.Source
+	other["price_per_million"] = breakdown.PricePerMillion
+	other["input_tokens"] = breakdown.InputTokens
+	other["output_tokens"] = breakdown.OutputTokens
+	other["total_tokens"] = breakdown.TotalTokens
 	other["input_video_duration_ms"] = breakdown.InputVideoDurationMS
+	other["output_duration_seconds"] = breakdown.OutputDurationSeconds
+	other["output_width"] = breakdown.Width
+	other["output_height"] = breakdown.Height
+	other["frame_rate"] = breakdown.FrameRate
+	other["base_charge"] = breakdown.BaseCharge
+	other["final_charge"] = breakdown.FinalCharge
 }
 
 func taskBillingContextPriceData(bc *model.TaskBillingContext) *types.PriceData {
@@ -572,6 +582,60 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 
 func RecalculateTaskQuotaWithTokens(ctx context.Context, task *model.Task, actualQuota, billingTokens int, reason string, clamps ...*common.QuotaClamp) {
 	recalculateTaskQuota(ctx, task, actualQuota, billingTokens, reason, true, clamps...)
+}
+
+func recalculateSeedanceTaskQuota(ctx context.Context, task *model.Task, clamps ...*common.QuotaClamp) error {
+	if task == nil || task.PrivateData.BillingContext == nil {
+		return errors.New("Seedance billing context is unavailable")
+	}
+	bc := task.PrivateData.BillingContext
+	if bc.BillingMode != billing_setting.BillingModeSeedanceTokens || bc.SeedanceTokenPrice == nil {
+		return errors.New("Seedance official token price is unavailable")
+	}
+	usage, ok := PersistedSeedanceTaskUsage(bc)
+	if !ok {
+		return errors.New("validated Seedance token usage is unavailable")
+	}
+	outputDurationSeconds := bc.RequestedDurationSeconds
+	resolution := strings.TrimSpace(bc.DurationResolution)
+	if resolution == "" {
+		resolution = strings.TrimSpace(bc.Resolution)
+	}
+	charge, err := bc.SeedanceTokenPrice.CalculateCharge(
+		resolution,
+		bc.HasVideoInput,
+		bc.InputVideoDurationMS,
+		outputDurationSeconds,
+		types.SeedanceTokenUsage{
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.CompletionTokens,
+			TotalTokens:  usage.TotalTokens,
+		},
+		relaycommon.MaxTokensLimit,
+	)
+	if err != nil {
+		return err
+	}
+	if bc.GroupRatio < 0 || math.IsNaN(bc.GroupRatio) || math.IsInf(bc.GroupRatio, 0) {
+		return errors.New("frozen Seedance group ratio is invalid")
+	}
+	groupRatio := decimal.NewFromFloat(bc.GroupRatio)
+	finalCharge := charge.BaseCharge.Mul(groupRatio)
+	breakdown := charge.Breakdown()
+	breakdown.GroupRatio = groupRatio.String()
+	breakdown.FinalCharge = finalCharge.String()
+	bc.BillingTokens = usage.TotalTokens
+	bc.SeedanceTokenBilling = breakdown
+	if task.ID > 0 {
+		if err := task.Update(); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("任务 %s Seedance 官方 Token 账单回写失败: %s", task.TaskID, err.Error()))
+		}
+	}
+	actualQuota, quotaClamp := common.QuotaFromDecimalChecked(finalCharge.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+	clamps = append(clamps, quotaClamp)
+	reason := fmt.Sprintf("Seedance 官方 Token 结算：total_tokens=%d, price_per_million=%s, group_ratio=%s", usage.TotalTokens, charge.PricePerMillion.String(), groupRatio.String())
+	RecalculateTaskQuotaWithTokens(ctx, task, actualQuota, usage.TotalTokens, reason, clamps...)
+	return nil
 }
 
 func recalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota, billingTokens int, reason string, allowZero bool, clamps ...*common.QuotaClamp) {

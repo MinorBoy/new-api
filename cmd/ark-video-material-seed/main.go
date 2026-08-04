@@ -35,6 +35,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -87,21 +88,29 @@ type importedCostConfig struct {
 }
 
 type seedResult struct {
-	TotalTargets      int
-	AcceptedTasks     int
-	FailedMockTasks   int64
-	ContractBlocks    int
-	DisabledPricing   int
-	CommonLogs        int64
-	TaskRows          int64
-	TerminalResults   int64
-	QuotaDataRows     int64
-	CostRequests      int64
-	CostAttempts      int64
-	MaterialLimits    map[string]int
-	MockUpstreamCalls int
-	UserID            int
-	TokenID           int
+	TotalTargets       int
+	AcceptedTasks      int
+	FailedMockTasks    int64
+	ContractBlocks     int
+	DisabledPricing    int
+	CommonLogs         int64
+	TaskRows           int64
+	TerminalResults    int64
+	QuotaDataRows      int64
+	CostRequests       int64
+	CostAttempts       int64
+	CostSettled        int64
+	CostConfirmedZero  int64
+	CostFailed         int64
+	ProfitComplete     int64
+	NegativeProfit     int64
+	RevenueNanoUSD     int64
+	CostNanoUSD        int64
+	GrossProfitNanoUSD int64
+	MaterialLimits     map[string]int
+	MockUpstreamCalls  int
+	UserID             int
+	TokenID            int
 }
 
 type mockVideoServer struct {
@@ -305,6 +314,21 @@ func run() error {
 	result, err := summarizeResult(user.Id, token.Id, len(targets), len(createdTasks)-1, contractBlocks, disabledPricing, createdTasks, materialLimits, mock.count())
 	if err != nil {
 		return err
+	}
+	if result.CostRequests != int64(result.AcceptedTasks)+result.FailedMockTasks ||
+		result.CostAttempts != result.CostRequests {
+		return fmt.Errorf("incomplete cost accounting rows: requests=%d attempts=%d successful_tasks=%d failed_tasks=%d",
+			result.CostRequests, result.CostAttempts, result.AcceptedTasks, result.FailedMockTasks)
+	}
+	if result.CostSettled != int64(result.AcceptedTasks) ||
+		result.CostConfirmedZero != result.FailedMockTasks || result.CostFailed != 0 {
+		return fmt.Errorf("incomplete cost settlement: settled=%d confirmed_zero=%d settlement_failed=%d",
+			result.CostSettled, result.CostConfirmedZero, result.CostFailed)
+	}
+	if result.ProfitComplete != result.CostRequests ||
+		result.RevenueNanoUSD-result.CostNanoUSD != result.GrossProfitNanoUSD {
+		return fmt.Errorf("incomplete profit accounting: complete=%d requests=%d revenue=%d cost=%d gross_profit=%d",
+			result.ProfitComplete, result.CostRequests, result.RevenueNanoUSD, result.CostNanoUSD, result.GrossProfitNanoUSD)
 	}
 	printResult(result)
 	return nil
@@ -1308,18 +1332,27 @@ func (m *mockVideoServer) pollingResponse(taskID string) []byte {
 		failReason = "mock content policy rejection"
 		nestedError = map[string]any{"code": "content_policy_violation", "message": failReason}
 	}
+	createdAt := time.Now().Unix() - 20
+	updatedAt := time.Now().Unix()
+	totalTokens := 216900
+	if strings.HasSuffix(modelName, "-token") {
+		totalTokens = 281700
+	}
 	response, _ := common.Marshal(map[string]any{
 		"code": "success", "message": "",
 		"data": map[string]any{
 			"task_id": taskID, "status": status, "result_url": resultURL, "fail_reason": failReason,
-			"submit_time": time.Now().Unix() - 20, "start_time": time.Now().Unix() - 15, "finish_time": time.Now().Unix(),
+			"submit_time": createdAt, "start_time": createdAt + 5, "finish_time": updatedAt,
 			"progress": "100%", "quota": 2_000_000, "platform": "54",
 			"properties": map[string]any{"origin_model_name": modelrouting.Seedance20, "upstream_model_name": modelName},
 			"data": map[string]any{
 				"content": map[string]any{"video_url": resultURL},
 				"error":   nestedError,
 				"id":      taskID, "model": modelName, "status": nestedStatus, "duration": 10, "resolution": "720p", "ratio": "16:9",
-				"usage": map[string]any{"completion_tokens": 216900, "total_tokens": 216900},
+				"seed": 78674, "framespersecond": 24, "service_tier": "default", "execution_expires_after": 172800,
+				"generate_audio": true, "draft": false, "priority": 0,
+				"usage":      map[string]any{"completion_tokens": 216900, "total_tokens": totalTokens},
+				"created_at": createdAt, "updated_at": updatedAt,
 			},
 		},
 	})
@@ -1359,20 +1392,57 @@ func summarizeResult(userID, tokenID, totalTargets, acceptedTasks, contractBlock
 	if err := model.DB.Model(&model.QuotaData{}).Where("user_id = ?", userID).Count(&quotaDataRows).Error; err != nil {
 		return seedResult{}, err
 	}
-	var costRequests int64
-	if err := model.DB.Model(&model.CostAccountingRequest{}).Where("user_id = ?", userID).Count(&costRequests).Error; err != nil {
+	var costRequestRows []model.CostAccountingRequest
+	if err := model.DB.Where("user_id = ?", userID).Find(&costRequestRows).Error; err != nil {
 		return seedResult{}, err
 	}
-	var costAttempts int64
-	if err := model.DB.Model(&model.CostAccountingAttempt{}).Where("channel_name LIKE ?", seedChannelName+"%").Count(&costAttempts).Error; err != nil {
+	var costAttemptRows []model.CostAccountingAttempt
+	if err := model.DB.Where("channel_name LIKE ?", seedChannelName+"%").Find(&costAttemptRows).Error; err != nil {
 		return seedResult{}, err
 	}
-	return seedResult{
+	result := seedResult{
 		TotalTargets: totalTargets, AcceptedTasks: acceptedTasks, FailedMockTasks: failedMockTasks, ContractBlocks: contractBlocks, DisabledPricing: disabledPricing,
 		CommonLogs: commonLogs, TaskRows: taskRows, TerminalResults: terminalResults, QuotaDataRows: quotaDataRows,
-		CostRequests: costRequests, CostAttempts: costAttempts, MaterialLimits: materialLimits,
+		CostRequests: int64(len(costRequestRows)), CostAttempts: int64(len(costAttemptRows)), MaterialLimits: materialLimits,
 		MockUpstreamCalls: upstreamCalls, UserID: userID, TokenID: tokenID,
-	}, nil
+	}
+	for i := range costAttemptRows {
+		switch types.CostAttemptStatus(costAttemptRows[i].Status) {
+		case types.CostAttemptSettled:
+			result.CostSettled++
+		case types.CostAttemptConfirmedZero:
+			result.CostConfirmedZero++
+		case types.CostAttemptSettlementFailed:
+			result.CostFailed++
+		}
+	}
+	for i := range costRequestRows {
+		request := &costRequestRows[i]
+		if types.CostProfitStatus(request.ProfitStatus) == types.CostProfitComplete {
+			result.ProfitComplete++
+		}
+		if request.BilledGrossProfitNanoUSD != nil && *request.BilledGrossProfitNanoUSD < 0 {
+			result.NegativeProfit++
+		}
+		var addErr error
+		if request.BilledRevenueEquivalentNanoUSD != nil {
+			result.RevenueNanoUSD, addErr = service.CheckedNanoAdd(result.RevenueNanoUSD, *request.BilledRevenueEquivalentNanoUSD)
+			if addErr != nil {
+				return seedResult{}, addErr
+			}
+		}
+		result.CostNanoUSD, addErr = service.CheckedNanoAdd(result.CostNanoUSD, request.ConfirmedCostNanoUSD)
+		if addErr != nil {
+			return seedResult{}, addErr
+		}
+		if request.BilledGrossProfitNanoUSD != nil {
+			result.GrossProfitNanoUSD, addErr = service.CheckedNanoAdd(result.GrossProfitNanoUSD, *request.BilledGrossProfitNanoUSD)
+			if addErr != nil {
+				return seedResult{}, addErr
+			}
+		}
+	}
+	return result, nil
 }
 
 func printResult(result seedResult) {
@@ -1381,6 +1451,12 @@ func printResult(result seedResult) {
 	fmt.Printf("targets: %d, accepted tasks: %d, contract blocks before submit: %d, disabled pricing drafts: %d\n", result.TotalTargets, result.AcceptedTasks, result.ContractBlocks, result.DisabledPricing)
 	fmt.Printf("task rows: %d, failed mock tasks: %d, terminal user results: %d, usage logs for user: %d, quota_data rows: %d\n", result.TaskRows, result.FailedMockTasks, result.TerminalResults, result.CommonLogs, result.QuotaDataRows)
 	fmt.Printf("cost accounting requests: %d, attempts: %d, mock upstream calls: %d\n", result.CostRequests, result.CostAttempts, result.MockUpstreamCalls)
+	fmt.Printf("cost settlement: settled=%d, confirmed_zero=%d, settlement_failed=%d, profit_complete=%d\n", result.CostSettled, result.CostConfirmedZero, result.CostFailed, result.ProfitComplete)
+	fmt.Printf("accounting totals: revenue=$%s, supplier_cost=$%s, gross_profit=$%s, negative_profit_requests=%d\n",
+		decimal.NewFromInt(result.RevenueNanoUSD).Shift(-9).StringFixed(9),
+		decimal.NewFromInt(result.CostNanoUSD).Shift(-9).StringFixed(9),
+		decimal.NewFromInt(result.GrossProfitNanoUSD).Shift(-9).StringFixed(9),
+		result.NegativeProfit)
 	fmt.Printf("material limits: 431=%d, 900=%d, 903=%d, 933=%d\n", result.MaterialLimits["431"], result.MaterialLimits["900"], result.MaterialLimits["903"], result.MaterialLimits["933"])
 	fmt.Println("view pages:")
 	fmt.Println("  http://127.0.0.1:3000/dashboard/overview")

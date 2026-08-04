@@ -43,6 +43,25 @@ type taskPollingFetchAdaptor struct {
 	parseErr     error
 }
 
+type costMeterCapturePollingAdaptor struct {
+	*taskPollingFetchAdaptor
+	normalizedResult *relaycommon.TaskInfo
+	normalizeCalls   int
+}
+
+func (a *costMeterCapturePollingAdaptor) NormalizeTaskCostMeter(task *model.Task, result *relaycommon.TaskInfo) (types.CostMeter, error) {
+	a.normalizeCalls++
+	if result != nil {
+		copy := *result
+		if result.CostMeter != nil {
+			meter := *result.CostMeter
+			copy.CostMeter = &meter
+		}
+		a.normalizedResult = &copy
+	}
+	return a.BaseBilling.NormalizeTaskCostMeter(task, result)
+}
+
 type sunoFailurePollingAdaptor struct {
 	failReason string
 }
@@ -672,6 +691,65 @@ func TestSeedanceLocalSaleUsagePreservesAuthoritativeSupplierTokenMeter(t *testi
 	assert.Equal(t, int64(250_000_000), *attempt.CostNanoUSD)
 	assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
 	assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
+}
+
+func TestPreparePolledTaskCostUsesSupplierMeterWhenSeedanceSaleUsageIsLocal(t *testing.T) {
+	config := validTokenCostConfig(types.CostTokenModeTotal, types.CostMeterUpstreamUsage)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	task, handle := prepareTaskPollingCostAttempt(t, types.CostModePerToken, config)
+	totalTokens := int64(250_000)
+	supplierMeter := types.CostMeter{Source: types.CostMeterUpstreamUsage, TotalTokens: &totalTokens}
+	result := &relaycommon.TaskInfo{
+		Status:                  string(model.TaskStatusSuccess),
+		UsageSource:             model.TaskUsageSourceLocalCalculated,
+		CompletionTokens:        108_000,
+		TotalTokens:             108_000,
+		CompletionTokensPresent: true,
+		TotalTokensPresent:      true,
+		UpstreamUsageCostMeter:  &supplierMeter,
+	}
+	adaptor := &costMeterCapturePollingAdaptor{taskPollingFetchAdaptor: &taskPollingFetchAdaptor{}}
+
+	require.NoError(t, preparePolledTaskCostSettlement(context.Background(), adaptor, task, result))
+
+	require.NotNil(t, adaptor.normalizedResult)
+	assert.False(t, adaptor.normalizedResult.CompletionTokensPresent)
+	assert.False(t, adaptor.normalizedResult.TotalTokensPresent)
+	require.NotNil(t, adaptor.normalizedResult.CostMeter)
+	assert.Equal(t, supplierMeter, *adaptor.normalizedResult.CostMeter)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.Contains(t, attempt.ActualMeterJSON, `"total_tokens":250000`)
+}
+
+func TestPreparePolledTaskCostSkipsNormalizerForValidatedRequestMeter(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	config := validDurationCostConfig(types.CostMeterValidatedRequest)
+	config.ChargeEvent = types.CostChargeTaskSucceeded
+	seedActiveAttemptRule(t, types.CostModePerDuration, config)
+	taskID := "task-validated-request-meter"
+	duration := "4"
+	input := preparedAttemptInput()
+	input.RequestID = "request-" + taskID
+	input.TaskID = &taskID
+	input.TaskPlatform = constant.TaskPlatform("task-test")
+	input.RequestPath = "/v1/video/generations"
+	input.FinalUserQuota = nil
+	input.RequestMeter = &types.CostMeter{Source: types.CostMeterValidatedRequest, DurationSeconds: &duration}
+	handle, err := PrepareCostAttempt(context.Background(), input)
+	require.NoError(t, err)
+	require.NoError(t, AuthorizeCostDispatch(context.Background(), handle))
+	require.NoError(t, RecordCostDispatchOutcome(context.Background(), handle, types.CostOutcome{
+		Status: types.CostAttemptAwaitingMeter, UpstreamAccepted: true,
+	}))
+	require.NoError(t, MarkWinningCostAttempt(context.Background(), handle))
+	task := &model.Task{TaskID: taskID, PrivateData: model.TaskPrivateData{CostRequestID: handle.CostRequestID}}
+	adaptor := &costMeterCapturePollingAdaptor{taskPollingFetchAdaptor: &taskPollingFetchAdaptor{}}
+
+	require.NoError(t, preparePolledTaskCostSettlement(context.Background(), adaptor, task, &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+	}))
+
+	assert.Zero(t, adaptor.normalizeCalls)
 }
 
 func TestUpdateVideoSingleTaskDirectInProgressIgnoresCompletedAt(t *testing.T) {

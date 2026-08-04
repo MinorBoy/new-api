@@ -93,6 +93,31 @@ test('builds the corrected v1 import document without unresolved contracts', asy
   )
 })
 
+test('omits channel lines that have no imported model mapping or route target', async () => {
+  const bytes = await fs.readFile(fixturePath)
+  const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))
+  const sourceLine = extracted.channelLines[0]
+  assert.ok(sourceLine)
+  extracted.channelLines.push({
+    ...sourceLine,
+    businessId: 'unused-channel-line',
+  })
+
+  const result = await buildImportDocument({
+    extracted,
+    sourceBytes: bytes,
+    sourceFileName: 'channel-config-v1-corrected.xlsx',
+  })
+
+  assert.equal(
+    result.document.entities.channel_lines.some(
+      (line) => line.line_ref === 'unused-channel-line'
+    ),
+    false
+  )
+  assert.equal(result.document.manifest.counts.channel_lines, 14)
+})
+
 test('builds explicit Seedance official token sale contracts from USD per million prices', async () => {
   const bytes = await fs.readFile(fixturePath)
   const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))

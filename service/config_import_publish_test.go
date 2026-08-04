@@ -248,6 +248,43 @@ func TestPublishConfigImportBatchReplacesBoundChannelModelSnapshot(t *testing.T)
 	assert.NotNil(t, oldRule.EffectiveTo)
 }
 
+func TestPublishConfigImportModelSnapshotExcludesExplicitlyUnpricedMapping(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Group: "default", Models: "stale-model", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	confirmedAt := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: 1, LineRef: "line-a", Action: string(types.ConfigImportBindingActionBind), ChannelID: &channel.Id,
+		CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+	}).Error)
+	mapping := types.ConfigImportModelMapping{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "mapping-unpriced"},
+		CanonicalModel:                  "canonical-video", ClientModel: "canonical-video", LineRef: "line-a", UpstreamModel: "vendor-unpriced", SKURef: "sku-a",
+	}
+	mappingJSON, err := common.Marshal(mapping)
+	require.NoError(t, err)
+	disabled := false
+	costDraft := types.ConfigImportCostRuleDraft{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "cost-unpriced"},
+		Enabled:                         &disabled, LineRef: "line-a", UpstreamModel: "vendor-unpriced", CostVariantKey: "480p-disabled",
+		RouteTargetRef: "route-target/mapping-unpriced", CostMode: string(types.CostModePerDuration),
+	}
+	costJSON, err := common.Marshal(costDraft)
+	require.NoError(t, err)
+	items := []model.ConfigImportItem{
+		{BatchID: 1, EntityType: "model_mappings", BusinessID: mapping.BusinessID, CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew)},
+		{BatchID: 1, EntityType: "cost_rule_drafts", BusinessID: costDraft.BusinessID, CanonicalJSON: string(costJSON), State: string(types.ConfigImportItemStateExcluded), ExclusionReason: "disabled by import document"},
+	}
+
+	require.NoError(t, publishConfigImportModelMappings(model.DB, items, &ConfigImportRefreshKeys{}))
+
+	var savedChannel model.Channel
+	require.NoError(t, model.DB.First(&savedChannel, channel.Id).Error)
+	assert.Empty(t, savedChannel.Models)
+	assert.JSONEq(t, `{}`, savedChannel.GetModelMapping())
+}
+
 func TestPublishConfigImportModelSnapshotRollsBackWithTransaction(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
@@ -1094,7 +1131,7 @@ func TestRetryConfigImportBatchCacheDoesNotRepublishConfiguration(t *testing.T) 
 	assert.Equal(t, int64(1), auditCount)
 }
 
-func TestPublishConfigImportBatchIgnoresUnrelatedActiveCostRule(t *testing.T) {
+func TestPublishConfigImportBatchRetiresActiveCostRuleMissingFromAuthoritativeSnapshot(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
 	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
@@ -1110,6 +1147,8 @@ func TestPublishConfigImportBatchIgnoresUnrelatedActiveCostRule(t *testing.T) {
 		BatchID: batch.ID, EntityType: "model_mappings", BusinessID: mapping.BusinessID,
 		CanonicalJSON: string(mappingJSON), State: string(types.ConfigImportItemStateNew),
 	}).Error)
+	unrelatedRule := &model.ChannelModelCostRule{ChannelID: channel.Id, BillableUpstreamModel: "unrelated-model", CostVariantKey: "default", Version: 1, Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`}
+	require.NoError(t, model.DB.Create(unrelatedRule).Error)
 	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
 	require.NoError(t, err)
 
@@ -1117,8 +1156,6 @@ func TestPublishConfigImportBatchIgnoresUnrelatedActiveCostRule(t *testing.T) {
 	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "cost_rule_drafts").First(&item).Error)
 	var rule model.ChannelModelCostRule
 	require.NoError(t, model.DB.First(&rule, *item.MaterializedID).Error)
-	unrelatedRule := &model.ChannelModelCostRule{ChannelID: channel.Id, BillableUpstreamModel: "unrelated-model", CostVariantKey: "default", Version: 1, Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`}
-	require.NoError(t, model.DB.Create(unrelatedRule).Error)
 
 	err = PublishConfigImportBatch(context.Background(), batch.ID, 42)
 	require.NoError(t, err)
@@ -1127,10 +1164,35 @@ func TestPublishConfigImportBatchIgnoresUnrelatedActiveCostRule(t *testing.T) {
 	assert.Equal(t, string(types.CostRuleActive), loaded.Status)
 	var unrelatedLoaded model.ChannelModelCostRule
 	require.NoError(t, model.DB.First(&unrelatedLoaded, unrelatedRule.ID).Error)
-	assert.Equal(t, string(types.CostRuleActive), unrelatedLoaded.Status)
+	assert.Equal(t, string(types.CostRuleRetired), unrelatedLoaded.Status)
+	assert.NotNil(t, unrelatedLoaded.EffectiveTo)
+	refreshKeys, err := configImportRefreshKeysForBatch(model.DB, batch.ID)
+	require.NoError(t, err)
+	assert.Contains(t, refreshKeys.CostModelKeys, fmt.Sprintf("%d|unrelated-model|default", channel.Id))
 	var loadedBatch model.ConfigImportBatch
 	require.NoError(t, model.DB.First(&loadedBatch, batch.ID).Error)
 	assert.Equal(t, string(types.ConfigImportBatchStatusPublished), loadedBatch.Status)
+}
+
+func TestPublishConfigImportBatchRejectsChangedCostRuleMissingFromAuthoritativeSnapshot(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.ConfigImportPublishAudit{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	obsoleteRule := &model.ChannelModelCostRule{
+		ChannelID: channel.Id, BillableUpstreamModel: "obsolete-model", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: "per_request", SchemaVersion: 1, ConfigJSON: `{}`,
+	}
+	require.NoError(t, model.DB.Create(obsoleteRule).Error)
+	_, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(obsoleteRule).Update("config_json", `{"changed":true}`).Error)
+
+	err = PublishConfigImportBatch(context.Background(), batch.ID, 42)
+	require.ErrorIs(t, err, ErrConfigImportStale)
+	require.NoError(t, model.DB.First(obsoleteRule, obsoleteRule.ID).Error)
+	assert.Equal(t, string(types.CostRuleActive), obsoleteRule.Status)
 }
 
 func TestPublishConfigImportBatchRetiresCostRuleDisabledByImport(t *testing.T) {

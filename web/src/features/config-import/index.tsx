@@ -389,7 +389,8 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
                 await publishConfigImport(id)
                 return getConfigImportBatch(id)
               })
-            await runMutation(mutation)
+            const published = await runMutation(mutation)
+            if (published) setReviewStep(undefined)
           }}
         />
       )}

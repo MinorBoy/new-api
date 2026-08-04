@@ -1126,6 +1126,23 @@ export async function buildImportDocument(
     )
   }
 
+  if (input.extracted.templateVersion === '1') {
+    const mappedLineRefs = new Set(
+      entities.model_mappings.map((mapping) => String(mapping.line_ref ?? ''))
+    )
+    const routedLineRefs = new Set(
+      entities.route_blueprints.flatMap((blueprint) =>
+        (blueprint.targets as Array<Record<string, unknown>>).map((target) =>
+          String(target.line_ref ?? '')
+        )
+      )
+    )
+    entities.channel_lines = entities.channel_lines.filter((line) => {
+      const lineRef = String(line.line_ref ?? '')
+      return mappedLineRefs.has(lineRef) && routedLineRefs.has(lineRef)
+    })
+  }
+
   for (const collection of Object.values(entities)) {
     collection.sort((left, right) =>
       left.business_id.localeCompare(right.business_id)

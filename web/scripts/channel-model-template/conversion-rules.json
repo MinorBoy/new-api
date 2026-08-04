@@ -10,7 +10,8 @@
     "7": "CH-DIMENSIO",
     "8": "CH-MEGABYAI",
     "9": "CH-4STOKEN",
-    "10": "CH-OMEGAAI"
+    "10": "CH-OMEGAAI",
+    "11": "CH-Z5API"
   },
   "defaults": {
     "currency": "CNY",

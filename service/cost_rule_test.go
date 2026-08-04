@@ -17,7 +17,9 @@ func prepareCostRuleServiceDB(t *testing.T) {
 	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}))
 	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
 	require.NoError(t, model.DB.Exec("DELETE FROM channels").Error)
-	require.NoError(t, model.DB.Create(&model.Channel{Id: 7, Type: 1, Name: "supplier", Key: "test-key"}).Error)
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id: 7, Type: 1, Name: "supplier", Key: "test-key", Status: common.ChannelStatusEnabled,
+	}).Error)
 
 	previousLookup := CostCapabilityLookup
 	CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
@@ -357,6 +359,24 @@ func TestCheckAuthoritativeCostCoverageIgnoresAbilitiesForDeletedChannels(t *tes
 	require.Len(t, results, 1)
 	assert.Equal(t, 7, results[0].ChannelID)
 	assert.Equal(t, "valid-model", results[0].OriginModel)
+}
+
+func TestCheckAuthoritativeCostCoverageIgnoresAbilitiesForDisabledChannels(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	})
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 7).Update("status", common.ChannelStatusManuallyDisabled).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "default", Model: "disabled-model", ChannelId: 7, Enabled: true,
+	}).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	assert.Empty(t, results)
 }
 
 func TestTaskOnlyChannelCostRuleLifecycleUsesTaskAdaptorCapabilities(t *testing.T) {

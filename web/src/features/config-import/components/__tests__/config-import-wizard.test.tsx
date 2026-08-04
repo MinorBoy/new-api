@@ -21,7 +21,11 @@ import { createRoot, type Container } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 
 import { ConfigImportWizard } from '../../index'
-import type { ConfigImportBatchDetail } from '../../types'
+import type {
+  ConfigImportBatchDetail,
+  ConfigImportPricingReviewRequest,
+  ConfigImportRouteReviewsRequest,
+} from '../../types'
 
 const browserWindow = new Window({ url: 'http://localhost/' })
 browserWindow.document.write('<!doctype html><html><body></body></html>')
@@ -106,6 +110,14 @@ async function mount(
     onStage?: (id: number) => Promise<ConfigImportBatchDetail>
     onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
     onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
+    onSavePricingReview?: (
+      id: number,
+      request: ConfigImportPricingReviewRequest
+    ) => Promise<ConfigImportBatchDetail>
+    onSaveRouteReviews?: (
+      id: number,
+      request: ConfigImportRouteReviewsRequest
+    ) => Promise<ConfigImportBatchDetail>
     onLoadChannels?: () => Promise<
       Array<{ id: number; name: string; status: number }>
     >
@@ -136,6 +148,20 @@ async function mount(
           onPublish={async (id) => {
             calls.push(`publish:${id}`)
             return options.onPublish?.(id) ?? batch('published', [])
+          }}
+          onSavePricingReview={async (id, request) => {
+            calls.push(`pricing:${id}`)
+            return (
+              options.onSavePricingReview?.(id, request) ??
+              batch('staged', ['stage'])
+            )
+          }}
+          onSaveRouteReviews={async (id, request) => {
+            calls.push(`routes:${id}`)
+            return (
+              options.onSaveRouteReviews?.(id, request) ??
+              batch('staged', ['validate'])
+            )
           }}
           onLoadChannels={options.onLoadChannels}
         />
@@ -235,6 +261,46 @@ test('returns to routing diffs when publish reports a stale baseline', async () 
     await act(async () => button(mounted.container, 'Publish import').click())
     assert.match(mounted.container.textContent ?? '', /Routing diff/)
     assert.match(mounted.container.textContent ?? '', /stale/i)
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('shows the publish result after a successful publish', async () => {
+  const mounted = await mount({
+    currentBatch: batch('staged', ['validate']),
+    onStage: async () => batch('staged', ['validate']),
+    onValidate: async () => batch('ready', ['publish']),
+    onPublish: async () => batch('published', []),
+  })
+  try {
+    await act(async () => button(mounted.container, 'Continue').click())
+    assert.match(mounted.container.textContent ?? '', /Pricing review/)
+    await act(async () => button(mounted.container, 'Continue').click())
+    assert.match(mounted.container.textContent ?? '', /Routing diff/)
+    await act(async () => button(mounted.container, 'Continue').click())
+    assert.match(mounted.container.textContent ?? '', /Publish review/)
+    const confirm = mounted.container.querySelector(
+      '[aria-label="Confirm publish"]'
+    ) as HTMLInputElement | null
+    assert.ok(confirm)
+    await act(async () => confirm.click())
+    await act(async () => button(mounted.container, 'Publish import').click())
+
+    assert.match(mounted.container.textContent ?? '', /Published/)
+    assert.equal(
+      [...mounted.container.querySelectorAll('button')].some(
+        (candidate) => candidate.textContent === 'Publish import'
+      ),
+      false
+    )
+    assert.deepEqual(mounted.calls, [
+      'pricing:12',
+      'stage:12',
+      'routes:12',
+      'validate:12',
+      'publish:12',
+    ])
   } finally {
     await act(async () => mounted.root.unmount())
   }

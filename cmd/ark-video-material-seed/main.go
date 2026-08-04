@@ -551,12 +551,14 @@ func seedChannels(upstreamURL string) (map[string]int, error) {
 	sort.Strings(lineRefs)
 
 	channelIDs := make(map[string]int, len(lineRefs))
+	currentChannelNames := make(map[string]struct{}, len(lineRefs))
 	for index, lineRef := range lineRefs {
 		definition, ok := definitions[lineRef]
 		if !ok {
 			return nil, fmt.Errorf("missing channel definition for line %q", lineRef)
 		}
 		name := seedChannelName + lineRef
+		currentChannelNames[name] = struct{}{}
 		priority := int64(100 - index)
 		weight := uint(100)
 		channel := &model.Channel{}
@@ -592,7 +594,40 @@ func seedChannels(upstreamURL string) (map[string]int, error) {
 		}
 		channelIDs[lineRef] = channel.Id
 	}
+	if err := disableRemovedSeedChannels(currentChannelNames); err != nil {
+		return nil, err
+	}
 	return channelIDs, nil
+}
+
+func disableRemovedSeedChannels(currentChannelNames map[string]struct{}) error {
+	var channels []model.Channel
+	if err := model.DB.Where("name LIKE ?", seedChannelName+"%").Find(&channels).Error; err != nil {
+		return err
+	}
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		now := common.GetTimestamp()
+		for index := range channels {
+			channel := &channels[index]
+			if _, current := currentChannelNames[channel.Name]; current {
+				continue
+			}
+			if channel.Status != common.ChannelStatusManuallyDisabled {
+				if err := tx.Model(&model.Channel{}).Where("id = ?", channel.Id).
+					Update("status", common.ChannelStatusManuallyDisabled).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Model(&model.ChannelModelCostRule{}).
+				Where("channel_id = ? AND status = ?", channel.Id, types.CostRuleActive).
+				Updates(map[string]any{
+					"status": string(types.CostRuleRetired), "effective_to": now, "updated_at": now,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func seedCostRules(targets []matrixTarget, channelIDs map[string]int) error {

@@ -30,6 +30,9 @@ import { readSourceWorkbook } from '../source'
 const fixturePath = fileURLToPath(
   new URL('../__fixtures__/sd-source-v1.xlsx', import.meta.url)
 )
+const repositorySourcePath = fileURLToPath(
+  new URL('../../../../docs/new-channels/sd收录.xlsx', import.meta.url)
+)
 
 test('reads source records with original worksheet and row locations', async () => {
   const source = await readSourceWorkbook(fixturePath)
@@ -38,6 +41,18 @@ test('reads source records with original worksheet and row locations', async () 
   assert.equal(source.models[0]?.location.sheet, 'sd')
   assert.equal(source.models[0]?.location.row, 3)
   assert.equal(source.officialPrices[0]?.location.sheet, 'sd官价')
+})
+
+test('reads the renamed billing and model resolution columns from the latest source sheet', async () => {
+  const source = await readSourceWorkbook(repositorySourcePath)
+  const channel = source.channels.find(
+    (record) => record.fields.渠道 === 11
+  )
+  const model = source.models.find((record) => record.fields.渠道 === 11)
+
+  assert.equal(channel?.fields.名称, 'z5')
+  assert.equal(model?.fields.清晰度, '720p')
+  assert.equal(model?.fields.计费, 'call')
 })
 
 test('rejects a workbook whose sd header changes', async () => {

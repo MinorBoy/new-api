@@ -1274,6 +1274,7 @@ type ConfigImportBaseline struct {
 
 type configImportBaselineScope struct {
 	costRules       map[string]struct{}
+	costChannels    map[int]struct{}
 	optionFields    map[string]map[string]struct{}
 	modelMappings   map[int]map[string]struct{}
 	routingPolicies map[string]struct{}
@@ -1287,6 +1288,7 @@ type configImportBaselineFieldValue struct {
 func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImportBaselineScope, error) {
 	scope := &configImportBaselineScope{
 		costRules:       make(map[string]struct{}),
+		costChannels:    make(map[int]struct{}),
 		optionFields:    make(map[string]map[string]struct{}),
 		modelMappings:   make(map[int]map[string]struct{}),
 		routingPolicies: make(map[string]struct{}),
@@ -1300,8 +1302,11 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 		return nil, err
 	}
 	for _, channelID := range lineChannels {
-		if channelID > 0 && scope.modelMappings[channelID] == nil {
-			scope.modelMappings[channelID] = make(map[string]struct{})
+		if channelID > 0 {
+			scope.costChannels[channelID] = struct{}{}
+			if scope.modelMappings[channelID] == nil {
+				scope.modelMappings[channelID] = make(map[string]struct{})
+			}
 		}
 	}
 	for _, item := range items {
@@ -1444,7 +1449,9 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 		}
 		for _, rule := range rules {
 			businessKey := fmt.Sprintf("%d|%s|%s", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey)
-			if _, included := scope.costRules[businessKey]; !included {
+			_, channelIncluded := scope.costChannels[rule.ChannelID]
+			_, keyIncluded := scope.costRules[businessKey]
+			if !channelIncluded && !keyIncluded {
 				continue
 			}
 			key := fmt.Sprintf("%s|%d", businessKey, rule.Version)
@@ -1822,6 +1829,32 @@ func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigIm
 	if err != nil {
 		return nil, err
 	}
+	type mappingPricingKey struct {
+		lineRef       string
+		upstreamModel string
+	}
+	explicitlyUnpriced := make(map[mappingPricingKey]struct{})
+	hasEnabledCost := make(map[mappingPricingKey]struct{})
+	for _, item := range items {
+		if item.EntityType != "cost_rule_drafts" {
+			continue
+		}
+		var draft types.ConfigImportCostRuleDraft
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &draft); err != nil {
+			return nil, err
+		}
+		lineRef := strings.TrimSpace(draft.LineRef)
+		upstreamModel := strings.TrimSpace(draft.UpstreamModel)
+		if lineChannels[lineRef] <= 0 || lineRef == "" || upstreamModel == "" {
+			continue
+		}
+		key := mappingPricingKey{lineRef: lineRef, upstreamModel: upstreamModel}
+		if draft.Enabled != nil && !*draft.Enabled {
+			explicitlyUnpriced[key] = struct{}{}
+			continue
+		}
+		hasEnabledCost[key] = struct{}{}
+	}
 	targetsByChannel := make(map[int]configImportChannelModelSnapshotTarget)
 	for lineRef, channelID := range lineChannels {
 		if channelID <= 0 {
@@ -1844,9 +1877,16 @@ func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigIm
 		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
 			return nil, err
 		}
-		channelID := lineChannels[mapping.LineRef]
+		lineRef := strings.TrimSpace(mapping.LineRef)
+		channelID := lineChannels[lineRef]
 		if channelID <= 0 {
 			continue
+		}
+		pricingKey := mappingPricingKey{lineRef: lineRef, upstreamModel: strings.TrimSpace(mapping.UpstreamModel)}
+		if _, unpriced := explicitlyUnpriced[pricingKey]; unpriced {
+			if _, priced := hasEnabledCost[pricingKey]; !priced {
+				continue
+			}
 		}
 		target, exists := targetsByChannel[channelID]
 		if !exists {
@@ -1869,7 +1909,7 @@ func configImportChannelModelSnapshotTargets(db *gorm.DB, items []model.ConfigIm
 		}
 		target.Models[canonicalModel] = struct{}{}
 		target.Models[upstreamModel] = struct{}{}
-		target.LineRefs[mapping.LineRef] = struct{}{}
+		target.LineRefs[lineRef] = struct{}{}
 		targetsByChannel[channelID] = target
 	}
 	return targetsByChannel, nil

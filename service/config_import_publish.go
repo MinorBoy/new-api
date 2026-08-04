@@ -131,7 +131,7 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		if err := tx.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
 			return err
 		}
-		if err := publishConfigImportDisabledCostRules(tx, items, &refresh); err != nil {
+		if err := publishConfigImportAuthoritativeCostRules(tx, items, &refresh); err != nil {
 			return err
 		}
 		for _, item := range items {
@@ -206,7 +206,7 @@ func markConfigImportStale(ctx context.Context, batchID int64) error {
 		}).Error
 }
 
-func publishConfigImportDisabledCostRules(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {
+func publishConfigImportAuthoritativeCostRules(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {
 	if !tx.Migrator().HasTable(&model.ChannelModelCostRule{}) {
 		return nil
 	}
@@ -214,13 +214,18 @@ func publishConfigImportDisabledCostRules(tx *gorm.DB, items []model.ConfigImpor
 	if err != nil {
 		return err
 	}
-	now := common.GetTimestamp()
-	for _, item := range items {
-		disabled, err := configImportDisabledCostRuleRetiresActive(item)
-		if err != nil {
-			return err
+	affectedChannels := make(map[int]struct{})
+	for _, channelID := range lineChannels {
+		if channelID > 0 {
+			affectedChannels[channelID] = struct{}{}
 		}
-		if !disabled {
+	}
+	if len(affectedChannels) == 0 {
+		return nil
+	}
+	authoritativeKeys := make(map[string]struct{})
+	for _, item := range items {
+		if item.EntityType != "cost_rule_drafts" || item.State == string(types.ConfigImportItemStateExcluded) {
 			continue
 		}
 		var draft types.ConfigImportCostRuleDraft
@@ -229,20 +234,43 @@ func publishConfigImportDisabledCostRules(tx *gorm.DB, items []model.ConfigImpor
 		}
 		channelID := lineChannels[draft.LineRef]
 		if channelID <= 0 {
-			return configImportError("PUBLISH_LINE_UNBOUND", "disabled cost rule %q references unbound line %q", item.BusinessID, draft.LineRef)
+			continue
 		}
-		result := tx.Model(&model.ChannelModelCostRule{}).Where(
-			"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
-			channelID, draft.UpstreamModel, draft.CostVariantKey, types.CostRuleActive,
-		).Updates(map[string]any{
-			"status": string(types.CostRuleRetired), "effective_to": now, "updated_at": now,
-		})
+		if draft.Enabled != nil && !*draft.Enabled {
+			continue
+		}
+		authoritativeKeys[fmt.Sprintf("%d|%s|%s", channelID, strings.TrimSpace(draft.UpstreamModel), draft.CostVariantKey)] = struct{}{}
+	}
+	channelIDs := make([]int, 0, len(affectedChannels))
+	for channelID := range affectedChannels {
+		channelIDs = append(channelIDs, channelID)
+	}
+	sort.Ints(channelIDs)
+	var activeRules []model.ChannelModelCostRule
+	if err := tx.Where("channel_id IN ? AND status = ?", channelIDs, types.CostRuleActive).
+		Order("channel_id ASC, billable_upstream_model ASC, cost_variant_key ASC, id ASC").Find(&activeRules).Error; err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	for _, rule := range activeRules {
+		key := fmt.Sprintf("%d|%s|%s", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey)
+		if _, retained := authoritativeKeys[key]; retained {
+			continue
+		}
+		result := tx.Model(&model.ChannelModelCostRule{}).
+			Where("id = ? AND status = ?", rule.ID, types.CostRuleActive).
+			Updates(map[string]any{
+				"status": string(types.CostRuleRetired), "effective_to": now, "updated_at": now,
+			})
 		if result.Error != nil {
 			return result.Error
 		}
+		if result.RowsAffected != 1 {
+			return model.ErrCostRuleStateConflict
+		}
 		refresh.CostModelKeys = appendConfigImportRefreshString(
 			refresh.CostModelKeys,
-			fmt.Sprintf("%d|%s|%s", channelID, draft.UpstreamModel, draft.CostVariantKey),
+			key,
 		)
 	}
 	return nil
@@ -405,18 +433,18 @@ func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRe
 	}
 	for _, snapshot := range storedSummary.ChannelModelSnapshots {
 		keys.ChannelIDs = appendConfigImportRefreshInt(keys.ChannelIDs, snapshot.ChannelID)
-		if len(snapshot.RemovedModels) == 0 {
-			continue
-		}
 		if db.Migrator().HasTable(&model.ChannelModelCostRule{}) {
 			var rules []model.ChannelModelCostRule
-			if err := db.Where("channel_id = ? AND billable_upstream_model IN ? AND status = ?", snapshot.ChannelID, snapshot.RemovedModels, types.CostRuleRetired).
+			if err := db.Where("channel_id = ? AND status = ?", snapshot.ChannelID, types.CostRuleRetired).
 				Order("billable_upstream_model ASC, cost_variant_key ASC, id ASC").Find(&rules).Error; err != nil {
 				return keys, err
 			}
 			for _, rule := range rules {
 				keys.CostModelKeys = appendConfigImportRefreshString(keys.CostModelKeys, fmt.Sprintf("%d|%s|%s", rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey))
 			}
+		}
+		if len(snapshot.RemovedModels) == 0 {
+			continue
 		}
 		if db.Migrator().HasTable(&model.RoutingPolicy{}) && db.Migrator().HasTable(&model.RouteTarget{}) {
 			var policyIDs []int

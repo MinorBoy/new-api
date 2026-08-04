@@ -37,7 +37,7 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 	err := DB.Table("abilities").
 		Select("abilities.*, channels.type as channel_type").
 		Joins("join channels on abilities.channel_id = channels.id").
-		Where("abilities.enabled = ?", true).
+		Where("abilities.enabled = ? AND channels.status = ?", true, common.ChannelStatusEnabled).
 		Scan(&abilities).Error
 	return abilities, err
 }

@@ -54,18 +54,65 @@ func TestSeedPasswordHashAcceptsSeedPassword(t *testing.T) {
 	require.True(t, common.ValidatePasswordAndHash(seedPassword, hashed))
 }
 
+func TestDisableRemovedSeedChannelsLeavesOnlyCurrentMatrixLinesEnabled(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	previousDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+
+	current := model.Channel{Name: seedChannelName + "current", Key: "key", Status: common.ChannelStatusEnabled}
+	removed := model.Channel{Name: seedChannelName + "removed", Key: "key", Status: common.ChannelStatusEnabled}
+	unrelated := model.Channel{Name: "unrelated", Key: "key", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(&current).Error)
+	require.NoError(t, db.Create(&removed).Error)
+	require.NoError(t, db.Create(&unrelated).Error)
+	currentRule := model.ChannelModelCostRule{
+		ChannelID: current.Id, BillableUpstreamModel: "current-model", CostVariantKey: "default",
+		Version: 1, Status: string(types.CostRuleActive),
+	}
+	removedRule := model.ChannelModelCostRule{
+		ChannelID: removed.Id, BillableUpstreamModel: "removed-model", CostVariantKey: "default",
+		Version: 1, Status: string(types.CostRuleActive),
+	}
+	unrelatedRule := model.ChannelModelCostRule{
+		ChannelID: unrelated.Id, BillableUpstreamModel: "unrelated-model", CostVariantKey: "default",
+		Version: 1, Status: string(types.CostRuleActive),
+	}
+	require.NoError(t, db.Create(&currentRule).Error)
+	require.NoError(t, db.Create(&removedRule).Error)
+	require.NoError(t, db.Create(&unrelatedRule).Error)
+
+	require.NoError(t, disableRemovedSeedChannels(map[string]struct{}{current.Name: {}}))
+
+	require.NoError(t, db.First(&current, current.Id).Error)
+	require.NoError(t, db.First(&removed, removed.Id).Error)
+	require.NoError(t, db.First(&unrelated, unrelated.Id).Error)
+	require.Equal(t, common.ChannelStatusEnabled, current.Status)
+	require.Equal(t, common.ChannelStatusManuallyDisabled, removed.Status)
+	require.Equal(t, common.ChannelStatusEnabled, unrelated.Status)
+	require.NoError(t, db.First(&currentRule, currentRule.ID).Error)
+	require.NoError(t, db.First(&removedRule, removedRule.ID).Error)
+	require.NoError(t, db.First(&unrelatedRule, unrelatedRule.ID).Error)
+	require.Equal(t, string(types.CostRuleActive), currentRule.Status)
+	require.Equal(t, string(types.CostRuleRetired), removedRule.Status)
+	require.NotNil(t, removedRule.EffectiveTo)
+	require.Equal(t, string(types.CostRuleActive), unrelatedRule.Status)
+}
+
 func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
-	require.Len(t, targets, 147)
-	require.Equal(t, map[string]int{"431": 38, "900": 6, "903": 4, "933": 99}, materialDistribution(targets))
+	require.Len(t, targets, 155)
+	require.Equal(t, map[string]int{"431": 41, "900": 6, "903": 4, "933": 104}, materialDistribution(targets))
 	enabledCosts := 0
 	for _, target := range targets {
 		if target.CostEnabled {
 			enabledCosts++
 		}
 	}
-	require.Equal(t, 146, enabledCosts)
+	require.Equal(t, 154, enabledCosts)
 
 	targetsByLine := make(map[string][]matrixTarget)
 	for _, target := range targets {
@@ -122,7 +169,7 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 		accepted++
 	}
 
-	require.Equal(t, 110, accepted)
+	require.Equal(t, 118, accepted)
 	require.Equal(t, 36, blocked)
 	require.Equal(t, 1, disabled)
 }
@@ -399,7 +446,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	document, err := loadDocument(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
 
-	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R130-480")
+	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R132-480")
 	require.True(t, ok)
 	config, err := importedCostRuleConfig(rule)
 	require.NoError(t, err)
@@ -411,7 +458,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, "0.4794520547945205", *config.value.NormalizedUSDPrices.UnitPrice)
 	require.NotEqual(t, "0.20", *config.value.UnitPrice)
 
-	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R140-720")
+	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R142-720")
 	require.True(t, ok)
 	durationConfig, err := importedCostRuleConfig(durationRule)
 	require.NoError(t, err)

@@ -736,8 +736,16 @@ func preparePolledTaskCostSettlement(ctx context.Context, adaptor TaskPollingAda
 		return nil
 	}
 	if model.TaskStatus(result.Status) == model.TaskStatusSuccess {
+		_, attempt, err := loadAsyncCostTaskAttempt(ctx, task.PrivateData.CostRequestID, task)
+		if err != nil {
+			return err
+		}
+		mode := types.CostMode(attempt.CostMode)
+		requiresTerminalMeter := types.CostChargeEvent(attempt.ChargeEvent) == types.CostChargeTaskSucceeded &&
+			(mode == types.CostModePerDuration || mode == types.CostModePerToken) &&
+			types.CostMeterSource(attempt.MeterSource) != types.CostMeterValidatedRequest
 		normalizer, ok := adaptor.(taskCostMeterNormalizer)
-		if ok {
+		if ok && requiresTerminalMeter {
 			normalizerResult := result
 			if result.UsageSource == model.TaskUsageSourceLocalCalculated {
 				resultCopy := *result
@@ -745,6 +753,10 @@ func preparePolledTaskCostSettlement(ctx context.Context, adaptor TaskPollingAda
 				resultCopy.TotalTokens = 0
 				resultCopy.CompletionTokensPresent = false
 				resultCopy.TotalTokensPresent = false
+				if resultCopy.CostMeter == nil && result.UpstreamUsageCostMeter != nil {
+					meter := *result.UpstreamUsageCostMeter
+					resultCopy.CostMeter = &meter
+				}
 				normalizerResult = &resultCopy
 			}
 			meter, err := normalizer.NormalizeTaskCostMeter(task, normalizerResult)

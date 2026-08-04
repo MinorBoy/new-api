@@ -46,9 +46,9 @@
 
 **Files:** `relay/channel/task/newapivideo/profile.go`, `relay/channel/task/newapivideo/z5api_request.go`, `relay/channel/task/newapivideo/z5api_request_test.go`
 
-- [ ] 在 `profile.go` 增加 `ChannelNameZ5API = "Z5API"`、`videoRequestDialectZ5APIMedia` 和 `z5apiProtocolProfile()`；配置提交/查询路径 `/v1/videos`、`/v1/videos/{task_id}`、JSON、公网 URL和最多 9 图片/3 视频/3 音频协议上限，不写静态模型列表。
-- [ ] 先写失败测试，覆盖文生、首帧、首尾帧、图片/视频/音频混合请求的精确 JSON；缺省 `parameters` 字段省略，显式 `duration` 指针不丢失；显式 `watermark`、`seed`、`generate_audio`、`callback_url`、`draft`、非默认 `service_tier` 返回 `InvalidParameter.*`。
-- [ ] 测试图片 9/10、视频 3/4、音频 3/4；允许 `first_frame`、`last_frame`、`reference_image`、`reference_video`、`reference_voice`，拒绝错误角色、`file://`、`asset://`、私网 URL和错误 data URI。
+- [x] 在 `profile.go` 增加 `ChannelNameZ5API = "Z5API"`、`videoRequestDialectZ5APIMedia` 和 `z5apiProtocolProfile()`；配置提交/查询路径 `/v1/videos`、`/v1/videos/{task_id}`、JSON、公网 URL和最多 9 图片/3 视频/3 音频协议上限，不写静态模型列表。
+- [x] 先写失败测试，覆盖文生、首帧、首尾帧、图片/视频/音频混合请求的精确 JSON；缺省 `parameters` 字段省略，显式 `duration` 指针不丢失；显式 `watermark`、`seed`、`generate_audio`、`callback_url`、`draft`、非默认 `service_tier` 返回 `InvalidParameter.*`。
+- [x] 测试图片 9/10、视频 3/4、音频 3/4；允许 `first_frame`、`last_frame`、`reference_image`、`reference_video`、`reference_voice`，拒绝错误角色、`file://`、`asset://`、私网 URL和错误 data URI。
 - [ ] 运行失败测试：
 
 ~~~~powershell
@@ -56,41 +56,41 @@ go test ./relay/channel/task/newapivideo -run 'TestZ5API|TestBuildZ5' -count=1
 ~~~~
 
 Expected: 因 Z5API 方言和 profile 尚不存在而失败。
-- [ ] 实现 `z5apiRequest`（`Model`、`Prompt`、`Media`、`Parameters`）；可选参数使用指针和 `omitempty`，通过 `common.Marshal` 编码。将 Ark 媒体角色映射为文档声明的 Z5API type，音频映射为 `reference_voice`。
-- [ ] 实现 `validateZ5APIRequest`，复用 Ark 语义、角色、数量、公网 URL、比例和 `MaxTaskDurationSeconds` 校验；模型细分能力交给导入 route contract。
-- [ ] 在 `TaskAdaptor.ValidateRequestAndSetAction` 与 `BuildRequestBody` 增加 Z5API 分支，并要求 `ProviderValidationComplete` 后编码。
+- [x] 实现 `z5apiRequest`（`Model`、`Prompt`、`Media`、`Parameters`）；可选参数使用指针和 `omitempty`，通过 `common.Marshal` 编码。将 Ark 媒体角色映射为文档声明的 Z5API type，音频映射为 `reference_voice`。
+- [x] 实现 `validateZ5APIRequest`，复用 Ark 语义、角色、数量、公网 URL、比例和 `MaxTaskDurationSeconds` 校验；模型细分能力交给导入 route contract。
+- [x] 在 `TaskAdaptor.ValidateRequestAndSetAction` 与 `BuildRequestBody` 增加 Z5API 分支，并要求 `ProviderValidationComplete` 后编码。
 - [ ] 运行：
 
 ~~~~powershell
 gofmt -w relay/channel/task/newapivideo/profile.go relay/channel/task/newapivideo/z5api_request.go relay/channel/task/newapivideo/z5api_request_test.go relay/channel/task/newapivideo/adaptor.go
 go test ./relay/channel/task/newapivideo -run 'TestZ5API|TestBuildZ5|TestPaipu|TestEightYes' -count=1
 ~~~~
-- [ ] 提交：`git commit -m "feat(z5api): add request protocol profile"`。
+- [x] 提交：`git commit -m "feat(z5api): add request protocol profile"`。
 
 ## Task 2: 响应解析与 Ark 转换
 
 **Files:** `relay/channel/task/newapivideo/dto.go`, `relay/channel/task/newapivideo/response.go`, `relay/channel/task/newapivideo/z5api_response_test.go`
 
-- [ ] 先写失败测试：`pending/processing` 为进行中，`completed + object` 为成功，`failed` 清理错误，`seconds` 进入 duration 和 CostMeter；成功无 URL、非法/超大 seconds 遵循现有错误和边界策略。
-- [ ] 扩展 direct task DTO，保存 Z5API 的 `object` 和 `seconds` 字段；`directTaskVideoURL` 对 Z5API 方言优先读取 `object`，不覆盖既有 `url/video_url/result_url`。
-- [ ] 在解析阶段使用 decimal 和公共边界检查，禁止裸 `int(float)`；失败消息走 `sanitizeUpstreamFailure`，不返回 Key、私有任务 ID或渠道字段。
-- [ ] 在 `ConvertToArkVideoTask` 中输出用户模型、公开任务 ID、Ark status、`content.video_url`、duration、resolution和 usage；覆盖单查与列表隐私隔离。
+- [x] 先写失败测试：`pending/processing` 为进行中，`completed + object` 为成功，`failed` 清理错误，`seconds` 进入 duration 和 CostMeter；成功无 URL、非法/超大 seconds 遵循现有错误和边界策略。
+- [x] 扩展 direct task DTO，保存 Z5API 的 `object` 和 `seconds` 字段；`directTaskVideoURL` 对 Z5API 方言优先读取 `object`，不覆盖既有 `url/video_url/result_url`。
+- [x] 在解析阶段使用 decimal 和公共边界检查，禁止裸 `int(float)`；失败消息走 `sanitizeUpstreamFailure`，不返回 Key、私有任务 ID或渠道字段。
+- [x] 在 `ConvertToArkVideoTask` 中输出用户模型、公开任务 ID、Ark status、`content.video_url`、duration、resolution和 usage；覆盖单查与列表隐私隔离。
 - [ ] 运行：
 
 ~~~~powershell
 gofmt -w relay/channel/task/newapivideo/dto.go relay/channel/task/newapivideo/response.go relay/channel/task/newapivideo/z5api_response_test.go
 go test ./relay/channel/task/newapivideo -run 'TestZ5API|TestParse.*Task|TestConvertToArkVideoTask' -count=1
 ~~~~
-- [ ] 提交：`git commit -m "feat(z5api): normalize video task responses"`。
+- [x] 提交：`git commit -m "feat(z5api): normalize video task responses"`。
 
 ## Task 3: 注册渠道类型 211
 
 **Files:** `constant/channel.go`, `constant/channel_test.go`, `relay/relay_adaptor.go`, `relay/seedance_task.go`, `relay/relay_task.go`, `relay/video_route_contract.go`, `relay/relay_task_seedance_test.go`, `relay/cost_accounting_adaptor_test.go`, `controller/channel.go`, `controller/channel-test.go`, `controller/channel_test_internal_test.go`, `service/config_import_stage.go`, `service/config_import_stage_test.go`
 
-- [ ] 先写失败测试，断言类型、名称、默认 URL、`GetTaskAdaptor("211")`、Ark converter、cost capabilities、Seedance allow-list、task-only 和配置导入 task protocol。
-- [ ] 分配 `ChannelTypeZ5API = 211`，将 `ChannelTypeDummy` 移到 212，设置 `https://z5api.com` 与 `Z5API`；不加入 `common.ChannelType2APIType`。
-- [ ] 注册 `newapivideo.NewZ5APITaskAdaptor()`，把 211 加入 Seedance 三个平台集合、Ark converter、relay task routing、video route contract、cost capability 和 generic-test exclusion。
-- [ ] 配置导入把 `CH-Z5API` 绑定到 211，保留导入模型和 disabled 状态，不从 HTML 生成模型目录。
+- [x] 先写失败测试，断言类型、名称、默认 URL、`GetTaskAdaptor("211")`、Ark converter、cost capabilities、Seedance allow-list、task-only 和配置导入 task protocol。
+- [x] 分配 `ChannelTypeZ5API = 211`，将 `ChannelTypeDummy` 移到 212，设置 `https://z5api.com` 与 `Z5API`；不加入 `common.ChannelType2APIType`。
+- [x] 注册 `newapivideo.NewZ5APITaskAdaptor()`，把 211 加入 Seedance 三个平台集合、Ark converter、relay task routing、video route contract、cost capability 和 generic-test exclusion。
+- [x] 配置导入把 `CH-Z5API` 绑定到 211，保留导入模型和 disabled 状态，不从 HTML 生成模型目录。
 - [ ] 运行：
 
 ~~~~powershell
@@ -103,10 +103,10 @@ go test ./constant ./relay ./controller ./service -run 'TestZ5API|TestSeedanceTa
 
 **Files:** `web/src/features/channels/constants.ts`, `web/src/features/channels/lib/channel-type-config.ts`, `web/src/channel-config-converter/document.ts`, `web/tests/channel-type-config.test.ts`, `web/src/channel-config-converter/__tests__/v1.test.ts`, `web/src/i18n/locales/{en,zh,zh-TW,fr,ru,ja,vi}.json`
 
-- [ ] 先写失败测试，断言 `CHANNEL_TYPES[211] === "Z5API"`、显示顺序、NewAPI 图标、默认 URL、task-only、不可拉取模型、空静态模型数组和 `CH-Z5API -> 211`。
-- [ ] 增加 211 配置：默认 Base URL `https://z5api.com`、原始 Key 提示、模型由导入/手工映射维护；加入 managed default URL 集合，不加入 model fetch 集合。
-- [ ] 在 V1 converter 表和 fixture 中增加 `CH-Z5API`，确保 provider hint 为 `z5api`，导入 upstream model 不被静态配置覆盖。
-- [ ] 为七种 locale 增加 Z5API、默认地址、Key 提示和“仅在真实上游契约验收后启用”文案，用户可见文本全部走 `t()`。
+- [x] 先写失败测试，断言 `CHANNEL_TYPES[211] === "Z5API"`、显示顺序、NewAPI 图标、默认 URL、task-only、不可拉取模型、空静态模型数组和 `CH-Z5API -> 211`。
+- [x] 增加 211 配置：默认 Base URL `https://z5api.com`、原始 Key 提示、模型由导入/手工映射维护；加入 managed default URL 集合，不加入 model fetch 集合。
+- [x] 在 V1 converter 表和 fixture 中增加 `CH-Z5API`，确保 provider hint 为 `z5api`，导入 upstream model 不被静态配置覆盖。
+- [x] 为七种 locale 增加 Z5API、默认地址、Key 提示和“仅在真实上游契约验收后启用”文案，用户可见文本全部走 `t()`。
 - [ ] 运行：
 
 ~~~~powershell
@@ -122,10 +122,10 @@ Set-Location ..
 
 **Files:** `e2e/z5api_upstream_e2e_test.go`, `relay/relay_task_billing_test.go`, `relay/video_route_contract_test.go`
 
-- [ ] 先写 mock server 失败测试：Ark POST 收到 `/v1/videos`、Bearer Key和精确 `media/parameters` JSON；返回 pending，轮询 processing，终态 completed/object/seconds；Ark 单查和列表只返回公开投影。
-- [ ] 增加失败 fixture：上游 failed 与 HTTP 4xx/5xx 只退款一次；不支持角色、数量或私网 URL 在本地 400 且上游 POST 计数为 0。
-- [ ] 将 Z5API 加入 billing matrix：按请求、按时长、上游 seconds 结算、失败退款、超大 seconds 饱和；使用现有测试数据库和 `require/assert`，不直接写 `OtherRatios`。
-- [ ] 增加 route contract：导入 capability 的图片/视频/音频上限和分辨率限制在路由选择阶段生效，未知模型不被 profile 静态列表误判。
+- [x] 先写 mock server 失败测试：Ark POST 收到 `/v1/videos`、Bearer Key和精确 `media/parameters` JSON；返回 pending，轮询 processing，终态 completed/object/seconds；Ark 单查和列表只返回公开投影。
+- [x] 增加失败 fixture：上游 failed 与 HTTP 4xx/5xx 只退款一次；不支持角色、数量或私网 URL 在本地 400 且上游 POST 计数为 0。
+- [x] 将 Z5API 加入 billing matrix：按请求、按时长、上游 seconds 结算、失败退款、超大 seconds 饱和；使用现有测试数据库和 `require/assert`，不直接写 `OtherRatios`。
+- [x] 增加 route contract：导入 capability 的图片/视频/音频上限和分辨率限制在路由选择阶段生效，未知模型不被 profile 静态列表误判。
 - [ ] 运行：
 
 ~~~~powershell
@@ -133,7 +133,7 @@ gofmt -w e2e/z5api_upstream_e2e_test.go relay/relay_task_billing_test.go relay/v
 go test ./e2e -run 'TestZ5API' -count=1 -v
 go test ./relay -run 'TestZ5API|TestTaskBilling|TestVideoRouteContract' -count=1 -v
 ~~~~
-- [ ] 提交：`git commit -m "test(z5api): cover Ark lifecycle and billing"`。
+- [x] 提交：`git commit -m "test(z5api): cover Ark lifecycle and billing"`。
 
 ## Task 6: 真实验收与发布门禁
 

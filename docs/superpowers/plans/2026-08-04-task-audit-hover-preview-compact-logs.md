@@ -15,7 +15,7 @@
 ## 文件职责
 
 - `web/src/features/usage-logs/components/columns/task-logs-columns.tsx`：渲染三列审计数据入口，协调 Hover Card 与详情 Dialog 状态。
-- `web/src/features/usage-logs/components/dialogs/task-audit-data-dialog.tsx`：提供稳定的审计数据格式化函数和现有完整详情 Dialog。
+- `web/src/features/usage-logs/components/dialogs/task-audit-data-dialog.tsx`：渲染现有完整详情 Dialog，并接收单元格共享的格式化字符串。
 - `web/src/features/usage-logs/components/__tests__/task-audit-columns.test.tsx`：保护三列入口、聚焦预览、完整 JSON、复制入口、点击详情和空数据降级。
 - `web/src/features/usage-logs/lib/table-density.ts`：按日志分类提供稳定的桌面表格密度配置。
 - `web/src/features/usage-logs/components/__tests__/usage-logs-table-density.test.tsx`：从 `UsageLogsTable` 边界保护任务/绘图紧凑、普通日志不变的布局契约。
@@ -80,10 +80,10 @@ bun test --parallel=1 src/features/usage-logs/components/__tests__/task-audit-co
 
 - [ ] **步骤 3：共享格式化结果并实现 Hover Card**
 
-将详情文件中的格式化函数导出：
+在 `TaskAuditDataCell` 的 `useMemo` 中生成共享格式化字符串：
 
 ```ts
-export function formatTaskAuditData(data: unknown): string {
+const formattedData = useMemo(() => {
   if (typeof data === 'string') {
     try {
       return JSON.stringify(JSON.parse(data), null, 2)
@@ -93,16 +93,15 @@ export function formatTaskAuditData(data: unknown): string {
   }
 
   return JSON.stringify(data, null, 2) ?? ''
-}
+}, [data])
 ```
 
-在 `TaskAuditDataCell` 中使用 `useMemo` 生成一次 `formattedData`，并增加受控 Hover Card。`trigger-press` 不打开预览，点击路径只打开现有 Dialog：
+使用该 `formattedData` 增加受控 Hover Card。`trigger-press` 不打开预览，点击路径只打开现有 Dialog：
 
 ```tsx
 const triggerId = useId()
 const [previewOpen, setPreviewOpen] = useState(false)
 const [dialogOpen, setDialogOpen] = useState(false)
-const formattedData = useMemo(() => formatTaskAuditData(data), [data])
 const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
 
 <HoverCard

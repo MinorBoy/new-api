@@ -431,10 +431,13 @@ describe('task audit columns', () => {
       preview.textContent ?? '',
       /"prompt": "A cinematic city at night"/
     )
-    assert.ok(preview.querySelector('[data-slot="scroll-area"]'))
-    assert.ok(
-      preview.querySelector('button[aria-label="Copy to clipboard"]')
+    const scrollArea = preview.querySelector('[data-slot="scroll-area"]')
+    assert.ok(scrollArea)
+    assert.equal(
+      scrollArea.classList.contains('h-[min(26rem,calc(100vh-8rem))]'),
+      true
     )
+    assert.ok(preview.querySelector('button[aria-label="Copy to clipboard"]'))
 
     await mounted.cleanup()
   })

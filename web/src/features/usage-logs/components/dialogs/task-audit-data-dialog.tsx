@@ -29,19 +29,6 @@ interface TaskAuditDataDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-export function formatTaskAuditData(data: unknown): string {
-  if (typeof data === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(data), null, 2)
-    } catch {
-      return data
-    }
-  }
-
-  const formatted = JSON.stringify(data, null, 2)
-  return formatted ?? ''
-}
-
 export function TaskAuditDataDialog(props: TaskAuditDataDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })

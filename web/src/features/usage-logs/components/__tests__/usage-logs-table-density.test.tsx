@@ -133,8 +133,7 @@ mock.module('@/components/data-table', () => ({
   DataTableRow: (props: DataTableRowProbeProps) =>
     createElement('div', {
       'data-slot': 'density-row',
-      'data-cell-class':
-        props.getColumnClassName?.('status', 'cell') ?? '',
+      'data-cell-class': props.getColumnClassName?.('status', 'cell') ?? '',
       className: props.className,
     }),
   useDataTable: () => ({ table: {} }),
@@ -206,10 +205,7 @@ async function mountTable(logCategory: LogCategory): Promise<{
   return { container: container as unknown as HTMLElement, root }
 }
 
-async function unmountTable(mounted: {
-  container: HTMLElement
-  root: Root
-}) {
+async function unmountTable(mounted: { container: HTMLElement; root: Root }) {
   await act(async () => mounted.root.unmount())
   mounted.container.remove()
 }

@@ -45,10 +45,7 @@ import {
   type AudioClip,
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
-import {
-  formatTaskAuditData,
-  TaskAuditDataDialog,
-} from '../dialogs/task-audit-data-dialog'
+import { TaskAuditDataDialog } from '../dialogs/task-audit-data-dialog'
 import { ModelBadge } from '../model-badge'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
@@ -109,7 +106,17 @@ function TaskAuditDataCell({ data, title }: { data: unknown; title: string }) {
   const triggerId = useId()
   const [previewOpen, setPreviewOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const formattedData = useMemo(() => formatTaskAuditData(data), [data])
+  const formattedData = useMemo(() => {
+    if (typeof data === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(data), null, 2)
+      } catch {
+        return data
+      }
+    }
+
+    return JSON.stringify(data, null, 2) ?? ''
+  }, [data])
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
 
   if (data == null || data === '') {
@@ -169,7 +176,7 @@ function TaskAuditDataCell({ data, title }: { data: unknown; title: string }) {
             </Button>
           </div>
           <Separator />
-          <ScrollArea className='max-h-[min(26rem,calc(100vh-8rem))]'>
+          <ScrollArea className='h-[min(26rem,calc(100vh-8rem))]'>
             <pre className='overflow-wrap-anywhere min-w-0 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap'>
               {formattedData}
             </pre>

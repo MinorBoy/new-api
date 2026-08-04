@@ -569,6 +569,13 @@ export const STATIC_I18N_KEYS = [
   'cURL copied',
   'Video URL copied',
 
+  // Z5API channel configuration
+  'Z5API',
+  'Default: https://z5api.com',
+  'Enter the raw API key issued by Z5API',
+  'Map client-visible Ark model names to verified Z5API upstream models',
+  'Z5API is task-only. Enable it only after real upstream contract acceptance.',
+
   // Misc
   'Cancel',
   'Status',

@@ -556,3 +556,35 @@ describe('8yes channel configuration', () => {
     )
   })
 })
+
+describe('Z5API channel configuration', () => {
+  test('registers task-only type 211 without inventing a model catalog', () => {
+    expect(CHANNEL_TYPES[211]).toBe('Z5API')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 211, label: 'Z5API' })
+    expect(getChannelTypeIcon(211)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(211)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(211)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(211)).toBe(false)
+    expect(getChannelTypeConfig(211)).toMatchObject({
+      id: 211,
+      name: 'Z5API',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://z5api.com',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(211)).toBe('https://z5api.com')
+    expect(getChannelModelOptions(211, [], [])).toEqual([])
+    expect(getBaseUrlOnChannelTypeChange(211, '', false)).toBe('https://z5api.com')
+    expect(getBaseUrlOnChannelTypeChange(211, 'https://proxy.example.com', false)).toBe(
+      'https://proxy.example.com'
+    )
+    expect(getChannelTypeHints(211)).toEqual({
+      baseUrl: 'Default: https://z5api.com',
+      key: 'Enter the raw API key issued by Z5API',
+      models: 'Map client-visible Ark model names to verified Z5API upstream models',
+    })
+    expect(CHANNEL_TYPE_WARNINGS[211]).toBe(
+      'Z5API is task-only. Enable it only after real upstream contract acceptance.'
+    )
+  })
+})

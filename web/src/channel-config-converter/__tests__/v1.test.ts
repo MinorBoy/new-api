@@ -496,6 +496,17 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
       },
     ],
   })
+  extracted.channels.push({
+    ...sourceChannel,
+    businessId: 'CH-Z5API',
+    sourceLocations: [
+      {
+        ...sourceLocation,
+        businessId: 'CH-Z5API',
+        row: 1000,
+      },
+    ],
+  })
   const result = await buildImportDocument({
     extracted,
     sourceBytes,
@@ -514,6 +525,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-OMEGAAI'), 208)
   assert.equal(typesByChannel.get('CH-4STOKEN'), 209)
   assert.equal(typesByChannel.get('CH-8YES'), 210)
+  assert.equal(typesByChannel.get('CH-Z5API'), 211)
 })
 
 test('v1 adapter treats line and SKU price differences as distinct variants and removes Secure unsupported 480p rows', async () => {

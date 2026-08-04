@@ -5936,6 +5936,11 @@
     "Your Turnstile site key": "您的 Turnstile 站點金鑰",
     "YSRouter adds no markup": "YSRouter adds no markup",
     "Zero retention": "零數據保留",
+    "Z5API": "Z5API",
+    "Z5API is task-only. Enable it only after real upstream contract acceptance.": "Z5API is task-only. Enable it only after real upstream contract acceptance.",
+    "Default: https://z5api.com": "Default: https://z5api.com",
+    "Enter the raw API key issued by Z5API": "Enter the raw API key issued by Z5API",
+    "Map client-visible Ark model names to verified Z5API upstream models": "Map client-visible Ark model names to verified Z5API upstream models",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4"
   }

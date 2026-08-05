@@ -16,12 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import test, { after, beforeEach } from 'node:test'
-
 // @ts-expect-error Bun supplies mock.module at test runtime, but the frontend
 // typecheck intentionally only includes Node's test declarations.
 import { mock } from 'bun:test'
+import assert from 'node:assert/strict'
+import test, { after, beforeEach } from 'node:test'
+
 import { Window } from 'happy-dom'
 import { act } from 'react'
 import type { Container, Root } from 'react-dom/client'
@@ -39,7 +39,8 @@ const browserGlobals = {
   ResizeObserver: browserWindow.ResizeObserver,
   IntersectionObserver: browserWindow.IntersectionObserver,
   getComputedStyle: browserWindow.getComputedStyle.bind(browserWindow),
-  requestAnimationFrame: browserWindow.requestAnimationFrame.bind(browserWindow),
+  requestAnimationFrame:
+    browserWindow.requestAnimationFrame.bind(browserWindow),
   cancelAnimationFrame: browserWindow.cancelAnimationFrame.bind(browserWindow),
   IS_REACT_ACT_ENVIRONMENT: true,
 }
@@ -73,9 +74,8 @@ mock.module('@tanstack/react-router', () => {
 })
 
 const { createRoot } = await import('react-dom/client')
-const { QueryClient, QueryClientProvider } = await import(
-  '@tanstack/react-query'
-)
+const { QueryClient, QueryClientProvider } =
+  await import('@tanstack/react-query')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 
@@ -130,9 +130,7 @@ async function mountFilterBar() {
       <I18nextProvider i18n={i18n}>
         <QueryClientProvider client={createQueryClient()}>
           <UsageLogsProvider>
-            <CommonLogsFilterBar
-              table={{ getAllColumns: () => [] } as never}
-            />
+            <CommonLogsFilterBar table={{ getAllColumns: () => [] } as never} />
           </UsageLogsProvider>
         </QueryClientProvider>
       </I18nextProvider>
@@ -142,7 +140,10 @@ async function mountFilterBar() {
   return { container: container as unknown as HTMLElement, root }
 }
 
-async function unmountFilterBar(mounted: { root: Root; container: HTMLElement }) {
+async function unmountFilterBar(mounted: {
+  root: Root
+  container: HTMLElement
+}) {
   await act(async () => mounted.root.unmount())
   mounted.container.remove()
 }
@@ -158,7 +159,10 @@ test('renders a log-type Tabs row above the filter toolbar with every type', asy
   const labels = tabTriggers.map(
     (trigger) => (trigger as HTMLElement).textContent?.trim() ?? ''
   )
-  assert.deepEqual(labels, LOG_TYPE_FILTERS.map((type) => type.label))
+  assert.deepEqual(
+    labels,
+    LOG_TYPE_FILTERS.map((type) => type.label)
+  )
 
   // The Tabs group sits above the rest of the filter bar — the first
   // child of the rendered fragment is the tabs, not the toolbar.
@@ -180,7 +184,9 @@ test('renders a log-type Tabs row above the filter toolbar with every type', asy
 test('selecting a log-type Tab navigates with that type in the URL', async () => {
   const mounted = await mountFilterBar()
   const errorTrigger = (
-    [...mounted.container.querySelectorAll('[data-slot="tabs-trigger"]')] as HTMLElement[]
+    [
+      ...mounted.container.querySelectorAll('[data-slot="tabs-trigger"]'),
+    ] as HTMLElement[]
   ).find((trigger) => trigger.textContent?.trim() === 'Error')
 
   assert.ok(errorTrigger, 'Error tab must be present')
@@ -211,6 +217,22 @@ test('"Consume" is the active Tab when no type is selected (default)', async () 
     (activeTriggers[0] as HTMLElement).textContent?.trim(),
     'Consume'
   )
+
+  await unmountFilterBar(mounted)
+})
+
+test('regular users do not receive supplier filters or an audit masking toggle', async () => {
+  const mounted = await mountFilterBar()
+  const text = mounted.container.textContent ?? ''
+  const placeholders = [
+    ...mounted.container.querySelectorAll<HTMLInputElement>('[placeholder]'),
+  ].map((input) => input.placeholder)
+
+  assert.equal(text.includes('Group'), false)
+  assert.equal(placeholders.includes('Channel ID'), false)
+  assert.equal(placeholders.includes('Upstream Request ID'), false)
+  assert.equal(mounted.container.querySelector('[aria-label="Hide"]'), null)
+  assert.equal(mounted.container.querySelector('[aria-label="Show"]'), null)
 
   await unmountFilterBar(mounted)
 })

@@ -21,7 +21,7 @@ import { test } from 'node:test'
 
 import { buildSearchParams } from '../filter'
 import { buildQueryParams } from '../query-params'
-import { buildTaskApiParams } from '../utils'
+import { buildApiParams, buildTaskApiParams } from '../utils'
 
 test('buildQueryParams preserves zero while omitting empty values', () => {
   const params = buildQueryParams({
@@ -100,4 +100,48 @@ test('task API parameters omit the admin-only user filter in self view', () => {
   })
 
   assert.equal(params.user_id, undefined)
+})
+
+test('common self API parameters omit every supplier dimension', () => {
+  const params = buildApiParams({
+    page: 1,
+    pageSize: 20,
+    isAdmin: false,
+    searchParams: {
+      model: 'public-model',
+      token: 'user-token',
+      group: 'internal-group',
+      channel: '40',
+      username: 'alice',
+      requestId: 'req-public',
+      upstreamRequestId: 'upstream-secret',
+    },
+  })
+
+  assert.equal(params.model_name, 'public-model')
+  assert.equal(params.token_name, 'user-token')
+  assert.equal(params.request_id, 'req-public')
+  assert.equal(params.group, undefined)
+  assert.equal(params.channel, undefined)
+  assert.equal(params.username, undefined)
+  assert.equal(params.upstream_request_id, undefined)
+})
+
+test('common administrator API parameters retain audit dimensions', () => {
+  const params = buildApiParams({
+    page: 1,
+    pageSize: 20,
+    isAdmin: true,
+    searchParams: {
+      group: 'internal-group',
+      channel: '40',
+      username: 'alice',
+      upstreamRequestId: 'upstream-secret',
+    },
+  })
+
+  assert.equal(params.group, 'internal-group')
+  assert.equal(params.channel, 40)
+  assert.equal(params.username, 'alice')
+  assert.equal(params.upstream_request_id, 'upstream-secret')
 })

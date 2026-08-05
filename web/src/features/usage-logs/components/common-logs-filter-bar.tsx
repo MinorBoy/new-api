@@ -145,10 +145,10 @@ export function CommonLogsFilterBar<TData>(
       ...(searchParams.endTime
         ? { end_timestamp: Math.floor(Number(searchParams.endTime) / 1000) }
         : {}),
-      ...(searchParams.token
-        ? { token_name: String(searchParams.token) }
+      ...(searchParams.token ? { token_name: String(searchParams.token) } : {}),
+      ...(isAdmin && searchParams.group
+        ? { group: String(searchParams.group) }
         : {}),
-      ...(searchParams.group ? { group: String(searchParams.group) } : {}),
       ...(isAdmin && searchParams.channel
         ? { channel: Number(searchParams.channel) || 0 }
         : {}),
@@ -307,21 +307,24 @@ export function CommonLogsFilterBar<TData>(
     !!filters.username ||
     !!filters.channel ||
     !!filters.requestId ||
-    !!filters.upstreamRequestId
+    (isAdmin && !!filters.upstreamRequestId)
 
   // A type selection counts as an "active filter" only when it deviates from
   // the default (Consume). Selecting "All Types" or "Consume" leaves the Reset
   // button inactive for the type dimension.
   const hasTypeFilter = logType !== LOG_TYPE_DEFAULT_VALUE
   const hasAdditionalFilters =
-    !!filters.model || !!filters.group || hasTypeFilter || hasExpandedFilters
+    !!filters.model ||
+    (isAdmin && !!filters.group) ||
+    hasTypeFilter ||
+    hasExpandedFilters
 
   const expandedFilterCount = [
     filters.token,
     isAdmin ? filters.username : undefined,
     isAdmin ? filters.channel : undefined,
     filters.requestId,
-    filters.upstreamRequestId,
+    isAdmin ? filters.upstreamRequestId : undefined,
   ].filter(Boolean).length
   const sensitiveType = sensitiveVisible ? 'text' : 'password'
   const logTypeTabs = (
@@ -353,7 +356,7 @@ export function CommonLogsFilterBar<TData>(
       <CommonLogsStats />
     </div>
   )
-  const sensitiveToggle = (
+  const sensitiveToggle = isAdmin ? (
     <Tooltip>
       <TooltipTrigger
         render={
@@ -372,7 +375,7 @@ export function CommonLogsFilterBar<TData>(
         {sensitiveVisible ? t('Hide') : t('Show')}
       </TooltipContent>
     </Tooltip>
-  )
+  ) : undefined
 
   const dateRangeFilter = (
     <LogsFilterField wide>
@@ -402,7 +405,7 @@ export function CommonLogsFilterBar<TData>(
       />
     </LogsFilterField>
   )
-  const groupFilter = (
+  const groupFilter = isAdmin ? (
     <LogsFilterField>
       <Combobox
         options={groupOptions}
@@ -418,7 +421,7 @@ export function CommonLogsFilterBar<TData>(
         className='h-8 min-w-0 text-sm leading-5'
       />
     </LogsFilterField>
-  )
+  ) : null
   const advancedFilters = (
     <>
       <LogsFilterField>
@@ -478,19 +481,23 @@ export function CommonLogsFilterBar<TData>(
           }
         />
       </LogsFilterField>
-      <LogsFilterField>
-        <LogsFilterInput
-          placeholder={t('Upstream Request ID')}
-          value={filters.upstreamRequestId || ''}
-          onChange={(e) =>
-            handleTextChange('upstreamRequestId', e.target.value)
-          }
-          onCompositionStart={() => handleCompositionStart('upstreamRequestId')}
-          onCompositionEnd={(e) =>
-            handleCompositionEnd('upstreamRequestId', e.currentTarget.value)
-          }
-        />
-      </LogsFilterField>
+      {isAdmin && (
+        <LogsFilterField>
+          <LogsFilterInput
+            placeholder={t('Upstream Request ID')}
+            value={filters.upstreamRequestId || ''}
+            onChange={(e) =>
+              handleTextChange('upstreamRequestId', e.target.value)
+            }
+            onCompositionStart={() =>
+              handleCompositionStart('upstreamRequestId')
+            }
+            onCompositionEnd={(e) =>
+              handleCompositionEnd('upstreamRequestId', e.currentTarget.value)
+            }
+          />
+        </LogsFilterField>
+      )}
     </>
   )
 
@@ -518,8 +525,8 @@ export function CommonLogsFilterBar<TData>(
           </>
         }
         mobileFilterCount={
-          [filters.model, filters.group].filter(Boolean).length +
-          expandedFilterCount
+          [filters.model, isAdmin ? filters.group : undefined].filter(Boolean)
+            .length + expandedFilterCount
         }
         hasAdvancedActiveFilters={hasExpandedFilters}
         advancedFilterCount={expandedFilterCount}

@@ -548,9 +548,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
       const other = parseLogOther(log.other)
       const displayName = sensitiveVisible ? tokenName : '••••'
-      let group = log.group
-      if (!group) group = other?.group || ''
-      const groupRatio = getGroupRatio(other)
+      let group = isAdmin ? log.group : ''
+      if (isAdmin && !group) group = other?.group || ''
+      const groupRatio = isAdmin ? getGroupRatio(other) : null
 
       return (
         <div className='flex max-w-[200px] flex-col gap-0.5'>
@@ -605,7 +605,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const log = row.original
         if (!isDisplayableLogType(log.type)) return null
 
-        const modelInfo = formatModelName(log)
+        const modelInfo = formatModelName(log, isAdmin)
 
         return (
           <div className='flex w-fit flex-col gap-0.5'>

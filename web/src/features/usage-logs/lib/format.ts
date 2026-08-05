@@ -156,8 +156,11 @@ export function hasToolSurcharge(other: LogOtherData | null): boolean {
 /**
  * Parse the 'other' field from JSON string to object
  */
-export function parseLogOther(other: string): LogOtherData | null {
+export function parseLogOther(
+  other: LogOtherData | string | null | undefined
+): LogOtherData | null {
   if (!other) return null
+  if (typeof other === 'object') return other
   try {
     return JSON.parse(other) as LogOtherData
   } catch (error) {
@@ -214,17 +217,22 @@ export function getResponseTimeColor(
 /**
  * Format model name with mapping indicator
  */
-export function formatModelName(log: UsageLog): {
+export function formatModelName(
+  log: UsageLog,
+  includeActualModel = false
+): {
   name: string
   isMapped: boolean
   actualModel?: string
 } {
   const other = parseLogOther(log.other)
-  const isMapped = !!(
-    other?.is_model_mapped &&
-    other?.upstream_model_name &&
-    other.upstream_model_name !== ''
-  )
+  const isMapped =
+    includeActualModel &&
+    !!(
+      other?.is_model_mapped &&
+      other?.upstream_model_name &&
+      other.upstream_model_name !== ''
+    )
 
   return {
     name: log.model_name,

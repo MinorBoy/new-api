@@ -6,7 +6,7 @@
 
 普通用户不能从 API、桌面页面、移动页面或媒体预览中获得渠道信息、供应商名称、渠道 Base URL、API Key、上游模型 ID、供应商价格、成本、路由尝试、审计历史、原始请求、上游响应或供应商资源 URL。成本核算详情对普通用户返回 HTTP 403。Seedance、Suno 和非 Seedance 视频任务均只返回用户侧事实及 new-api 本地媒体代理地址。
 
-实现分支为 `codex/supplier-log-confidentiality`，基线为本地 `ysr@458b8f296`。主体实现提交截至 `2da8b6c9b`；本报告与媒体安全审查修复位于后续收尾提交。
+历史实现分支为 `codex/supplier-log-confidentiality`，基线为本地 `ysr@458b8f296`。主体实现提交截至 `2da8b6c9b`，安全收尾提交为 `155730d95`，已通过合并提交 `e7fd7299b` 合并到本地 `ysr`；功能分支及对应 worktree 已在合并验收后清理。
 
 ## 角色与权限矩阵
 
@@ -111,4 +111,4 @@ git diff --check
 - 最终独立安全复审未发现剩余 Critical 或 Important 问题。
 - 项目全量 `bun run lint` 仍被本分支之外的既有错误阻断，例如 `channel-affinity/cache-stats-dialog.tsx`、`confirm-dialog.tsx` 和多个旧类型导入规则错误；本轮未修改这些文件，也未把无关全库 Lint 清理混入供应商保密修复。
 
-最终提交和合并后将在本地 `ysr` 再执行关键后端测试、51 条使用日志前端测试、类型检查、构建和 `git diff --check`。
+合并后已在本地 `ysr@e7fd7299b` 重新执行关键后端测试、51 条使用日志前端测试、类型检查、生产构建和 `git diff --check`，结果全部通过。重建后的 `new-api`、MySQL、Redis 和视频元数据服务均为健康状态，`GET /api/status` 返回 HTTP 200 且 `success:true`。

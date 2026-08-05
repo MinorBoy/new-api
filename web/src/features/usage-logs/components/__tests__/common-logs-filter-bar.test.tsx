@@ -224,13 +224,13 @@ test('"Consume" is the active Tab when no type is selected (default)', async () 
 test('regular users do not receive supplier filters or an audit masking toggle', async () => {
   const mounted = await mountFilterBar()
   const text = mounted.container.textContent ?? ''
-  const placeholders = [
+  const placeholders = new Set([
     ...mounted.container.querySelectorAll<HTMLInputElement>('[placeholder]'),
-  ].map((input) => input.placeholder)
+  ].map((input) => input.placeholder))
 
   assert.equal(text.includes('Group'), false)
-  assert.equal(placeholders.includes('Channel ID'), false)
-  assert.equal(placeholders.includes('Upstream Request ID'), false)
+  assert.equal(placeholders.has('Channel ID'), false)
+  assert.equal(placeholders.has('Upstream Request ID'), false)
   assert.equal(mounted.container.querySelector('[aria-label="Hide"]'), null)
   assert.equal(mounted.container.querySelector('[aria-label="Show"]'), null)
 

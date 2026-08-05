@@ -97,14 +97,14 @@ function projectPublicTaskResult(log: TaskLog): PublicTaskResult | null {
     typeof value === 'string' ? value : ''
   const taskStatus = String(log.status || '').toUpperCase()
   const sourceStatus = stringValue(source.status)
-  const status =
-    taskStatus === TASK_STATUS.SUCCESS
-      ? 'succeeded'
-      : taskStatus === TASK_STATUS.FAILURE
-        ? 'failed'
-        : ['queued', 'running', 'cancelled'].includes(sourceStatus)
-          ? sourceStatus
-          : 'queued'
+  let status = 'queued'
+  if (taskStatus === TASK_STATUS.SUCCESS) {
+    status = 'succeeded'
+  } else if (taskStatus === TASK_STATUS.FAILURE) {
+    status = 'failed'
+  } else if (['queued', 'running', 'cancelled'].includes(sourceStatus)) {
+    status = sourceStatus
+  }
 
   const result: PublicTaskResult = {
     id: log.task_id,

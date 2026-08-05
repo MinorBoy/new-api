@@ -1632,6 +1632,11 @@ type configImportStageIssue struct {
 	BusinessID string
 }
 
+const (
+	configImportIssueRouteMergeModeConflict = "ROUTE_MERGE_MODE_CONFLICT"
+	configImportIssueRouteDefaultsConflict  = "ROUTE_DEFAULTS_CONFLICT"
+)
+
 // StageConfigImportBatch materializes only inactive cost drafts. Sale,
 // mapping, and routing entities remain canonical proposals in import items
 // until the publish transaction reviews and applies them.
@@ -2215,6 +2220,60 @@ func pointerStringValue(value *string) string {
 
 func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]configImportStageIssue, error) {
 	issues := make([]configImportStageIssue, 0)
+	type routePlan struct {
+		businessID string
+		mergeMode  types.ConfigImportRouteMergeMode
+		defaults   modelrouting.Defaults
+	}
+	routePlans := make(map[model.RoutingPolicyKey]routePlan)
+	for _, item := range items {
+		if item.EntityType != "route_blueprints" || item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		var blueprint types.ConfigImportRouteBlueprint
+		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
+			return issues, err
+		}
+		mergeMode := blueprint.MergeMode
+		if mergeMode == "" {
+			mergeMode = types.ConfigImportRouteMergeModeMerge
+		}
+		if mergeMode == types.ConfigImportRouteMergeModeSkip {
+			continue
+		}
+		policy := configImportRoutePolicy(blueprint)
+		key := model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model}
+		current := routePlan{
+			businessID: item.BusinessID,
+			mergeMode:  mergeMode,
+			defaults: modelrouting.Defaults{
+				OutputResolution: policy.DefaultResolution,
+				DurationSeconds:  policy.DefaultDuration,
+				AspectRatio:      policy.DefaultRatio,
+			},
+		}
+		existing, found := routePlans[key]
+		if !found {
+			routePlans[key] = current
+			continue
+		}
+		if existing.mergeMode != current.mergeMode {
+			issues = append(issues, configImportStageIssue{
+				Code:       configImportIssueRouteMergeModeConflict,
+				Severity:   types.ConfigImportIssueSeverityError,
+				BusinessID: item.BusinessID,
+				Message:    fmt.Sprintf("route blueprints %q and %q for %s|%s use conflicting merge modes %q and %q", existing.businessID, current.businessID, key.GroupName, key.Model, existing.mergeMode, current.mergeMode),
+			})
+		}
+		if existing.defaults != current.defaults {
+			issues = append(issues, configImportStageIssue{
+				Code:       configImportIssueRouteDefaultsConflict,
+				Severity:   types.ConfigImportIssueSeverityError,
+				BusinessID: item.BusinessID,
+				Message:    fmt.Sprintf("route blueprints %q and %q for %s|%s derive conflicting defaults", existing.businessID, current.businessID, key.GroupName, key.Model),
+			})
+		}
+	}
 	costBySKU, err := configImportCostBySKU(items)
 	if err != nil {
 		return issues, err

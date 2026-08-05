@@ -2226,10 +2226,19 @@ func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]
 		defaults   modelrouting.Defaults
 	}
 	routePlans := make(map[model.RoutingPolicyKey]routePlan)
+	routeItems := make([]model.ConfigImportItem, 0)
 	for _, item := range items {
-		if item.EntityType != "route_blueprints" || item.State == string(types.ConfigImportItemStateExcluded) {
-			continue
+		if item.EntityType == "route_blueprints" && item.State != string(types.ConfigImportItemStateExcluded) {
+			routeItems = append(routeItems, item)
 		}
+	}
+	sort.SliceStable(routeItems, func(i, j int) bool {
+		if routeItems[i].BusinessID != routeItems[j].BusinessID {
+			return routeItems[i].BusinessID < routeItems[j].BusinessID
+		}
+		return routeItems[i].ID < routeItems[j].ID
+	})
+	for _, item := range routeItems {
 		var blueprint types.ConfigImportRouteBlueprint
 		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
 			return issues, err
@@ -2265,14 +2274,10 @@ func stageConfigImportProposals(db *gorm.DB, items []model.ConfigImportItem) ([]
 				Message:    fmt.Sprintf("route blueprints %q and %q for %s|%s use conflicting merge modes %q and %q", existing.businessID, current.businessID, key.GroupName, key.Model, existing.mergeMode, current.mergeMode),
 			})
 		}
-		if existing.defaults != current.defaults {
-			issues = append(issues, configImportStageIssue{
-				Code:       configImportIssueRouteDefaultsConflict,
-				Severity:   types.ConfigImportIssueSeverityError,
-				BusinessID: item.BusinessID,
-				Message:    fmt.Sprintf("route blueprints %q and %q for %s|%s derive conflicting defaults", existing.businessID, current.businessID, key.GroupName, key.Model),
-			})
-		}
+		// A policy has one fallback default, while each imported target retains
+		// its own resolution, duration, and ratio constraints. Different target
+		// capabilities therefore do not conflict; the lexicographically first
+		// blueprint supplies the deterministic policy default.
 	}
 	costBySKU, err := configImportCostBySKU(items)
 	if err != nil {

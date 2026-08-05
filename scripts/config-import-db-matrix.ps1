@@ -40,8 +40,11 @@ try {
 
   Remove-Item Env:SQL_DSN -ErrorAction SilentlyContinue
   go test ./model -run 'TestConfigImportMigrationConfiguredDatabases|TestCostAccountingMigrationConfiguredDatabases' -count=1
+  if ($LASTEXITCODE -ne 0) { throw "model database matrix tests failed with exit code $LASTEXITCODE" }
   go test ./service -run 'TestConfigImport' -count=1
+  if ($LASTEXITCODE -ne 0) { throw "service config import tests failed with exit code $LASTEXITCODE" }
   go test ./e2e -run 'TestConfigImport' -count=1
+  if ($LASTEXITCODE -ne 0) { throw "config import E2E tests failed with exit code $LASTEXITCODE" }
 }
 finally {
   Restore-EnvironmentValue 'SQL_DSN' $originalSqlDsn

@@ -401,7 +401,8 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 		&model.RoutingPolicy{}, &model.RouteTarget{}, &model.ChannelModelCostRule{},
 		&model.CostAccountingRequest{}, &model.CostAccountingAttempt{}, &model.CostAccountingAudit{},
 		&model.ConfigImportBatch{}, &model.ConfigImportItem{}, &model.ConfigImportBinding{},
-		&model.ConfigImportIssue{}, &model.ConfigImportResolution{}, &model.ConfigImportPublishAudit{}, &model.Option{},
+		&model.ConfigImportIssue{}, &model.ConfigImportResolution{}, &model.ConfigImportPublishAudit{},
+		&model.ConfigImportActivationAudit{}, &model.ConfigImportRouteOwnershipChange{}, &model.Option{},
 	))
 	require.NoError(t, model.InitRoutingPolicyCache())
 	t.Cleanup(func() {
@@ -512,6 +513,20 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 	require.NoError(t, model.DB.First(&publishedBatch, batch.ID).Error)
 	require.Equal(t, string(types.ConfigImportBatchStatusPublished), publishedBatch.Status)
 	var activeRuleCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
+		Where("source = ? AND status = ?", "config_import", types.CostRuleActive).
+		Count(&activeRuleCount).Error)
+	require.Zero(t, activeRuleCount)
+	var draftRuleCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
+		Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).
+		Count(&draftRuleCount).Error)
+	require.EqualValues(t, 167, draftRuleCount)
+	preview, err := service.PreviewConfigImportBatchActivation(context.Background(), batch.ID)
+	require.NoError(t, err)
+	require.Truef(t, preview.Ready, "activation blockers: %+v", preview.Blockers)
+	_, err = service.ActivateConfigImportBatch(context.Background(), batch.ID, 1)
+	require.NoError(t, err)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
 		Where("source = ? AND status = ?", "config_import", types.CostRuleActive).
 		Count(&activeRuleCount).Error)

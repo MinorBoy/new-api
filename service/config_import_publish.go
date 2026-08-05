@@ -1117,6 +1117,13 @@ func buildConfigImportPublishedRoutePlans(tx *gorm.DB, items []model.ConfigImpor
 		}
 		routeBlueprints = append(routeBlueprints, configImportPublishRouteBlueprint{item: item, blueprint: blueprint})
 	}
+	sort.SliceStable(routeBlueprints, func(i, j int) bool {
+		left, right := routeBlueprints[i].item, routeBlueprints[j].item
+		if left.BusinessID != right.BusinessID {
+			return left.BusinessID < right.BusinessID
+		}
+		return left.ID < right.ID
+	})
 	priorityOverrides := configImportRouteTargetPriorityOverrides(lineChannels, routeBlueprints)
 	plansByKey := make(map[model.RoutingPolicyKey]*configImportPublishedRoutePlan)
 	for _, routeBlueprint := range routeBlueprints {
@@ -1132,7 +1139,7 @@ func buildConfigImportPublishedRoutePlans(tx *gorm.DB, items []model.ConfigImpor
 		if plan == nil {
 			plan = &configImportPublishedRoutePlan{PolicyKey: key, MergeMode: blueprint.MergeMode, Defaults: defaults}
 			plansByKey[key] = plan
-		} else if plan.MergeMode != blueprint.MergeMode || plan.Defaults != defaults {
+		} else if plan.MergeMode != blueprint.MergeMode {
 			return nil, configImportError("PUBLISH_ROUTE_PLAN", "route blueprint %q conflicts with another blueprint for %s|%s", item.BusinessID, key.GroupName, key.Model)
 		}
 		plan.Targets = append(plan.Targets, targets...)

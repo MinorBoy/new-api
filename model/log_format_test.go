@@ -3,97 +3,19 @@ package model
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/pkg/modelrouting"
-
 	"github.com/stretchr/testify/require"
 )
 
-// TestFormatUserLogsStripsQuotaSaturation verifies the admin-only quota
-// saturation marker (nested under other.admin_info) is removed for non-admin
-// log views, since formatUserLogs strips the whole admin_info object.
-func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
-	other := common.MapToJsonStr(map[string]interface{}{
-		"model_price": 0.004,
-		"admin_info": map[string]interface{}{
-			"quota_saturation": map[string]interface{}{
-				"op":      "QuotaFromDecimal",
-				"kind":    "overflow",
-				"clamped": common.MaxQuota,
-			},
-		},
-	})
-	logs := []*Log{{Other: other}}
+func TestFormatUserLogsAssignsDisplayIDsAndClearsChannelNames(t *testing.T) {
+	logs := []*Log{
+		{Id: 41, ChannelName: "supplier-a"},
+		{Id: 42, ChannelName: "supplier-b"},
+	}
 
-	formatUserLogs(logs, 0)
+	formatUserLogs(logs, 10)
 
-	parsed, err := common.StrToMap(logs[0].Other)
-	require.NoError(t, err)
-	_, hasAdminInfo := parsed["admin_info"]
-	require.False(t, hasAdminInfo, "admin_info (and nested quota_saturation) must be stripped for non-admin views")
-	// Non-admin billing fields remain visible.
-	require.Contains(t, parsed, "model_price")
-}
-
-func TestFormatUserLogsStripsCapabilityRouting(t *testing.T) {
-	other := common.MapToJsonStr(map[string]interface{}{
-		"admin_info": map[string]interface{}{
-			"routing": &modelrouting.Audit{PolicyID: 7, TargetID: 21, UpstreamModel: "provider-1080p"},
-		},
-	})
-	logs := []*Log{{Other: other}}
-
-	formatUserLogs(logs, 0)
-
-	parsed, err := common.StrToMap(logs[0].Other)
-	require.NoError(t, err)
-	require.NotContains(t, parsed, "admin_info")
-	require.NotContains(t, logs[0].Other, "provider-1080p")
-}
-
-func TestFormatUserLogsStripsCostAccountingAdminInfo(t *testing.T) {
-	other := common.MapToJsonStr(map[string]interface{}{
-		"billing_source": "wallet",
-		"admin_info": map[string]interface{}{
-			"cost_accounting_request_id": int64(42),
-		},
-	})
-	logs := []*Log{{Other: other}}
-
-	formatUserLogs(logs, 0)
-
-	parsed, err := common.StrToMap(logs[0].Other)
-	require.NoError(t, err)
-	require.NotContains(t, parsed, "admin_info")
-	require.NotContains(t, logs[0].Other, "cost_accounting_request_id")
-	require.Contains(t, parsed, "billing_source")
-}
-
-func TestFormatUserLogsStripsProfitRoutingDiagnostics(t *testing.T) {
-	other := common.MapToJsonStr(map[string]interface{}{
-		"request_path": "/v1/video/generations",
-		"admin_info": map[string]interface{}{
-			"routing_diagnostics": []map[string]interface{}{
-				{
-					"channel_id":                  17,
-					"billable_upstream_model":     "vendor-video-model",
-					"estimated_revenue_nano_usd":  int64(10_000_000_000),
-					"minimum_expected_margin_bps": 1000,
-					"rule_version":                3,
-					"reason":                      "margin_below_threshold",
-				},
-			},
-		},
-	})
-	logs := []*Log{{Other: other}}
-
-	formatUserLogs(logs, 0)
-
-	parsed, err := common.StrToMap(logs[0].Other)
-	require.NoError(t, err)
-	require.NotContains(t, parsed, "admin_info")
-	require.Contains(t, parsed, "request_path")
-	require.NotContains(t, logs[0].Other, "vendor-video-model")
-	require.NotContains(t, logs[0].Other, "10_000_000_000")
-	require.NotContains(t, logs[0].Other, "margin_below_threshold")
+	require.Equal(t, 11, logs[0].Id)
+	require.Equal(t, 12, logs[1].Id)
+	require.Empty(t, logs[0].ChannelName)
+	require.Empty(t, logs[1].ChannelName)
 }

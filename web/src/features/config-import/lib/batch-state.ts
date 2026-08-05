@@ -15,6 +15,7 @@ export const CONFIG_IMPORT_STEPS = [
   'pricing',
   'routing_diff',
   'publish_review',
+  'activation',
   'publish_result',
 ] as const
 
@@ -25,10 +26,12 @@ export interface ConfigImportWizardState {
   canGoBack: boolean
   canContinue: boolean
   canPublish: boolean
+  canActivate: boolean
   blockingCodes: string[]
 }
 
-function stepForStatus(status: ConfigImportBatchStatus): ConfigImportStep {
+function stepForBatch(batch: ConfigImportBatchDetail): ConfigImportStep {
+  const status: ConfigImportBatchStatus = batch.status
   switch (status) {
     case 'validating':
       return 'upload'
@@ -42,8 +45,9 @@ function stepForStatus(status: ConfigImportBatchStatus): ConfigImportStep {
     case 'publishing':
       return 'publish_review'
     case 'publish_failed':
-    case 'published':
       return 'publish_result'
+    case 'published':
+      return batch.activated_at == null ? 'activation' : 'publish_result'
   }
 }
 
@@ -65,7 +69,7 @@ function openBlockingCodes(batch: ConfigImportBatchDetail): string[] {
 export function deriveWizardState(
   batch: ConfigImportBatchDetail
 ): ConfigImportWizardState {
-  const step = stepForStatus(batch.status)
+  const step = stepForBatch(batch)
   const blockingCodes = openBlockingCodes(batch)
   const terminal =
     batch.status === 'published' || batch.status === 'publish_failed'
@@ -73,6 +77,11 @@ export function deriveWizardState(
     batch.status === 'ready' &&
     batch.allowed_actions.includes('publish') &&
     blockingCodes.length === 0
+  const canActivate =
+    batch.status === 'published' &&
+    batch.allowed_actions.includes('activate') &&
+    batch.activation_preview?.ready === true &&
+    batch.activation_preview.blockers.length === 0
   const canContinue =
     !terminal &&
     !['blocked', 'validating', 'publishing'].includes(batch.status) &&
@@ -84,6 +93,7 @@ export function deriveWizardState(
     canGoBack: step !== 'upload' && !terminal,
     canContinue,
     canPublish,
+    canActivate,
     blockingCodes,
   }
 }

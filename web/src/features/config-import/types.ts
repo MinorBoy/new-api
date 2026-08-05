@@ -109,6 +109,27 @@ export const configImportIssueSchema = z
   })
   .strict()
 
+export const configImportActivationBlockerSchema = z
+  .object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+    line_ref: z.string().optional(),
+    route_target_ref: z.string().optional(),
+    channel_id: z.number().int().positive().optional(),
+  })
+  .strict()
+
+export const configImportActivationPreviewSchema = z
+  .object({
+    ready: z.boolean(),
+    channel_count: z.number().int().nonnegative(),
+    policy_count: z.number().int().nonnegative(),
+    target_count: z.number().int().nonnegative(),
+    retire_target_count: z.number().int().nonnegative(),
+    blockers: z.array(configImportActivationBlockerSchema),
+  })
+  .strict()
+
 export const configImportBatchSummarySchema = z
   .object({
     id: z.number().int().positive(),
@@ -121,6 +142,7 @@ export const configImportBatchSummarySchema = z
     item_counts: entityCountsSchema,
     issue_count: z.number().int().nonnegative(),
     allowed_actions: z.array(z.string()),
+    activated_at: z.number().int().positive().nullish(),
     created_at: z.number().int(),
     updated_at: z.number().int(),
   })
@@ -143,6 +165,7 @@ export const configImportBatchDetailSchema =
       .optional(),
     issues: z.array(configImportIssueSchema),
     channel_model_snapshots: z.array(channelModelSnapshotSchema).optional(),
+    activation_preview: configImportActivationPreviewSchema.nullish(),
   })
 
 export const configImportBindingSchema = z
@@ -372,6 +395,12 @@ export type ConfigImportRouteMergeMode = z.infer<
 export type ConfigImportEntityCounts = z.infer<typeof entityCountsSchema>
 export type ConfigImportItemDetail = z.infer<typeof configImportItemSchema>
 export type ConfigImportIssueDetail = z.infer<typeof configImportIssueSchema>
+export type ConfigImportActivationBlocker = z.infer<
+  typeof configImportActivationBlockerSchema
+>
+export type ConfigImportActivationPreview = z.infer<
+  typeof configImportActivationPreviewSchema
+>
 export type ConfigImportBatchSummary = z.infer<
   typeof configImportBatchSummarySchema
 >

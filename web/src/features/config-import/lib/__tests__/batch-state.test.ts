@@ -58,6 +58,7 @@ test('derives a blocked binding state from unresolved backend issues', () => {
     canGoBack: true,
     canContinue: false,
     canPublish: false,
+    canActivate: false,
     blockingCodes: ['CHANNEL_LINE_UNBOUND'],
   })
 })
@@ -84,11 +85,7 @@ test('does not promote warnings to a ready or publishable state', () => {
   assert.deepEqual(result.blockingCodes, ['MARGIN_WARNING'])
 })
 
-test('published and failed batches resolve to the terminal result step', () => {
-  assert.equal(
-    deriveWizardState(batch({ status: 'published', issues: [] })).step,
-    'publish_result'
-  )
+test('a failed publish resolves to the terminal result step', () => {
   assert.equal(
     deriveWizardState(batch({ status: 'publish_failed', issues: [] })).step,
     'publish_result'
@@ -129,4 +126,69 @@ test('does not block a ready batch for an issue excluded by the backend', () => 
 
   assert.equal(result.canPublish, true)
   assert.deepEqual(result.blockingCodes, [])
+})
+
+test('routes a published unactivated batch to activation', () => {
+  const result = deriveWizardState(
+    batch({
+      status: 'published',
+      activated_at: null,
+      allowed_actions: ['activate'],
+      issues: [],
+      activation_preview: {
+        ready: true,
+        channel_count: 2,
+        policy_count: 3,
+        target_count: 13,
+        retire_target_count: 67,
+        blockers: [],
+      },
+    })
+  )
+
+  assert.equal(result.step, 'activation')
+  assert.equal(result.canActivate, true)
+})
+
+test('routes an activated batch to the final result', () => {
+  const result = deriveWizardState(
+    batch({
+      status: 'published',
+      activated_at: 123,
+      allowed_actions: [],
+      issues: [],
+    })
+  )
+
+  assert.equal(result.step, 'publish_result')
+  assert.equal(result.canActivate, false)
+})
+
+test('blocks activation when preview, permission, or blockers are missing', () => {
+  const cases = [
+    batch({ status: 'published', allowed_actions: [], issues: [] }),
+    batch({ status: 'published', allowed_actions: ['activate'], issues: [] }),
+    batch({
+      status: 'published',
+      allowed_actions: ['activate'],
+      issues: [],
+      activation_preview: {
+        ready: true,
+        channel_count: 1,
+        policy_count: 1,
+        target_count: 1,
+        retire_target_count: 0,
+        blockers: [
+          {
+            code: 'ACTIVATION_CHANNEL_KEY_MISSING',
+            message: 'A channel key is required.',
+          },
+        ],
+      },
+    }),
+  ]
+
+  for (const current of cases) {
+    assert.equal(deriveWizardState(current).canActivate, false)
+  }
 })

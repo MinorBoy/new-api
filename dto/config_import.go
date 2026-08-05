@@ -187,3 +187,22 @@ type ConfigImportBatchPage struct {
 	Page     int                        `json:"page"`
 	PageSize int                        `json:"page_size"`
 }
+
+type ConfigImportRouteOwnershipCandidate struct {
+	RouteTargetID     int     `json:"route_target_id"`
+	PolicyID          int     `json:"policy_id"`
+	RouteTargetRef    string  `json:"route_target_ref"`
+	ChannelID         int     `json:"channel_id"`
+	BatchID           *int64  `json:"batch_id,omitempty"`
+	CandidateBatchIDs []int64 `json:"candidate_batch_ids,omitempty"`
+	Reason            string  `json:"reason"`
+}
+
+type ConfigImportRouteOwnershipReport struct {
+	OperationID   string                                `json:"operation_id,omitempty"`
+	Matched       []ConfigImportRouteOwnershipCandidate `json:"matched"`
+	Ambiguous     []ConfigImportRouteOwnershipCandidate `json:"ambiguous"`
+	Unmatched     []ConfigImportRouteOwnershipCandidate `json:"unmatched"`
+	AppliedCount  int                                   `json:"applied_count"`
+	RevertedCount int                                   `json:"reverted_count"`
+}

@@ -176,6 +176,33 @@ func RefreshConfigImportBatchCache(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"batch_id": id, "status": "published"})
 }
 
+func PreviewConfigImportRouteOwnershipBackfill(c *gin.Context) {
+	report, err := service.PreviewConfigImportRouteOwnershipBackfill(c)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
+func ApplyConfigImportRouteOwnershipBackfill(c *gin.Context) {
+	report, err := service.ApplyConfigImportRouteOwnershipBackfill(c, c.GetInt("id"))
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
+func RollbackConfigImportRouteOwnershipBackfill(c *gin.Context) {
+	report, err := service.RollbackConfigImportRouteOwnershipBackfill(c, c.GetInt("id"), c.Param("operation_id"))
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
 func configImportID(c *gin.Context) (int64, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -188,7 +215,7 @@ func writeConfigImportError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	var schemaErr *service.ConfigImportSchemaError
 	if errors.As(err, &schemaErr) {
-		if schemaErr.Code == "STALE_BASE_VERSION" {
+		if schemaErr.Code == "STALE_BASE_VERSION" || schemaErr.Code == "ROUTE_OWNERSHIP_ROLLBACK_CONFLICT" {
 			status = http.StatusConflict
 		}
 		c.JSON(status, gin.H{"success": false, "code": schemaErr.Code, "message": schemaErr.Message})

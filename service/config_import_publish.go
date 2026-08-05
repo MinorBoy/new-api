@@ -378,8 +378,24 @@ func RetryConfigImportBatchCache(ctx context.Context, batchID int64, adminID int
 	if err != nil {
 		return err
 	}
-	if err := RefreshPublishedConfig(keys); err != nil {
-		if markErr := markConfigImportCacheRefreshPending(ctx, batchID); markErr != nil {
+	hadActivationPending := false
+	if model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
+		var pendingCount int64
+		if err := model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).
+			Where("batch_id = ? AND code = ? AND resolution_status = ?", batchID, "ACTIVATION_CACHE_REFRESH_PENDING", "open").
+			Count(&pendingCount).Error; err != nil {
+			return err
+		}
+		hadActivationPending = pendingCount > 0
+	}
+	if err := refreshConfigImportActivation(keys); err != nil {
+		var markErr error
+		if batch.ActivatedAt != nil {
+			markErr = markConfigImportActivationCacheRefreshPending(ctx, batchID)
+		} else {
+			markErr = markConfigImportCacheRefreshPending(ctx, batchID)
+		}
+		if markErr != nil {
 			common.SysError(fmt.Sprintf("failed to record pending config import cache refresh for batch %d: %v", batchID, markErr))
 		}
 		return fmt.Errorf("config import cache refresh failed: %w", err)
@@ -387,9 +403,17 @@ func RetryConfigImportBatchCache(ctx context.Context, batchID int64, adminID int
 	if !model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
 		return nil
 	}
-	return model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).
-		Where("batch_id = ? AND code = ? AND resolution_status = ?", batchID, "CACHE_REFRESH_PENDING", "open").
-		Updates(map[string]any{"resolution_status": "resolved", "updated_at": common.GetTimestamp()}).Error
+	if err := model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).
+		Where("batch_id = ? AND code IN ? AND resolution_status = ?", batchID, []string{"CACHE_REFRESH_PENDING", "ACTIVATION_CACHE_REFRESH_PENDING"}, "open").
+		Updates(map[string]any{"resolution_status": "resolved", "updated_at": common.GetTimestamp()}).Error; err != nil {
+		return err
+	}
+	if hadActivationPending {
+		if err := appendConfigImportActivationCacheAudit(ctx, batchID, adminID, "cache_refreshed"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRefreshKeys, error) {

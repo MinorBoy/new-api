@@ -14,6 +14,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type configImportActivationPolicyPlan struct {
@@ -40,6 +41,22 @@ type configImportActivationTargetMetadata struct {
 	Target  types.ConfigImportRouteTarget
 }
 
+type configImportActivationAuditInput struct {
+	Preview        dto.ConfigImportActivationPreview
+	BeforeSHA256   string
+	AfterSHA256    string
+	FailureCode    string
+	FailureMessage string
+}
+
+var refreshConfigImportActivation = func(keys ConfigImportRefreshKeys) error {
+	if err := RefreshPublishedConfig(keys); err != nil {
+		return err
+	}
+	ResetProxyClientCache()
+	return nil
+}
+
 func PreviewConfigImportBatchActivation(ctx context.Context, batchID int64) (*dto.ConfigImportActivationPreview, error) {
 	if batchID <= 0 {
 		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
@@ -51,20 +68,212 @@ func PreviewConfigImportBatchActivation(ctx context.Context, batchID int64) (*dt
 	if err != nil {
 		return nil, err
 	}
+	preview := configImportActivationPreview(plan)
+	return &preview, nil
+}
+
+func ActivateConfigImportBatch(ctx context.Context, batchID int64, adminID int) (*dto.ConfigImportBatchDetail, error) {
+	if adminID <= 0 {
+		return nil, configImportError("SCHEMA_ADMIN", "admin ID is required")
+	}
+	if batchID <= 0 {
+		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	refresh := ConfigImportRefreshKeys{}
+	alreadyActivated := false
+	var rejectedAudit *configImportActivationAuditInput
+	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch model.ConfigImportBatch
+		if err := model.LockModelForUpdate(tx, &model.ConfigImportBatch{}).Where("id = ?", batchID).First(&batch).Error; err != nil {
+			return err
+		}
+		if batch.ActivatedAt != nil {
+			alreadyActivated = true
+			return nil
+		}
+		plan, err := buildConfigImportActivationPlan(tx, batchID, true)
+		if err != nil {
+			return err
+		}
+		preview := configImportActivationPreview(plan)
+		if len(plan.Blockers) > 0 {
+			rejectedAudit = &configImportActivationAuditInput{
+				Preview: preview, BeforeSHA256: plan.BeforeSHA256, AfterSHA256: plan.CurrentSHA256,
+				FailureCode: "ACTIVATION_BLOCKED", FailureMessage: fmt.Sprintf("activation blocked by %d checks", len(plan.Blockers)),
+			}
+			return configImportErrorWithData("ACTIVATION_BLOCKED", preview, "batch %d activation is blocked", batchID)
+		}
+
+		now := common.GetTimestamp()
+		var items []model.ConfigImportItem
+		if err := tx.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		if err := publishConfigImportAuthoritativeCostRules(tx, items, &refresh); err != nil {
+			return err
+		}
+		for _, item := range items {
+			if item.EntityType != "cost_rule_drafts" || item.MaterializedID == nil ||
+				item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+				continue
+			}
+			if *item.MaterializedID <= 0 {
+				return configImportError("ACTIVATION_COST_DRAFT_ID", "cost draft item %d has an invalid materialized ID", item.ID)
+			}
+			activated, err := model.ActivateChannelModelCostRuleWithTx(tx, int64(*item.MaterializedID), adminID, now, nil)
+			if err != nil {
+				return err
+			}
+			refresh.CostModelKeys = appendConfigImportRefreshString(
+				refresh.CostModelKeys,
+				fmt.Sprintf("%d|%s|%s", activated.ChannelID, activated.BillableUpstreamModel, activated.CostVariantKey),
+			)
+		}
+		if err := publishConfigImportSaleOptions(tx, items, &refresh); err != nil {
+			return err
+		}
+		if err := publishConfigImportModelMappings(tx, items, &refresh); err != nil {
+			return err
+		}
+		for _, policyPlan := range plan.Policies {
+			if len(policyPlan.RetireIDs) > 0 {
+				result := tx.Model(&model.RouteTarget{}).
+					Where("id IN ? AND managed_by = ?", policyPlan.RetireIDs, string(types.RouteTargetManagedByConfigImport)).
+					Updates(map[string]any{"enabled": false, "retired_at": now, "updated_at": now})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != int64(len(policyPlan.RetireIDs)) {
+					return configImportError("ACTIVATION_CONCURRENT", "route retirement set changed concurrently")
+				}
+			}
+			if len(policyPlan.EnableIDs) > 0 {
+				result := tx.Model(&model.RouteTarget{}).
+					Where("id IN ? AND source_batch_id = ?", policyPlan.EnableIDs, batchID).
+					Updates(map[string]any{"enabled": true, "retired_at": nil, "updated_at": now})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != int64(len(policyPlan.EnableIDs)) {
+					return configImportError("ACTIVATION_CONCURRENT", "route activation set changed concurrently")
+				}
+			}
+			result := tx.Model(&model.RoutingPolicy{}).Where("id = ?", policyPlan.Policy.ID).Updates(map[string]any{
+				"enabled": true, "default_resolution": policyPlan.Defaults.OutputResolution,
+				"default_duration": policyPlan.Defaults.DurationSeconds, "default_ratio": policyPlan.Defaults.AspectRatio,
+				"updated_at": now,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return configImportError("ACTIVATION_CONCURRENT", "routing policy %d changed concurrently", policyPlan.Policy.ID)
+			}
+			refresh.RoutingPolicyKeys = appendConfigImportRefreshRoutingKey(
+				refresh.RoutingPolicyKeys,
+				model.RoutingPolicyKey{GroupName: policyPlan.Policy.GroupName, Model: policyPlan.Policy.Model},
+			)
+		}
+		if len(plan.ChannelIDs) > 0 {
+			if err := tx.Model(&model.Channel{}).
+				Where("id IN ? AND status = ?", plan.ChannelIDs, common.ChannelStatusManuallyDisabled).
+				Update("status", common.ChannelStatusEnabled).Error; err != nil {
+				return err
+			}
+			var channels []model.Channel
+			if err := model.LockChannelsForUpdate(tx).Where("id IN ?", plan.ChannelIDs).Order("id ASC").Find(&channels).Error; err != nil {
+				return err
+			}
+			if len(channels) != len(plan.ChannelIDs) {
+				return configImportError("ACTIVATION_CONCURRENT", "activation channel set changed concurrently")
+			}
+			for _, channel := range channels {
+				if channel.Status != common.ChannelStatusEnabled {
+					return configImportError("ACTIVATION_CONCURRENT", "channel %d is not enabled", channel.Id)
+				}
+			}
+			if err := tx.Model(&model.Ability{}).Where("channel_id IN ?", plan.ChannelIDs).Update("enabled", true).Error; err != nil {
+				return err
+			}
+		}
+		for _, channelID := range plan.ChannelIDs {
+			refresh.ChannelIDs = appendConfigImportRefreshInt(refresh.ChannelIDs, channelID)
+		}
+
+		after, err := CaptureConfigImportBaseline(tx, batchID)
+		if err != nil {
+			return err
+		}
+		if err := appendConfigImportActivationAudit(
+			tx, batchID, adminID, "activated", plan.BeforeSHA256, after.Hash, preview, "", "",
+		); err != nil {
+			return err
+		}
+		result := tx.Model(&model.ConfigImportBatch{}).Where("id = ? AND activated_at IS NULL", batchID).
+			Updates(map[string]any{"activated_at": now, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return configImportError("ACTIVATION_CONCURRENT", "batch %d activation changed concurrently", batchID)
+		}
+		return nil
+	})
+	if err != nil {
+		if rejectedAudit != nil {
+			auditErr := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				return appendConfigImportActivationAudit(
+					tx, batchID, adminID, "rejected", rejectedAudit.BeforeSHA256, rejectedAudit.AfterSHA256,
+					rejectedAudit.Preview, rejectedAudit.FailureCode, rejectedAudit.FailureMessage,
+				)
+			})
+			if auditErr != nil {
+				common.SysError(fmt.Sprintf("failed to append rejected activation audit for batch %d: %v", batchID, auditErr))
+			}
+		}
+		return nil, err
+	}
+	if alreadyActivated {
+		return GetConfigImportBatch(ctx, batchID)
+	}
+	if err := refreshConfigImportActivation(refresh); err != nil {
+		if markErr := markConfigImportActivationCacheRefreshPending(ctx, batchID); markErr != nil {
+			common.SysError(fmt.Sprintf("failed to record pending activation cache refresh for batch %d: %v", batchID, markErr))
+		}
+		if auditErr := appendConfigImportActivationCacheAudit(ctx, batchID, adminID, "cache_refresh_pending"); auditErr != nil {
+			common.SysError(fmt.Sprintf("failed to append pending activation cache audit for batch %d: %v", batchID, auditErr))
+		}
+		return nil, configImportErrorWithData(
+			"ACTIVATION_CACHE_REFRESH_PENDING",
+			map[string]any{"batch_id": batchID, "activated": true},
+			"batch %d activated but cache refresh is pending",
+			batchID,
+		)
+	}
+	if err := recordPostActivationCostCoverage(ctx, batchID, refresh); err != nil {
+		common.SysError(fmt.Sprintf("failed to record post-activation cost coverage for batch %d: %v", batchID, err))
+	}
+	return GetConfigImportBatch(ctx, batchID)
+}
+
+func configImportActivationPreview(plan *configImportActivationPlan) dto.ConfigImportActivationPreview {
 	targetCount := 0
 	retireTargetCount := 0
 	for _, policy := range plan.Policies {
 		targetCount += len(policy.EnableIDs)
 		retireTargetCount += len(policy.RetireIDs)
 	}
-	return &dto.ConfigImportActivationPreview{
+	return dto.ConfigImportActivationPreview{
 		Ready:             len(plan.Blockers) == 0,
 		ChannelCount:      len(plan.ChannelIDs),
 		PolicyCount:       len(plan.Policies),
 		TargetCount:       targetCount,
 		RetireTargetCount: retireTargetCount,
 		Blockers:          plan.Blockers,
-	}, nil
+	}
 }
 
 func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*configImportActivationPlan, error) {
@@ -175,6 +384,7 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 		hasBindingBlocker = true
 	}
 	if hasBindingBlocker {
+		plan.CurrentSHA256 = plan.BeforeSHA256
 		plan.Blockers = normalizeConfigImportActivationBlockers(plan.Blockers)
 		return plan, nil
 	}
@@ -229,6 +439,13 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 	for _, target := range targets {
 		targetsByPolicy[target.PolicyID] = append(targetsByPolicy[target.PolicyID], target)
 	}
+	channelIDs := make([]int, 0)
+	for _, publishedPlan := range publishedPlans {
+		for _, target := range publishedPlan.Targets {
+			channelIDs = appendConfigImportRefreshInt(channelIDs, target.ChannelID)
+		}
+	}
+	sort.Ints(channelIDs)
 
 	mappings := make(map[string]struct{})
 	costItemsByTarget := make(map[string]model.ConfigImportItem)
@@ -259,12 +476,20 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 	}
 	sort.Slice(costDraftIDs, func(i, j int) bool { return costDraftIDs[i] < costDraftIDs[j] })
 	var costDrafts []model.ChannelModelCostRule
-	if len(costDraftIDs) > 0 {
+	if len(costDraftIDs) > 0 || lock && len(channelIDs) > 0 {
 		costQuery := tx.Model(&model.ChannelModelCostRule{})
 		if lock {
 			costQuery = model.LockModelForUpdate(tx, &model.ChannelModelCostRule{})
 		}
-		if err := costQuery.Where("id IN ?", costDraftIDs).Order("id ASC").Find(&costDrafts).Error; err != nil {
+		switch {
+		case len(costDraftIDs) > 0 && lock && len(channelIDs) > 0:
+			costQuery = costQuery.Where("id IN ? OR (channel_id IN ? AND status = ?)", costDraftIDs, channelIDs, types.CostRuleActive)
+		case len(costDraftIDs) > 0:
+			costQuery = costQuery.Where("id IN ?", costDraftIDs)
+		default:
+			costQuery = costQuery.Where("channel_id IN ? AND status = ?", channelIDs, types.CostRuleActive)
+		}
+		if err := costQuery.Order("id ASC").Find(&costDrafts).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -273,13 +498,6 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 		costDraftsByID[draft.ID] = draft
 	}
 
-	channelIDs := make([]int, 0)
-	for _, publishedPlan := range publishedPlans {
-		for _, target := range publishedPlan.Targets {
-			channelIDs = appendConfigImportRefreshInt(channelIDs, target.ChannelID)
-		}
-	}
-	sort.Ints(channelIDs)
 	var channels []model.Channel
 	if len(channelIDs) > 0 {
 		channelsQuery := tx.Model(&model.Channel{})
@@ -296,7 +514,11 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 	}
 	if lock && len(channelIDs) > 0 {
 		var abilities []model.Ability
-		if err := model.LockModelForUpdate(tx, &model.Ability{}).Where("channel_id IN ?", channelIDs).Order("id ASC").Find(&abilities).Error; err != nil {
+		if err := model.LockModelForUpdate(tx, &model.Ability{}).Where("channel_id IN ?", channelIDs).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "channel_id"}}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "group"}}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "model"}}).
+			Find(&abilities).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -544,4 +766,95 @@ func normalizeConfigImportActivationBlockers(blockers []dto.ConfigImportActivati
 
 func activationIntPointer(value int) *int {
 	return &value
+}
+
+func appendConfigImportActivationAudit(
+	tx *gorm.DB,
+	batchID int64,
+	adminID int,
+	outcome string,
+	beforeSHA256 string,
+	afterSHA256 string,
+	preview dto.ConfigImportActivationPreview,
+	failureCode string,
+	failureMessage string,
+) error {
+	if beforeSHA256 == "" || afterSHA256 == "" {
+		return configImportError("ACTIVATION_AUDIT_HASH", "activation audit requires before and after hashes")
+	}
+	type auditBlocker struct {
+		Code           string `json:"code"`
+		LineRef        string `json:"line_ref,omitempty"`
+		RouteTargetRef string `json:"route_target_ref,omitempty"`
+		ChannelID      *int   `json:"channel_id,omitempty"`
+	}
+	blockers := make([]auditBlocker, 0, len(preview.Blockers))
+	for _, blocker := range preview.Blockers {
+		blockers = append(blockers, auditBlocker{
+			Code: blocker.Code, LineRef: blocker.LineRef,
+			RouteTargetRef: blocker.RouteTargetRef, ChannelID: blocker.ChannelID,
+		})
+	}
+	summary, err := common.Marshal(struct {
+		Ready             bool           `json:"ready"`
+		ChannelCount      int            `json:"channel_count"`
+		PolicyCount       int            `json:"policy_count"`
+		TargetCount       int            `json:"target_count"`
+		RetireTargetCount int            `json:"retire_target_count"`
+		Blockers          []auditBlocker `json:"blockers"`
+	}{
+		Ready: preview.Ready, ChannelCount: preview.ChannelCount,
+		PolicyCount: preview.PolicyCount, TargetCount: preview.TargetCount,
+		RetireTargetCount: preview.RetireTargetCount, Blockers: blockers,
+	})
+	if err != nil {
+		return err
+	}
+	return tx.Create(&model.ConfigImportActivationAudit{
+		BatchID: batchID, AdminID: adminID, Outcome: outcome,
+		ChannelCount: preview.ChannelCount, PolicyCount: preview.PolicyCount,
+		TargetCount: preview.TargetCount, RetiredTargetCount: preview.RetireTargetCount,
+		BeforeSHA256: beforeSHA256, AfterSHA256: afterSHA256,
+		FailureCode: failureCode, FailureMessage: failureMessage,
+		SummaryJSON: model.ConfigImportSummaryJSON(summary), CreatedAt: common.GetTimestamp(),
+	}).Error
+}
+
+func markConfigImportActivationCacheRefreshPending(ctx context.Context, batchID int64) error {
+	if !model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
+		return nil
+	}
+	now := common.GetTimestamp()
+	var issue model.ConfigImportIssue
+	err := model.DB.WithContext(ctx).Where("batch_id = ? AND code = ?", batchID, "ACTIVATION_CACHE_REFRESH_PENDING").First(&issue).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.DB.WithContext(ctx).Create(&model.ConfigImportIssue{
+			BatchID: batchID, Severity: string(types.ConfigImportIssueSeverityWarning), Code: "ACTIVATION_CACHE_REFRESH_PENDING",
+			Message: "Activated configuration cache refresh is pending.", ResolutionStatus: "open", CreatedAt: now, UpdatedAt: now,
+		}).Error
+	}
+	if err != nil {
+		return err
+	}
+	return model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).Where("id = ?", issue.ID).Updates(map[string]any{
+		"severity": string(types.ConfigImportIssueSeverityWarning), "message": "Activated configuration cache refresh is pending.",
+		"resolution_status": "open", "updated_at": now,
+	}).Error
+}
+
+func appendConfigImportActivationCacheAudit(ctx context.Context, batchID int64, adminID int, outcome string) error {
+	var activated model.ConfigImportActivationAudit
+	if err := model.DB.WithContext(ctx).Where("batch_id = ? AND outcome = ?", batchID, "activated").Order("id DESC").First(&activated).Error; err != nil {
+		return err
+	}
+	preview := dto.ConfigImportActivationPreview{
+		Ready: true, ChannelCount: activated.ChannelCount, PolicyCount: activated.PolicyCount,
+		TargetCount: activated.TargetCount, RetireTargetCount: activated.RetiredTargetCount,
+		Blockers: []dto.ConfigImportActivationBlocker{},
+	}
+	return model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return appendConfigImportActivationAudit(
+			tx, batchID, adminID, outcome, activated.BeforeSHA256, activated.AfterSHA256, preview, "", "",
+		)
+	})
 }

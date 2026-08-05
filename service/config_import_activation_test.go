@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type activationFixture struct {
@@ -23,6 +24,274 @@ type activationFixture struct {
 	RetireTargetID int
 	MappingItemID  int64
 	CostDraftID    int64
+}
+
+type activationApplyFixture struct {
+	activationFixture
+	CurrentCostRuleID  int64
+	PreviousCostRuleID int64
+	ManualTargetID     int
+}
+
+func TestActivateConfigImportBatchAppliesConfigurationAtomically(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	previousRefresh := refreshConfigImportActivation
+	var refreshed ConfigImportRefreshKeys
+	refreshConfigImportActivation = func(keys ConfigImportRefreshKeys) error {
+		refreshed = keys
+		return nil
+	}
+	t.Cleanup(func() { refreshConfigImportActivation = previousRefresh })
+
+	detail, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+	require.NoError(t, err)
+	require.NotNil(t, detail.ActivatedAt)
+	var previousCostRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&previousCostRule, fixture.PreviousCostRuleID).Error)
+	assert.Equal(t, string(types.CostRuleRetired), previousCostRule.Status)
+	var currentCostRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&currentCostRule, fixture.CurrentCostRuleID).Error)
+	assert.Equal(t, string(types.CostRuleActive), currentCostRule.Status)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "ModelPrice").First(&option).Error)
+	var prices map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(option.Value, &prices))
+	assert.Equal(t, float64(2), prices[modelrouting.Seedance20])
+	assert.Equal(t, float64(9), prices["legacy-model"])
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, fixture.ChannelID).Error)
+	assert.Equal(t, common.ChannelStatusEnabled, channel.Status)
+	assert.Equal(t, modelrouting.Seedance20+",vendor-video", channel.Models)
+	var mapping map[string]string
+	require.NoError(t, common.UnmarshalJsonStr(channel.GetModelMapping(), &mapping))
+	assert.Equal(t, "vendor-video", mapping[modelrouting.Seedance20])
+	var current model.RouteTarget
+	require.NoError(t, model.DB.First(&current, fixture.TargetID).Error)
+	assert.True(t, current.Enabled)
+	assert.Nil(t, current.RetiredAt)
+	var previous model.RouteTarget
+	require.NoError(t, model.DB.First(&previous, fixture.RetireTargetID).Error)
+	assert.False(t, previous.Enabled)
+	require.NotNil(t, previous.RetiredAt)
+	var manual model.RouteTarget
+	require.NoError(t, model.DB.First(&manual, fixture.ManualTargetID).Error)
+	assert.True(t, manual.Enabled)
+	assert.Nil(t, manual.RetiredAt)
+	var policy model.RoutingPolicy
+	require.NoError(t, model.DB.First(&policy, fixture.PolicyID).Error)
+	assert.True(t, policy.Enabled)
+	assert.Equal(t, "720p", policy.DefaultResolution)
+	assert.Equal(t, 10, policy.DefaultDuration)
+	assert.Equal(t, "16:9", policy.DefaultRatio)
+	var ability model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ? AND model = ?", fixture.ChannelID, modelrouting.Seedance20).First(&ability).Error)
+	assert.True(t, ability.Enabled)
+	var batch model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&batch, fixture.BatchID).Error)
+	require.NotNil(t, batch.ActivatedAt)
+	assert.Equal(t, *batch.ActivatedAt, *previous.RetiredAt)
+	assert.Contains(t, refreshed.OptionKeys, "ModelPrice")
+	assert.Contains(t, refreshed.ChannelIDs, fixture.ChannelID)
+	assert.Contains(t, refreshed.RoutingPolicyKeys, model.RoutingPolicyKey{GroupName: "default", Model: modelrouting.Seedance20})
+	var audit model.ConfigImportActivationAudit
+	require.NoError(t, model.DB.Where("batch_id = ? AND outcome = ?", fixture.BatchID, "activated").First(&audit).Error)
+	assert.NotEmpty(t, audit.BeforeSHA256)
+	assert.NotEmpty(t, audit.AfterSHA256)
+
+	_, err = ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+	require.NoError(t, err)
+	var auditCount int64
+	require.NoError(t, model.DB.Model(&model.ConfigImportActivationAudit{}).Where("batch_id = ?", fixture.BatchID).Count(&auditCount).Error)
+	assert.Equal(t, int64(1), auditCount)
+}
+
+func TestActivateConfigImportBatchRetiresImportedTargetsByMergeMode(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		mergeMode              types.ConfigImportRouteMergeMode
+		expectUnrelatedRetired bool
+	}{
+		{name: "merge", mergeMode: types.ConfigImportRouteMergeModeMerge},
+		{name: "replace", mergeMode: types.ConfigImportRouteMergeModeReplace, expectUnrelatedRetired: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := createActivationApplyFixture(t)
+			previousRefresh := refreshConfigImportActivation
+			refreshConfigImportActivation = func(ConfigImportRefreshKeys) error { return nil }
+			t.Cleanup(func() { refreshConfigImportActivation = previousRefresh })
+			var current model.RouteTarget
+			require.NoError(t, model.DB.First(&current, fixture.TargetID).Error)
+			previousBatchID := int64(18)
+			unrelated := current
+			unrelated.ID = 0
+			unrelated.Name = "unrelated-import"
+			unrelated.TargetPriority--
+			unrelated.Enabled = true
+			unrelated.SourceBatchID = &previousBatchID
+			require.NoError(t, model.DB.Create(&unrelated).Error)
+			var routeItem model.ConfigImportItem
+			require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", fixture.BatchID, "route_blueprints").First(&routeItem).Error)
+			var blueprint types.ConfigImportRouteBlueprint
+			require.NoError(t, common.UnmarshalJsonStr(routeItem.CanonicalJSON, &blueprint))
+			blueprint.MergeMode = test.mergeMode
+			encoded, err := common.Marshal(blueprint)
+			require.NoError(t, err)
+			require.NoError(t, model.DB.Model(&routeItem).Update("canonical_json", string(encoded)).Error)
+			persistActivationBaseline(t, fixture.BatchID)
+
+			_, err = ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+			require.NoError(t, err)
+			var sameName model.RouteTarget
+			require.NoError(t, model.DB.First(&sameName, fixture.RetireTargetID).Error)
+			assert.False(t, sameName.Enabled)
+			var unrelatedLoaded model.RouteTarget
+			require.NoError(t, model.DB.First(&unrelatedLoaded, unrelated.ID).Error)
+			assert.Equal(t, !test.expectUnrelatedRetired, unrelatedLoaded.Enabled)
+			if test.expectUnrelatedRetired {
+				assert.NotNil(t, unrelatedLoaded.RetiredAt)
+			} else {
+				assert.Nil(t, unrelatedLoaded.RetiredAt)
+			}
+		})
+	}
+	t.Run("skip", func(t *testing.T) {
+		fixture := createActivationApplyFixture(t)
+		previousRefresh := refreshConfigImportActivation
+		refreshConfigImportActivation = func(ConfigImportRefreshKeys) error { return nil }
+		t.Cleanup(func() { refreshConfigImportActivation = previousRefresh })
+		require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).
+			Where("batch_id = ? AND entity_type = ?", fixture.BatchID, "route_blueprints").
+			Updates(map[string]any{"state": string(types.ConfigImportItemStateExcluded), "exclusion_reason": "route merge mode skip"}).Error)
+		require.NoError(t, model.DB.Delete(&model.RouteTarget{}, fixture.TargetID).Error)
+		persistActivationBaseline(t, fixture.BatchID)
+
+		_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+		require.NoError(t, err)
+		var previous model.RouteTarget
+		require.NoError(t, model.DB.First(&previous, fixture.RetireTargetID).Error)
+		assert.True(t, previous.Enabled)
+		assert.Nil(t, previous.RetiredAt)
+		var policy model.RoutingPolicy
+		require.NoError(t, model.DB.First(&policy, fixture.PolicyID).Error)
+		assert.False(t, policy.Enabled)
+		var channel model.Channel
+		require.NoError(t, model.DB.First(&channel, fixture.ChannelID).Error)
+		assert.Equal(t, common.ChannelStatusManuallyDisabled, channel.Status)
+	})
+}
+
+func TestActivateConfigImportBatchRollsBackAllConfigurationWhenAbilityUpdateFails(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	callbackName := "test:config_import_activation_ability_failure"
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(db *gorm.DB) {
+		if db.Statement != nil && db.Statement.Table == "abilities" {
+			db.AddError(errors.New("injected ability update failure"))
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, model.DB.Callback().Update().Remove(callbackName)) })
+
+	_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+	require.ErrorContains(t, err, "injected ability update failure")
+	var previousCostRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&previousCostRule, fixture.PreviousCostRuleID).Error)
+	assert.Equal(t, string(types.CostRuleActive), previousCostRule.Status)
+	var currentCostRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&currentCostRule, fixture.CurrentCostRuleID).Error)
+	assert.Equal(t, string(types.CostRuleDraft), currentCostRule.Status)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "ModelPrice").First(&option).Error)
+	assert.JSONEq(t, `{"legacy-model":9}`, option.Value)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, fixture.ChannelID).Error)
+	assert.Equal(t, common.ChannelStatusManuallyDisabled, channel.Status)
+	assert.Equal(t, "vendor-video", channel.Models)
+	assert.Empty(t, channel.GetModelMapping())
+	var current model.RouteTarget
+	require.NoError(t, model.DB.First(&current, fixture.TargetID).Error)
+	assert.False(t, current.Enabled)
+	var previous model.RouteTarget
+	require.NoError(t, model.DB.First(&previous, fixture.RetireTargetID).Error)
+	assert.True(t, previous.Enabled)
+	assert.Nil(t, previous.RetiredAt)
+	var policy model.RoutingPolicy
+	require.NoError(t, model.DB.First(&policy, fixture.PolicyID).Error)
+	assert.False(t, policy.Enabled)
+	var batch model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&batch, fixture.BatchID).Error)
+	assert.Nil(t, batch.ActivatedAt)
+	var auditCount int64
+	require.NoError(t, model.DB.Model(&model.ConfigImportActivationAudit{}).Where("batch_id = ?", fixture.BatchID).Count(&auditCount).Error)
+	assert.Zero(t, auditCount)
+}
+
+func TestActivateConfigImportBatchRecordsAndRecoversCacheRefreshFailure(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	previousRefresh := refreshConfigImportActivation
+	refreshConfigImportActivation = func(ConfigImportRefreshKeys) error { return errors.New("injected cache refresh failure") }
+	t.Cleanup(func() { refreshConfigImportActivation = previousRefresh })
+
+	detail, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+	assert.Nil(t, detail)
+	var schemaErr *ConfigImportSchemaError
+	require.ErrorAs(t, err, &schemaErr)
+	assert.Equal(t, "ACTIVATION_CACHE_REFRESH_PENDING", schemaErr.Code)
+	var pending model.ConfigImportIssue
+	require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", fixture.BatchID, "ACTIVATION_CACHE_REFRESH_PENDING").First(&pending).Error)
+	assert.Equal(t, "open", pending.ResolutionStatus)
+	var activatedAudit model.ConfigImportActivationAudit
+	require.NoError(t, model.DB.Where("batch_id = ? AND outcome = ?", fixture.BatchID, "activated").First(&activatedAudit).Error)
+	var pendingAudit model.ConfigImportActivationAudit
+	require.NoError(t, model.DB.Where("batch_id = ? AND outcome = ?", fixture.BatchID, "cache_refresh_pending").First(&pendingAudit).Error)
+	assert.Equal(t, activatedAudit.BeforeSHA256, pendingAudit.BeforeSHA256)
+	assert.Equal(t, activatedAudit.AfterSHA256, pendingAudit.AfterSHA256)
+
+	refreshConfigImportActivation = previousRefresh
+	require.NoError(t, RetryConfigImportBatchCache(context.Background(), fixture.BatchID, 42))
+	require.NoError(t, model.DB.First(&pending, pending.ID).Error)
+	assert.Equal(t, "resolved", pending.ResolutionStatus)
+	var recoveredAudit model.ConfigImportActivationAudit
+	require.NoError(t, model.DB.Where("batch_id = ? AND outcome = ?", fixture.BatchID, "cache_refreshed").First(&recoveredAudit).Error)
+	assert.Equal(t, activatedAudit.BeforeSHA256, recoveredAudit.BeforeSHA256)
+	assert.Equal(t, activatedAudit.AfterSHA256, recoveredAudit.AfterSHA256)
+	var current model.RouteTarget
+	require.NoError(t, model.DB.First(&current, fixture.TargetID).Error)
+	assert.True(t, current.Enabled)
+}
+
+func TestActivateConfigImportBatchAuditsRejectedBlockers(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		mutate         func(t *testing.T, fixture activationApplyFixture)
+		expectSameHash bool
+	}{
+		{name: "missing key", expectSameHash: true, mutate: func(t *testing.T, fixture activationApplyFixture) {
+			require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", fixture.ChannelID).Update("key", "").Error)
+		}},
+		{name: "stale baseline", mutate: func(t *testing.T, fixture activationApplyFixture) {
+			require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", fixture.ChannelID).Update("models", "concurrent-model").Error)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := createActivationApplyFixture(t)
+			test.mutate(t, fixture)
+
+			_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+			var schemaErr *ConfigImportSchemaError
+			require.ErrorAs(t, err, &schemaErr)
+			assert.Equal(t, "ACTIVATION_BLOCKED", schemaErr.Code)
+			var audit model.ConfigImportActivationAudit
+			require.NoError(t, model.DB.Where("batch_id = ? AND outcome = ?", fixture.BatchID, "rejected").First(&audit).Error)
+			assert.NotEmpty(t, audit.BeforeSHA256)
+			assert.NotEmpty(t, audit.AfterSHA256)
+			assert.Equal(t, test.expectSameHash, audit.BeforeSHA256 == audit.AfterSHA256)
+		})
+	}
 }
 
 func TestPreviewConfigImportBatchActivationBlockers(t *testing.T) {
@@ -165,12 +434,67 @@ func TestPreviewConfigImportBatchActivationIsDeterministicAndReadOnly(t *testing
 	assert.Equal(t, string(types.CostRuleDraft), draft.Status)
 }
 
+func createActivationApplyFixture(t *testing.T) activationApplyFixture {
+	t.Helper()
+	fixture := createActivationFixture(t)
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptionMap
+		common.OptionMapRWMutex.Unlock()
+	})
+	var currentCostRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&currentCostRule, fixture.CostDraftID).Error)
+	previousCostRule := &model.ChannelModelCostRule{
+		ChannelID: currentCostRule.ChannelID, BillableUpstreamModel: currentCostRule.BillableUpstreamModel,
+		CostVariantKey: currentCostRule.CostVariantKey, Version: currentCostRule.Version + 1,
+		Status: string(types.CostRuleActive), CostMode: currentCostRule.CostMode,
+		SchemaVersion: currentCostRule.SchemaVersion, ConfigJSON: currentCostRule.ConfigJSON,
+	}
+	require.NoError(t, model.DB.Create(previousCostRule).Error)
+	var current model.RouteTarget
+	require.NoError(t, model.DB.First(&current, fixture.TargetID).Error)
+	manual := current
+	manual.ID = 0
+	manual.Name = "manual-target"
+	manual.TargetPriority++
+	manual.Enabled = true
+	manual.ManagedBy = string(types.RouteTargetManagedByManual)
+	manual.SourceBatchID = nil
+	require.NoError(t, model.DB.Create(&manual).Error)
+	require.NoError(t, model.DB.Create(&model.Option{Key: "ModelPrice", Value: `{"legacy-model":9}`}).Error)
+	var saleItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", fixture.BatchID, "sale_proposals").First(&saleItem).Error)
+	saleDocument := map[string]any{
+		"business_id":   "sale-a",
+		"model_sku_ref": "sku-a",
+		"staged_proposal": map[string]any{
+			"option_patches": map[string]any{
+				"ModelPrice": map[string]any{modelrouting.Seedance20: 2},
+			},
+		},
+	}
+	encoded, err := common.Marshal(saleDocument)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&saleItem).Updates(map[string]any{
+		"canonical_json": string(encoded), "state": string(types.ConfigImportItemStateChanged), "exclusion_reason": "",
+	}).Error)
+	persistActivationBaseline(t, fixture.BatchID)
+	return activationApplyFixture{
+		activationFixture: fixture, CurrentCostRuleID: currentCostRule.ID,
+		PreviousCostRuleID: previousCostRule.ID, ManualTargetID: manual.ID,
+	}
+}
+
 func createActivationFixture(t *testing.T) activationFixture {
 	t.Helper()
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(
 		&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}, &model.Option{},
-		&model.RoutingPolicy{}, &model.RouteTarget{},
+		&model.RoutingPolicy{}, &model.RouteTarget{}, &model.ConfigImportActivationAudit{},
 	))
 	previousLookup := CostCapabilityLookup
 	CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {

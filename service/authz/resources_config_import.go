@@ -17,7 +17,7 @@ func init() {
 		Actions: []ActionDefinition{
 			{Action: ActionRead, LabelKey: "Read channel imports", DescriptionKey: "View imported configuration batches without secrets.", DefaultRoles: []string{BuiltInRoleAdmin}},
 			{Action: ActionWrite, LabelKey: "Manage channel imports", DescriptionKey: "Upload, bind, resolve, stage, and validate imported configuration.", DefaultRoles: []string{BuiltInRoleAdmin}},
-			{Action: ActionPublish, LabelKey: "Publish channel imports", DescriptionKey: "Publish reviewed imported configuration atomically.", DefaultRoles: []string{BuiltInRoleAdmin}},
+			{Action: ActionPublish, LabelKey: "Publish channel imports", DescriptionKey: "Publish, activate, and backfill ownership for reviewed imported configuration.", DefaultRoles: []string{BuiltInRoleAdmin}},
 		},
 	})
 }

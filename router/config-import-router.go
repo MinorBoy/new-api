@@ -28,6 +28,7 @@ var configImportPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/batches/:id/stage", permission: authz.ConfigImportWrite, handler: controller.StageConfigImportBatch},
 	{method: http.MethodPost, path: "/batches/:id/validate", permission: authz.ConfigImportWrite, handler: controller.ValidateConfigImportBatch},
 	{method: http.MethodPost, path: "/batches/:id/publish", permission: authz.ConfigImportPublish, handler: controller.PublishConfigImportBatch},
+	{method: http.MethodPost, path: "/batches/:id/activate", permission: authz.ConfigImportPublish, handler: controller.ActivateConfigImportBatch},
 	{method: http.MethodPost, path: "/batches/:id/refresh-cache", permission: authz.ConfigImportPublish, handler: controller.RefreshConfigImportBatchCache},
 	{method: http.MethodGet, path: "/route-ownership/backfill-preview", permission: authz.ConfigImportPublish, handler: controller.PreviewConfigImportRouteOwnershipBackfill},
 	{method: http.MethodPost, path: "/route-ownership/backfill", permission: authz.ConfigImportPublish, handler: controller.ApplyConfigImportRouteOwnershipBackfill},

@@ -34,12 +34,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
-import { formatTimestampToDate } from '@/lib/format'
+import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
-import type { TaskLog } from '../../types'
+import type { PublicTaskResult, TaskLog } from '../../types'
 import {
   AudioPreviewDialog,
   type AudioClip,
@@ -65,6 +65,92 @@ function parseTaskData(data: unknown): unknown[] {
     }
   }
   return []
+}
+
+function projectPublicTaskResult(log: TaskLog): PublicTaskResult | null {
+  let data = log.user_response_data
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return null
+    }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+
+  const source = data as Record<string, unknown>
+  const sourceUsage =
+    source.usage &&
+    typeof source.usage === 'object' &&
+    !Array.isArray(source.usage)
+      ? (source.usage as Record<string, unknown>)
+      : {}
+  const sourceContent =
+    source.content &&
+    typeof source.content === 'object' &&
+    !Array.isArray(source.content)
+      ? (source.content as Record<string, unknown>)
+      : {}
+  const numberValue = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : 0
+  const stringValue = (value: unknown) =>
+    typeof value === 'string' ? value : ''
+  const taskStatus = String(log.status || '').toUpperCase()
+  const sourceStatus = stringValue(source.status)
+  const status =
+    taskStatus === TASK_STATUS.SUCCESS
+      ? 'succeeded'
+      : taskStatus === TASK_STATUS.FAILURE
+        ? 'failed'
+        : ['queued', 'running', 'cancelled'].includes(sourceStatus)
+          ? sourceStatus
+          : 'queued'
+
+  const result: PublicTaskResult = {
+    id: log.task_id,
+    model: log.request_model || '',
+    status,
+    usage: {
+      completion_tokens: numberValue(sourceUsage.completion_tokens),
+      total_tokens: numberValue(sourceUsage.total_tokens),
+    },
+    created_at: numberValue(source.created_at),
+    updated_at: numberValue(source.updated_at),
+    seed: numberValue(source.seed),
+    resolution: stringValue(source.resolution),
+    ratio: stringValue(source.ratio),
+    duration: numberValue(source.duration),
+    framespersecond: numberValue(source.framespersecond),
+    service_tier: stringValue(source.service_tier),
+    execution_expires_after: numberValue(source.execution_expires_after),
+    generate_audio: source.generate_audio === true,
+    draft: source.draft === true,
+    priority: numberValue(source.priority),
+  }
+
+  if (status === 'succeeded') {
+    const candidateURL = stringValue(sourceContent.video_url)
+    const expectedPath = `/v1/videos/${encodeURIComponent(log.task_id)}/content`
+    if (candidateURL === expectedPath) {
+      result.content = { video_url: expectedPath }
+    } else if (candidateURL) {
+      try {
+        const parsedURL = new URL(candidateURL, window.location.origin)
+        if (
+          parsedURL.origin === window.location.origin &&
+          parsedURL.pathname === expectedPath
+        ) {
+          result.content = { video_url: expectedPath }
+        }
+      } catch {
+        // Invalid or non-local URLs are not part of the public task contract.
+      }
+    }
+  } else if (status === 'failed') {
+    result.error = { code: 'task_failed', message: 'task failed' }
+  }
+
+  return result
 }
 
 function AudioPreviewCell({ log }: { log: TaskLog }) {
@@ -218,6 +304,21 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
     ),
     size: 150,
   }
+  const taskDetailsColumn: ColumnDef<TaskLog> = {
+    accessorKey: 'user_response_data',
+    header: t('Task Details'),
+    cell: ({ row }) => (
+      <TaskAuditDataCell
+        data={
+          isAdmin
+            ? row.original.user_response_data
+            : projectPublicTaskResult(row.original)
+        }
+        title='Task Details'
+      />
+    ),
+    size: 180,
+  }
   const columns: ColumnDef<TaskLog>[] = [
     {
       accessorKey: 'submit_time',
@@ -284,7 +385,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
               className='flex items-center gap-1.5 text-left'
               onClick={(e) => {
                 e.stopPropagation()
-                setSelectedUserId(log.user_id)
+                setSelectedUserId(log.user_id ?? null)
                 setUserInfoDialogOpen(true)
               }}
             >
@@ -323,20 +424,10 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
         ),
         size: 180,
       },
-      {
-        accessorKey: 'user_response_data',
-        header: t('Task Details'),
-        cell: ({ row }) => (
-          <TaskAuditDataCell
-            data={row.original.user_response_data}
-            title='Task Details'
-          />
-        ),
-        size: 180,
-      }
+      taskDetailsColumn
     )
   } else {
-    columns.push(requestModelColumn, requestDataColumn)
+    columns.push(requestModelColumn, taskDetailsColumn)
   }
 
   columns.push(
@@ -359,7 +450,8 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
               className='border-border/60 bg-muted/30 !text-foreground max-w-full truncate rounded-md border px-1.5 py-0.5 font-mono'
             />
             <span className='text-muted-foreground/60 truncate text-[11px]'>
-              {t(log.platform)} · {t(taskActionMapper.getLabel(log.action))}
+              {isAdmin && log.platform ? `${t(log.platform)} · ` : ''}
+              {t(taskActionMapper.getLabel(log.action))}
             </span>
           </div>
         )
@@ -390,6 +482,16 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
       },
     },
     createProgressColumn<TaskLog>({ headerLabel: t('Progress') }),
+    {
+      accessorKey: 'quota',
+      header: t('Consumption'),
+      cell: ({ row }) => (
+        <span className='font-mono text-xs tabular-nums'>
+          {formatLogQuota(row.original.quota || 0)}
+        </span>
+      ),
+      size: 120,
+    },
     {
       accessorKey: 'fail_reason',
       header: t('Details'),
@@ -423,9 +525,15 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           log.action === TASK_ACTIONS.REMIX_GENERATE
         const isSuccess = status === TASK_STATUS.SUCCESS
         const isUrl = failReason?.startsWith('http')
+        const publicResult = projectPublicTaskResult(log)
+        const publicVideoURL = publicResult?.content?.video_url
 
-        if (isSuccess && isVideoTask && isUrl) {
-          const videoUrl = `/v1/videos/${log.task_id}/content`
+        if (
+          isSuccess &&
+          isVideoTask &&
+          (publicVideoURL || (isAdmin && isUrl))
+        ) {
+          const videoUrl = publicVideoURL || `/v1/videos/${log.task_id}/content`
           return (
             <a
               href={videoUrl}

@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import assert from 'node:assert/strict'
 import { after, describe, test } from 'node:test'
 
-import type { ColumnDef } from '@tanstack/react-table'
+import {
+  flexRender,
+  getCoreRowModel,
+  type ColumnDef,
+  useReactTable,
+} from '@tanstack/react-table'
 import { Window } from 'happy-dom'
 
 import type { TaskLog } from '../../types'
@@ -352,6 +357,48 @@ async function renderRequestDataCell(data: unknown) {
   }
 }
 
+async function renderTaskRow(log: TaskLog, isAdmin = false) {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+
+  function TaskRowProbe() {
+    const columns = useTaskLogsColumns(isAdmin)
+    const table = useReactTable({
+      data: [log],
+      columns,
+      getCoreRowModel: getCoreRowModel(),
+    })
+
+    return (
+      <div>
+        {table.getRowModel().rows[0]?.getVisibleCells().map((cell) => (
+          <div key={cell.id} data-column-id={cell.column.id}>
+            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <TaskRowProbe />
+      </I18nextProvider>
+    )
+  })
+
+  return {
+    container,
+    root,
+    async cleanup() {
+      await act(async () => root.unmount())
+      container.remove()
+    },
+  }
+}
+
 describe('task audit columns', () => {
   after(() => {
     domWindow.close()
@@ -393,13 +440,85 @@ describe('task audit columns', () => {
     assert.equal(text, 'client-model')
   })
 
-  test('shows request model and request data but hides admin task responses from regular users', async () => {
+  test('shows public task details but hides every administrator audit column from regular users', async () => {
     const headers = await getHeaders(false)
 
     assert.equal(headers.includes('Request Model'), true)
-    assert.equal(headers.includes('Request Data'), true)
+    assert.equal(headers.includes('Request Data'), false)
     assert.equal(headers.includes('Upstream Response (Create Task)'), false)
-    assert.equal(headers.includes('Task Details'), false)
+    assert.equal(headers.includes('Task Details'), true)
+    assert.equal(headers.includes('Consumption'), true)
+    assert.equal(headers.includes('Channel'), false)
+    assert.equal(headers.includes('Endpoint'), false)
+    assert.equal(headers.includes('User'), false)
+  })
+
+  test('regular task rows render only the Ark public result and local proxy URL', async () => {
+    const mounted = await renderTaskRow({
+      id: 91,
+      user_id: 10,
+      username: 'supplier-user',
+      platform: 'supplier-platform',
+      task_id: 'task_public',
+      action: 'generate',
+      channel_id: 40,
+      request_path: '/supplier/private/path',
+      request_model: 'public-model',
+      submit_time: 1,
+      status: 'SUCCESS',
+      user_request_data: { secret: 'request-secret' },
+      upstream_response_data: { id: 'cgt-private' },
+      user_response_data: {
+        id: 'task_public',
+        model: 'public-model',
+        status: 'succeeded',
+        content: { video_url: '/v1/videos/task_public/content' },
+        usage: { completion_tokens: 108900, total_tokens: 108900 },
+        created_at: 1779348818,
+        updated_at: 1779348874,
+        seed: 78674,
+        resolution: '720p',
+        ratio: '16:9',
+        duration: 5,
+        framespersecond: 24,
+        service_tier: 'default',
+        execution_expires_after: 172800,
+        generate_audio: true,
+        draft: false,
+        priority: 0,
+        supplier_url: 'https://supplier.example/private',
+        upstream_model: 'provider-model',
+      },
+      fail_reason: '',
+    })
+
+    const text = mounted.container.textContent ?? ''
+    assert.match(text, /public-model/)
+    assert.match(text, /task_public/)
+    assert.doesNotMatch(text, /supplier-platform/)
+    assert.doesNotMatch(text, /request-secret/)
+    assert.doesNotMatch(text, /cgt-private/)
+
+    const detailsTrigger = mounted.container.querySelector<HTMLButtonElement>(
+      '[data-column-id="user_response_data"] button[title="View"]'
+    )
+    assert.ok(detailsTrigger)
+    await act(async () => detailsTrigger.focus())
+
+    const preview = document.querySelector('[data-slot="hover-card-content"]')
+    assert.ok(preview)
+    const previewText = preview.textContent ?? ''
+    assert.match(previewText, /"completion_tokens": 108900/)
+    assert.match(previewText, /\/v1\/videos\/task_public\/content/)
+    assert.doesNotMatch(previewText, /supplier\.example/)
+    assert.doesNotMatch(previewText, /provider-model/)
+
+    const videoLink = mounted.container.querySelector<HTMLAnchorElement>(
+      '[data-column-id="fail_reason"] a'
+    )
+    assert.equal(videoLink?.getAttribute('href'), '/v1/videos/task_public/content')
+
+    await mounted.cleanup()
   })
 
   test('uses the compact View label for every task audit data action', async () => {

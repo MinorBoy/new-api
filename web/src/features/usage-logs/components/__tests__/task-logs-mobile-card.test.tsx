@@ -19,7 +19,6 @@ import { after, test } from 'node:test'
 
 import {
   getCoreRowModel,
-  type ColumnDef,
   useReactTable,
 } from '@tanstack/react-table'
 import { Window } from 'happy-dom'
@@ -69,6 +68,7 @@ const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { UsageLogsMobileList } = await import('../usage-logs-mobile-card')
+const { useTaskLogsColumns } = await import('../columns/task-logs-columns')
 
 const reactTestGlobals = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean
@@ -85,6 +85,7 @@ await i18n.use(initReactI18next).init({
         'Request Data': 'Request Data',
         'Upstream Response (Create Task)': 'Upstream Response (Create Task)',
         'Task Details': 'Task Details',
+        Consumption: 'Consumption',
         Result: 'Result',
         'Submit Time': 'Submit Time',
       },
@@ -92,50 +93,48 @@ await i18n.use(initReactI18next).init({
   },
 })
 
-const columns: ColumnDef<TaskLog>[] = [
-  { accessorKey: 'task_id', cell: ({ getValue }) => String(getValue()) },
-  { accessorKey: 'status', cell: ({ getValue }) => String(getValue()) },
-  { accessorKey: 'submit_time', cell: ({ getValue }) => String(getValue()) },
-  {
-    accessorKey: 'request_model',
-    cell: ({ getValue }) => String(getValue()),
-  },
-  {
-    accessorKey: 'user_request_data',
-    cell: ({ getValue }) => String(getValue()),
-  },
-  {
-    accessorKey: 'upstream_response_data',
-    cell: ({ getValue }) => String(getValue()),
-  },
-  {
-    accessorKey: 'user_response_data',
-    cell: ({ getValue }) => String(getValue()),
-  },
-  { accessorKey: 'fail_reason', cell: ({ getValue }) => String(getValue()) },
-]
-
-test('renders task payload fields in the mobile task card', async () => {
+test('renders only public task result fields in the mobile task card', async () => {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
   const log: TaskLog = {
     id: 1,
     user_id: 1,
-    platform: 'seedance',
-    task_id: 'task_1',
-    action: 'GENERATE',
-    channel_id: 1,
-    request_model: 'client-model',
+    platform: 'supplier-platform',
+    task_id: 'task_public',
+    action: 'generate',
+    channel_id: 40,
+    request_model: 'public-model',
     submit_time: 1,
     status: 'SUCCESS',
-    user_request_data: 'request-payload',
-    upstream_response_data: 'upstream-payload',
-    user_response_data: 'task-result',
+    quota: 125000,
+    user_request_data: 'request-secret',
+    upstream_response_data: 'upstream-secret',
+    user_response_data: {
+      id: 'task_public',
+      model: 'public-model',
+      status: 'succeeded',
+      content: { video_url: '/v1/videos/task_public/content' },
+      usage: { completion_tokens: 108900, total_tokens: 108900 },
+      created_at: 1779348818,
+      updated_at: 1779348874,
+      seed: 78674,
+      resolution: '720p',
+      ratio: '16:9',
+      duration: 5,
+      framespersecond: 24,
+      service_tier: 'default',
+      execution_expires_after: 172800,
+      generate_audio: true,
+      draft: false,
+      priority: 0,
+      supplier_url: 'https://supplier.example/private',
+    },
     fail_reason: '',
   }
 
   function MobileCardProbe() {
+    const columns = useTaskLogsColumns(false)
     const table = useReactTable({
       data: [log],
       columns,
@@ -154,13 +153,25 @@ test('renders task payload fields in the mobile task card', async () => {
 
   const text = container.textContent ?? ''
   assert.match(text, /Request Model/)
-  assert.match(text, /client-model/)
-  assert.match(text, /Request Data/)
-  assert.match(text, /request-payload/)
-  assert.match(text, /Upstream Response \(Create Task\)/)
-  assert.match(text, /upstream-payload/)
+  assert.match(text, /public-model/)
   assert.match(text, /Task Details/)
-  assert.match(text, /task-result/)
+  assert.match(text, /Consumption/)
+  assert.doesNotMatch(text, /Request Data/)
+  assert.doesNotMatch(text, /request-secret/)
+  assert.doesNotMatch(text, /Upstream Response \(Create Task\)/)
+  assert.doesNotMatch(text, /upstream-secret/)
+  assert.doesNotMatch(text, /supplier-platform/)
+
+  const detailsTrigger = container.querySelector<HTMLButtonElement>(
+    'button[title="View"]'
+  )
+  assert.ok(detailsTrigger)
+  await act(async () => detailsTrigger.focus())
+
+  const preview = document.querySelector('[data-slot="hover-card-content"]')
+  assert.ok(preview)
+  assert.match(preview.textContent ?? '', /\/v1\/videos\/task_public\/content/)
+  assert.doesNotMatch(preview.textContent ?? '', /supplier\.example/)
 
   await act(async () => root.unmount())
   container.remove()

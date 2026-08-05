@@ -29,3 +29,9 @@ func lockForUpdate(tx *gorm.DB) *gorm.DB {
 func LockChannelsForUpdate(tx *gorm.DB) *gorm.DB {
 	return lockForUpdate(tx).Model(&Channel{})
 }
+
+// LockModelForUpdate applies the shared cross-database row-lock policy to a
+// model query owned by a surrounding transaction.
+func LockModelForUpdate(tx *gorm.DB, value any) *gorm.DB {
+	return lockForUpdate(tx).Model(value)
+}

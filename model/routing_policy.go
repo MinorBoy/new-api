@@ -34,6 +34,9 @@ type RouteTarget struct {
 	MinimumExpectedMarginBPS *int   `json:"minimum_expected_margin_bps"`
 	Constraints              string `json:"constraints" gorm:"type:text;not null"`
 	Enabled                  bool   `json:"enabled" gorm:"not null"`
+	ManagedBy                string `json:"managed_by" gorm:"type:varchar(32);not null;index"`
+	SourceBatchID            *int64 `json:"source_batch_id,omitempty" gorm:"index"`
+	RetiredAt                *int64 `json:"retired_at,omitempty" gorm:"index"`
 	CreatedAt                int64  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt                int64  `json:"updated_at" gorm:"autoUpdateTime"`
 }

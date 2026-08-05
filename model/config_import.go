@@ -51,6 +51,7 @@ type ConfigImportBatch struct {
 	FailureMessage  string                   `json:"failure_message" gorm:"type:text"`
 	ValidatedAt     *int64                   `json:"validated_at,omitempty"`
 	PublishedAt     *int64                   `json:"published_at,omitempty"`
+	ActivatedAt     *int64                   `json:"activated_at,omitempty"`
 	FailedAt        *int64                   `json:"failed_at,omitempty"`
 	CreatedAt       int64                    `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt       int64                    `json:"updated_at" gorm:"autoUpdateTime"`
@@ -158,6 +159,46 @@ type ConfigImportPublishAudit struct {
 
 func (ConfigImportPublishAudit) TableName() string {
 	return "config_import_publish_audits"
+}
+
+type ConfigImportActivationAudit struct {
+	ID                 int64                   `json:"id" gorm:"primaryKey"`
+	BatchID            int64                   `json:"batch_id" gorm:"not null;index"`
+	AdminID            int                     `json:"admin_id" gorm:"index"`
+	Outcome            string                  `json:"outcome" gorm:"type:varchar(64);index"`
+	ChannelCount       int                     `json:"channel_count"`
+	PolicyCount        int                     `json:"policy_count"`
+	TargetCount        int                     `json:"target_count"`
+	RetiredTargetCount int                     `json:"retired_target_count"`
+	BeforeSHA256       string                  `json:"before_sha256" gorm:"type:varchar(64);not null"`
+	AfterSHA256        string                  `json:"after_sha256" gorm:"type:varchar(64);not null"`
+	FailureCode        string                  `json:"failure_code" gorm:"type:varchar(64)"`
+	FailureMessage     string                  `json:"failure_message" gorm:"type:text"`
+	SummaryJSON        ConfigImportSummaryJSON `json:"summary_json"`
+	CreatedAt          int64                   `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (ConfigImportActivationAudit) TableName() string {
+	return "config_import_activation_audits"
+}
+
+type ConfigImportRouteOwnershipChange struct {
+	ID                     int64  `json:"id" gorm:"primaryKey"`
+	OperationID            string `json:"operation_id" gorm:"type:varchar(64);not null;uniqueIndex:idx_route_ownership_change,priority:1;index"`
+	RouteTargetID          int    `json:"route_target_id" gorm:"not null;uniqueIndex:idx_route_ownership_change,priority:2;index"`
+	PreviousManagedBy      string `json:"previous_managed_by" gorm:"type:varchar(32);not null"`
+	PreviousSourceBatchID  *int64 `json:"previous_source_batch_id,omitempty"`
+	AssignedBatchID        int64  `json:"assigned_batch_id" gorm:"not null;index"`
+	AppliedTargetUpdatedAt int64  `json:"applied_target_updated_at"`
+	AppliedTargetSHA256    string `json:"applied_target_sha256" gorm:"type:varchar(64);not null"`
+	AppliedBy              int    `json:"applied_by" gorm:"index"`
+	RevertedBy             int    `json:"reverted_by" gorm:"index"`
+	RevertedAt             *int64 `json:"reverted_at,omitempty"`
+	CreatedAt              int64  `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (ConfigImportRouteOwnershipChange) TableName() string {
+	return "config_import_route_ownership_changes"
 }
 
 // UpdateConfigImportBatchStatus atomically advances a batch only when its

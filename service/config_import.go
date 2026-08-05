@@ -300,7 +300,14 @@ func GetConfigImportBatch(ctx context.Context, batchID int64) (*dto.ConfigImport
 			ResolutionStatus: issues[index].ResolutionStatus,
 		})
 	}
-	detail.AllowedActions = configImportAllowedActions(types.ConfigImportBatchStatus(batch.Status), issues)
+	detail.AllowedActions = configImportAllowedActions(types.ConfigImportBatchStatus(batch.Status), batch.ActivatedAt, issues)
+	if types.ConfigImportBatchStatus(batch.Status) == types.ConfigImportBatchStatusPublished && batch.ActivatedAt == nil {
+		preview, err := PreviewConfigImportBatchActivation(ctx, batch.ID)
+		if err != nil {
+			return nil, err
+		}
+		detail.ActivationPreview = preview
+	}
 	return detail, nil
 }
 
@@ -442,7 +449,8 @@ func configImportBatchSummary(batch *model.ConfigImportBatch, issues []model.Con
 		CreatedBy:       batch.CreatedBy,
 		ItemCounts:      stored.ItemCounts,
 		IssueCount:      stored.IssueCount,
-		AllowedActions:  configImportAllowedActions(types.ConfigImportBatchStatus(batch.Status), issues),
+		AllowedActions:  configImportAllowedActions(types.ConfigImportBatchStatus(batch.Status), batch.ActivatedAt, issues),
+		ActivatedAt:     batch.ActivatedAt,
 		CreatedAt:       batch.CreatedAt,
 		UpdatedAt:       batch.UpdatedAt,
 	}, nil
@@ -459,12 +467,15 @@ func configImportIssuesHaveFailure(issues []model.ConfigImportIssue) bool {
 
 // configImportAllowedActions is the only place that turns lifecycle state and
 // persisted issue gates into administrative commands.
-func configImportAllowedActions(status types.ConfigImportBatchStatus, issues []model.ConfigImportIssue) []string {
+func configImportAllowedActions(status types.ConfigImportBatchStatus, activatedAt *int64, issues []model.ConfigImportIssue) []string {
 	if status == types.ConfigImportBatchStatusPublished {
 		for _, issue := range issues {
-			if issue.Code == "CACHE_REFRESH_PENDING" && issue.ResolutionStatus == "open" {
+			if (issue.Code == "CACHE_REFRESH_PENDING" || issue.Code == "ACTIVATION_CACHE_REFRESH_PENDING") && issue.ResolutionStatus == "open" {
 				return []string{"refresh_cache"}
 			}
+		}
+		if activatedAt == nil {
+			return []string{"activate"}
 		}
 		return []string{}
 	}

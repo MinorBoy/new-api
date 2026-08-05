@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,6 +103,90 @@ func TestSaveRoutingPolicyCarriesCostVariantThroughPersistenceCacheAndView(t *te
 	assert.Equal(t, "720p", persisted.CostVariantKey)
 }
 
+func TestSaveRoutingPolicyPreservesImportedTargetOwnershipByID(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	created, err := service.SaveRoutingPolicy(0, validRoutingPolicyWriteRequest())
+	require.NoError(t, err)
+	require.Len(t, created.Targets, 1)
+	batchID := int64(20)
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).
+		Where("id = ?", created.Targets[0].ID).
+		Updates(map[string]any{
+			"managed_by":      string(types.RouteTargetManagedByConfigImport),
+			"source_batch_id": batchID,
+		}).Error)
+
+	view, err := service.GetRoutingPolicyView(created.ID)
+	require.NoError(t, err)
+	request := routingPolicyWriteRequestForTest(view)
+	request.Targets[0].TargetPriority = 101
+	updated, err := service.SaveRoutingPolicy(created.ID, request)
+	require.NoError(t, err)
+
+	var target model.RouteTarget
+	require.NoError(t, model.DB.First(&target, updated.Targets[0].ID).Error)
+	assert.Equal(t, string(types.RouteTargetManagedByConfigImport), target.ManagedBy)
+	require.NotNil(t, target.SourceBatchID)
+	assert.Equal(t, batchID, *target.SourceBatchID)
+}
+
+func TestSaveRoutingPolicySoftRetiresOmittedImportedTargetAndDeletesOmittedManualTarget(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	request := validRoutingPolicyWriteRequest()
+	manual := request.Targets[0]
+	manual.Name = "manual"
+	manual.TargetPriority = 90
+	keeper := request.Targets[0]
+	keeper.Name = "keeper"
+	keeper.TargetPriority = 80
+	request.Targets = []service.RouteTargetWriteRequest{request.Targets[0], manual, keeper}
+	created, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	require.Len(t, created.Targets, 3)
+	batchID := int64(20)
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).
+		Where("id = ?", created.Targets[0].ID).
+		Updates(map[string]any{
+			"managed_by":      string(types.RouteTargetManagedByConfigImport),
+			"source_batch_id": batchID,
+		}).Error)
+
+	view, err := service.GetRoutingPolicyView(created.ID)
+	require.NoError(t, err)
+	write := routingPolicyWriteRequestForTest(view)
+	write.Targets = write.Targets[2:]
+	_, err = service.SaveRoutingPolicy(created.ID, write)
+	require.NoError(t, err)
+
+	var imported model.RouteTarget
+	require.NoError(t, model.DB.First(&imported, created.Targets[0].ID).Error)
+	assert.False(t, imported.Enabled)
+	assert.NotNil(t, imported.RetiredAt)
+	var manualCount int64
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).
+		Where("id = ?", created.Targets[1].ID).Count(&manualCount).Error)
+	assert.Zero(t, manualCount)
+	var keeperCount int64
+	require.NoError(t, model.DB.Model(&model.RouteTarget{}).
+		Where("id = ?", created.Targets[2].ID).Count(&keeperCount).Error)
+	assert.Equal(t, int64(1), keeperCount)
+}
+
+func TestSaveRoutingPolicyRejectsTargetIDFromAnotherPolicy(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
+	created, err := service.SaveRoutingPolicy(0, validRoutingPolicyWriteRequest())
+	require.NoError(t, err)
+
+	request := validRoutingPolicyWriteRequest()
+	foreignID := created.Targets[0].ID
+	request.Targets[0].ID = &foreignID
+	_, err = service.SaveRoutingPolicy(0, request)
+	assertRoutingPolicyServiceError(t, err, "invalid_target_id", nil)
+}
+
 func TestGetRoutingPolicyViewDefaultsLegacyBlankCostVariant(t *testing.T) {
 	prepareRoutingPolicyServiceTest(t)
 	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
@@ -174,9 +259,11 @@ func routingPolicyWriteRequestForTest(view *service.RoutingPolicyView) service.R
 		Targets: make([]service.RouteTargetWriteRequest, 0, len(view.Targets)),
 	}
 	for _, target := range view.Targets {
+		targetID := target.ID
 		request.Targets = append(request.Targets, service.RouteTargetWriteRequest{
+			ID:        &targetID,
 			ChannelID: target.ChannelID, Name: target.Name, UpstreamModel: target.UpstreamModel,
-			TargetPriority: target.TargetPriority, Enabled: target.Enabled, Constraints: target.Constraints,
+			CostVariantKey: target.CostVariantKey, TargetPriority: target.TargetPriority, Enabled: target.Enabled, Constraints: target.Constraints,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,36 @@ func TestReplaceRoutingPolicyPreservesMinimumExpectedMarginNullAndZero(t *testin
 	assert.Nil(t, created.Targets[0].MinimumExpectedMarginBPS)
 	require.NotNil(t, created.Targets[1].MinimumExpectedMarginBPS)
 	assert.Zero(t, *created.Targets[1].MinimumExpectedMarginBPS)
+}
+
+func TestReplaceRoutingPolicyPreservesImportedTargetOwnershipByID(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RoutingPolicy{}, &model.RouteTarget{}))
+	created, err := model.ReplaceRoutingPolicy(0, validRoutingPolicyRow(), []model.RouteTarget{{
+		ChannelID:      11,
+		Name:           "imported",
+		UpstreamModel:  "provider-original",
+		TargetPriority: 100,
+		Enabled:        true,
+		Constraints:    validConstraintsJSON(t, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+	}})
+	require.NoError(t, err)
+	require.Len(t, created.Targets, 1)
+	batchID := int64(20)
+	require.NoError(t, db.Model(&model.RouteTarget{}).Where("id = ?", created.Targets[0].ID).Updates(map[string]any{
+		"managed_by":      string(types.RouteTargetManagedByConfigImport),
+		"source_batch_id": batchID,
+	}).Error)
+
+	target := created.Targets[0]
+	target.Name = "updated"
+	updated, err := model.ReplaceRoutingPolicy(created.ID, validRoutingPolicyRow(), []model.RouteTarget{target})
+	require.NoError(t, err)
+	require.Len(t, updated.Targets, 1)
+	assert.Equal(t, created.Targets[0].ID, updated.Targets[0].ID)
+	assert.Equal(t, string(types.RouteTargetManagedByConfigImport), updated.Targets[0].ManagedBy)
+	require.NotNil(t, updated.Targets[0].SourceBatchID)
+	assert.Equal(t, batchID, *updated.Targets[0].SourceBatchID)
 }
 
 func TestRoutingPolicyUniqueGroupAndModel(t *testing.T) {

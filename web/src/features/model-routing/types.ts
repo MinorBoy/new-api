@@ -287,10 +287,9 @@ export const routeTargetSchema = z.object({
   constraints: routeConstraintsApiSchema,
 })
 
-export const routeTargetWriteRequestSchema = routeTargetSchema.omit({
-  id: true,
-  channel_name: true,
-})
+export const routeTargetWriteRequestSchema = routeTargetSchema
+  .omit({ channel_name: true })
+  .extend({ id: z.number().int().positive().optional() })
 
 export const routingPolicySchema = z.object({
   id: z.number().int().positive(),
@@ -565,6 +564,7 @@ export function toWriteRequest(
     enabled: parsed.enabled,
     defaults: parsed.defaults,
     targets: parsed.targets.map((target) => ({
+      id: target.id,
       channel_id: target.channel_id,
       name: target.name,
       upstream_model: target.upstream_model,

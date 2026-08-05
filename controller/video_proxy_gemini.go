@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -17,13 +18,12 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 		return "", fmt.Errorf("invalid channel or task")
 	}
 
-	if url := extractGeminiVideoURLFromTaskData(task); url != "" {
-		return ensureAPIKey(url, apiKey), nil
-	}
-
 	baseURL := constant.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
+	}
+	if videoURL := extractGeminiVideoURLFromTaskData(task); videoURL != "" {
+		return secureGeminiVideoURL(baseURL, videoURL)
 	}
 
 	adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channel.Type)))
@@ -52,11 +52,11 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 
 	taskInfo, parseErr := adaptor.ParseTaskResult(body)
 	if parseErr == nil && taskInfo != nil && taskInfo.RemoteUrl != "" {
-		return ensureAPIKey(taskInfo.RemoteUrl, apiKey), nil
+		return secureGeminiVideoURL(baseURL, taskInfo.RemoteUrl)
 	}
 
-	if url := extractGeminiVideoURLFromPayload(body); url != "" {
-		return ensureAPIKey(url, apiKey), nil
+	if videoURL := extractGeminiVideoURLFromPayload(body); videoURL != "" {
+		return secureGeminiVideoURL(baseURL, videoURL)
 	}
 
 	if parseErr != nil {
@@ -280,15 +280,24 @@ func buildVideoDataURL(mimeType string, encoding string, base64Data string) stri
 	return "data:" + mime + ";base64," + base64Data
 }
 
-func ensureAPIKey(uri, key string) string {
-	if key == "" || uri == "" {
-		return uri
+func secureGeminiVideoURL(baseURL, rawURI string) (string, error) {
+	base, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return "", fmt.Errorf("invalid Gemini base URL")
 	}
-	if strings.Contains(uri, "key=") {
-		return uri
+	media, err := url.Parse(strings.TrimSpace(rawURI))
+	if err != nil {
+		return "", fmt.Errorf("invalid Gemini media URL")
 	}
-	if strings.Contains(uri, "?") {
-		return fmt.Sprintf("%s&key=%s", uri, key)
+	media = base.ResolveReference(media)
+	if media.User != nil ||
+		!strings.EqualFold(media.Scheme, base.Scheme) ||
+		!strings.EqualFold(media.Host, base.Host) {
+		return "", fmt.Errorf("untrusted Gemini media origin")
 	}
-	return fmt.Sprintf("%s?key=%s", uri, key)
+	query := media.Query()
+	query.Del("key")
+	media.RawQuery = query.Encode()
+	media.Fragment = ""
+	return media.String(), nil
 }

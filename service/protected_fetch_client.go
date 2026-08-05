@@ -37,6 +37,23 @@ func newProtectedFetchHTTPClient() *http.Client {
 	return newProtectedFetchHTTPClientWithDialer(nil, nil, nil)
 }
 
+func newDirectProtectedFetchHTTPClient() *http.Client {
+	return newDirectProtectedFetchHTTPClientWithDialer(nil, nil, nil)
+}
+
+func newDirectProtectedFetchHTTPClientWithDialer(
+	resolver ssrffetch.Resolver,
+	dialContext func(context.Context, string, string) (net.Conn, error),
+	getProtection func() (*common.SSRFProtection, bool, error),
+) *http.Client {
+	return newProtectedFetchHTTPClientWithProxy(
+		resolver,
+		dialContext,
+		getProtection,
+		func(*http.Request) (*url.URL, error) { return nil, nil },
+	)
+}
+
 func newProtectedFetchHTTPClientWithDialer(
 	resolver ssrffetch.Resolver,
 	dialContext func(context.Context, string, string) (net.Conn, error),

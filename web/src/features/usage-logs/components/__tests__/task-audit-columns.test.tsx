@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import assert from 'node:assert/strict'
 import { after, describe, test } from 'node:test'
 
-import type { ColumnDef } from '@tanstack/react-table'
+import {
+  flexRender,
+  getCoreRowModel,
+  type ColumnDef,
+  useReactTable,
+} from '@tanstack/react-table'
 import { Window } from 'happy-dom'
 
 import type { TaskLog } from '../../types'
@@ -64,6 +69,7 @@ const { act, Fragment } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
+const { api } = await import('@/lib/api')
 const { useTaskLogsColumns } = await import('../columns/task-logs-columns')
 
 const i18n = createInstance()
@@ -352,6 +358,51 @@ async function renderRequestDataCell(data: unknown) {
   }
 }
 
+async function renderTaskRow(log: TaskLog, isAdmin = false) {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+
+  function TaskRowProbe() {
+    const columns = useTaskLogsColumns(isAdmin)
+    const table = useReactTable({
+      data: [log],
+      columns,
+      getCoreRowModel: getCoreRowModel(),
+    })
+
+    return (
+      <div>
+        {table
+          .getRowModel()
+          .rows[0]?.getVisibleCells()
+          .map((cell) => (
+            <div key={cell.id} data-column-id={cell.column.id}>
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </div>
+          ))}
+      </div>
+    )
+  }
+
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <TaskRowProbe />
+      </I18nextProvider>
+    )
+  })
+
+  return {
+    container,
+    root,
+    async cleanup() {
+      await act(async () => root.unmount())
+      container.remove()
+    },
+  }
+}
+
 describe('task audit columns', () => {
   after(() => {
     domWindow.close()
@@ -393,13 +444,264 @@ describe('task audit columns', () => {
     assert.equal(text, 'client-model')
   })
 
-  test('shows request model and request data but hides admin task responses from regular users', async () => {
+  test('shows public task details but hides every administrator audit column from regular users', async () => {
     const headers = await getHeaders(false)
 
     assert.equal(headers.includes('Request Model'), true)
-    assert.equal(headers.includes('Request Data'), true)
+    assert.equal(headers.includes('Request Data'), false)
     assert.equal(headers.includes('Upstream Response (Create Task)'), false)
-    assert.equal(headers.includes('Task Details'), false)
+    assert.equal(headers.includes('Task Details'), true)
+    assert.equal(headers.includes('Consumption'), true)
+    assert.equal(headers.includes('Channel'), false)
+    assert.equal(headers.includes('Endpoint'), false)
+    assert.equal(headers.includes('User'), false)
+  })
+
+  test('regular task rows render only the Ark public result and local proxy URL', async () => {
+    const mounted = await renderTaskRow({
+      id: 91,
+      user_id: 10,
+      username: 'supplier-user',
+      platform: 'supplier-platform',
+      task_id: 'task_public',
+      action: 'generate',
+      channel_id: 40,
+      request_path: '/supplier/private/path',
+      request_model: 'public-model',
+      submit_time: 1,
+      status: 'SUCCESS',
+      user_request_data: { secret: 'request-secret' },
+      upstream_response_data: { id: 'cgt-private' },
+      user_response_data: {
+        id: 'task_public',
+        model: 'public-model',
+        status: 'succeeded',
+        content: { video_url: '/v1/videos/task_public/content' },
+        usage: { completion_tokens: 108900, total_tokens: 108900 },
+        created_at: 1779348818,
+        updated_at: 1779348874,
+        seed: 78674,
+        resolution: '720p',
+        ratio: '16:9',
+        duration: 5,
+        framespersecond: 24,
+        service_tier: 'default',
+        execution_expires_after: 172800,
+        generate_audio: true,
+        draft: false,
+        priority: 0,
+        supplier_url: 'https://supplier.example/private',
+        upstream_model: 'provider-model',
+      },
+      fail_reason: '',
+    })
+
+    const text = mounted.container.textContent ?? ''
+    assert.match(text, /public-model/)
+    assert.match(text, /task_public/)
+    assert.doesNotMatch(text, /supplier-platform/)
+    assert.doesNotMatch(text, /request-secret/)
+    assert.doesNotMatch(text, /cgt-private/)
+
+    const detailsTrigger = mounted.container.querySelector<HTMLButtonElement>(
+      '[data-column-id="user_response_data"] button[title="View"]'
+    )
+    assert.ok(detailsTrigger)
+    await act(async () => detailsTrigger.focus())
+
+    const preview = document.querySelector('[data-slot="hover-card-content"]')
+    assert.ok(preview)
+    const previewText = preview.textContent ?? ''
+    assert.match(previewText, /"completion_tokens": 108900/)
+    assert.match(previewText, /\/v1\/videos\/task_public\/content/)
+    assert.doesNotMatch(previewText, /supplier\.example/)
+    assert.doesNotMatch(previewText, /provider-model/)
+
+    const videoPreview = mounted.container.querySelector<HTMLButtonElement>(
+      '[data-column-id="fail_reason"] button'
+    )
+    assert.match(videoPreview?.textContent ?? '', /Click to preview video/)
+
+    await mounted.cleanup()
+  })
+
+  test('regular task rows fetch a valid cross-origin gateway video through the authenticated local proxy', async () => {
+    const proxyURL =
+      'https://gateway.example/v1/videos/task_cross_origin/content'
+    const requests: Array<{ url: string; responseType?: string }> = []
+    const revoked: string[] = []
+    const originalGet = api.get
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    api.get = (async (url: string, config?: { responseType?: string }) => {
+      requests.push({ url, responseType: config?.responseType })
+      return { data: new Blob(['video'], { type: 'video/mp4' }) }
+    }) as typeof api.get
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => 'blob:authenticated-video-preview',
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: (url: string) => revoked.push(url),
+    })
+    const mounted = await renderTaskRow({
+      task_id: 'task_cross_origin',
+      action: 'generate',
+      request_model: 'public-model',
+      submit_time: 1,
+      status: 'SUCCESS',
+      user_response_data: {
+        id: 'task_cross_origin',
+        model: 'public-model',
+        status: 'succeeded',
+        content: { video_url: proxyURL },
+        usage: { completion_tokens: 1, total_tokens: 1 },
+        created_at: 1,
+        updated_at: 2,
+        seed: 0,
+        resolution: '720p',
+        ratio: '16:9',
+        duration: 5,
+        framespersecond: 24,
+        service_tier: 'default',
+        execution_expires_after: 172800,
+        generate_audio: true,
+        draft: false,
+        priority: 0,
+      },
+      fail_reason: '',
+    })
+
+    try {
+      const videoPreview = mounted.container.querySelector<HTMLButtonElement>(
+        '[data-column-id="fail_reason"] button'
+      )
+      assert.ok(videoPreview)
+
+      await act(async () => videoPreview.click())
+      await act(async () => {})
+
+      assert.deepEqual(requests, [
+        {
+          url: '/v1/videos/task_cross_origin/content',
+          responseType: 'blob',
+        },
+      ])
+      const video = document.querySelector<HTMLVideoElement>('video')
+      assert.equal(video?.getAttribute('src'), 'blob:authenticated-video-preview')
+
+      const closeButton = document.querySelector<HTMLButtonElement>(
+        '[data-slot="dialog-close"]'
+      )
+      assert.ok(closeButton)
+      await act(async () => closeButton.click())
+      assert.deepEqual(revoked, ['blob:authenticated-video-preview'])
+    } finally {
+      api.get = originalGet
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectURL,
+      })
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: originalRevokeObjectURL,
+      })
+      await mounted.cleanup()
+    }
+  })
+
+  test('regular Suno rows show only whitelisted outputs and proxy audio without provider platform', async () => {
+    const audioURL =
+      'https://gateway.example/v1/tasks/task_suno_public/media/7/audio'
+    const requests: Array<{ url: string; responseType?: string }> = []
+    const revoked: string[] = []
+    const originalGet = api.get
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    api.get = (async (url: string, config?: { responseType?: string }) => {
+      requests.push({ url, responseType: config?.responseType })
+      return { data: new Blob(['audio'], { type: 'audio/mpeg' }) }
+    }) as typeof api.get
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => 'blob:authenticated-audio-preview',
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: (url: string) => revoked.push(url),
+    })
+    const mounted = await renderTaskRow({
+      task_id: 'task_suno_public',
+      action: 'MUSIC',
+      request_model: 'suno_music',
+      submit_time: 1,
+      status: 'SUCCESS',
+      data: [
+        {
+          title: 'Public title',
+          text: 'Public lyrics',
+          audio_url: audioURL,
+          supplier_url: 'https://supplier.example/private',
+          upstream_model: 'provider-model-secret',
+        },
+      ],
+      fail_reason: '',
+    })
+
+    try {
+      const detailsTrigger = mounted.container.querySelector<HTMLButtonElement>(
+        '[data-column-id="user_response_data"] button[title="View"]'
+      )
+      assert.ok(detailsTrigger)
+      await act(async () => detailsTrigger.focus())
+
+      const preview = document.querySelector('[data-slot="hover-card-content"]')
+      assert.ok(preview)
+      const previewText = preview.textContent ?? ''
+      assert.match(previewText, /Public title/)
+      assert.match(previewText, /Public lyrics/)
+      assert.match(
+        previewText,
+        /\/v1\/tasks\/task_suno_public\/media\/7\/audio/
+      )
+      assert.doesNotMatch(previewText, /supplier\.example/)
+      assert.doesNotMatch(previewText, /provider-model-secret/)
+
+      const audioPreview = mounted.container.querySelector<HTMLButtonElement>(
+        '[data-column-id="fail_reason"] button'
+      )
+      assert.match(audioPreview?.textContent ?? '', /Click to preview audio/)
+      await act(async () => audioPreview?.click())
+      await act(async () => {})
+
+      assert.deepEqual(requests, [
+        {
+          url: '/v1/tasks/task_suno_public/media/7/audio',
+          responseType: 'blob',
+        },
+      ])
+      const audio = document.querySelector<HTMLAudioElement>('audio')
+      assert.equal(audio?.getAttribute('src'), 'blob:authenticated-audio-preview')
+
+      const closeButton = document.querySelector<HTMLButtonElement>(
+        '[data-slot="dialog-close"]'
+      )
+      assert.ok(closeButton)
+      await act(async () => closeButton.click())
+      assert.deepEqual(revoked, ['blob:authenticated-audio-preview'])
+    } finally {
+      api.get = originalGet
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectURL,
+      })
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: originalRevokeObjectURL,
+      })
+      await mounted.cleanup()
+    }
   })
 
   test('uses the compact View label for every task audit data action', async () => {

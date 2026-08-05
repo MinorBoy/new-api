@@ -292,23 +292,68 @@ export interface MidjourneyLog {
 // Task Logs Types
 // ============================================================================
 
+export interface PublicTaskContent {
+  video_url: string
+}
+
+export interface PublicTaskUsage {
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface PublicTaskError {
+  code: string
+  message: string
+}
+
+export interface PublicTaskResult {
+  id: string
+  model: string
+  status: string
+  content?: PublicTaskContent
+  usage: PublicTaskUsage
+  created_at: number
+  updated_at: number
+  seed: number
+  resolution: string
+  ratio: string
+  duration: number
+  framespersecond: number
+  service_tier: string
+  execution_expires_after: number
+  generate_audio: boolean
+  draft: boolean
+  priority: number
+  error?: PublicTaskError
+}
+
+export interface PublicTaskOutput {
+  title?: string
+  text?: string
+  audio_url?: string
+  video_url?: string
+  image_url?: string
+}
+
 export interface TaskLog {
-  id: number
-  user_id: number
+  id?: number
+  user_id?: number
   username?: string
-  platform: string // suno, kling, runway, etc.
+  platform?: string // administrator-only provider platform
   task_id: string
   request_model?: string
   action: string // MUSIC, LYRICS, GENERATE, TEXT_GENERATE, etc.
-  channel_id: number
+  channel_id?: number
+  quota?: number
   request_path?: string
   submit_time: number // seconds
+  start_time?: number // seconds
   finish_time?: number // seconds
   progress?: string
   progress_message_en?: string
-  data?: string // JSON string
-  // UserRequestData is available to the task owner. Other raw payloads are
-  // administrator-only.
+  result_url?: string
+  data?: unknown
+  // Raw request and upstream response payloads are administrator-only.
   user_request_data?: unknown
   upstream_response_data?: unknown
   user_response_data?: unknown

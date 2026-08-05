@@ -406,6 +406,7 @@ function TaskLogsCard<TData>({
           label={t('Task Details')}
           cell={cells.get('user_response_data')}
         />
+        <SummaryField label={t('Consumption')} cell={cells.get('quota')} />
         <SummaryField
           label={t('Result')}
           cell={cells.get('fail_reason')}

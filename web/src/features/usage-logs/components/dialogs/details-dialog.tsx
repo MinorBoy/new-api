@@ -286,14 +286,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isManage = props.log.type === 3
   const isSubscription = other?.billing_source === 'subscription'
   const isTieredBilling =
+    props.isAdmin &&
     isConsume &&
     !isViolation &&
     other?.billing_mode === 'tiered_expr' &&
     !!other?.expr_b64
   const hasAudioTokens = other?.ws || other?.audio
   const showTiming = isTimingLogType(props.log.type)
-  const showAdminIp =
-    !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
+  const showAdminIp = props.isAdmin && !!props.log.ip && (showTiming || isTopup)
   const adminInfo = other?.admin_info
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
@@ -373,10 +373,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
           label: t('Login Method'),
           value: String(other.login_method),
         },
-        props.log.ip && {
-          label: t('IP Address'),
-          value: props.log.ip,
-        },
+        props.isAdmin &&
+          props.log.ip && {
+            label: t('IP Address'),
+            value: props.log.ip,
+          },
         other?.user_agent && {
           label: t('User Agent'),
           value: String(other.user_agent),
@@ -448,7 +449,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.log.upstream_request_id && (
+          {props.isAdmin && props.log.upstream_request_id && (
             <DetailRow
               label={t('Upstream Request ID')}
               value={props.log.upstream_request_id}
@@ -482,7 +483,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow label={t('Token')} value={props.log.token_name} mono />
           )}
 
-          {(props.log.group || other?.group) && (
+          {props.log.model_name && (
+            <DetailRow label={t('Model')} value={props.log.model_name} mono />
+          )}
+
+          {props.isAdmin && (props.log.group || other?.group) && (
             <DetailRow
               label={t('Group')}
               value={props.log.group || other?.group || ''}
@@ -852,20 +857,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Model mapping */}
-        {other?.is_model_mapped && other?.upstream_model_name && (
-          <DetailSection label={t('Model Mapping')}>
-            <DetailRow
-              label={t('Request Model')}
-              value={props.log.model_name}
-              mono
-            />
-            <DetailRow
-              label={t('Actual Model')}
-              value={other.upstream_model_name}
-              mono
-            />
-          </DetailSection>
-        )}
+        {props.isAdmin &&
+          other?.is_model_mapped &&
+          other?.upstream_model_name && (
+            <DetailSection label={t('Model Mapping')}>
+              <DetailRow
+                label={t('Request Model')}
+                value={props.log.model_name}
+                mono
+              />
+              <DetailRow
+                label={t('Actual Model')}
+                value={other.upstream_model_name}
+                mono
+              />
+            </DetailSection>
+          )}
 
         {/* Token breakdown (for consume/error types with token data) */}
         {isDisplayableType(props.log.type) && other && (

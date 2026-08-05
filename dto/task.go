@@ -60,6 +60,67 @@ type TaskDto struct {
 	UserResponseData     json.RawMessage `json:"user_response_data,omitempty"`
 }
 
+type PublicTaskDto struct {
+	CreatedAt        int64              `json:"created_at"`
+	UpdatedAt        int64              `json:"updated_at"`
+	TaskID           string             `json:"task_id"`
+	Quota            int                `json:"quota"`
+	Action           string             `json:"action"`
+	Status           string             `json:"status"`
+	FailReason       string             `json:"fail_reason,omitempty"`
+	SubmitTime       int64              `json:"submit_time"`
+	StartTime        int64              `json:"start_time"`
+	FinishTime       int64              `json:"finish_time"`
+	Progress         string             `json:"progress"`
+	RequestModel     string             `json:"request_model,omitempty"`
+	ResultURL        string             `json:"result_url,omitempty"`
+	Data             []PublicTaskOutput `json:"data,omitempty"`
+	UserResponseData *PublicTaskResult  `json:"user_response_data,omitempty"`
+}
+
+type PublicTaskOutput struct {
+	Title    string `json:"title,omitempty"`
+	Text     string `json:"text,omitempty"`
+	AudioURL string `json:"audio_url,omitempty"`
+	VideoURL string `json:"video_url,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+}
+
+type PublicTaskResult struct {
+	ID                    string             `json:"id"`
+	Model                 string             `json:"model"`
+	Status                string             `json:"status"`
+	Content               *PublicTaskContent `json:"content,omitempty"`
+	Usage                 PublicTaskUsage    `json:"usage"`
+	CreatedAt             int64              `json:"created_at"`
+	UpdatedAt             int64              `json:"updated_at"`
+	Seed                  int64              `json:"seed"`
+	Resolution            string             `json:"resolution"`
+	Ratio                 string             `json:"ratio"`
+	Duration              int64              `json:"duration"`
+	FramesPerSecond       int64              `json:"framespersecond"`
+	ServiceTier           string             `json:"service_tier"`
+	ExecutionExpiresAfter int64              `json:"execution_expires_after"`
+	GenerateAudio         bool               `json:"generate_audio"`
+	Draft                 bool               `json:"draft"`
+	Priority              int64              `json:"priority"`
+	Error                 *PublicTaskError   `json:"error,omitempty"`
+}
+
+type PublicTaskContent struct {
+	VideoURL string `json:"video_url"`
+}
+
+type PublicTaskUsage struct {
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+}
+
+type PublicTaskError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 type FetchReq struct {
 	IDs []string `json:"ids"`
 }

@@ -67,6 +67,10 @@ export function getBillingBreakdownRows(
   isAdmin: boolean,
   t: TFunction
 ): BillingBreakdownRow[] {
+  if (!isAdmin) {
+    return [{ label: t('Total Cost'), value: formatLogQuota(log.quota) }]
+  }
+
   const isPerCall = isPerCallBilling(other.model_price)
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'

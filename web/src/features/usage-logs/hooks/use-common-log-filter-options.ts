@@ -19,10 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
+import { getChannels } from '@/features/channels/api'
 import { getApiKeys } from '@/features/keys/api'
 import { getGroups } from '@/features/users/api'
 
-import { getChannels } from '@/features/channels/api'
 import { getLogModels, getUserLogModels } from '../api'
 
 export type LogFilterOption = {
@@ -71,6 +71,7 @@ export function useCommonLogFilterOptions(
   const groupsQuery = useQuery({
     queryKey: ['usage-log-filter-options', 'groups'],
     queryFn: getGroups,
+    enabled: isAdmin,
     staleTime: 5 * 60 * 1000,
   })
   const tokensQuery = useQuery({
@@ -111,13 +112,15 @@ export function useCommonLogFilterOptions(
     ),
     groupOptions: useMemo(
       () =>
-        createOptions(
-          (groupsQuery.data?.data ?? []).map((group) => ({
-            value: group,
-            label: group,
-          }))
-        ),
-      [groupsQuery.data]
+        isAdmin
+          ? createOptions(
+              (groupsQuery.data?.data ?? []).map((group) => ({
+                value: group,
+                label: group,
+              }))
+            )
+          : [],
+      [groupsQuery.data, isAdmin]
     ),
     tokenOptions: useMemo(
       () =>

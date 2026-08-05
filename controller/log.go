@@ -5,7 +5,9 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,16 +43,30 @@ func GetUserLogs(c *gin.Context) {
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
-	group := c.Query("group")
 	requestId := c.Query("request_id")
-	upstreamRequestId := c.Query("upstream_request_id")
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId)
+	logs, total, err := model.GetUserLogs(
+		userId,
+		logType,
+		startTimestamp,
+		endTimestamp,
+		modelName,
+		tokenName,
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+		"",
+		requestId,
+		"",
+	)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	publicLogs := make([]*dto.PublicLog, len(logs))
+	for i, log := range logs {
+		publicLogs[i] = service.ProjectPublicLog(log, pageInfo.GetStartIdx()+i+1)
+	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(logs)
+	pageInfo.SetItems(publicLogs)
 	common.ApiSuccess(c, pageInfo)
 	return
 }
@@ -88,10 +104,14 @@ func GetLogByKey(c *gin.Context) {
 		})
 		return
 	}
+	publicLogs := make([]*dto.PublicLog, len(logs))
+	for i, log := range logs {
+		publicLogs[i] = service.ProjectPublicLog(log, i+1)
+	}
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",
-		"data":    logs,
+		"data":    publicLogs,
 	})
 }
 
@@ -129,9 +149,7 @@ func GetLogsSelfStat(c *gin.Context) {
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
-	channel, _ := strconv.Atoi(c.Query("channel"))
-	group := c.Query("group")
-	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, 0, "")
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -184,8 +202,7 @@ func GetLogSelfModels(c *gin.Context) {
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
-	group := c.Query("group")
-	models, err := model.GetDistinctLogModelNames(userId, logType, startTimestamp, endTimestamp, modelName, "", tokenName, 0, group)
+	models, err := model.GetDistinctLogModelNames(userId, logType, startTimestamp, endTimestamp, modelName, "", tokenName, 0, "")
 	if err != nil {
 		common.ApiError(c, err)
 		return

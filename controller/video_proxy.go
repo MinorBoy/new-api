@@ -5,17 +5,16 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -67,18 +66,9 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	var videoURL string
-	proxy := channel.GetSetting().Proxy
-	client := service.GetSSRFProtectedHTTPClient()
-	if proxy != "" {
-		// 渠道代理路径的连接由代理侧建立，无法做拨号时逐 IP 校验，
-		// 因此后面对 videoURL 保留请求前的一次性 SSRF 校验。
-		client, err = service.GetHttpClientWithProxy(proxy)
-		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to create proxy client for task %s: %s", taskID, err.Error()))
-			videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy client")
-			return
-		}
-	}
+	// Result URLs are untrusted; outbound proxies cannot preserve dial-time SSRF pinning.
+	client := publicMediaHTTPClient("")
+	geminiAuthenticatedMedia := false
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
@@ -99,15 +89,16 @@ func VideoProxy(c *gin.Context) {
 		}
 		videoURL, err = getGeminiVideoURL(channel, task, apiKey)
 		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Gemini video URL for task %s: %s", taskID, err.Error()))
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Gemini video URL for task %s", taskID))
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Gemini video URL")
 			return
 		}
 		req.Header.Set("x-goog-api-key", apiKey)
+		geminiAuthenticatedMedia = true
 	case constant.ChannelTypeVertexAi:
 		videoURL, err = getVertexVideoURL(channel, task)
 		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Vertex video URL for task %s: %s", taskID, err.Error()))
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Vertex video URL for task %s", taskID))
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Vertex video URL")
 			return
 		}
@@ -137,55 +128,96 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
-	var validateErr error
-	if proxy == "" {
-		validateErr = service.ValidateSSRFProtectedFetchURL(videoURL)
-	} else {
-		fetchSetting := system_setting.GetFetchSetting()
-		validateErr = common.ValidateURLWithFetchSetting(videoURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain)
-	}
+	validateErr := service.ValidateSSRFProtectedFetchURL(videoURL)
 	if validateErr != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, validateErr))
-		videoProxyError(c, http.StatusForbidden, "server_error", fmt.Sprintf("request blocked: %v", validateErr))
+		videoProxyError(c, http.StatusForbidden, "server_error", "Video request blocked")
 		return
 	}
 
 	req.URL, err = url.Parse(videoURL)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse URL %s: %s", videoURL, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse video URL for task %s: %s", taskID, err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy request")
 		return
+	}
+	if geminiAuthenticatedMedia {
+		client = publicMediaHTTPClient("x-goog-api-key")
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video from %s: %s", videoURL, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video for task %s", taskID))
 		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, videoURL))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for task %s", resp.StatusCode, taskID))
 		videoProxyError(c, http.StatusBadGateway, "server_error",
 			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))
 		return
 	}
-
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Writer.Header().Add(key, value)
-		}
+	contentType, ok := publicMediaContentType("video", resp.Header.Get("Content-Type"))
+	if !ok {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned an unsafe media type for task %s", taskID))
+		videoProxyError(c, http.StatusBadGateway, "server_error", "Upstream media type is not supported")
+		return
 	}
+	resp.Header.Set("Content-Type", contentType)
 
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	copyPublicMediaResponseHeaders(c.Writer.Header(), resp.Header)
+
+	c.Writer.Header().Set("Cache-Control", "private, no-store")
+	c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 	c.Writer.WriteHeader(resp.StatusCode)
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
 }
 
+func publicMediaHTTPClient(sensitiveHeader string) *http.Client {
+	baseClient := service.GetDirectSSRFProtectedHTTPClient()
+	client := *baseClient
+	baseRedirectCheck := baseClient.CheckRedirect
+	client.CheckRedirect = func(redirectRequest *http.Request, previous []*http.Request) error {
+		if baseRedirectCheck != nil {
+			if err := baseRedirectCheck(redirectRequest, previous); err != nil {
+				return err
+			}
+		}
+		redirectRequest.Header.Del("Referer")
+		if sensitiveHeader != "" && len(previous) > 0 {
+			originalURL := previous[0].URL
+			if !strings.EqualFold(redirectRequest.URL.Scheme, originalURL.Scheme) ||
+				!strings.EqualFold(redirectRequest.URL.Host, originalURL.Host) {
+				redirectRequest.Header.Del(sensitiveHeader)
+			}
+		}
+		return nil
+	}
+	return &client
+}
+
+func copyPublicMediaResponseHeaders(destination, source http.Header) {
+	for _, key := range []string{
+		"Content-Type",
+		"Content-Length",
+		"Content-Range",
+		"Accept-Ranges",
+	} {
+		for _, value := range source.Values(key) {
+			destination.Add(key, value)
+		}
+	}
+}
+
 func writeVideoDataURL(c *gin.Context, dataURL string) error {
+	return writePublicMediaDataURL(c, dataURL, "video")
+}
+
+func writePublicMediaDataURL(c *gin.Context, dataURL, kind string) error {
 	parts := strings.SplitN(dataURL, ",", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid data url")
@@ -197,10 +229,11 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 		return fmt.Errorf("unsupported data url")
 	}
 
-	mimeType := strings.TrimPrefix(header, "data:")
-	mimeType = strings.TrimSuffix(mimeType, ";base64")
-	if mimeType == "" {
-		mimeType = "video/mp4"
+	contentType := strings.TrimPrefix(header, "data:")
+	contentType = strings.TrimSuffix(contentType, ";base64")
+	contentType, ok := publicMediaContentType(kind, contentType)
+	if !ok {
+		return fmt.Errorf("unsupported media content type")
 	}
 
 	videoBytes, err := base64.StdEncoding.DecodeString(payload)
@@ -211,9 +244,36 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 		}
 	}
 
-	c.Writer.Header().Set("Content-Type", mimeType)
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Set("Cache-Control", "private, no-store")
+	c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 	c.Writer.WriteHeader(http.StatusOK)
 	_, err = c.Writer.Write(videoBytes)
 	return err
+}
+
+func publicMediaContentType(kind, value string) (string, bool) {
+	contentType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil {
+		return "", false
+	}
+	contentType = strings.ToLower(contentType)
+	if contentType == "application/octet-stream" {
+		return contentType, true
+	}
+	var allowed bool
+	switch kind {
+	case "audio":
+		allowed = strings.HasPrefix(contentType, "audio/")
+	case "video":
+		allowed = strings.HasPrefix(contentType, "video/")
+	case "image":
+		allowed = strings.HasPrefix(contentType, "image/") && contentType != "image/svg+xml"
+	default:
+		return "", false
+	}
+	if !allowed {
+		return "", false
+	}
+	return contentType, true
 }

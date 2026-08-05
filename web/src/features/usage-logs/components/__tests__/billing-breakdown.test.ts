@@ -21,6 +21,8 @@ import test from 'node:test'
 
 import type { TFunction } from 'i18next'
 
+import { formatLogQuota } from '@/lib/format'
+
 import type { UsageLog } from '../../data/schema'
 import type { LogOtherData } from '../../types'
 import { getBillingBreakdownRows } from '../dialogs/billing-breakdown'
@@ -59,7 +61,7 @@ test('renders duration billing without a token pricing fallback', () => {
       requested_duration_seconds: 5,
       billable_duration_seconds: 5,
     } as LogOtherData,
-    false,
+    true,
     identityTranslation
   )
 
@@ -79,4 +81,23 @@ test('renders duration billing without a token pricing fallback', () => {
     rows.some((row) => row.value === 'Per-token'),
     false
   )
+})
+
+test('regular users only receive the settled total without prices or ratios', () => {
+  const rows = getBillingBreakdownRows(
+    log,
+    {
+      billing_mode: 'per_duration',
+      duration_price: 0.25,
+      billable_duration_seconds: 5,
+      group_ratio: 1.25,
+      upstream_model_name: 'provider-model',
+    } as LogOtherData,
+    false,
+    identityTranslation
+  )
+
+  assert.deepEqual(rows, [
+    { label: 'Total Cost', value: formatLogQuota(log.quota) },
+  ])
 })

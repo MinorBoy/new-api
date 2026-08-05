@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -47,7 +48,6 @@ func GetUserTask(c *gin.Context) {
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 
 	queryParams := model.SyncTaskQueryParams{
-		Platform:       constant.TaskPlatform(c.Query("platform")),
 		TaskID:         c.Query("task_id"),
 		RequestModel:   c.Query("request_model"),
 		Status:         c.Query("status"),
@@ -58,8 +58,12 @@ func GetUserTask(c *gin.Context) {
 
 	items := model.TaskGetAllUserTask(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	total := model.TaskCountAllUserTask(userId, queryParams)
+	publicItems := make([]*dto.PublicTaskDto, len(items))
+	for i, task := range items {
+		publicItems[i] = service.ProjectPublicTask(task)
+	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(tasksToDto(items, false))
+	pageInfo.SetItems(publicItems)
 	common.ApiSuccess(c, pageInfo)
 }
 

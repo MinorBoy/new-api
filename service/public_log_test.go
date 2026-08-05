@@ -62,7 +62,7 @@ func TestProjectPublicLogDropsSupplierFactsByWhitelist(t *testing.T) {
 	assert.Equal(t, 1, projected.ID)
 	assert.Equal(t, source.CreatedAt, projected.CreatedAt)
 	assert.Equal(t, source.Type, projected.Type)
-	assert.Equal(t, common.MaskSensitiveInfo(source.Content), projected.Content)
+	assert.Empty(t, projected.Content)
 	assert.Equal(t, source.TokenName, projected.TokenName)
 	assert.Equal(t, source.ModelName, projected.ModelName)
 	assert.Equal(t, source.Quota, projected.Quota)
@@ -105,4 +105,32 @@ func TestProjectPublicLogDropsSupplierFactsByWhitelist(t *testing.T) {
 
 func TestProjectPublicLogReturnsNilForNilInput(t *testing.T) {
 	assert.Nil(t, ProjectPublicLog(nil, 1))
+}
+
+func TestProjectPublicLogContentUsesEventTypeWhitelist(t *testing.T) {
+	tests := []struct {
+		name    string
+		logType int
+		want    string
+	}{
+		{name: "consume", logType: model.LogTypeConsume},
+		{name: "error", logType: model.LogTypeError},
+		{name: "refund", logType: model.LogTypeRefund},
+		{name: "unknown", logType: model.LogTypeUnknown},
+		{name: "topup", logType: model.LogTypeTopup, want: "account event"},
+		{name: "manage", logType: model.LogTypeManage, want: "account event"},
+		{name: "system", logType: model.LogTypeSystem, want: "account event"},
+		{name: "login", logType: model.LogTypeLogin, want: "account event"},
+	}
+
+	for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+			projected := ProjectPublicLog(&model.Log{
+				Type:    tt.logType,
+				Content: "account event",
+			}, 1)
+			require.NotNil(t, projected)
+			assert.Equal(t, tt.want, projected.Content)
+		})
+	}
 }

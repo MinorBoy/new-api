@@ -196,6 +196,87 @@ func TestArkToClmmAcceptsDocumentedChannelPrefixes(t *testing.T) {
 	}
 }
 
+func TestValidateRouteModelAcceptsConfiguredCLMMModelIDs(t *testing.T) {
+	for _, modelName := range []string{
+		"mg-seedance2.0 -720p pro",
+		"ov-Seedance2.0 fast 720p-15s",
+		"seedance2.0 480p-fast-nsp",
+	} {
+		t.Run(modelName, func(t *testing.T) {
+			require.NoError(t, ValidateRouteModel(modelName))
+		})
+	}
+}
+
+func TestArkToClmmParsesControlsInConfiguredModelIDs(t *testing.T) {
+	tests := []struct {
+		name            string
+		model           string
+		duration        int
+		wantResolution  string
+		wantSeconds     string
+		wantMySeconds   string
+		wantBillingTime int
+	}{
+		{
+			name:            "space delimited resolution",
+			model:           "mg-seedance2.0 -720p pro",
+			duration:        4,
+			wantResolution:  "720p",
+			wantSeconds:     "4",
+			wantBillingTime: 4,
+		},
+		{
+			name:            "space and hyphen delimited duration limit",
+			model:           "ov-Seedance2.0 fast 720p-15s",
+			duration:        4,
+			wantResolution:  "720p",
+			wantSeconds:     "1",
+			wantMySeconds:   "4",
+			wantBillingTime: 4,
+		},
+		{
+			name:            "fixed duration controls",
+			model:           "mg-seedance2.0 -480p-fast-gz-15s",
+			duration:        4,
+			wantResolution:  "480p",
+			wantSeconds:     "1",
+			wantMySeconds:   "15",
+			wantBillingTime: 15,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			converted, billingSeconds, err := arkToClmm(arkRequest{
+				Model:    "client-model",
+				Duration: &test.duration,
+				Content:  []arkContent{{Type: "text", Text: "prompt"}},
+			}, test.model)
+
+			require.NoError(t, err)
+			assert.Equal(t, test.model, converted.Model)
+			assert.Equal(t, test.wantResolution, converted.Resolution)
+			assert.Equal(t, test.wantSeconds, converted.Seconds)
+			assert.Equal(t, test.wantMySeconds, converted.MySeconds)
+			assert.Equal(t, test.wantBillingTime, billingSeconds)
+		})
+	}
+}
+
+func TestArkToClmmAcceptsFourSecondOrdinaryDuration(t *testing.T) {
+	converted, billingSeconds, err := arkToClmm(arkRequest{
+		Model:    "client-model",
+		Duration: intPointer(4),
+		Content:  []arkContent{{Type: "text", Text: "prompt"}},
+	}, "seedance2.0 720p-fast")
+
+	require.NoError(t, err)
+	assert.Equal(t, "4", converted.Seconds)
+	assert.Empty(t, converted.MySeconds)
+	assert.Equal(t, 4, billingSeconds)
+}
+
 func TestArkToClmmNormalizesMappedModelWhitespace(t *testing.T) {
 	converted, _, err := arkToClmm(arkRequest{
 		Model:   "client-model",
@@ -214,7 +295,7 @@ func TestArkToClmmRejectsInvalidMappedModelControls(t *testing.T) {
 		duration *int
 		images   int
 	}{
-		{name: "unknown prefix", model: "unknown-video"},
+		{name: "empty model", model: "  "},
 		{name: "gz without duration suffix", model: "op-video-gz"},
 		{name: "zero duration suffix", model: "sh-video-0s"},
 		{name: "duration suffix above global bound", model: fmt.Sprintf("sh-video-%ds", common.MaxTaskDurationSeconds+1)},
@@ -275,7 +356,7 @@ func TestArkToClmmRejectsUnsupportedArkInput(t *testing.T) {
 		}},
 		{name: "invalid ratio", mutate: func(request *arkRequest) { request.Ratio = stringPointer("1:1") }},
 		{name: "invalid resolution", mutate: func(request *arkRequest) { request.Resolution = stringPointer("1080p") }},
-		{name: "ordinary duration below minimum", mutate: func(request *arkRequest) { request.Duration = intPointer(4) }},
+		{name: "ordinary duration below minimum", mutate: func(request *arkRequest) { request.Duration = intPointer(3) }},
 		{name: "ordinary duration above maximum", mutate: func(request *arkRequest) { request.Duration = intPointer(16) }},
 		{name: "non-default service tier", mutate: func(request *arkRequest) { request.ServiceTier = &priorityTier }},
 		{name: "known unsupported field even false", mutate: func(request *arkRequest) { request.Watermark = &falseValue }},

@@ -188,9 +188,9 @@ func validateArkContentRoles(content []ArkContent, modelName string) error {
 	if audios > 3 {
 		return fmt.Errorf("too many audios: dimensio allows at most 3 (audio_file_1..3)")
 	}
-	totalLimit := 12
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "pxv-") {
-		totalLimit = 15
+	totalLimit := 15
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "jmg-") {
+		totalLimit = 12
 	}
 	if images+videos+audios > totalLimit {
 		return fmt.Errorf("too many media items: dimensio allows at most %d total", totalLimit)

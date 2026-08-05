@@ -37,7 +37,7 @@ import (
 )
 
 const importedMaterialMatrixGroup = "default"
-const importedMaterialMatrixAssetBaseURL = "http://cdn.openai.com/ark-matrix"
+const importedMaterialMatrixAssetBaseURL = "https://cdn.openai.com/ark-matrix"
 const importedMaterialMatrixGroupRatio = 1.25
 
 type importedMaterialMatrixTarget struct {
@@ -123,7 +123,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	silenceSeedanceBillingLogs(t)
 	targets := loadImportedMaterialMatrixTargets(t)
 	env := setupImportedMaterialMatrixE2E(t, targets)
-	require.Len(t, targets, 147)
+	require.Len(t, targets, 167)
 	checked := 0
 	accepted := 0
 	contractBlocks := 0
@@ -150,7 +150,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 				Defaults: modelrouting.Defaults{
 					OutputResolution: target.Resolution,
 					DurationSeconds:  target.Duration,
-					AspectRatio:      "16:9",
+					AspectRatio:      target.AspectRatio,
 				},
 				Targets: []service.RouteTargetWriteRequest{{
 					ChannelID:      publishedTarget.ChannelID,
@@ -212,6 +212,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 				require.True(t, errors.As(err, &policyErr), "%s: %v", target.CaseID, err)
 				require.Equal(t, "incompatible_channel_contract", policyErr.Code, target.CaseID)
 				require.Equal(t, "targets.0.constraints", policyErr.Field, target.CaseID)
+				t.Logf("contract blocked: provider=%s target=%s reason=%s", target.Provider, target.RouteTargetRef, policyErr.Error())
 				contractBlocks++
 				after := seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
 					User: &model.User{Id: e2eUserID}, Token: &model.Token{Id: 1},
@@ -386,10 +387,10 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	}
 
 	if checked == len(targets) {
-		require.Equal(t, 110, accepted)
-		require.Equal(t, 36, contractBlocks)
-		require.Equal(t, 1, disabledPricingDrafts)
-		require.Equal(t, map[string]int{"431": 38, "900": 6, "903": 4, "933": 99}, env.materialSeen)
+		require.Equal(t, 167, accepted)
+		require.Zero(t, contractBlocks)
+		require.Zero(t, disabledPricingDrafts)
+		require.Equal(t, map[string]int{"431": 53, "900": 12, "903": 4, "933": 98}, env.materialSeen)
 	}
 }
 
@@ -514,7 +515,7 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
 		Where("source = ? AND status = ?", "config_import", types.CostRuleActive).
 		Count(&activeRuleCount).Error)
-	require.EqualValues(t, 146, activeRuleCount)
+	require.EqualValues(t, 167, activeRuleCount)
 
 	policyIDs := make(map[string]int)
 	var policies []model.RoutingPolicy

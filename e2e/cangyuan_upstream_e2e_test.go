@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/videometa"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -75,6 +76,7 @@ type cangyuanE2EEnvironment struct {
 func setupCangyuanE2E(t *testing.T, pollResponses ...string) *cangyuanE2EEnvironment {
 	t.Helper()
 	setupSeedanceE2EDB(t)
+	setupSeedanceE2EVideoMetadata(t)
 	mock := &cangyuanE2EMock{pollResponses: pollResponses}
 	server := httptest.NewServer(mock)
 	t.Cleanup(server.Close)
@@ -88,6 +90,12 @@ func setupCangyuanE2E(t *testing.T, pollResponses ...string) *cangyuanE2EEnviron
 	channel.Models = "doubao-seedance-2-0-260128"
 	channel.ModelMapping = &mapping
 	require.NoError(t, channel.Update())
+	service.SetVideoMetadataClient(cangyuanE2EVideoMetadataClient{})
+	service.SetReferenceAudioDurationResolver(cangyuanE2EAudioDurationResolver{})
+	t.Cleanup(func() {
+		service.SetVideoMetadataClient(nil)
+		service.SetReferenceAudioDurationResolver(nil)
+	})
 
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		return relay.GetTaskAdaptor(platform)
@@ -96,12 +104,27 @@ func setupCangyuanE2E(t *testing.T, pollResponses ...string) *cangyuanE2EEnviron
 	return &cangyuanE2EEnvironment{engine: seedanceE2ERouter(), mock: mock}
 }
 
-func TestCangyuanARKLifecycleAndTextRequestE2E(t *testing.T) {
+type cangyuanE2EVideoMetadataClient struct{}
+
+func (cangyuanE2EVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	return videometa.Metadata{
+		DurationMS: 5_000, Width: 1280, Height: 720,
+		FrameRateNum: 24, FrameRateDen: 1, Container: "mp4", ContentLength: 1024,
+	}, nil
+}
+
+type cangyuanE2EAudioDurationResolver struct{}
+
+func (cangyuanE2EAudioDurationResolver) ResolveMS(context.Context, []string) (int64, error) {
+	return 5_000, nil
+}
+
+func TestCangyuanARKLifecycleAndReferenceMediaRequestE2E(t *testing.T) {
 	env := setupCangyuanE2E(t,
 		`{"task_id":"cangyuan-private","status":"in_progress","progress":50}`,
 		`{"task_id":"cangyuan-private","status":"completed","data":[{"url":"https://assets.example/cangyuan.mp4"}]}`,
 	)
-	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"cangyuan text acceptance"}],"duration":8,"ratio":"16:9","resolution":"720p"}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"cangyuan media acceptance"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.png"}},{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.wav"}}],"duration":8,"ratio":"16:9","resolution":"720p","generate_audio":true}`
 
 	status, submit := performJSONRequest(t, env.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", requestBody)
 	require.Equal(t, http.StatusOK, status, string(submit))
@@ -117,7 +140,7 @@ func TestCangyuanARKLifecycleAndTextRequestE2E(t *testing.T) {
 	assert.Equal(t, http.MethodPost, requests[0].Method)
 	assert.Equal(t, "/v1/videos", requests[0].Path)
 	assert.Equal(t, "Bearer mock-cangyuan-key", requests[0].Authorization)
-	assert.JSONEq(t, `{"model":"seedance-2.0-720p","prompt":"cangyuan text acceptance","aspect_ratio":"16:9","duration":8,"resolution":"720p"}`, string(requests[0].Body))
+	assert.JSONEq(t, `{"model":"seedance-2.0-720p","prompt":"cangyuan media acceptance","reference_image_urls":["https://8.8.8.8/ref.png"],"reference_videos":["https://8.8.8.8/ref.mp4"],"reference_audios":["https://8.8.8.8/ref.wav"],"aspect_ratio":"16:9","duration":8,"resolution":"720p","audio":true}`, string(requests[0].Body))
 	assert.NotContains(t, string(requests[0].Body), `"ratio"`)
 
 	task := pollNewAPIVideoTask(t, publicID)
@@ -137,9 +160,9 @@ func TestCangyuanARKLifecycleAndTextRequestE2E(t *testing.T) {
 	assert.Contains(t, string(list), publicID)
 }
 
-func TestCangyuanRejectsReferenceMediaBeforeUpstreamAndPreConsumeE2E(t *testing.T) {
+func TestCangyuanRejectsReferenceLimitBeforeUpstreamAndPreConsumeE2E(t *testing.T) {
 	env := setupCangyuanE2E(t)
-	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"media is unsupported"},{"type":"image_url","image_url":{"url":"https://8.8.8.8/ref.jpg"}}],"duration":8}`
+	requestBody := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"too many images"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/1.jpg"}},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/2.jpg"}},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/3.jpg"}},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/4.jpg"}},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/5.jpg"}}],"duration":8}`
 
 	var beforeTasks int64
 	var beforeUser model.User

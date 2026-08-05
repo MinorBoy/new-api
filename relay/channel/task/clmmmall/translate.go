@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -13,7 +14,6 @@ import (
 var (
 	durationControlPattern = regexp.MustCompile(`(?i)^(\d+)s$`)
 	imageControlPattern    = regexp.MustCompile(`(?i)^(\d+)img$`)
-	clmmModelPrefixes      = []string{"sh-", "grok-", "veo-", "bbv3-", "bbv4-", "me-", "hj-", "mowc-", "op-"}
 )
 
 type modelControls struct {
@@ -76,8 +76,8 @@ func arkToClmm(request arkRequest, upstreamModel string) (clmmRequest, int, erro
 		if normalized.duration != nil {
 			billingSeconds = *normalized.duration
 		}
-		if billingSeconds < 5 || billingSeconds > 15 || billingSeconds > relaycommon.MaxTaskDurationSeconds {
-			return clmmRequest{}, 0, fmt.Errorf("duration must be between 5 and 15 seconds")
+		if billingSeconds < 4 || billingSeconds > 15 || billingSeconds > relaycommon.MaxTaskDurationSeconds {
+			return clmmRequest{}, 0, fmt.Errorf("duration must be between 4 and 15 seconds")
 		}
 		seconds = strconv.Itoa(billingSeconds)
 	}
@@ -206,20 +206,17 @@ func normalizeArkRequest(request arkRequest) (normalizedArkRequest, error) {
 }
 
 func parseModelControls(modelName string) (modelControls, error) {
-	lowerModel := strings.ToLower(modelName)
-	validPrefix := false
-	for _, prefix := range clmmModelPrefixes {
-		if strings.HasPrefix(lowerModel, prefix) {
-			validPrefix = true
-			break
-		}
-	}
-	if !validPrefix {
-		return modelControls{}, fmt.Errorf("model %s is not supported by CLMM Mall", modelName)
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return modelControls{}, fmt.Errorf("model is required")
 	}
 
 	controls := modelControls{}
-	for _, segment := range strings.Split(lowerModel, "-") {
+	hasBaseModel := false
+	for _, rawSegment := range strings.FieldsFunc(strings.ToLower(modelName), func(r rune) bool {
+		return r == '-' || unicode.IsSpace(r)
+	}) {
+		segment := strings.TrimSpace(rawSegment)
 		switch segment {
 		case "480p", "720p":
 			controls.resolution = segment
@@ -248,13 +245,32 @@ func parseModelControls(modelName string) (modelControls, error) {
 				if value > controls.minimumImages {
 					controls.minimumImages = value
 				}
+				continue
 			}
+			hasBaseModel = true
 		}
+	}
+	if !hasBaseModel {
+		return modelControls{}, fmt.Errorf("model %s is missing a base model", modelName)
 	}
 	if controls.fixedDuration && !controls.hasDuration {
 		return modelControls{}, fmt.Errorf("model suffix gz requires a duration suffix")
 	}
 	return controls, nil
+}
+
+// RouteModelContract exposes the parsed CLMM behavior needed by routing-policy validation.
+type RouteModelContract struct {
+	ControlsDuration bool
+}
+
+// AnalyzeRouteModel is the single model grammar entry point shared by submission and routing validation.
+func AnalyzeRouteModel(modelName string) (RouteModelContract, error) {
+	controls, err := parseModelControls(strings.TrimSpace(modelName))
+	if err != nil {
+		return RouteModelContract{}, err
+	}
+	return RouteModelContract{ControlsDuration: controls.hasDuration}, nil
 }
 
 // ValidateRouteModel verifies the mapped model grammar without constructing an

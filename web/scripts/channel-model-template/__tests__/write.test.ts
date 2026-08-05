@@ -242,6 +242,110 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
   }
 })
 
+test('writes and converts channel mapping duration independently from the SKU', async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-template-mapping-duration-')
+  )
+  const outputPath = path.join(directory, 'template.xlsx')
+  const reportPath = path.join(directory, 'template.report.json')
+  try {
+    const channelSource = structuredClone(source)
+    const model = channelSource.models[0]
+    assert.ok(model)
+    model.fields.时长范围 = '5-15'
+    const data = buildTemplateData(channelSource, rules)
+    assert.equal(data.skus[0]?.minDurationSeconds, 4)
+
+    const result = await writeTemplateWorkbook({
+      basePath,
+      outputPath,
+      reportPath,
+      sourcePath: 'source.xlsx',
+      rulesPath: 'rules.json',
+      rules,
+      data,
+    })
+    assert.equal(result.hasFailures, false)
+
+    const written = new ExcelJS.Workbook()
+    await written.xlsx.readFile(outputPath)
+    const mappingSheet = written.getWorksheet('模型映射')
+    assert.ok(mappingSheet)
+    assert.equal(mappingSheet.getRow(4).getCell(8).value, '最小时长秒')
+    assert.equal(mappingSheet.getRow(4).getCell(9).value, '最大时长秒')
+    assert.equal(mappingSheet.getRow(5).getCell(8).value, 5)
+    assert.equal(mappingSheet.getRow(5).getCell(9).value, 15)
+
+    const bytes = await fs.readFile(outputPath)
+    const converted = await convertWorkbook(
+      new File([bytes], 'channel-model-template.xlsx', {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+    )
+    const blueprint = converted.document.entities.route_blueprints.find(
+      (item) => item.business_id === 'route-blueprint/MAP-CLMM-R3-720'
+    )
+    assert.ok(blueprint)
+    const target = (blueprint.targets as Array<Record<string, unknown>>)[0]
+    assert.equal(target?.duration_min, 5)
+    assert.equal(target?.duration_max, 15)
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('writes discrete channel durations as route duration values', async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-template-discrete-duration-')
+  )
+  const outputPath = path.join(directory, 'template.xlsx')
+  const reportPath = path.join(directory, 'template.report.json')
+  try {
+    const channelSource = structuredClone(source)
+    const model = channelSource.models[0]
+    assert.ok(model)
+    model.fields.时长范围 = '5,10,15'
+    const data = buildTemplateData(channelSource, rules)
+
+    const result = await writeTemplateWorkbook({
+      basePath,
+      outputPath,
+      reportPath,
+      sourcePath: 'source.xlsx',
+      rulesPath: 'rules.json',
+      rules,
+      data,
+    })
+    assert.equal(result.hasFailures, false)
+
+    const written = new ExcelJS.Workbook()
+    await written.xlsx.readFile(outputPath)
+    const mappingSheet = written.getWorksheet('模型映射')
+    assert.ok(mappingSheet)
+    assert.equal(mappingSheet.getRow(4).getCell(10).value, '可用时长秒')
+    assert.equal(mappingSheet.getRow(5).getCell(8).value, null)
+    assert.equal(mappingSheet.getRow(5).getCell(9).value, null)
+    assert.equal(mappingSheet.getRow(5).getCell(10).value, '5,10,15')
+
+    const bytes = await fs.readFile(outputPath)
+    const converted = await convertWorkbook(
+      new File([bytes], 'channel-model-template.xlsx', {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+    )
+    const blueprint = converted.document.entities.route_blueprints.find(
+      (item) => item.business_id === 'route-blueprint/MAP-CLMM-R3-720'
+    )
+    assert.ok(blueprint)
+    const target = (blueprint.targets as Array<Record<string, unknown>>)[0]
+    assert.deepEqual(target?.duration_values, [5, 10, 15])
+    assert.equal(target?.duration_min, undefined)
+    assert.equal(target?.duration_max, undefined)
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('writes a report for a relative output path in a new directory', async () => {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), 'channel-template-relative-write-')

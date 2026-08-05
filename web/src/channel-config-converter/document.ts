@@ -162,6 +162,19 @@ function listField(entity: ExtractedEntity, ...names: string[]): string[] {
     .filter(Boolean)
 }
 
+function integerListField(
+  entity: ExtractedEntity,
+  ...names: string[]
+): number[] {
+  return [
+    ...new Set(
+      listField(entity, ...names)
+        .map(Number)
+        .filter((value) => Number.isSafeInteger(value) && value > 0)
+    ),
+  ].sort((left, right) => left - right)
+}
+
 type ReferenceBounds = {
   minimums: { images: number; videos: number; audios: number }
   limits: { images: number; videos: number; audios: number }
@@ -1029,8 +1042,21 @@ export async function buildImportDocument(
           await authoritativeEntity(cost, source, costFields)
         )
 
-        const durationMin = field(sku, 'duration_min', '最小时长秒')
-        const durationMax = field(sku, 'duration_max', '最大时长秒')
+        const durationMin = optionalInteger(
+          mapping,
+          'duration_min',
+          '最小时长秒'
+        )
+        const durationMax = optionalInteger(
+          mapping,
+          'duration_max',
+          '最大时长秒'
+        )
+        const durationValues = integerListField(
+          mapping,
+          'duration_values',
+          '可用时长秒'
+        )
         entities.route_blueprints.push(
           await authoritativeEntity(
             {
@@ -1048,8 +1074,16 @@ export async function buildImportDocument(
                   cost_variant_key: variant,
                   enabled: false,
                   line_ref: lineRef,
-                  ...(durationMin ? { duration_min: Number(durationMin) } : {}),
-                  ...(durationMax ? { duration_max: Number(durationMax) } : {}),
+                  ...(durationValues.length > 0
+                    ? { duration_values: durationValues }
+                    : {
+                        ...(durationMin === undefined
+                          ? {}
+                          : { duration_min: durationMin }),
+                        ...(durationMax === undefined
+                          ? {}
+                          : { duration_max: durationMax }),
+                      }),
                   ...(line?.supportsRealPerson === undefined
                     ? {}
                     : { supports_real_person: line.supportsRealPerson }),

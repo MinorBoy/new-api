@@ -105,15 +105,15 @@ func TestDisableRemovedSeedChannelsLeavesOnlyCurrentMatrixLinesEnabled(t *testin
 func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
-	require.Len(t, targets, 155)
-	require.Equal(t, map[string]int{"431": 41, "900": 6, "903": 4, "933": 104}, materialDistribution(targets))
+	require.Len(t, targets, 167)
+	require.Equal(t, map[string]int{"431": 53, "900": 12, "903": 4, "933": 98}, materialDistribution(targets))
 	enabledCosts := 0
 	for _, target := range targets {
 		if target.CostEnabled {
 			enabledCosts++
 		}
 	}
-	require.Equal(t, 154, enabledCosts)
+	require.Equal(t, 167, enabledCosts)
 
 	targetsByLine := make(map[string][]matrixTarget)
 	for _, target := range targets {
@@ -122,6 +122,26 @@ func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	require.Equal(t, constant.ChannelTypeFourSToken, targetsByLine["channel-4stoken"][0].ChannelType)
 	require.Equal(t, constant.ChannelTypeMegaByAI, targetsByLine["megabyai-fast-real-person"][0].ChannelType)
 	require.Equal(t, constant.ChannelTypeSecure, targetsByLine["secure-discount"][0].ChannelType)
+}
+
+func TestLoadTargetsUsesAllowedAspectRatioForPolicyAndRequest(t *testing.T) {
+	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
+	require.NoError(t, err)
+
+	var target matrixTarget
+	for _, candidate := range targets {
+		if candidate.RouteTargetRef == "route-target/MAP-CLMM-R3-720" {
+			target = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, target.RouteTargetRef)
+	require.Equal(t, "9:16", target.AspectRatio)
+	require.Contains(t, target.AspectRatios, target.AspectRatio)
+
+	var body map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(requestBody(target, seedAssetBaseURL), &body))
+	require.Equal(t, target.AspectRatio, body["ratio"])
 }
 
 func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
@@ -170,9 +190,9 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 		accepted++
 	}
 
-	require.Equal(t, 118, accepted)
-	require.Equal(t, 36, blocked)
-	require.Equal(t, 1, disabled)
+	require.Equal(t, 167, accepted)
+	require.Zero(t, blocked)
+	require.Zero(t, disabled)
 }
 
 func TestSelectFailureFixtureTargetFallsBackToAcceptedProviderChannel(t *testing.T) {
@@ -537,7 +557,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	document, err := loadDocument(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
 
-	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R132-480")
+	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R148-480")
 	require.True(t, ok)
 	config, err := importedCostRuleConfig(rule)
 	require.NoError(t, err)
@@ -549,7 +569,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, "0.4794520547945205", *config.value.NormalizedUSDPrices.UnitPrice)
 	require.NotEqual(t, "0.20", *config.value.UnitPrice)
 
-	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R142-720")
+	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R158-720")
 	require.True(t, ok)
 	durationConfig, err := importedCostRuleConfig(durationRule)
 	require.NoError(t, err)
@@ -565,35 +585,6 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, types.CostModePerToken, tokenConfig.mode)
 	require.Equal(t, types.CostChargeTaskSucceeded, tokenConfig.value.ChargeEvent)
 	require.Equal(t, types.CostMeterUpstreamUsage, tokenConfig.value.MeterSource)
-}
-
-func TestSeedCostRulesSkipsDisabledImportedDraft(t *testing.T) {
-	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
-	require.NoError(t, err)
-	var disabled matrixTarget
-	for _, target := range targets {
-		if target.RouteTargetRef == "route-target/MAP-DIMENSIO-R101-480" {
-			disabled = target
-			break
-		}
-	}
-	require.NotEmpty(t, disabled.RouteTargetRef)
-
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.ChannelModelCostRule{}))
-	previousDB := model.DB
-	model.DB = db
-	t.Cleanup(func() { model.DB = previousDB })
-	workingDirectory, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(filepath.Join("..", "..")))
-	t.Cleanup(func() { require.NoError(t, os.Chdir(workingDirectory)) })
-
-	require.NoError(t, seedCostRules([]matrixTarget{disabled}, map[string]int{disabled.LineRef: 7}))
-	var count int64
-	require.NoError(t, db.Model(&model.ChannelModelCostRule{}).Count(&count).Error)
-	require.Zero(t, count)
 }
 
 func TestSeedCostRulesRequiresPublishedActiveRule(t *testing.T) {

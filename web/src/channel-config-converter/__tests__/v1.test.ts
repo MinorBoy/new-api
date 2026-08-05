@@ -299,6 +299,67 @@ test('v1 document decodes compact reference limits into route target constraints
   assert.equal(paipuCost.enabled, true)
 })
 
+test('v1 document uses channel mapping duration instead of shared SKU duration', async () => {
+  const snapshot = cloneSnapshot(await loadFixture())
+  const mappingSheet = snapshot.sheets.find(
+    (sheet) => sheet.name === '模型映射'
+  )
+  assert.ok(mappingSheet)
+  const minDurationColumn = V1_HEADERS.模型映射.indexOf('最小时长秒')
+  const maxDurationColumn = V1_HEADERS.模型映射.indexOf('最大时长秒')
+  assert.notEqual(minDurationColumn, -1)
+  assert.notEqual(maxDurationColumn, -1)
+  const mapping = mappingSheet.rows.find(
+    (row) => row.cells[0]?.value === 'MAP-SECURE-R69-720'
+  )
+  assert.ok(mapping)
+  requiredCell(mapping, minDurationColumn).value = 5
+  requiredCell(mapping, maxDurationColumn).value = 15
+
+  const result = await buildImportDocument({
+    extracted: extractWorkbook(snapshot),
+    sourceBytes: await fs.readFile(fixturePath),
+    sourceFileName: 'channel-config-v1-mapping-duration.xlsx',
+  })
+  const blueprint = result.document.entities.route_blueprints.find(
+    (item) => item.business_id === 'route-blueprint/MAP-SECURE-R69-720'
+  )
+  assert.ok(blueprint)
+  const target = (blueprint.targets as Array<Record<string, unknown>>)[0]
+
+  assert.equal(target?.duration_min, 5)
+  assert.equal(target?.duration_max, 15)
+})
+
+test('v1 document preserves discrete channel durations on the route target', async () => {
+  const snapshot = cloneSnapshot(await loadFixture())
+  const extracted = extractWorkbook(snapshot)
+  const mapping = extracted.modelMappings.find(
+    (item) => item.businessId === 'MAP-SECURE-R69-720'
+  )
+  assert.ok(mapping)
+  mapping.fields['可用时长秒'] = {
+    value: '5,10,15',
+    formula: null,
+    formulaResult: null,
+  }
+
+  const result = await buildImportDocument({
+    extracted,
+    sourceBytes: await fs.readFile(fixturePath),
+    sourceFileName: 'channel-config-v1-discrete-duration.xlsx',
+  })
+  const blueprint = result.document.entities.route_blueprints.find(
+    (item) => item.business_id === 'route-blueprint/MAP-SECURE-R69-720'
+  )
+  assert.ok(blueprint)
+  const target = (blueprint.targets as Array<Record<string, unknown>>)[0]
+
+  assert.deepEqual(target?.duration_values, [5, 10, 15])
+  assert.equal(target?.duration_min, undefined)
+  assert.equal(target?.duration_max, undefined)
+})
+
 test('v1 document preserves disabled cost draft status', async () => {
   const snapshot = cloneSnapshot(await loadFixture())
   const costSheet = snapshot.sheets.find((sheet) => sheet.name === '渠道成本')

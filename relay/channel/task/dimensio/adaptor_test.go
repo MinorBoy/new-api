@@ -194,31 +194,35 @@ func TestEstimateDurationSecondsRejectsInvalidContext(t *testing.T) {
 	}
 }
 
-func TestValidateBillingRequestEnforcesDocumentedModelResolutionMatrix(t *testing.T) {
+func TestValidateBillingRequestAcceptsConfiguredModelsWithinProtocolResolutions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name       string
 		model      string
 		resolution string
-		wantError  bool
+		wantCode   string
 	}{
 		{name: "fast vip 720p", model: "jmg-video-seedance-2.0-fast-vip", resolution: "720p"},
 		{name: "mini 720p", model: "jmg-video-seedance-2.0-mini", resolution: "720p"},
 		{name: "vip 720p", model: "jmg-video-seedance-2.0-vip", resolution: "720p"},
 		{name: "vip 1080p", model: "jmg-video-seedance-2.0-vip", resolution: "1080p"},
-		{name: "fast vip 1080p", model: "jmg-video-seedance-2.0-fast-vip", resolution: "1080p", wantError: true},
-		{name: "mini 1080p", model: "jmg-video-seedance-2.0-mini", resolution: "1080p", wantError: true},
+		{name: "fast vip 1080p", model: "jmg-video-seedance-2.0-fast-vip", resolution: "1080p", wantCode: "invalid_resolution"},
+		{name: "mini 1080p", model: "jmg-video-seedance-2.0-mini", resolution: "1080p", wantCode: "invalid_resolution"},
 		{name: "pxv standard 4k", model: "pxv-seedance-2.0-standard", resolution: "4k"},
-		{name: "unknown model", model: "jimeng-video-unknown", resolution: "720p", wantError: true},
+		{name: "imported hgf standard 4k", model: "hgf-seedance-2.0", resolution: "4k"},
+		{name: "imported dvc standard 1080p", model: "dvc-seedance-2.0", resolution: "1080p"},
+		{name: "empty configured model", model: "  ", resolution: "720p", wantCode: "invalid_model"},
+		{name: "unsupported protocol resolution", model: "hgf-seedance-2.0", resolution: "1440p", wantCode: "invalid_resolution"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Set("task_resolution", test.resolution)
 			err := (&TaskAdaptor{}).ValidateBillingRequest(c, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: test.model}})
-			if test.wantError {
+			if test.wantCode != "" {
 				require.NotNil(t, err)
 				assert.Equal(t, http.StatusBadRequest, err.StatusCode)
+				assert.Equal(t, test.wantCode, err.Code)
 				return
 			}
 			require.Nil(t, err)

@@ -225,6 +225,33 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			}
 			return nil
 		}
+		if profile.requestDialect == videoRequestDialectCangyuanMedia {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			upstreamModel := ""
+			if info != nil {
+				upstreamModel = info.UpstreamModelName
+				if upstreamModel == "" {
+					upstreamModel = info.OriginModelName
+				}
+			}
+			requestProfile := cangyuanGenericRequestProfile()
+			if upstreamModel != "" {
+				requestProfile = cangyuanRequestProfileForModel(upstreamModel)
+			}
+			if err := validateCangyuanRequest(*state.ARK, requestProfile); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+			}
+			state.ProviderValidationComplete = true
+			c.Set(requestStateContextKey, state)
+			return nil
+		}
 		if profile.requestDialect != videoRequestDialectMegaReferenceArrays {
 			return nil
 		}
@@ -442,6 +469,43 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		}
 		return nil
 	}
+	if profile.requestDialect == videoRequestDialectCangyuanMedia {
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+			if upstreamModel == "" {
+				upstreamModel = info.OriginModelName
+			}
+		}
+		cangyuanRequest := cangyuanRequestProfileForModel(upstreamModel)
+		if err := validateCangyuanRequest(*state.ARK, cangyuanRequest); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+		if err := validateCangyuanReferenceDurations(c.Request.Context(), *state.ARK, cangyuanRequest); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			var videoMetadataErr *service.VideoMetadataError
+			if errors.As(err, &videoMetadataErr) && videoMetadataErr.Kind == service.VideoMetadataInvalidMedia {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+			var audioMetadataErr *service.ReferenceAudioDurationError
+			if errors.As(err, &audioMetadataErr) && audioMetadataErr.Kind == service.ReferenceAudioInvalidMedia {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(fmt.Errorf("reference media metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+		}
+		return nil
+	}
 	if profile.channelName != ChannelNameLucen && (profile.textRequest == nil || !profile.textRequest.enforceModelResolutionSuffix) {
 		return nil
 	}
@@ -587,6 +651,15 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, fmt.Errorf("text request profile is missing")
 			}
 			body, err = buildTextVideoRequest(*state.ARK, modelName, *profile.textRequest)
+		case videoRequestDialectCangyuanMedia:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			body, err = buildCangyuanRequest(*state.ARK, modelName, cangyuanRequestProfileForModel(modelName))
 		case videoRequestDialectMegaReferenceArrays:
 			state, stateErr := getRequestState(c)
 			if stateErr != nil {

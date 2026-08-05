@@ -131,6 +131,12 @@ func TestArkToDimensioUsesModelSpecificTotalMediaLimit(t *testing.T) {
 	assert.Len(t, converted.ImageFiles, 9)
 	assert.Len(t, converted.VideoFiles, 3)
 	assert.Len(t, converted.AudioFiles, 3)
+
+	converted, err = ArkToDimensio(ArkRequest{Model: "hgf-seedance-2.0", Content: content})
+	require.NoError(t, err)
+	assert.Len(t, converted.ImageFiles, 9)
+	assert.Len(t, converted.VideoFiles, 3)
+	assert.Len(t, converted.AudioFiles, 3)
 }
 
 func TestArkToDimensioRejectsInvalidContent(t *testing.T) {

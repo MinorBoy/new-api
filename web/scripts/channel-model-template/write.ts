@@ -324,6 +324,9 @@ function mappingRows(data: TemplateData): CellValue[][] {
     item.skuCode,
     item.defaultScenario,
     item.enabled,
+    item.minDurationSeconds ?? null,
+    item.maxDurationSeconds ?? null,
+    item.durationValues?.join(',') ?? null,
     new Date(),
     null,
     item.sourceId,
@@ -487,8 +490,8 @@ function writeFormulas(
   for (let row = 5; row < data.mappings.length + 5; row += 1) {
     setFormula(
       mappings,
-      `L${row}`,
-      `IF(A${row}="","",IF(COUNTIF($A$5:$A$1004,A${row})>1,"错误:重复映射ID",IF(OR(B${row}="",C${row}="",D${row}="",E${row}="",F${row}="",G${row}="",J${row}=""),"错误:必填项","OK")))`
+      `O${row}`,
+      `IF(A${row}="","",IF(COUNTIF($A$5:$A$1004,A${row})>1,"错误:重复映射ID",IF(OR(B${row}="",C${row}="",D${row}="",E${row}="",F${row}="",G${row}="",AND(J${row}="",OR(H${row}<=0,I${row}<H${row})),M${row}=""),"错误:必填项","OK")))`
     )
   }
   for (const [index, profit] of data.profits.entries()) {

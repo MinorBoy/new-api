@@ -23,6 +23,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import ExcelJS from 'exceljs'
+
 import { convertWorkbook } from '../../../src/channel-config-converter/conversion'
 import { runGenerator } from '../generate'
 
@@ -72,10 +74,22 @@ test('writes a workbook and report when warnings are explicitly allowed', async 
   )
   const outputPath = path.join(directory, 'template.xlsx')
   const reportPath = path.join(directory, 'template.report.json')
+  const warningSourcePath = path.join(directory, 'source-with-warning.xlsx')
   try {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.readFile(sourcePath)
+    const sourceSheet = workbook.getWorksheet('sd')
+    assert.ok(sourceSheet)
+    const priceColumn = sourceSheet
+      .getRow(2)
+      .values.findIndex((value) => String(value).trim() === '元/秒')
+    assert.ok(priceColumn > 0)
+    sourceSheet.getRow(3).getCell(priceColumn).value = 0
+    await workbook.xlsx.writeFile(warningSourcePath)
+
     const result = await runGenerator([
       '--source',
-      sourcePath,
+      warningSourcePath,
       '--rules',
       rulesPath,
       '--base',
@@ -88,7 +102,12 @@ test('writes a workbook and report when warnings are explicitly allowed', async 
     ])
 
     assert.equal(result.hasFailures, false)
-    assert.ok(result.report.issues.some((item) => item.severity === 'WARN'))
+    assert.ok(
+      result.report.issues.some(
+        (item) =>
+          item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+      )
+    )
     const bytes = await fs.readFile(outputPath)
     const converted = await convertWorkbook(
       new File([bytes], 'template.xlsx', {

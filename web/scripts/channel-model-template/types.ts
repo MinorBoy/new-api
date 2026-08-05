@@ -164,6 +164,9 @@ export type MappingRow = {
   skuCode: string
   defaultScenario: 'no_video' | 'with_video'
   enabled: '是' | '否'
+  minDurationSeconds?: number
+  maxDurationSeconds?: number
+  durationValues?: number[]
   sourceId: string
   sourceSheet: string
   sourceRow: number

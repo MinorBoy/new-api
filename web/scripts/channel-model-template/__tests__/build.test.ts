@@ -263,6 +263,116 @@ test('derives Secure overseas reference modes and aspect ratios from the verifie
   assert.match(note, /归一化比例=1:1,4:3,3:4,16:9,9:16,21:9/)
 })
 
+test('accepts documented Cangyuan 431 limits and derives its media modes', () => {
+  const source = sourceWithOfficialPrice()
+  const channel = source.channels[0]
+  const model = firstSourceModel(source)
+  assert.ok(channel)
+  channel.fields.渠道 = 6
+  model.fields.渠道 = 6
+  model.fields.模型ID = 'seedance-2.0'
+  model.fields.参考图数 = 4
+  model.fields.参考视频数 = 3
+  model.fields.参考音频数 = 1
+  model.fields.最大素材数 = 8
+  model.fields.视频音频合计上限 = null
+  model.fields.最小参考图数 = 0
+  model.fields.比例 = 'auto'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { ...rulesInput.channelCodes, '6': 'CH-CANGYUANSUANLI' },
+      modelRules: {},
+    })
+  )
+
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.severity === 'FAIL' && item.code.startsWith('CHANNEL_CONTRACT_')
+    ),
+    false
+  )
+  assert.match(
+    output.mappings[0]?.note ?? '',
+    /素材模式=first_last_frames,omni_reference/
+  )
+})
+
+test('accepts documented Cangyuan sd5 shared media limits', () => {
+  const source = sourceWithOfficialPrice()
+  const channel = source.channels[0]
+  const model = firstSourceModel(source)
+  assert.ok(channel)
+  channel.fields.渠道 = 6
+  model.fields.渠道 = 6
+  model.fields.模型ID = 'sd5-seedance-2.0-fast'
+  model.fields.参考图数 = 9
+  model.fields.参考视频数 = 3
+  model.fields.参考音频数 = 3
+  model.fields.最大素材数 = 12
+  model.fields.视频音频合计上限 = 3
+  model.fields.最小参考图数 = 0
+  model.fields.比例 = 'auto'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { ...rulesInput.channelCodes, '6': 'CH-CANGYUANSUANLI' },
+      modelRules: {},
+    })
+  )
+
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.severity === 'FAIL' && item.code.startsWith('CHANNEL_CONTRACT_')
+    ),
+    false
+  )
+})
+
+test('applies the Cangyuan sd5 shared media protocol when the source omits the aggregate field', () => {
+  const source = sourceWithOfficialPrice()
+  const channel = source.channels[0]
+  const model = firstSourceModel(source)
+  assert.ok(channel)
+  channel.fields.渠道 = 6
+  model.fields.渠道 = 6
+  model.fields.模型ID = 'sd5-seedance-2.0'
+  model.fields.参考图数 = 9
+  model.fields.参考视频数 = 3
+  model.fields.参考音频数 = 3
+  model.fields.最大素材数 = 12
+  model.fields.视频音频合计上限 = null
+  model.fields.最小参考图数 = 0
+  model.fields.比例 = 'auto'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { ...rulesInput.channelCodes, '6': 'CH-CANGYUANSUANLI' },
+      modelRules: {},
+    })
+  )
+
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.severity === 'FAIL' && item.code.startsWith('CHANNEL_CONTRACT_')
+    ),
+    false
+  )
+  assert.match(
+    output.mappings[0]?.note ?? '',
+    /视频音频合计上限=3/
+  )
+})
+
 test('matches a Seedance source family to an official Seedance SKU', async () => {
   const source = await readSourceWorkbook(sourceFixturePath)
   const output = buildTemplateData(source, rules)
@@ -302,6 +412,145 @@ test('interprets an Excel date in the duration range as month-day bounds', () =>
 
   assert.equal(sku?.minDurationSeconds, 4)
   assert.equal(sku?.maxDurationSeconds, 15)
+})
+
+test('treats a single duration value as an exact channel duration', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.时长范围 = '15'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+
+  assert.equal(output.skus[0]?.minDurationSeconds, 15)
+  assert.equal(output.skus[0]?.maxDurationSeconds, 15)
+  assert.equal(output.mappings[0]?.minDurationSeconds, 15)
+  assert.equal(output.mappings[0]?.maxDurationSeconds, 15)
+})
+
+test('preserves discrete channel durations without widening them into a range', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.时长范围 = '5,10,15'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+
+  assert.deepEqual(output.mappings[0]?.durationValues, [5, 10, 15])
+  assert.equal(output.mappings[0]?.minDurationSeconds, undefined)
+  assert.equal(output.mappings[0]?.maxDurationSeconds, undefined)
+})
+
+test('aggregates SKU duration while preserving each channel mapping duration', () => {
+  const source = sourceWithOfficialPrice()
+  const first = firstSourceModel(source)
+  first.fields.时长范围 = '5-15'
+  const second = structuredClone(first)
+  second.location.row = 4
+  second.fields.时长范围 = '4-15'
+  source.models.push(second)
+
+  const output = buildTemplateData(
+    source,
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+
+  assert.equal(output.skus[0]?.minDurationSeconds, 4)
+  assert.equal(output.skus[0]?.maxDurationSeconds, 15)
+  assert.deepEqual(
+    output.mappings.map((mapping) => ({
+      row: mapping.sourceRow,
+      min: mapping.minDurationSeconds,
+      max: mapping.maxDurationSeconds,
+    })),
+    [
+      { row: 3, min: 5, max: 15 },
+      { row: 4, min: 4, max: 15 },
+    ]
+  )
+})
+
+test('blocks verified channel contract conflicts before workbook generation', () => {
+  const contractRules = parseRules({
+    ...rulesInput,
+    channelCodes: {
+      '1': 'CH-CLMM',
+      '4': 'CH-8YES',
+      '5': 'CH-SECURE',
+      '6': 'CH-CANGYUANSUANLI',
+      '8': 'CH-MEGABYAI',
+    },
+    modelRules: {},
+  })
+  const tests = [
+    {
+      name: 'Cangyuan reference limit overflow',
+      channel: 6,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'seedance-2.0'
+        model.fields.参考图数 = 5
+        model.fields.参考视频数 = 3
+        model.fields.参考音频数 = 1
+        model.fields.最大素材数 = 9
+        model.fields.视频音频合计上限 = null
+        model.fields.最小参考图数 = 0
+      },
+      code: 'CHANNEL_CONTRACT_REFERENCES',
+    },
+    {
+      name: '8yes model resolution mismatch',
+      channel: 4,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'videos-mini-480p'
+        model.fields.清晰度 = '720p'
+      },
+      code: 'CHANNEL_CONTRACT_RESOLUTION',
+    },
+    {
+      name: 'MegaByAI unsupported resolution',
+      channel: 8,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'videos-standard'
+        model.fields.清晰度 = '1080p'
+      },
+      code: 'CHANNEL_CONTRACT_RESOLUTION',
+    },
+    {
+      name: 'Secure enterprise four second duration',
+      channel: 5,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'video-2.0-pro'
+        model.fields.清晰度 = '720p'
+        model.fields.上游模型分组 = 'video-企业'
+        model.fields.时长范围 = '4-15'
+        model.fields.参考视频数 = 0
+        model.fields.最大素材数 = 12
+      },
+      code: 'CHANNEL_CONTRACT_DURATION',
+    },
+  ]
+
+  for (const testCase of tests) {
+    const source = sourceWithOfficialPrice()
+    const channel = source.channels[0]
+    const model = source.models[0]
+    assert.ok(channel)
+    assert.ok(model)
+    channel.fields.渠道 = testCase.channel
+    model.fields.渠道 = testCase.channel
+    testCase.mutate(model)
+
+    const output = buildTemplateData(source, contractRules)
+
+    assert.ok(
+      output.issues.some(
+        (item) => item.code === testCase.code && item.severity === 'FAIL'
+      ),
+      testCase.name
+    )
+  }
 })
 
 test('uses the configured exchange rate for official sale previews', () => {

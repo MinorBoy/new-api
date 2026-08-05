@@ -179,7 +179,18 @@ func TestNewAPIVideoOpenAILifecycleE2E(t *testing.T) {
 	var terminalResponse map[string]interface{}
 	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
 	assert.Equal(t, publicID, terminalResponse["id"])
-	assert.Equal(t, "completed", terminalResponse["status"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", terminalResponse["model"])
+	assert.Equal(t, "succeeded", terminalResponse["status"])
+	assert.Equal(t, map[string]interface{}{
+		"completion_tokens": float64(216000),
+		"total_tokens":      float64(216000),
+	}, terminalResponse["usage"])
+	assert.Equal(t, "720p", terminalResponse["resolution"])
+	assert.Equal(t, "16:9", terminalResponse["ratio"])
+	assert.Equal(t, float64(10), terminalResponse["duration"])
+	assert.Equal(t, float64(24), terminalResponse["framespersecond"])
+	assert.Equal(t, float64(172800), terminalResponse["execution_expires_after"])
+	assert.NotContains(t, terminalResponse, "future_field")
 
 	requests = mock.snapshot()
 	require.Len(t, requests, 2)

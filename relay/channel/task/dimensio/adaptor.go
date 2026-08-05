@@ -153,10 +153,13 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		requestModel = info.OriginModelName
 	}
 	requestModel = strings.ToLower(strings.TrimSpace(requestModel))
-	if !common.StringsContains(ModelList, requestModel) {
-		return service.TaskErrorWrapperLocal(fmt.Errorf("model %s is not supported by dimensio", requestModel), "invalid_model", http.StatusBadRequest)
+	if requestModel == "" {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("model is required"), "invalid_model", http.StatusBadRequest)
 	}
 	resolution := strings.ToLower(strings.TrimSpace(c.GetString("task_resolution")))
+	if resolution != "480p" && resolution != "720p" && resolution != "1080p" && resolution != "4k" {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by dimensio", resolution), "invalid_resolution", http.StatusBadRequest)
+	}
 	if strings.HasPrefix(requestModel, "jmg-") {
 		if resolution == "480p" || resolution == "4k" || (resolution == "1080p" && requestModel != "jmg-video-seedance-2.0-vip") {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, requestModel), "invalid_resolution", http.StatusBadRequest)

@@ -114,7 +114,12 @@ function referenceContract(record: SourceRecord): {
   const videos = integer('参考视频数')
   const audios = integer('参考音频数')
   const totalMax = integer('最大素材数')
-  const videoAudioTotalMax = integer('视频音频合计上限', true)
+  const sourceChannel = field(record, '渠道')
+  const sourceModel = field(record, '模型ID').toLowerCase()
+  const protocolVideoAudioTotalMax =
+    sourceChannel === '6' && sourceModel.startsWith('sd5-seedance-') ? 3 : null
+  const videoAudioTotalMax =
+    integer('视频音频合计上限', true) ?? protocolVideoAudioTotalMax
   const videoDurationSeconds = integer('参考视频总时长上限 秒', true)
   const minimumImages = integer('最小参考图数')
   if (
@@ -157,10 +162,11 @@ function referenceContract(record: SourceRecord): {
       }
     }
   }
-  const sourceChannel = field(record, '渠道')
   const group = field(record, '上游模型分组')
   let modes: string[] = []
-  if (sourceChannel === '7') {
+  if (sourceChannel === '6') {
+    modes = ['first_last_frames', 'omni_reference']
+  } else if (sourceChannel === '7') {
     modes = ['first_last_frames', 'omni_reference', 'agentic']
   } else if (sourceChannel === '5' && group === 'video-海外') {
     modes = ['first_last_frames', 'omni_reference']
@@ -211,12 +217,39 @@ function resolution(value: string): string {
     : `${normalized}p`
 }
 
-function parseDuration(value: string): [number, number] {
+type ParsedDuration = {
+  min: number
+  max: number
+  values?: number[]
+}
+
+function parseDuration(value: string): ParsedDuration {
   const excelDate = value.match(/^\d{4}-(\d{1,2})-(\d{1,2})(?:T|$)/u)
-  if (excelDate) return [Number(excelDate[1]), Number(excelDate[2])]
+  if (excelDate) {
+    return { min: Number(excelDate[1]), max: Number(excelDate[2]) }
+  }
   const match = value.match(/(\d+(?:\.\d+)?)\s*[-~至]\s*(\d+(?:\.\d+)?)/u)
-  if (!match) return [0, 0]
-  return [Number(match[1]), Number(match[2])]
+  if (match) {
+    const bounds = [Number(match[1]), Number(match[2])]
+    return { min: Math.min(...bounds), max: Math.max(...bounds) }
+  }
+  if (/^\s*\d+(?:\s*[,，|]\s*\d+)+\s*$/u.test(value)) {
+    const values = [
+      ...new Set(
+        value
+          .split(/[,，|]/u)
+          .map((item) => Number(item.trim()))
+          .filter((item) => Number.isSafeInteger(item) && item > 0)
+      ),
+    ].sort((left, right) => left - right)
+    if (values.length > 0) {
+      return { min: values[0], max: values.at(-1) ?? values[0], values }
+    }
+  }
+  const exact = value.match(/^\s*(\d+(?:\.\d+)?)\s*$/u)
+  if (!exact) return { min: 0, max: 0 }
+  const duration = Number(exact[1])
+  return { min: duration, max: duration }
 }
 
 function booleanLabel(
@@ -247,6 +280,175 @@ function issue(
     sheet: record.location.sheet,
     row: record.location.row,
   }
+}
+
+function channelContractIssues(
+  record: SourceRecord,
+  channelCode: string,
+  upstreamModel: string,
+  resolutionValue: string,
+  minDuration: number,
+  maxDuration: number,
+  reference: ReferenceContract | null
+): Issue[] {
+  const fail = (code: string, message: string): Issue =>
+    issue(code, 'FAIL', message, record)
+  const durationWithin = (minimum: number, maximum: number): boolean =>
+    minDuration >= minimum &&
+    maxDuration <= maximum &&
+    minDuration <= maxDuration
+  const referencesWithin = (
+    images: number,
+    videos: number,
+    audios: number,
+    total: number
+  ): boolean =>
+    reference !== null &&
+    reference.images <= images &&
+    reference.videos <= videos &&
+    reference.audios <= audios &&
+    reference.totalMax <= total
+
+  if (channelCode === 'CH-CANGYUANSUANLI') {
+    const sd5Dialect = upstreamModel.toLowerCase().startsWith('sd5-seedance-')
+    const maximumImages = sd5Dialect ? 9 : 4
+    const maximumVideos = 3
+    const maximumAudios = sd5Dialect ? 3 : 1
+    const maximumTotal = sd5Dialect ? 12 : 8
+    const maximumVideoAudio = sd5Dialect ? 3 : null
+    if (!['480p', '720p'].includes(resolutionValue)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_RESOLUTION',
+          `Cangyuan 仅支持 480p 和 720p，源行声明为 ${resolutionValue}。`
+        ),
+      ]
+    }
+    if (
+      reference &&
+      (!referencesWithin(maximumImages, maximumVideos, maximumAudios, maximumTotal) ||
+        (maximumVideoAudio !== null &&
+          reference.videoAudioTotalMax !== null &&
+          reference.videoAudioTotalMax > maximumVideoAudio))
+    ) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_REFERENCES',
+          sd5Dialect
+            ? 'Cangyuan sd5 模型素材上限为参考图 9、参考视频 3、参考音频 3，视频和音频合计最多 3 个，全部素材最多 12 个。'
+            : 'Cangyuan 素材上限为参考图 4、参考视频 3、参考音频 1，全部素材最多 8 个。'
+        ),
+      ]
+    }
+    if (!durationWithin(4, 15)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_DURATION',
+          'Cangyuan 视频时长必须位于 4 至 15 秒。'
+        ),
+      ]
+    }
+  }
+
+  if (channelCode === 'CH-8YES') {
+    const requiredResolution = ['480p', '720p', '1080p', '4k'].find(
+      (candidate) => upstreamModel.toLowerCase().endsWith(`-${candidate}`)
+    )
+    if (requiredResolution && requiredResolution !== resolutionValue) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_RESOLUTION',
+          `8yes 模型 ${upstreamModel} 要求 ${requiredResolution}，源行声明为 ${resolutionValue}。`
+        ),
+      ]
+    }
+  }
+
+  if (
+    channelCode === 'CH-MEGABYAI' &&
+    !['480p', '720p'].includes(resolutionValue)
+  ) {
+    return [
+      fail(
+        'CHANNEL_CONTRACT_RESOLUTION',
+        `MegaByAI 仅支持 480p 和 720p，源行声明为 ${resolutionValue}。`
+      ),
+    ]
+  }
+
+  if (channelCode === 'CH-CLMM') {
+    if (!['480p', '720p'].includes(resolutionValue)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_RESOLUTION',
+          `CLMM 仅支持 480p 和 720p，源行声明为 ${resolutionValue}。`
+        ),
+      ]
+    }
+    if (reference && !referencesWithin(9, 3, 3, 15)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_REFERENCES',
+          'CLMM 素材上限超过已验证协议。'
+        ),
+      ]
+    }
+    const controlsDuration = upstreamModel
+      .toLowerCase()
+      .split(/[-\s]+/u)
+      .some((segment) => /^\d+s$/u.test(segment))
+    if (!controlsDuration && !durationWithin(4, 15)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_DURATION',
+          '普通 CLMM 模型时长必须位于 4 至 15 秒。'
+        ),
+      ]
+    }
+  }
+
+  if (
+    channelCode === 'CH-SECURE' &&
+    field(record, '上游模型分组') === 'video-企业'
+  ) {
+    if (upstreamModel !== 'video-2.0-pro') {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_MODEL',
+          'Secure 企业组必须使用 video-2.0-pro。'
+        ),
+      ]
+    }
+    if (!durationWithin(5, 15)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_DURATION',
+          'Secure 企业组时长必须位于 5 至 15 秒。'
+        ),
+      ]
+    }
+    if (resolutionValue !== '720p') {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_RESOLUTION',
+          'Secure 企业组仅支持 720p。'
+        ),
+      ]
+    }
+    if (
+      reference &&
+      (!referencesWithin(9, 0, 3, 12) || reference.videos !== 0)
+    ) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_REFERENCES',
+          'Secure 企业组素材上限超过已验证协议。'
+        ),
+      ]
+    }
+  }
+
+  return []
 }
 
 function decimalString(value: Decimal | null, fallback = '0'): string {
@@ -378,15 +580,24 @@ function buildSkus(
     const officialPrice = findOfficial(officialIndex, model, resolutionValue)
     const version =
       field(officialPrice, '版本') || field(modelRecord, '版本') || '标准'
-    const [minDuration, maxDuration] = parseDuration(
-      field(modelRecord, '时长范围')
-    )
+    const duration = parseDuration(field(modelRecord, '时长范围'))
     const [ruleMin, ruleMax] = [
-      modelRule.minDurationSeconds ?? minDuration,
-      modelRule.maxDurationSeconds ?? maxDuration,
+      modelRule.minDurationSeconds ?? duration.min,
+      modelRule.maxDurationSeconds ?? duration.max,
     ]
     const id = skuId(model, version, resolutionValue)
-    if (rows.has(id)) continue
+    const existing = rows.get(id)
+    if (existing) {
+      existing.minDurationSeconds = Math.min(
+        existing.minDurationSeconds,
+        ruleMin
+      )
+      existing.maxDurationSeconds = Math.max(
+        existing.maxDurationSeconds,
+        ruleMax
+      )
+      continue
+    }
     const [fallbackWidth, fallbackHeight] =
       fallbackSkuDimensions(resolutionValue)
     const width =
@@ -648,7 +859,18 @@ function buildCostsAndMappings(
         issue(code, reference.error ? 'FAIL' : 'WARN', message, record)
       )
     }
-    const [minDuration, maxDuration] = parseDuration(field(record, '时长范围'))
+    const duration = parseDuration(field(record, '时长范围'))
+    issues.push(
+      ...channelContractIssues(
+        record,
+        channelCode,
+        upstreamModel,
+        resolutionValue,
+        duration.min,
+        duration.max,
+        reference.contract
+      )
+    )
     const billingMultiplier = numericField(record, '计费倍率') ?? new Decimal(1)
     const feeRate = numericField(record, '手续费') ?? new Decimal(0)
     const currencyToUsd = new Decimal(rules.defaults.currencyToUsd)
@@ -714,7 +936,7 @@ function buildCostsAndMappings(
         sourceId,
         sourceSheet: record.location.sheet,
         sourceRow: record.location.row,
-        note: `时长=${minDuration}-${maxDuration}; 原模型=${rawModel}; 上游模型分组=${field(record, '上游模型分组')}; 真人脸=${supportsRealPerson}; 原备注=${field(record, '备注')}`,
+        note: `时长=${field(record, '时长范围')}; 原模型=${rawModel}; 上游模型分组=${field(record, '上游模型分组')}; 真人脸=${supportsRealPerson}; 原备注=${field(record, '备注')}`,
       })
     }
     const referenceNote = reference.structured
@@ -738,6 +960,12 @@ function buildCostsAndMappings(
       skuCode,
       defaultScenario: 'no_video',
       enabled: costStatus === 'active' ? '是' : '否',
+      ...(duration.values
+        ? { durationValues: duration.values }
+        : {
+            minDurationSeconds: duration.min,
+            maxDurationSeconds: duration.max,
+          }),
       sourceId,
       sourceSheet: record.location.sheet,
       sourceRow: record.location.row,

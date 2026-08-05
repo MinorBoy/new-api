@@ -48,7 +48,7 @@ const (
 	seedToken        = "arkmatrixlocal"
 	seedTokenName    = "ARK SDK material matrix local seed"
 	seedChannelName  = "ark-sdk-matrix-mock-"
-	seedAssetBaseURL = "http://cdn.openai.com/ark-matrix"
+	seedAssetBaseURL = "https://cdn.openai.com/ark-matrix"
 	seedGroupRatio   = 1.25
 )
 
@@ -70,6 +70,7 @@ type matrixTarget struct {
 	ReferenceTotalMax                  *int
 	ReferenceVideoAudioTotalMax        *int
 	ReferenceVideoTotalDurationSeconds *int
+	AspectRatio                        string
 	AspectRatios                       []string
 	InputModes                         []modelrouting.InputMode
 	ReferenceModes                     []string
@@ -873,7 +874,7 @@ func saveSingleTargetPolicy(policyID int, target matrixTarget, channelID int) (i
 		Defaults: modelrouting.Defaults{
 			OutputResolution: target.Resolution,
 			DurationSeconds:  target.Duration,
-			AspectRatio:      "16:9",
+			AspectRatio:      target.AspectRatio,
 		},
 		Targets: []service.RouteTargetWriteRequest{{
 			ChannelID:      channelID,
@@ -982,7 +983,7 @@ func requestBody(target matrixTarget, assetBaseURL string) string {
 	}
 	body, err := common.Marshal(map[string]any{
 		"model": target.RuntimeModel, "content": content, "resolution": target.Resolution,
-		"duration": target.Duration, "ratio": "16:9",
+		"duration": target.Duration, "ratio": target.AspectRatio,
 	})
 	if err != nil {
 		panic(err)
@@ -1116,13 +1117,19 @@ func loadTargets(path string) ([]matrixTarget, error) {
 				durations.Max = common.GetPointer(duration)
 			}
 			aspectRatios := make([]string, 0, len(target.AspectRatios))
+			aspectRatio := "16:9"
 			for _, value := range target.AspectRatios {
-				if normalized := strings.ToLower(strings.TrimSpace(value)); normalized != "" {
-					aspectRatios = append(aspectRatios, normalized)
+				normalized := strings.ToLower(strings.TrimSpace(value))
+				if normalized == "" {
+					continue
+				}
+				aspectRatios = append(aspectRatios, normalized)
+				if normalized == "16:9" || len(aspectRatios) == 1 {
+					aspectRatio = normalized
 				}
 			}
 			if len(aspectRatios) == 0 {
-				aspectRatios = []string{"16:9"}
+				aspectRatios = []string{aspectRatio}
 			}
 			inputModes := make([]modelrouting.InputMode, 0, len(target.InputModes))
 			for _, value := range target.InputModes {
@@ -1138,7 +1145,7 @@ func loadTargets(path string) ([]matrixTarget, error) {
 				Minimums: minimums, References: references, RequestRefs: requestReferences,
 				ReferenceTotalMax: target.ReferenceTotalMax, ReferenceVideoAudioTotalMax: target.ReferenceVideoAudioTotalMax,
 				ReferenceVideoTotalDurationSeconds: target.ReferenceVideoTotalDurationSeconds,
-				AspectRatios:                       aspectRatios, InputModes: inputModes, ReferenceModes: append([]string(nil), target.ReferenceModes...),
+				AspectRatio:                        aspectRatio, AspectRatios: aspectRatios, InputModes: inputModes, ReferenceModes: append([]string(nil), target.ReferenceModes...),
 				SupportsRealPerson: target.SupportsRealPerson, ChannelType: definition.Type,
 			})
 		}

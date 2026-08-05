@@ -215,7 +215,8 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 		return &arkRequestError{Code: "InvalidParameter.callback_url", Message: "callback_url is not supported by this channel"}
 	}
 	supportsSeed := profile.requestDialect == videoRequestDialectFourSToken ||
-		profile.requestDialect == videoRequestDialectEightYes
+		profile.requestDialect == videoRequestDialectEightYes ||
+		profile.requestDialect == videoRequestDialectCangyuanMedia
 	if request.Seed != nil && !supportsSeed {
 		return &arkRequestError{Code: "InvalidParameter.seed", Message: "seed is not supported by this channel"}
 	}
@@ -302,7 +303,7 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if firstCount > 1 || lastCount > 1 || (lastCount > 0 && (firstCount != 1 || lastIndex < firstIndex)) {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "first/last frames require one first frame before at most one last frame"}
 	}
-	if audioCount > 0 && request.GenerateAudio != nil && !*request.GenerateAudio {
+	if audioCount > 0 && request.GenerateAudio != nil && !*request.GenerateAudio && profile.requestDialect != videoRequestDialectCangyuanMedia {
 		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "reference audio conflicts with generate_audio=false"}
 	}
 	if request.Seed != nil && supportsSeed {

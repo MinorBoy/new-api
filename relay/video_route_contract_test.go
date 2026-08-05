@@ -53,13 +53,38 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_resolution",
 		},
 		{
-			name: "cangyuan rejects a route that advertises media", channelType: constant.ChannelTypeCangyuan,
-			target:   videoContractTarget("seedance-2.0", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
-			wantCode: "route_contract_input_mode",
+			name: "cangyuan accepts documented media limits", channelType: constant.ChannelTypeCangyuan,
+			target: videoContractTargetWithCangyuanLimits("seedance-2.0", []string{"480p", "720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeFirstFrame, modelrouting.InputModeFirstLastFrames, modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, 8, 15),
 		},
 		{
-			name: "cangyuan accepts a text-only route", channelType: constant.ChannelTypeCangyuan,
-			target: videoContractTarget("seedance-2.0", []string{"720p"}, 4, 15, []modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
+			name: "cangyuan rejects five images", channelType: constant.ChannelTypeCangyuan,
+			target: videoContractTargetWithCangyuanLimits("seedance-2.0", []string{"720p"}, 4, 15, nil,
+				modelrouting.ReferenceLimits{Images: 5, Videos: 3, Audios: 1}, 9, 15),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "cangyuan sd5 accepts documented shared media limits", channelType: constant.ChannelTypeCangyuan,
+			target: func() modelrouting.Target {
+				target := videoContractTargetWithCangyuanLimits("sd5-seedance-2.0-fast", []string{"720p"}, 4, 15,
+					[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeFirstLastFrames, modelrouting.InputModeOmniReference},
+					modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, 12, 15)
+				target.Constraints.ReferenceVideoAudioTotalMax = common.GetPointer(3)
+				return target
+			}(),
+		},
+		{
+			name: "cangyuan rejects unsupported resolution", channelType: constant.ChannelTypeCangyuan,
+			target: videoContractTargetWithCangyuanLimits("seedance-2.0", []string{"1080p"}, 4, 15, nil,
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, 8, 15),
+			wantCode: "route_contract_resolution",
+		},
+		{
+			name: "cangyuan rejects four-second-below duration", channelType: constant.ChannelTypeCangyuan,
+			target: videoContractTargetWithCangyuanLimits("seedance-2.0", []string{"720p"}, 3, 15, nil,
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, 8, 15),
+			wantCode: "route_contract_duration",
 		},
 		{
 			name: "paipu accepts an imported reference route", channelType: constant.ChannelTypePaipu,
@@ -181,14 +206,12 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_resolution",
 		},
 		{
-			name: "clmm rejects unknown mapped model grammar", channelType: constant.ChannelTypeClmmMall,
-			target:   videoContractTarget("mg-seedance2.0 -720p pro", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3}),
-			wantCode: "route_contract_model",
+			name: "clmm accepts configured model id", channelType: constant.ChannelTypeClmmMall,
+			target: videoContractTarget("mg-seedance2.0 -720p pro", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3}),
 		},
 		{
-			name: "clmm rejects declared four-second duration", channelType: constant.ChannelTypeClmmMall,
-			target:   videoContractTarget("op-video-720p", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3}),
-			wantCode: "route_contract_duration",
+			name: "clmm accepts declared four-second duration", channelType: constant.ChannelTypeClmmMall,
+			target: videoContractTarget("op-video-720p", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3}),
 		},
 		{
 			name: "dimensio rejects combined maxima above twelve", channelType: constant.ChannelTypeDimensio,
@@ -204,8 +227,16 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			target: videoContractTarget("pxv-seedance-2.0-standard", []string{"4k"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 		},
 		{
-			name: "dimensio rejects unknown imported model", channelType: constant.ChannelTypeDimensio,
-			target:   videoContractTarget("dimensio-seedance-2.0", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
+			name: "dimensio accepts imported hgf model", channelType: constant.ChannelTypeDimensio,
+			target: videoContractTargetWithTotal("hgf-seedance-2.0", []string{"4k"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, 15),
+		},
+		{
+			name: "dimensio accepts imported dvc model", channelType: constant.ChannelTypeDimensio,
+			target: videoContractTargetWithTotal("dvc-seedance-2.0", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9}, 9),
+		},
+		{
+			name: "dimensio rejects empty configured model", channelType: constant.ChannelTypeDimensio,
+			target:   videoContractTarget("  ", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9}),
 			wantCode: "route_contract_model",
 		},
 		{
@@ -269,6 +300,12 @@ func videoContractTarget(modelName string, resolutions []string, minDuration, ma
 func videoContractTargetWithTotal(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits modelrouting.ReferenceLimits, total int) modelrouting.Target {
 	target := videoContractTarget(modelName, resolutions, minDuration, maxDuration, inputModes, limits)
 	target.Constraints.ReferenceTotalMax = common.GetPointer(total)
+	return target
+}
+
+func videoContractTargetWithCangyuanLimits(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits modelrouting.ReferenceLimits, total, videoDuration int) modelrouting.Target {
+	target := videoContractTargetWithTotal(modelName, resolutions, minDuration, maxDuration, inputModes, limits, total)
+	target.Constraints.ReferenceVideoTotalDurationSeconds = common.GetPointer(videoDuration)
 	return target
 }
 

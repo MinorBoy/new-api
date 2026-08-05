@@ -2,8 +2,8 @@ package newapivideo
 
 import (
 	"fmt"
+	"strings"
 
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
@@ -31,6 +31,7 @@ const (
 	videoRequestDialectNewAPIGenerations   videoRequestDialect = "newapi_generations"
 	videoRequestDialectMegaReferenceArrays videoRequestDialect = "mega_reference_arrays"
 	videoRequestDialectTextJSON            videoRequestDialect = "text_json"
+	videoRequestDialectCangyuanMedia       videoRequestDialect = "cangyuan_media"
 	videoRequestDialectSecureDiscount      videoRequestDialect = "secure_discount"
 	videoRequestDialectSecureOverseas      videoRequestDialect = "secure_overseas"
 	videoRequestDialectSecureEnterprise    videoRequestDialect = "secure_enterprise"
@@ -57,6 +58,23 @@ type textRequestProfile struct {
 	enforceModelResolutionSuffix bool
 }
 
+type cangyuanRequestProfile struct {
+	modelAgnostic         bool
+	sd5Dialect            bool
+	supportsSeed          bool
+	maximumPromptLength   int
+	minimumDuration       int
+	maximumDuration       int
+	allowedRatios         []string
+	allowedResolutions    []string
+	maximumImages         int
+	maximumVideos         int
+	maximumAudios         int
+	maximumReferenceTotal int
+	maximumVideoAudio     int
+	maximumVideoDuration  int
+}
+
 type protocolProfile struct {
 	channelName                        string
 	modelList                          []string
@@ -72,6 +90,7 @@ type protocolProfile struct {
 	requestDialect                     videoRequestDialect
 	defaultDurationSeconds             int
 	textRequest                        *textRequestProfile
+	cangyuanRequest                    *cangyuanRequestProfile
 	secureRequest                      *secureRequestProfile
 	omegaRequest                       *omegaRequestProfile
 	untypedImagesAreReferences         bool
@@ -130,19 +149,59 @@ func megaByAIProtocolProfile() protocolProfile {
 
 func cangyuanProtocolProfile() protocolProfile {
 	return protocolProfile{
-		channelName:    ChannelNameCangyuan,
-		modelList:      []string{"seedance-2.0-720p"},
-		submitPath:     "/v1/videos",
-		pollPath:       "/v1/videos/{task_id}",
-		contentType:    "application/json",
-		requestDialect: videoRequestDialectTextJSON,
-		textRequest: &textRequestProfile{
-			ratioField:                "aspect_ratio",
-			minimumDuration:           1,
-			maximumDuration:           relaycommon.MaxTaskDurationSeconds,
-			rejectExplicitServiceTier: true,
+		channelName:                ChannelNameCangyuan,
+		submitPath:                 "/v1/videos",
+		pollPath:                   "/v1/videos/{task_id}",
+		contentType:                "application/json",
+		requestDialect:             videoRequestDialectCangyuanMedia,
+		allowEmbeddedMedia:         true,
+		requirePublicHTTPMedia:     true,
+		untypedImagesAreReferences: true,
+		cangyuanRequest: &cangyuanRequestProfile{
+			minimumDuration:       4,
+			maximumDuration:       15,
+			allowedRatios:         []string{"16:9", "9:16", "1:1", "21:9", "3:4", "4:3"},
+			allowedResolutions:    []string{"480p", "720p"},
+			maximumImages:         4,
+			maximumVideos:         3,
+			maximumAudios:         1,
+			maximumReferenceTotal: 8,
+			maximumVideoDuration:  15,
 		},
 	}
+}
+
+func cangyuanGenericRequestProfile() cangyuanRequestProfile {
+	profile := cangyuanRequestProfileForModel("")
+	profile.modelAgnostic = true
+	profile.supportsSeed = true
+	profile.maximumImages = 9
+	profile.maximumVideos = 3
+	profile.maximumAudios = 3
+	profile.maximumReferenceTotal = 12
+	profile.maximumVideoAudio = 0
+	profile.maximumPromptLength = 5000
+	return profile
+}
+
+func cangyuanRequestProfileForModel(modelName string) cangyuanRequestProfile {
+	profile := cangyuanProtocolProfile().cangyuanRequest
+	if profile == nil {
+		return cangyuanRequestProfile{}
+	}
+	result := *profile
+	result.maximumPromptLength = 5000
+	result.supportsSeed = false
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "sd5-seedance-") {
+		result.sd5Dialect = true
+		result.supportsSeed = true
+		result.maximumPromptLength = 1200
+		result.maximumImages = 9
+		result.maximumAudios = 3
+		result.maximumReferenceTotal = 12
+		result.maximumVideoAudio = 3
+	}
+	return result
 }
 
 func paipuProtocolProfile() protocolProfile {

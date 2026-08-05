@@ -2,7 +2,6 @@ package relay
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	taskclmmmall "github.com/QuantumNous/new-api/relay/channel/task/clmmmall"
-	taskdimensio "github.com/QuantumNous/new-api/relay/channel/task/dimensio"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
@@ -30,7 +28,7 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	}
 	switch channel.Type {
 	case constant.ChannelTypeCangyuan:
-		return validateTextOnlyVideoRoute(target, nil)
+		return validateCangyuanVideoRoute(target)
 	case constant.ChannelTypeEightYes:
 		if required := modelResolutionSuffix(target.UpstreamModel); required != "" && !allRouteResolutions(target.Constraints.OutputResolutions, required) {
 			return newVideoRouteContractError("route_contract_resolution", fmt.Sprintf("mapped model requires %s", required))
@@ -54,6 +52,39 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	default:
 		return nil
 	}
+}
+
+func validateCangyuanVideoRoute(target modelrouting.Target) error {
+	if strings.TrimSpace(target.UpstreamModel) == "" {
+		return newVideoRouteContractError("route_contract_model", "Cangyuan mapped upstream model is required")
+	}
+	if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
+		return newVideoRouteContractError("route_contract_resolution", "Cangyuan routes support only 480p and 720p")
+	}
+	maxImages, maxVideos, maxAudios, maxTotal, maxVideoAudio := cangyuanReferenceLimits(target.UpstreamModel)
+	if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
+		return newVideoRouteContractError("route_contract_duration", "Cangyuan routes require durations from 4 to 15 seconds")
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios ||
+		routeReferenceTotalMax(target.Constraints) > maxTotal ||
+		(maxVideoAudio > 0 && target.Constraints.ReferenceVideoAudioTotalMax != nil && *target.Constraints.ReferenceVideoAudioTotalMax > maxVideoAudio) {
+		return newVideoRouteContractError("route_contract_references", "Cangyuan route reference limits exceed the verified protocol")
+	}
+	if target.Constraints.ReferenceVideoTotalDurationSeconds != nil && *target.Constraints.ReferenceVideoTotalDurationSeconds > 15 {
+		return newVideoRouteContractError("route_contract_references", "Cangyuan reference videos may total at most 15 seconds")
+	}
+	return nil
+}
+
+func cangyuanReferenceLimits(upstreamModel string) (images, videos, audios, total, videoAudio int) {
+	images, videos, audios, total = 4, 3, 1, 8
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(upstreamModel)), "sd5-seedance-") {
+		images, audios, total, videoAudio = 9, 3, 12, 3
+	}
+	return images, videos, audios, total, videoAudio
 }
 
 func validatePaipuVideoRoute(target modelrouting.Target) error {
@@ -108,28 +139,29 @@ func validateClmmVideoRoute(target modelrouting.Target) error {
 	if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
 		return newVideoRouteContractError("route_contract_resolution", "CLMM routes support only 480p and 720p")
 	}
-	if err := taskclmmmall.ValidateRouteModel(target.UpstreamModel); err != nil {
+	modelContract, err := taskclmmmall.AnalyzeRouteModel(target.UpstreamModel)
+	if err != nil {
 		return newVideoRouteContractError("route_contract_model", err.Error())
 	}
 	limits := target.Constraints.ReferenceLimits
 	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > 15 {
 		return newVideoRouteContractError("route_contract_references", "CLMM route reference limits exceed the verified protocol")
 	}
-	if !clmmModelControlsDuration(target.UpstreamModel) && !routeDurationWithin(target.Constraints.Durations, 5, 15) {
-		return newVideoRouteContractError("route_contract_duration", "ordinary CLMM routes require durations from 5 to 15 seconds")
+	if !modelContract.ControlsDuration && !routeDurationWithin(target.Constraints.Durations, 4, 15) {
+		return newVideoRouteContractError("route_contract_duration", "ordinary CLMM routes require durations from 4 to 15 seconds")
 	}
 	return nil
 }
 
 func validateDimensioVideoRoute(target modelrouting.Target) error {
 	modelName := strings.TrimSpace(target.UpstreamModel)
-	if !common.StringsContains(taskdimensio.ModelList, modelName) {
-		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for Dimensio")
+	if modelName == "" {
+		return newVideoRouteContractError("route_contract_model", "Dimensio route requires an upstream model")
 	}
 	limits := target.Constraints.ReferenceLimits
-	totalLimit := 12
-	if strings.HasPrefix(modelName, "pxv-") {
-		totalLimit = 15
+	totalLimit := 15
+	if strings.HasPrefix(modelName, "jmg-") {
+		totalLimit = 12
 	}
 	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > totalLimit {
 		return newVideoRouteContractError("route_contract_references", "Dimensio route reference limits exceed the verified protocol")
@@ -261,19 +293,6 @@ func modelResolutionSuffix(modelName string) string {
 		}
 	}
 	return ""
-}
-
-func clmmModelControlsDuration(modelName string) bool {
-	for _, segment := range strings.Split(strings.ToLower(strings.TrimSpace(modelName)), "-") {
-		if !strings.HasSuffix(segment, "s") {
-			continue
-		}
-		value, err := strconv.Atoi(strings.TrimSuffix(segment, "s"))
-		if err == nil && value > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func newVideoRouteContractError(code, message string) *VideoRouteContractError {

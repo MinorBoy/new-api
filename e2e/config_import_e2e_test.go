@@ -70,9 +70,9 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.Equal(t, types.ConfigImportEntityCounts{
-		Channels: 10, ChannelLines: 14, ModelSKUs: 8, SaleProposals: 16,
-		CostRuleDrafts: 147, ModelMappings: 147, RouteBlueprints: 147,
-		Sources: 13, UnresolvedVariants: 0,
+		Channels: 11, ChannelLines: 13, ModelSKUs: 8, SaleProposals: 16,
+		CostRuleDrafts: 167, ModelMappings: 167, RouteBlueprints: 167,
+		Sources: 14, UnresolvedVariants: 0,
 	}, first.ItemCounts)
 	assert.Equal(t, types.ConfigImportBatchStatusBinding, first.Status)
 	assert.Equal(t, []string{"bind", "resolve", "stage"}, first.AllowedActions)
@@ -86,11 +86,20 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		assert.NotEmpty(t, target.CostVariantKey, blueprint.BusinessID)
 		assert.NotEmpty(t, target.OutputResolutions, blueprint.BusinessID)
 		assert.NotEmpty(t, target.InputModes, blueprint.BusinessID)
-		require.NotNil(t, target.DurationMin, blueprint.BusinessID)
-		require.NotNil(t, target.DurationMax, blueprint.BusinessID)
+		hasDurationRange := target.DurationMin != nil || target.DurationMax != nil
+		hasDurationValues := len(target.DurationValues) > 0
+		require.NotEqual(t, hasDurationRange, hasDurationValues, blueprint.BusinessID)
+		if hasDurationValues {
+			for _, duration := range target.DurationValues {
+				assert.Positive(t, duration, blueprint.BusinessID)
+			}
+		} else {
+			require.NotNil(t, target.DurationMin, blueprint.BusinessID)
+			require.NotNil(t, target.DurationMax, blueprint.BusinessID)
+			assert.LessOrEqual(t, *target.DurationMin, *target.DurationMax, blueprint.BusinessID)
+		}
 		require.NotNil(t, target.ReferenceMinimums, blueprint.BusinessID)
 		require.NotNil(t, target.ReferenceLimits, blueprint.BusinessID)
-		assert.LessOrEqual(t, *target.DurationMin, *target.DurationMax, blueprint.BusinessID)
 	}
 
 	channelTypes := make(map[string]int, len(document.Entities.Channels))
@@ -137,7 +146,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 
 	bound, err := service.UpdateConfigImportBindings(context.Background(), 1, first.ID, bindings)
 	require.NoError(t, err)
-	require.Len(t, bound.Bindings, 14)
+	require.Len(t, bound.Bindings, 13)
 
 	staged, err := service.StageConfigImportBatch(context.Background(), 1, first.ID)
 	require.NoError(t, err)
@@ -147,14 +156,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	}
 	var materializedRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ?", "config_import").Count(&materializedRuleCount).Error)
-	assert.EqualValues(t, 146, materializedRuleCount)
+	assert.EqualValues(t, 167, materializedRuleCount)
 	var stagedRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&stagedRuleCount).Error)
-	assert.EqualValues(t, 146, stagedRuleCount)
+	assert.EqualValues(t, 167, stagedRuleCount)
 
 	var distinctRouteCosts []model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND business_id IN ?", first.ID, []string{
-		"COST-MEGABYAI-R120-720-DUR", "COST-MEGABYAI-R122-720-DUR",
+		"COST-MEGABYAI-R122-480-REQ", "COST-MEGABYAI-R123-720-REQ",
 	}).Order("business_id ASC").Find(&distinctRouteCosts).Error)
 	require.Len(t, distinctRouteCosts, 2)
 	require.NotNil(t, distinctRouteCosts[0].MaterializedID)
@@ -167,25 +176,10 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	assert.Equal(t, string(types.ConfigImportBatchStatusPublished), publishedBatch.Status)
 	var activeRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleActive).Count(&activeRuleCount).Error)
-	assert.EqualValues(t, 146, activeRuleCount)
+	assert.EqualValues(t, 167, activeRuleCount)
 	var remainingDraftCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
 	assert.Zero(t, remainingDraftCount)
-	var disabledDimensioCostVariantKey string
-	for _, draft := range document.Entities.CostRuleDrafts {
-		if draft.BusinessID == "COST-DIMENSIO-R101-480-DUR" {
-			disabledDimensioCostVariantKey = draft.CostVariantKey
-			break
-		}
-	}
-	require.NotEmpty(t, disabledDimensioCostVariantKey)
-	var disabledRuleCount int64
-	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where(
-		"channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ? AND status = ?",
-		channelIDsByLine["channel-dimensio"], "pxv-seedance-2.0-standard", disabledDimensioCostVariantKey, types.CostRuleActive,
-	).Count(&disabledRuleCount).Error)
-	assert.Zero(t, disabledRuleCount)
-
 	var dimensioChannel model.Channel
 	require.NoError(t, model.DB.First(&dimensioChannel, channelIDsByLine["channel-dimensio"]).Error)
 	var dimensioMapping map[string]string

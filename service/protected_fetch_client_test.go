@@ -14,6 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type fixedProtectedFetchResolver struct {
+	addresses []net.IPAddr
+}
+
+func (resolver fixedProtectedFetchResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	return resolver.addresses, nil
+}
+
 func configureSSRFTestFetchSetting(t *testing.T) {
 	t.Helper()
 	fetchSetting := system_setting.GetFetchSetting()
@@ -103,4 +111,25 @@ func TestProtectedFetchAdapterUsesConfiguredProxyForPublicTarget(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, response)
 	assert.Equal(t, []string{"127.0.0.1:3128"}, dialed)
+}
+
+func TestDirectProtectedFetchClientDialsValidatedIPWithoutAnyProxy(t *testing.T) {
+	configureSSRFTestFetchSetting(t)
+	var dialed []string
+	client := newDirectProtectedFetchHTTPClientWithDialer(
+		fixedProtectedFetchResolver{addresses: []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}},
+		func(_ context.Context, _ string, address string) (net.Conn, error) {
+			dialed = append(dialed, address)
+			return nil, errors.New("stop after protected direct dial")
+		},
+		currentFetchProtection,
+	)
+	request, err := http.NewRequest(http.MethodGet, "http://example.com/resource", nil)
+	require.NoError(t, err)
+
+	response, err := client.Do(request)
+
+	require.Error(t, err)
+	assert.Nil(t, response)
+	assert.Equal(t, []string{"93.184.216.34:80"}, dialed)
 }

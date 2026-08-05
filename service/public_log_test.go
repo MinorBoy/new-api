@@ -111,26 +111,25 @@ func TestProjectPublicLogContentUsesEventTypeWhitelist(t *testing.T) {
 	tests := []struct {
 		name    string
 		logType int
-		want    string
 	}{
 		{name: "consume", logType: model.LogTypeConsume},
 		{name: "error", logType: model.LogTypeError},
 		{name: "refund", logType: model.LogTypeRefund},
 		{name: "unknown", logType: model.LogTypeUnknown},
-		{name: "topup", logType: model.LogTypeTopup, want: "account event"},
-		{name: "manage", logType: model.LogTypeManage, want: "account event"},
-		{name: "system", logType: model.LogTypeSystem, want: "account event"},
-		{name: "login", logType: model.LogTypeLogin, want: "account event"},
+		{name: "topup", logType: model.LogTypeTopup},
+		{name: "manage", logType: model.LogTypeManage},
+		{name: "system", logType: model.LogTypeSystem},
+		{name: "login", logType: model.LogTypeLogin},
 	}
 
 	for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			projected := ProjectPublicLog(&model.Log{
 				Type:    tt.logType,
-				Content: "account event",
+				Content: "supplier-z5 api_key=secret Authorization: ApiKey secret provider-model-id",
 			}, 1)
 			require.NotNil(t, projected)
-			assert.Equal(t, tt.want, projected.Content)
+			assert.Empty(t, projected.Content)
 		})
 	}
 }

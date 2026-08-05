@@ -20,6 +20,7 @@ import (
 var (
 	httpClient              *http.Client
 	ssrfProtectedHTTPClient *http.Client
+	directSSRFHTTPClient    *http.Client
 	proxyClients            = proxyHTTPClientCache{
 		clients: make(map[string]*http.Client),
 		aliases: make(map[string]string),
@@ -112,6 +113,7 @@ func InitHttpClient() {
 	transport.Proxy = http.ProxyFromEnvironment
 	httpClient = newRelayHTTPClient(transport)
 	ssrfProtectedHTTPClient = newProtectedFetchHTTPClient()
+	directSSRFHTTPClient = newDirectProtectedFetchHTTPClient()
 }
 
 // GetHttpClient returns the general outbound client used by relay/provider
@@ -132,6 +134,12 @@ func GetSSRFProtectedHTTPClient() *http.Client {
 		return GetHttpClient()
 	}
 	return ssrfProtectedHTTPClient
+}
+
+// GetDirectSSRFProtectedHTTPClient never uses channel or environment proxies
+// for untrusted result URLs.
+func GetDirectSSRFProtectedHTTPClient() *http.Client {
+	return directSSRFHTTPClient
 }
 
 func newProxyURLConfig(parsedURL *url.URL) *proxyURLConfig {

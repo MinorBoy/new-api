@@ -16,10 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ExternalLink, Copy, Music } from 'lucide-react'
+import { Music, RotateCcw } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { StatusBadge } from '@/components/status-badge'
@@ -46,6 +45,9 @@ interface AudioPreviewDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   clips: AudioClip[]
+  loading?: boolean
+  failed?: boolean
+  onRetry?: () => void
 }
 
 function formatDuration(seconds?: number): string {
@@ -107,27 +109,6 @@ function AudioClipCard({ clip }: { clip: AudioClip }) {
             <span className='text-destructive text-xs'>
               {t('Audio playback failed')}
             </span>
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-7 gap-1 text-xs'
-              onClick={() => window.open(audioUrl, '_blank')}
-            >
-              <ExternalLink className='h-3 w-3' />
-              {t('Open in new tab')}
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-7 gap-1 text-xs'
-              onClick={() => {
-                navigator.clipboard.writeText(audioUrl)
-                toast.success(t('Copied'))
-              }}
-            >
-              <Copy className='h-3 w-3' />
-              {t('Copy Link')}
-            </Button>
           </div>
         ) : (
           <audio
@@ -147,6 +128,38 @@ function AudioClipCard({ clip }: { clip: AudioClip }) {
 export function AudioPreviewDialog(props: AudioPreviewDialogProps) {
   const { t } = useTranslation()
   const clips = Array.isArray(props.clips) ? props.clips : []
+  let content = (
+    <ScrollArea className='max-h-[60vh]'>
+      <div className='space-y-3 pr-2'>
+        {clips.map((clip, idx) => (
+          <AudioClipCard key={clip.clip_id || clip.id || idx} clip={clip} />
+        ))}
+      </div>
+    </ScrollArea>
+  )
+  if (props.loading) {
+    content = (
+      <p className='text-muted-foreground py-8 text-center text-sm'>
+        {t('Loading...')}
+      </p>
+    )
+  } else if (props.failed) {
+    content = (
+      <div className='flex flex-col items-center gap-3 py-8'>
+        <p className='text-destructive text-sm'>{t('Failed to load')}</p>
+        <Button variant='outline' size='sm' onClick={props.onRetry}>
+          <RotateCcw className='size-4' aria-hidden='true' />
+          {t('Retry')}
+        </Button>
+      </div>
+    )
+  } else if (clips.length === 0) {
+    content = (
+      <p className='text-muted-foreground py-4 text-center text-sm'>
+        {t('None')}
+      </p>
+    )
+  }
 
   return (
     <Dialog
@@ -165,19 +178,7 @@ export function AudioPreviewDialog(props: AudioPreviewDialogProps) {
       contentHeight='auto'
       bodyClassName='space-y-4'
     >
-      {clips.length === 0 ? (
-        <p className='text-muted-foreground py-4 text-center text-sm'>
-          {t('None')}
-        </p>
-      ) : (
-        <ScrollArea className='max-h-[60vh]'>
-          <div className='space-y-3 pr-2'>
-            {clips.map((clip, idx) => (
-              <AudioClipCard key={clip.clip_id || clip.id || idx} clip={clip} />
-            ))}
-          </div>
-        </ScrollArea>
-      )}
+      {content}
     </Dialog>
   )
 }

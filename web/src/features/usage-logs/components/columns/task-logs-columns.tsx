@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Check, Copy, Eye, Music } from 'lucide-react'
+import { Check, Copy, Eye, Music, Video } from 'lucide-react'
 /* eslint-disable react-refresh/only-export-components */
-import { useId, useMemo, useState } from 'react'
+import { useCallback, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
@@ -38,14 +38,16 @@ import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
+import { useAuthenticatedMediaLoader } from '../../hooks/use-authenticated-media-loader'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
-import type { PublicTaskResult, TaskLog } from '../../types'
+import type { PublicTaskOutput, PublicTaskResult, TaskLog } from '../../types'
 import {
   AudioPreviewDialog,
   type AudioClip,
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { TaskAuditDataDialog } from '../dialogs/task-audit-data-dialog'
+import { VideoPreviewDialog } from '../dialogs/video-preview-dialog'
 import { ModelBadge } from '../model-badge'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
@@ -65,6 +67,94 @@ function parseTaskData(data: unknown): unknown[] {
     }
   }
   return []
+}
+
+function projectPublicProxyURL(
+  candidate: unknown,
+  expectedPath: string
+): string {
+  if (typeof candidate !== 'string' || candidate === '') return ''
+  if (candidate.startsWith('/') && !candidate.startsWith('//')) {
+    return candidate === expectedPath ? candidate : ''
+  }
+  try {
+    const parsedURL = new URL(candidate)
+    if (
+      (parsedURL.protocol === 'http:' || parsedURL.protocol === 'https:') &&
+      parsedURL.username === '' &&
+      parsedURL.password === '' &&
+      parsedURL.pathname === expectedPath &&
+      parsedURL.search === '' &&
+      parsedURL.hash === ''
+    ) {
+      return expectedPath
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+function projectPublicTaskMediaProxyURL(
+  candidate: unknown,
+  taskId: string,
+  kind: 'audio' | 'video' | 'image'
+): string {
+  if (typeof candidate !== 'string' || candidate === '') return ''
+  const relative = candidate.startsWith('/') && !candidate.startsWith('//')
+  let parsedURL: URL
+  try {
+    parsedURL = relative
+      ? new URL(candidate, 'http://local.invalid')
+      : new URL(candidate)
+  } catch {
+    return ''
+  }
+  if (
+    (!relative &&
+      parsedURL.protocol !== 'http:' &&
+      parsedURL.protocol !== 'https:') ||
+    parsedURL.username !== '' ||
+    parsedURL.password !== '' ||
+    parsedURL.search !== '' ||
+    parsedURL.hash !== ''
+  ) {
+    return ''
+  }
+
+  const prefix = `/v1/tasks/${encodeURIComponent(taskId)}/media/`
+  if (!parsedURL.pathname.startsWith(prefix)) return ''
+  const mediaPath = parsedURL.pathname.slice(prefix.length).split('/')
+  if (
+    mediaPath.length !== 2 ||
+    !/^\d+$/.test(mediaPath[0] || '') ||
+    mediaPath[1] !== kind
+  ) {
+    return ''
+  }
+  return parsedURL.pathname
+}
+
+function projectPublicTaskOutputs(log: TaskLog): PublicTaskOutput[] {
+  return parseTaskData(log.data).flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const source = item as Record<string, unknown>
+    const output: PublicTaskOutput = {}
+    if (typeof source.title === 'string') output.title = source.title
+    if (typeof source.text === 'string') output.text = source.text
+
+    for (const kind of ['audio', 'video', 'image'] as const) {
+      const field = `${kind}_url` as const
+      const proxyURL = projectPublicTaskMediaProxyURL(
+        source[field],
+        log.task_id,
+        kind
+      )
+      if (proxyURL) output[field] = proxyURL
+    }
+
+    return Object.keys(output).length > 0 ? [output] : []
+  })
 }
 
 function projectPublicTaskResult(log: TaskLog): PublicTaskResult | null {
@@ -131,21 +221,8 @@ function projectPublicTaskResult(log: TaskLog): PublicTaskResult | null {
   if (status === 'succeeded') {
     const candidateURL = stringValue(sourceContent.video_url)
     const expectedPath = `/v1/videos/${encodeURIComponent(log.task_id)}/content`
-    if (candidateURL === expectedPath) {
-      result.content = { video_url: expectedPath }
-    } else if (candidateURL) {
-      try {
-        const parsedURL = new URL(candidateURL, window.location.origin)
-        if (
-          parsedURL.origin === window.location.origin &&
-          parsedURL.pathname === expectedPath
-        ) {
-          result.content = { video_url: expectedPath }
-        }
-      } catch {
-        // Invalid or non-local URLs are not part of the public task contract.
-      }
-    }
+    const proxyURL = projectPublicProxyURL(candidateURL, expectedPath)
+    if (proxyURL) result.content = { video_url: proxyURL }
   } else if (status === 'failed') {
     result.error = { code: 'task_failed', message: 'task failed' }
   }
@@ -153,25 +230,67 @@ function projectPublicTaskResult(log: TaskLog): PublicTaskResult | null {
   return result
 }
 
-function AudioPreviewCell({ log }: { log: TaskLog }) {
+function AudioPreviewCell(props: {
+  clips: AudioClip[]
+  authenticated: boolean
+}) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const clips = useMemo(() => {
-    const data = parseTaskData(log.data)
-    return data.filter(
-      (c) =>
-        c && typeof c === 'object' && (c as Record<string, unknown>).audio_url
-    )
-  }, [log.data])
+  const [resolvedClips, setResolvedClips] = useState<AudioClip[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const requestVersion = useRef(0)
+  const { load, release } = useAuthenticatedMediaLoader()
 
-  if (clips.length === 0) return null
+  const loadClips = useCallback(async () => {
+    const version = ++requestVersion.current
+    if (!props.authenticated) {
+      if (version === requestVersion.current) {
+        setResolvedClips(props.clips)
+      }
+      return
+    }
+    release()
+    setLoading(true)
+    setFailed(false)
+    try {
+      const nextClips = await Promise.all(
+        props.clips.map(async (clip) => {
+          const nextClip = { ...clip }
+          if (clip.audio_url) nextClip.audio_url = await load(clip.audio_url)
+          if (clip.image_url) nextClip.image_url = await load(clip.image_url)
+          if (clip.image_large_url) {
+            nextClip.image_large_url = await load(clip.image_large_url)
+          }
+          return nextClip
+        })
+      )
+      if (version === requestVersion.current) {
+        setResolvedClips(nextClips)
+      }
+    } catch {
+      if (version !== requestVersion.current) return
+      release()
+      setResolvedClips(null)
+      setFailed(true)
+    } finally {
+      if (version === requestVersion.current) {
+        setLoading(false)
+      }
+    }
+  }, [load, props.authenticated, props.clips, release])
+
+  if (props.clips.length === 0) return null
 
   return (
     <>
       <button
         type='button'
         className='group flex items-center gap-1 text-left text-xs'
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true)
+          if (resolvedClips == null && !loading) void loadClips()
+        }}
       >
         <Music className='text-muted-foreground size-3' />
         <span className='text-foreground leading-snug group-hover:underline'>
@@ -180,8 +299,85 @@ function AudioPreviewCell({ log }: { log: TaskLog }) {
       </button>
       <AudioPreviewDialog
         open={open}
-        onOpenChange={setOpen}
-        clips={clips as AudioClip[]}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+          if (!nextOpen) {
+            requestVersion.current += 1
+            release()
+            setResolvedClips(null)
+            setLoading(false)
+            setFailed(false)
+          }
+        }}
+        clips={resolvedClips ?? []}
+        loading={loading}
+        failed={failed}
+        onRetry={() => void loadClips()}
+      />
+    </>
+  )
+}
+
+function VideoPreviewCell({ videoURL }: { videoURL: string }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [mediaURL, setMediaURL] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const requestVersion = useRef(0)
+  const { load, release } = useAuthenticatedMediaLoader()
+
+  const loadVideo = useCallback(async () => {
+    const version = ++requestVersion.current
+    release()
+    setMediaURL('')
+    setLoading(true)
+    setFailed(false)
+    try {
+      const nextMediaURL = await load(videoURL)
+      if (version === requestVersion.current) {
+        setMediaURL(nextMediaURL)
+      }
+    } catch {
+      if (version === requestVersion.current) {
+        setFailed(true)
+      }
+    } finally {
+      if (version === requestVersion.current) {
+        setLoading(false)
+      }
+    }
+  }, [load, release, videoURL])
+
+  return (
+    <>
+      <button
+        type='button'
+        className='text-foreground inline-flex items-center gap-1 text-xs hover:underline'
+        onClick={() => {
+          setOpen(true)
+          if (!mediaURL && !loading) void loadVideo()
+        }}
+      >
+        <Video className='size-3' aria-hidden='true' />
+        {t('Click to preview video')}
+      </button>
+      <VideoPreviewDialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+          if (!nextOpen) {
+            requestVersion.current += 1
+            release()
+            setMediaURL('')
+            setLoading(false)
+            setFailed(false)
+          }
+        }}
+        mediaURL={mediaURL}
+        loading={loading}
+        failed={failed}
+        onRetry={() => void loadVideo()}
       />
     </>
   )
@@ -312,7 +508,8 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
         data={
           isAdmin
             ? row.original.user_response_data
-            : projectPublicTaskResult(row.original)
+            : projectPublicTaskResult(row.original) ||
+              projectPublicTaskOutputs(row.original)
         }
         title='Task Details'
       />
@@ -501,19 +698,19 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
         const status = log.status
         const [dialogOpen, setDialogOpen] = useState(false)
 
-        const isSunoSuccess =
-          log.platform === 'suno' && status === TASK_STATUS.SUCCESS
-        if (isSunoSuccess) {
-          const data = parseTaskData(log.data)
-          if (
-            data.some(
-              (c) =>
-                c &&
-                typeof c === 'object' &&
-                (c as Record<string, unknown>).audio_url
-            )
-          ) {
-            return <AudioPreviewCell log={log} />
+        if (status === TASK_STATUS.SUCCESS) {
+          const clips = (
+            isAdmin && log.platform === 'suno'
+              ? parseTaskData(log.data)
+              : projectPublicTaskOutputs(log)
+          ).filter(
+            (clip): clip is AudioClip =>
+              !!clip &&
+              typeof clip === 'object' &&
+              typeof (clip as Record<string, unknown>).audio_url === 'string'
+          )
+          if (clips.length > 0) {
+            return <AudioPreviewCell clips={clips} authenticated={!isAdmin} />
           }
         }
 
@@ -526,24 +723,19 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
         const isSuccess = status === TASK_STATUS.SUCCESS
         const isUrl = failReason?.startsWith('http')
         const publicResult = projectPublicTaskResult(log)
-        const publicVideoURL = publicResult?.content?.video_url
+        const expectedVideoPath = `/v1/videos/${encodeURIComponent(log.task_id)}/content`
+        const publicVideoURL =
+          publicResult?.content?.video_url ||
+          projectPublicProxyURL(log.result_url, expectedVideoPath)
 
         if (
           isSuccess &&
           isVideoTask &&
           (publicVideoURL || (isAdmin && isUrl))
         ) {
-          const videoUrl = publicVideoURL || `/v1/videos/${log.task_id}/content`
-          return (
-            <a
-              href={videoUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-foreground text-xs hover:underline'
-            >
-              {t('Click to preview video')}
-            </a>
-          )
+          const videoURL =
+            publicVideoURL || `/v1/videos/${log.task_id}/content`
+          return <VideoPreviewCell videoURL={videoURL} />
         }
 
         if (!failReason) {

@@ -327,6 +327,14 @@ export interface PublicTaskResult {
   error?: PublicTaskError
 }
 
+export interface PublicTaskOutput {
+  title?: string
+  text?: string
+  audio_url?: string
+  video_url?: string
+  image_url?: string
+}
+
 export interface TaskLog {
   id?: number
   user_id?: number
@@ -343,7 +351,8 @@ export interface TaskLog {
   finish_time?: number // seconds
   progress?: string
   progress_message_en?: string
-  data?: string // administrator-only JSON string
+  result_url?: string
+  data?: unknown
   // Raw request and upstream response payloads are administrator-only.
   user_request_data?: unknown
   upstream_response_data?: unknown

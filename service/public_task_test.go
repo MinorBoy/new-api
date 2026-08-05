@@ -54,6 +54,9 @@ func TestProjectPublicTaskUsesArkWhitelistAndProxyURL(t *testing.T) {
 				"status":"succeeded",
 				"content":{"video_url":"https://supplier.example/video.mp4"},
 				"usage":{"completion_tokens":108900,"total_tokens":108900},
+				"resolution":"https://supplier.example/private",
+				"ratio":"supplier-z5",
+				"service_tier":"provider-model-secret",
 				"supplier_payload":"never-public"
 			}`),
 			BillingContext: &model.TaskBillingContext{
@@ -83,6 +86,8 @@ func TestProjectPublicTaskUsesArkWhitelistAndProxyURL(t *testing.T) {
 	assert.Equal(t, int64(108900), public.UserResponseData.Usage.CompletionTokens)
 	assert.Equal(t, int64(4), public.UserResponseData.Duration)
 	assert.Equal(t, "480p", public.UserResponseData.Resolution)
+	assert.Equal(t, "16:9", public.UserResponseData.Ratio)
+	assert.Equal(t, "default", public.UserResponseData.ServiceTier)
 	assert.Equal(t, int64(24), public.UserResponseData.FramesPerSecond)
 
 	payload, err := common.Marshal(public)
@@ -93,7 +98,7 @@ func TestProjectPublicTaskUsesArkWhitelistAndProxyURL(t *testing.T) {
 		`"properties"`, `"request_path"`, `"user_request_data"`,
 		`"upstream_response_data"`, `"routing"`, `"billing_context"`,
 		"provider-model", "cgt-secret", "supplier-target", "supplier.example",
-		"supplier_payload", "never-public",
+		"supplier_payload", "never-public", "supplier-z5", "provider-model-secret",
 	} {
 		assert.NotContains(t, body, forbidden)
 	}
@@ -140,6 +145,105 @@ func TestProjectPublicTaskUsesFixedFailureError(t *testing.T) {
 	} {
 		assert.NotContains(t, body, forbidden)
 	}
+}
+
+func TestProjectPublicTaskRejectsUntrustedSeedanceEnumStrings(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_untrusted_enums",
+		Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
+		Status:   model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{
+			UserRequestData: []byte(`{
+				"resolution":"https://supplier.example/private",
+				"ratio":"supplier-ratio-secret",
+				"service_tier":"provider-tier-secret"
+			}`),
+			BillingContext: &model.TaskBillingContext{
+				UsageProfile: model.TaskUsageProfileSeedance,
+			},
+		},
+	}
+
+	public := ProjectPublicTask(task)
+	require.NotNil(t, public)
+	require.NotNil(t, public.UserResponseData)
+	assert.Equal(t, "720p", public.UserResponseData.Resolution)
+	assert.Equal(t, "16:9", public.UserResponseData.Ratio)
+	assert.Equal(t, "default", public.UserResponseData.ServiceTier)
+
+	payload, err := common.Marshal(public)
+	require.NoError(t, err)
+	assert.NotContains(t, string(payload), "supplier.example")
+	assert.NotContains(t, string(payload), "supplier-ratio-secret")
+	assert.NotContains(t, string(payload), "provider-tier-secret")
+}
+
+func TestProjectPublicTaskReturnsWhitelistedSunoOutputsWithMediaProxies(t *testing.T) {
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() { system_setting.ServerAddress = previousServerAddress })
+
+	task := &model.Task{
+		TaskID:   "task_suno_public",
+		Platform: constant.TaskPlatformSuno,
+		Status:   model.TaskStatusSuccess,
+		Data: []byte(`[{
+			"id":"provider-clip-secret",
+			"model_name":"supplier-model-secret",
+			"title":"Public title",
+			"text":"Public lyrics",
+			"audio_url":"https://supplier.example/audio.mp3",
+			"video_url":"https://supplier.example/video.mp4",
+			"image_url":"https://supplier.example/image.jpg",
+			"metadata":{"api_key":"secret","provider":"supplier-z5"}
+		}]`),
+	}
+
+	public := ProjectPublicTask(task)
+	require.NotNil(t, public)
+	payload, err := common.Marshal(public)
+	require.NoError(t, err)
+
+	var body map[string]interface{}
+	require.NoError(t, common.Unmarshal(payload, &body))
+	outputs, ok := body["data"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, outputs, 1)
+	output, ok := outputs[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Public title", output["title"])
+	assert.Equal(t, "Public lyrics", output["text"])
+	assert.Equal(t, "https://gateway.example/v1/tasks/task_suno_public/media/0/audio", output["audio_url"])
+	assert.Equal(t, "https://gateway.example/v1/tasks/task_suno_public/media/0/video", output["video_url"])
+	assert.Equal(t, "https://gateway.example/v1/tasks/task_suno_public/media/0/image", output["image_url"])
+
+	serialized := string(payload)
+	for _, forbidden := range []string{
+		"provider-clip-secret", "supplier-model-secret", "supplier.example",
+		"api_key", "supplier-z5", "metadata",
+	} {
+		assert.NotContains(t, serialized, forbidden)
+	}
+}
+
+func TestProjectPublicTaskReturnsLocalResultURLForNonSeedanceVideo(t *testing.T) {
+	previousServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() { system_setting.ServerAddress = previousServerAddress })
+
+	task := &model.Task{
+		TaskID:   "task_video_public",
+		Platform: constant.TaskPlatform("kling"),
+		Action:   constant.TaskActionGenerate,
+		Status:   model.TaskStatusSuccess,
+	}
+
+	public := ProjectPublicTask(task)
+	require.NotNil(t, public)
+	payload, err := common.Marshal(public)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"result_url":"https://gateway.example/v1/videos/task_video_public/content"`)
+	assert.NotContains(t, string(payload), "supplier.example")
 }
 
 func TestProjectPublicTaskReturnsNilForNilInput(t *testing.T) {

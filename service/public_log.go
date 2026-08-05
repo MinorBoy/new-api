@@ -17,17 +17,11 @@ func ProjectPublicLog(log *model.Log, displayID int) *dto.PublicLog {
 			other = dto.PublicLogOther{}
 		}
 	}
-	content := ""
-	switch log.Type {
-	case model.LogTypeTopup, model.LogTypeManage, model.LogTypeSystem, model.LogTypeLogin:
-		content = common.MaskSensitiveInfo(log.Content)
-	}
-
 	return &dto.PublicLog{
 		ID:               displayID,
 		CreatedAt:        log.CreatedAt,
 		Type:             log.Type,
-		Content:          content,
+		Content:          "",
 		TokenName:        log.TokenName,
 		ModelName:        log.ModelName,
 		Quota:            log.Quota,

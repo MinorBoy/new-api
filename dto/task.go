@@ -61,19 +61,29 @@ type TaskDto struct {
 }
 
 type PublicTaskDto struct {
-	CreatedAt        int64             `json:"created_at"`
-	UpdatedAt        int64             `json:"updated_at"`
-	TaskID           string            `json:"task_id"`
-	Quota            int               `json:"quota"`
-	Action           string            `json:"action"`
-	Status           string            `json:"status"`
-	FailReason       string            `json:"fail_reason,omitempty"`
-	SubmitTime       int64             `json:"submit_time"`
-	StartTime        int64             `json:"start_time"`
-	FinishTime       int64             `json:"finish_time"`
-	Progress         string            `json:"progress"`
-	RequestModel     string            `json:"request_model,omitempty"`
-	UserResponseData *PublicTaskResult `json:"user_response_data,omitempty"`
+	CreatedAt        int64              `json:"created_at"`
+	UpdatedAt        int64              `json:"updated_at"`
+	TaskID           string             `json:"task_id"`
+	Quota            int                `json:"quota"`
+	Action           string             `json:"action"`
+	Status           string             `json:"status"`
+	FailReason       string             `json:"fail_reason,omitempty"`
+	SubmitTime       int64              `json:"submit_time"`
+	StartTime        int64              `json:"start_time"`
+	FinishTime       int64              `json:"finish_time"`
+	Progress         string             `json:"progress"`
+	RequestModel     string             `json:"request_model,omitempty"`
+	ResultURL        string             `json:"result_url,omitempty"`
+	Data             []PublicTaskOutput `json:"data,omitempty"`
+	UserResponseData *PublicTaskResult  `json:"user_response_data,omitempty"`
+}
+
+type PublicTaskOutput struct {
+	Title    string `json:"title,omitempty"`
+	Text     string `json:"text,omitempty"`
+	AudioURL string `json:"audio_url,omitempty"`
+	VideoURL string `json:"video_url,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type PublicTaskResult struct {

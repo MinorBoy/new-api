@@ -44,6 +44,7 @@ var (
 type ConfigImportSchemaError struct {
 	Code    string
 	Message string
+	Data    any
 }
 
 func (e *ConfigImportSchemaError) Error() string {
@@ -54,7 +55,11 @@ func (e *ConfigImportSchemaError) Error() string {
 }
 
 func configImportError(code string, format string, args ...any) error {
-	return &ConfigImportSchemaError{Code: code, Message: fmt.Sprintf(format, args...)}
+	return configImportErrorWithData(code, nil, format, args...)
+}
+
+func configImportErrorWithData(code string, data any, format string, args ...any) error {
+	return &ConfigImportSchemaError{Code: code, Message: fmt.Sprintf(format, args...), Data: data}
 }
 
 // ParseConfigImportDocument reads and validates a complete, standalone channel

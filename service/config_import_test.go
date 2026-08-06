@@ -282,14 +282,42 @@ func TestConfigImportDetailRecoversNormalizedItemsAndIssues(t *testing.T) {
 }
 
 func TestConfigImportAllowedActionsAreStatusBounded(t *testing.T) {
-	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusValidating, nil))
-	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusBlocked, nil))
-	assert.Equal(t, []string{"bind", "resolve", "stage"}, configImportAllowedActions(types.ConfigImportBatchStatusBinding, nil))
-	assert.Equal(t, []string{"resolve", "validate"}, configImportAllowedActions(types.ConfigImportBatchStatusStaged, nil))
-	assert.Equal(t, []string{"publish"}, configImportAllowedActions(types.ConfigImportBatchStatusReady, nil))
-	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublishing, nil))
-	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil))
-	assert.Equal(t, []string{"validate"}, configImportAllowedActions(types.ConfigImportBatchStatusPublishFailed, nil))
+	activatedAt := int64(1)
+	cacheIssue := []model.ConfigImportIssue{{Code: "CACHE_REFRESH_PENDING", ResolutionStatus: "open"}}
+	activationCacheIssue := []model.ConfigImportIssue{{Code: "ACTIVATION_CACHE_REFRESH_PENDING", ResolutionStatus: "open"}}
+	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusValidating, nil, nil))
+	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusBlocked, nil, nil))
+	assert.Equal(t, []string{"bind", "resolve", "stage"}, configImportAllowedActions(types.ConfigImportBatchStatusBinding, nil, nil))
+	assert.Equal(t, []string{"resolve", "validate"}, configImportAllowedActions(types.ConfigImportBatchStatusStaged, nil, nil))
+	assert.Equal(t, []string{"publish"}, configImportAllowedActions(types.ConfigImportBatchStatusReady, nil, nil))
+	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublishing, nil, nil))
+	assert.Equal(t, []string{"activate"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, nil))
+	assert.Equal(t, []string{"refresh_cache"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, cacheIssue))
+	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublished, &activatedAt, nil))
+	assert.Equal(t, []string{"refresh_cache"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, &activatedAt, activationCacheIssue))
+	assert.Equal(t, []string{"validate"}, configImportAllowedActions(types.ConfigImportBatchStatusPublishFailed, nil, nil))
+}
+
+func TestGetConfigImportBatchIncludesActivationPreviewUntilActivated(t *testing.T) {
+	fixture := createActivationFixture(t)
+
+	detail, err := GetConfigImportBatch(context.Background(), fixture.BatchID)
+
+	require.NoError(t, err)
+	require.NotNil(t, detail.ActivationPreview)
+	assert.True(t, detail.ActivationPreview.Ready)
+	assert.Equal(t, []string{"activate"}, detail.AllowedActions)
+	assert.Nil(t, detail.ActivatedAt)
+
+	activatedAt := common.GetTimestamp()
+	require.NoError(t, model.DB.Model(&model.ConfigImportBatch{}).Where("id = ?", fixture.BatchID).Update("activated_at", activatedAt).Error)
+	detail, err = GetConfigImportBatch(context.Background(), fixture.BatchID)
+
+	require.NoError(t, err)
+	assert.Nil(t, detail.ActivationPreview)
+	require.NotNil(t, detail.ActivatedAt)
+	assert.Equal(t, activatedAt, *detail.ActivatedAt)
+	assert.Empty(t, detail.AllowedActions)
 }
 
 func assertConfigImportPersistenceEmpty(t *testing.T) {

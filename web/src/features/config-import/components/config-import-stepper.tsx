@@ -55,6 +55,8 @@ function stepLabel(step: ConfigImportStep): string {
       return 'Routing diff'
     case 'publish_review':
       return 'Publish review'
+    case 'activation':
+      return 'Route activation'
     case 'publish_result':
       return 'Publish result'
   }

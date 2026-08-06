@@ -52,6 +52,79 @@ func TestConfigImportBindingBindsExistingMatchingChannel(t *testing.T) {
 	assert.Nil(t, binding.CredentialsConfirmedAt)
 }
 
+func TestStageConfigImportBatchRejectsConflictingRouteBlueprintPlans(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*types.ConfigImportRouteBlueprint)
+		code   string
+	}{
+		{
+			name: "merge mode",
+			mutate: func(blueprint *types.ConfigImportRouteBlueprint) {
+				blueprint.MergeMode = types.ConfigImportRouteMergeModeReplace
+			},
+			code: "ROUTE_MERGE_MODE_CONFLICT",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			prepareConfigImportServiceDB(t)
+			require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+			channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+			require.NoError(t, model.DB.Create(channel).Error)
+			batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+			var original model.ConfigImportItem
+			require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "route_blueprints").First(&original).Error)
+			var blueprint types.ConfigImportRouteBlueprint
+			require.NoError(t, common.UnmarshalJsonStr(original.CanonicalJSON, &blueprint))
+			blueprint.BusinessID = "route-b"
+			test.mutate(&blueprint)
+			encoded, err := common.Marshal(blueprint)
+			require.NoError(t, err)
+			require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+				BatchID: batch.ID, EntityType: "route_blueprints", BusinessID: blueprint.BusinessID,
+				CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+			}).Error)
+
+			detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+			require.NoError(t, err)
+			assert.Equal(t, types.ConfigImportBatchStatusStaged, detail.Status)
+			var issue model.ConfigImportIssue
+			require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", batch.ID, test.code).First(&issue).Error)
+			assert.Equal(t, string(types.ConfigImportIssueSeverityError), issue.Severity)
+			assert.Equal(t, "open", issue.ResolutionStatus)
+		})
+	}
+}
+
+func TestStageConfigImportBatchAllowsDifferentTargetDefaultsWithinPolicy(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	var original model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "route_blueprints").First(&original).Error)
+	var blueprint types.ConfigImportRouteBlueprint
+	require.NoError(t, common.UnmarshalJsonStr(original.CanonicalJSON, &blueprint))
+	blueprint.BusinessID = "route-b"
+	blueprint.Targets[0].OutputResolutions = []string{"1080p"}
+	encoded, err := common.Marshal(blueprint)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "route_blueprints", BusinessID: blueprint.BusinessID,
+		CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, detail.Status)
+	var conflictCount int64
+	require.NoError(t, model.DB.Model(&model.ConfigImportIssue{}).
+		Where("batch_id = ? AND code = ? AND resolution_status = ?", batch.ID, "ROUTE_DEFAULTS_CONFLICT", "open").Count(&conflictCount).Error)
+	assert.Zero(t, conflictCount)
+}
+
 func TestConfigImportBindingUsesMappingModelsForGlobalSKU(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

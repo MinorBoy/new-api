@@ -52,7 +52,8 @@ i18n.init({ lng: 'en', resources: { en: { translation: {} } } })
 
 function batch(
   status: ConfigImportBatchDetail['status'],
-  allowedActions: string[]
+  allowedActions: string[],
+  overrides: Partial<ConfigImportBatchDetail> = {}
 ): ConfigImportBatchDetail {
   return {
     id: 12,
@@ -75,11 +76,31 @@ function batch(
     },
     issue_count: 0,
     allowed_actions: allowedActions,
+    activated_at: status === 'published' ? 123 : null,
     created_at: 1,
     updated_at: 1,
     items: [],
     issues: [],
+    activation_preview: null,
+    ...overrides,
   }
+}
+
+function publishedForActivation(
+  overrides: Partial<ConfigImportBatchDetail> = {}
+): ConfigImportBatchDetail {
+  return batch('published', ['activate'], {
+    activated_at: null,
+    activation_preview: {
+      ready: true,
+      channel_count: 2,
+      policy_count: 3,
+      target_count: 13,
+      retire_target_count: 67,
+      blockers: [],
+    },
+    ...overrides,
+  })
 }
 
 function bindingBatch(): ConfigImportBatchDetail {
@@ -110,6 +131,8 @@ async function mount(
     onStage?: (id: number) => Promise<ConfigImportBatchDetail>
     onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
     onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
+    onActivate?: (id: number) => Promise<ConfigImportBatchDetail>
+    onRefreshCache?: (id: number) => Promise<ConfigImportBatchDetail>
     onSavePricingReview?: (
       id: number,
       request: ConfigImportPricingReviewRequest
@@ -147,7 +170,15 @@ async function mount(
           }}
           onPublish={async (id) => {
             calls.push(`publish:${id}`)
-            return options.onPublish?.(id) ?? batch('published', [])
+            return options.onPublish?.(id) ?? publishedForActivation()
+          }}
+          onActivate={async (id) => {
+            calls.push(`activate:${id}`)
+            return options.onActivate?.(id) ?? batch('published', [])
+          }}
+          onRefreshCache={async (id) => {
+            calls.push(`refresh:${id}`)
+            return options.onRefreshCache?.(id) ?? batch('published', [])
           }}
           onSavePricingReview={async (id, request) => {
             calls.push(`pricing:${id}`)
@@ -271,7 +302,8 @@ test('shows the publish result after a successful publish', async () => {
     currentBatch: batch('staged', ['validate']),
     onStage: async () => batch('staged', ['validate']),
     onValidate: async () => batch('ready', ['publish']),
-    onPublish: async () => batch('published', []),
+    onPublish: async () => publishedForActivation(),
+    onActivate: async () => batch('published', []),
   })
   try {
     await act(async () => button(mounted.container, 'Continue').click())
@@ -287,7 +319,19 @@ test('shows the publish result after a successful publish', async () => {
     await act(async () => confirm.click())
     await act(async () => button(mounted.container, 'Publish import').click())
 
+    assert.match(mounted.container.textContent ?? '', /Route activation/)
+    const activationConfirm = mounted.container.querySelector(
+      '[aria-label="Confirm activation"]'
+    ) as HTMLInputElement | null
+    assert.ok(activationConfirm)
+    await act(async () => activationConfirm.click())
+    await act(async () => button(mounted.container, 'Activate import').click())
+
     assert.match(mounted.container.textContent ?? '', /Published/)
+    assert.match(
+      mounted.container.textContent ?? '',
+      /The published configuration is active\./
+    )
     assert.equal(
       [...mounted.container.querySelectorAll('button')].some(
         (candidate) => candidate.textContent === 'Publish import'
@@ -300,7 +344,127 @@ test('shows the publish result after a successful publish', async () => {
       'routes:12',
       'validate:12',
       'publish:12',
+      'activate:12',
     ])
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('does not activate a published batch with blockers', async () => {
+  const mounted = await mount({
+    currentBatch: publishedForActivation({
+      activation_preview: {
+        ready: false,
+        channel_count: 1,
+        policy_count: 1,
+        target_count: 1,
+        retire_target_count: 0,
+        blockers: [
+          {
+            code: 'ACTIVATION_CHANNEL_KEY_MISSING',
+            message: 'Channel 9 does not have an API key.',
+            channel_id: 9,
+          },
+        ],
+      },
+    }),
+  })
+  try {
+    assert.match(
+      mounted.container.textContent ?? '',
+      /ACTIVATION_CHANNEL_KEY_MISSING/
+    )
+    assert.equal(button(mounted.container, 'Activate import').disabled, true)
+    assert.equal(
+      mounted.calls.some((call) => call.startsWith('activate:')),
+      false
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('recovers an activated batch after cache refresh failure', async () => {
+  const cacheError = Object.assign(new Error('cache refresh pending'), {
+    code: 'ACTIVATION_CACHE_REFRESH_PENDING',
+  })
+  const pendingBatch = batch('published', ['refresh_cache'], {
+    activated_at: 123,
+    issues: [
+      {
+        id: 9,
+        severity: 'warning',
+        code: 'ACTIVATION_CACHE_REFRESH_PENDING',
+        message: 'Activated configuration cache refresh is pending.',
+        resolution_status: 'open',
+      },
+    ],
+  })
+  const mounted = await mount({
+    currentBatch: publishedForActivation(),
+    onActivate: async () => {
+      throw cacheError
+    },
+    onLoadBatch: async () => pendingBatch,
+    onRefreshCache: async () => batch('published', []),
+  })
+  try {
+    const confirmation = mounted.container.querySelector(
+      '[aria-label="Confirm activation"]'
+    ) as HTMLInputElement | null
+    assert.ok(confirmation)
+    await act(async () => confirmation.click())
+    await act(async () => button(mounted.container, 'Activate import').click())
+
+    assert.match(mounted.container.textContent ?? '', /Published/)
+    assert.match(
+      mounted.container.textContent ?? '',
+      /cache refresh is still pending/i
+    )
+    assert.deepEqual(mounted.calls, ['activate:12', 'load:12'])
+    assert.equal(
+      [...mounted.container.querySelectorAll('button')].some(
+        (candidate) => candidate.textContent === 'Activate import'
+      ),
+      false
+    )
+
+    await act(async () =>
+      button(mounted.container, 'Retry cache refresh').click()
+    )
+    assert.deepEqual(mounted.calls, ['activate:12', 'load:12', 'refresh:12'])
+    assert.doesNotMatch(
+      mounted.container.textContent ?? '',
+      /configuration changed, but cache refresh is still pending/i
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('keeps the legacy publish cache issue code in the recovery result', async () => {
+  const mounted = await mount({
+    currentBatch: batch('published', ['refresh_cache'], {
+      issues: [
+        {
+          id: 10,
+          severity: 'warning',
+          code: 'CACHE_REFRESH_PENDING',
+          message: 'Published configuration cache refresh is pending.',
+          resolution_status: 'open',
+        },
+      ],
+    }),
+  })
+  try {
+    const content = mounted.container.textContent ?? ''
+    assert.match(content, /CACHE_REFRESH_PENDING/)
+    assert.doesNotMatch(content, /ACTIVATION_CACHE_REFRESH_PENDING/)
+    assert.equal(
+      button(mounted.container, 'Retry cache refresh').disabled,
+      false
+    )
   } finally {
     await act(async () => mounted.root.unmount())
   }

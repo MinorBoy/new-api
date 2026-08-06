@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/relay"
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -32,6 +33,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		}
 	})
 	setupSeedanceE2EDB(t)
+	previousCostCapabilityLookup := service.CostCapabilityLookup
+	previousRouteTargetContractValidator := service.RouteTargetContractValidator
+	service.CostCapabilityLookup = relay.CostCapabilitiesForRoute
+	service.RouteTargetContractValidator = relay.ValidateVideoRouteTargetContract
+	t.Cleanup(func() {
+		service.CostCapabilityLookup = previousCostCapabilityLookup
+		service.RouteTargetContractValidator = previousRouteTargetContractValidator
+	})
 	common.OptionMapRWMutex.Lock()
 	previousOptionMap := common.OptionMap
 	common.OptionMap = make(map[string]string)
@@ -54,6 +63,8 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		&model.ConfigImportIssue{},
 		&model.ConfigImportResolution{},
 		&model.ConfigImportPublishAudit{},
+		&model.ConfigImportActivationAudit{},
+		&model.ConfigImportRouteOwnershipChange{},
 		&model.ChannelModelCostRule{},
 		&model.Option{},
 		&model.RoutingPolicy{},
@@ -150,7 +161,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 
 	staged, err := service.StageConfigImportBatch(context.Background(), 1, first.ID)
 	require.NoError(t, err)
-	assert.Equal(t, types.ConfigImportBatchStatusReady, staged.Status)
+	require.Equalf(t, types.ConfigImportBatchStatusReady, staged.Status, "stage issues: %+v", staged.Issues)
 	for _, issue := range staged.Issues {
 		assert.NotEqual(t, "COST_VARIANT_AMBIGUOUS", issue.Code, issue.BusinessID)
 	}
@@ -176,8 +187,17 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	assert.Equal(t, string(types.ConfigImportBatchStatusPublished), publishedBatch.Status)
 	var activeRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleActive).Count(&activeRuleCount).Error)
-	assert.EqualValues(t, 167, activeRuleCount)
+	assert.Zero(t, activeRuleCount)
 	var remainingDraftCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
+	assert.EqualValues(t, 167, remainingDraftCount)
+	preview, err := service.PreviewConfigImportBatchActivation(context.Background(), first.ID)
+	require.NoError(t, err)
+	require.Truef(t, preview.Ready, "activation blockers: %+v", preview.Blockers)
+	_, err = service.ActivateConfigImportBatch(context.Background(), first.ID, 1)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleActive).Count(&activeRuleCount).Error)
+	assert.EqualValues(t, 167, activeRuleCount)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
 	assert.Zero(t, remainingDraftCount)
 	var dimensioChannel model.Channel
@@ -230,6 +250,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		var constraints modelrouting.Constraints
 		require.NoError(t, common.UnmarshalJsonStr(target.Constraints, &constraints))
 		policyTargets = append(policyTargets, service.RouteTargetWriteRequest{
+			ID:        common.GetPointer(target.ID),
 			ChannelID: target.ChannelID, Name: target.Name, UpstreamModel: target.UpstreamModel,
 			CostVariantKey: target.CostVariantKey, TargetPriority: target.TargetPriority,
 			MinimumExpectedMarginBPS: target.MinimumExpectedMarginBPS,
@@ -247,7 +268,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		Targets: policyTargets,
 	})
 	require.NoError(t, err)
-	require.Len(t, enabledPolicy.Targets, len(dimensioTargets))
+	assert.GreaterOrEqual(t, len(enabledPolicy.Targets), len(dimensioTargets))
+	var enabledTargetIDs []int
+	for _, target := range enabledPolicy.Targets {
+		if target.Enabled {
+			enabledTargetIDs = append(enabledTargetIDs, target.ID)
+		}
+	}
+	assert.Contains(t, enabledTargetIDs, selectedTarget.ID)
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	routingInput := modelrouting.FactsInput{

@@ -277,6 +277,9 @@ func migrateDB() error {
 	if err := migrateCostVariantKeys(); err != nil {
 		return err
 	}
+	if err := migrateRouteTargetOwnershipColumns(); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -330,6 +333,8 @@ func migrateDB() error {
 		&ConfigImportIssue{},
 		&ConfigImportResolution{},
 		&ConfigImportPublishAudit{},
+		&ConfigImportActivationAudit{},
+		&ConfigImportRouteOwnershipChange{},
 	)
 	if err != nil {
 		return err
@@ -365,6 +370,9 @@ func migrateDBFast() error {
 	// skips the linear ordering and would otherwise create the columns with
 	// the wrong index shape.
 	if err := migrateCostVariantKeys(); err != nil {
+		return err
+	}
+	if err := migrateRouteTargetOwnershipColumns(); err != nil {
 		return err
 	}
 
@@ -417,6 +425,8 @@ func migrateDBFast() error {
 		{&ConfigImportIssue{}, "ConfigImportIssue"},
 		{&ConfigImportResolution{}, "ConfigImportResolution"},
 		{&ConfigImportPublishAudit{}, "ConfigImportPublishAudit"},
+		{&ConfigImportActivationAudit{}, "ConfigImportActivationAudit"},
+		{&ConfigImportRouteOwnershipChange{}, "ConfigImportRouteOwnershipChange"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -752,6 +762,82 @@ func migrateConfigImportBindingChannelIndex() error {
 		return fmt.Errorf("drop legacy idx_config_import_binding_channel: %w", err)
 	}
 	return nil
+}
+
+func migrateRouteTargetOwnershipColumns() error {
+	if DB == nil || !DB.Migrator().HasTable(&RouteTarget{}) {
+		return nil
+	}
+	columns := []struct {
+		Name string
+		DDL  string
+	}{
+		{Name: "managed_by", DDL: "VARCHAR(32) NOT NULL DEFAULT 'manual'"},
+		{Name: "source_batch_id", DDL: "BIGINT NULL"},
+		{Name: "retired_at", DDL: "BIGINT NULL"},
+	}
+	for _, column := range columns {
+		if DB.Migrator().HasColumn(&RouteTarget{}, column.Name) {
+			continue
+		}
+		statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s",
+			quoteIdentifier("route_targets"), quoteIdentifier(column.Name), column.DDL)
+		if err := DB.Exec(statement).Error; err != nil {
+			return fmt.Errorf("add route_targets.%s: %w", column.Name, err)
+		}
+	}
+	if err := DB.Model(&RouteTarget{}).
+		Where("managed_by IS NULL OR managed_by = ?", "").
+		Update("managed_by", string(types.RouteTargetManagedByManual)).Error; err != nil {
+		return err
+	}
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		return nil
+	}
+
+	var managedByColumn gorm.ColumnType
+	columnTypes, err := DB.Migrator().ColumnTypes(&RouteTarget{})
+	if err != nil {
+		return fmt.Errorf("inspect route_targets ownership columns: %w", err)
+	}
+	for _, columnType := range columnTypes {
+		if columnType.Name() == "managed_by" {
+			managedByColumn = columnType
+			break
+		}
+	}
+	if managedByColumn == nil {
+		return fmt.Errorf("route_targets.managed_by was not created")
+	}
+	nullable, nullableKnown := managedByColumn.Nullable()
+	_, hasDefault := managedByColumn.DefaultValue()
+	if nullableKnown && !nullable && !hasDefault {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`CREATE TABLE "route_targets__ownership_migration" ("id" integer,"policy_id" integer NOT NULL,"channel_id" integer NOT NULL,"name" varchar(128) NOT NULL,"upstream_model" varchar(255) NOT NULL,"cost_variant_key" varchar(64) NOT NULL,"target_priority" integer NOT NULL,"minimum_expected_margin_bps" integer,"constraints" text NOT NULL,"enabled" numeric NOT NULL,"managed_by" varchar(32) NOT NULL,"source_batch_id" integer,"retired_at" integer,"created_at" integer,"updated_at" integer,PRIMARY KEY ("id"))`).Error; err != nil {
+			return fmt.Errorf("create normalized route_targets table: %w", err)
+		}
+		if err := tx.Exec(`INSERT INTO route_targets__ownership_migration (
+			id, policy_id, channel_id, name, upstream_model, cost_variant_key,
+			target_priority, minimum_expected_margin_bps, constraints, enabled,
+			managed_by, source_batch_id, retired_at, created_at, updated_at
+		) SELECT
+			id, policy_id, channel_id, name, upstream_model, cost_variant_key,
+			target_priority, minimum_expected_margin_bps, constraints, enabled,
+			managed_by, source_batch_id, retired_at, created_at, updated_at
+		FROM route_targets`).Error; err != nil {
+			return fmt.Errorf("copy normalized route_targets rows: %w", err)
+		}
+		if err := tx.Exec("DROP TABLE route_targets").Error; err != nil {
+			return fmt.Errorf("drop legacy route_targets table: %w", err)
+		}
+		if err := tx.Exec("ALTER TABLE route_targets__ownership_migration RENAME TO route_targets").Error; err != nil {
+			return fmt.Errorf("rename normalized route_targets table: %w", err)
+		}
+		return nil
+	})
 }
 
 // migrateCostVariantKeys extends the channel_model_cost_rules and route_targets

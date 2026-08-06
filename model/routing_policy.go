@@ -34,6 +34,9 @@ type RouteTarget struct {
 	MinimumExpectedMarginBPS *int   `json:"minimum_expected_margin_bps"`
 	Constraints              string `json:"constraints" gorm:"type:text;not null"`
 	Enabled                  bool   `json:"enabled" gorm:"not null"`
+	ManagedBy                string `json:"managed_by" gorm:"type:varchar(32);not null;index"`
+	SourceBatchID            *int64 `json:"source_batch_id,omitempty" gorm:"index"`
+	RetiredAt                *int64 `json:"retired_at,omitempty" gorm:"index"`
 	CreatedAt                int64  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt                int64  `json:"updated_at" gorm:"autoUpdateTime"`
 }
@@ -143,6 +146,8 @@ func ReplaceRoutingPolicyWithTx(tx *gorm.DB, id int, policy RoutingPolicy, targe
 	}
 
 	policy.Targets = nil
+	existingByID := make(map[int]RouteTarget)
+	var existingTargets []RouteTarget
 	if id == 0 {
 		policy.ID = 0
 		if err := tx.Create(&policy).Error; err != nil {
@@ -152,6 +157,12 @@ func ReplaceRoutingPolicyWithTx(tx *gorm.DB, id int, policy RoutingPolicy, targe
 		var existing RoutingPolicy
 		if err := tx.First(&existing, "id = ?", id).Error; err != nil {
 			return nil, err
+		}
+		if err := tx.Where("policy_id = ?", id).Find(&existingTargets).Error; err != nil {
+			return nil, err
+		}
+		for _, target := range existingTargets {
+			existingByID[target.ID] = target
 		}
 		updates := map[string]interface{}{
 			"group_name":         policy.GroupName,
@@ -165,29 +176,87 @@ func ReplaceRoutingPolicyWithTx(tx *gorm.DB, id int, policy RoutingPolicy, targe
 			return nil, err
 		}
 		policy.ID = id
-		if err := tx.Where("policy_id = ?", id).Delete(&RouteTarget{}).Error; err != nil {
+	}
+
+	persistedTargets := make([]RouteTarget, len(targets))
+	copy(persistedTargets, targets)
+	seen := make(map[int]struct{})
+	for index := range persistedTargets {
+		target := &persistedTargets[index]
+		normalized, err := types.NormalizeCostVariantKey(target.CostVariantKey)
+		if err != nil {
+			return nil, err
+		}
+		target.CostVariantKey = normalized
+		if target.ID < 0 {
+			target.ID = 0
+		}
+		target.PolicyID = policy.ID
+		target.CreatedAt = 0
+		target.UpdatedAt = 0
+		if target.ID == 0 {
+			target.ManagedBy = string(types.RouteTargetManagedByManual)
+			target.SourceBatchID = nil
+			target.RetiredAt = nil
+			if err := tx.Create(target).Error; err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		existing, ok := existingByID[target.ID]
+		if !ok {
+			return nil, fmt.Errorf("route target %d does not belong to policy %d", target.ID, policy.ID)
+		}
+		if _, duplicate := seen[target.ID]; duplicate {
+			return nil, fmt.Errorf("route target %d is duplicated in policy %d", target.ID, policy.ID)
+		}
+		seen[target.ID] = struct{}{}
+		managedBy, err := types.NormalizeRouteTargetManagedBy(existing.ManagedBy)
+		if err != nil {
+			return nil, err
+		}
+		target.ManagedBy = string(managedBy)
+		target.SourceBatchID = existing.SourceBatchID
+		if target.Enabled {
+			target.RetiredAt = nil
+		} else {
+			target.RetiredAt = existing.RetiredAt
+		}
+		if err := tx.Model(&RouteTarget{}).
+			Where("id = ? AND policy_id = ?", target.ID, policy.ID).
+			Select("channel_id", "name", "upstream_model", "cost_variant_key", "target_priority", "minimum_expected_margin_bps", "constraints", "enabled", "retired_at", "updated_at").
+			Updates(target).Error; err != nil {
 			return nil, err
 		}
 	}
 
-	if len(targets) > 0 {
-		persistedTargets := make([]RouteTarget, len(targets))
-		copy(persistedTargets, targets)
-		for index := range persistedTargets {
-			normalized, err := types.NormalizeCostVariantKey(persistedTargets[index].CostVariantKey)
-			if err != nil {
-				return nil, err
-			}
-			persistedTargets[index].CostVariantKey = normalized
-			persistedTargets[index].ID = 0
-			persistedTargets[index].PolicyID = policy.ID
-			persistedTargets[index].CreatedAt = 0
-			persistedTargets[index].UpdatedAt = 0
+	now := common.GetTimestamp()
+	for _, existing := range existingTargets {
+		if _, ok := seen[existing.ID]; ok {
+			continue
 		}
-		if err := tx.Create(&persistedTargets).Error; err != nil {
+		managedBy, err := types.NormalizeRouteTargetManagedBy(existing.ManagedBy)
+		if err != nil {
 			return nil, err
 		}
-		policy.Targets = persistedTargets
+		if managedBy == types.RouteTargetManagedByConfigImport {
+			if err := tx.Model(&RouteTarget{}).Where("id = ?", existing.ID).Updates(map[string]any{
+				"enabled": false, "retired_at": now, "updated_at": now,
+			}).Error; err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if err := tx.Delete(&RouteTarget{}, existing.ID).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Where("policy_id = ?", policy.ID).
+		Order("channel_id ASC, target_priority DESC, id ASC").
+		Find(&policy.Targets).Error; err != nil {
+		return nil, err
 	}
 	return &policy, nil
 }

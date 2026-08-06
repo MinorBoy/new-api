@@ -23,6 +23,7 @@ type RoutingPolicyWriteRequest struct {
 }
 
 type RouteTargetWriteRequest struct {
+	ID                       *int                     `json:"id,omitempty"`
 	ChannelID                int                      `json:"channel_id"`
 	Name                     string                   `json:"name"`
 	UpstreamModel            string                   `json:"upstream_model"`
@@ -90,13 +91,15 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 		candidateNames[candidate.ID] = candidate.Name
 	}
 	existingChannelIDs := make(map[int]struct{})
+	existingTargetIDs := make(map[int]struct{})
 	if id > 0 {
 		existing, err := model.GetRoutingPolicy(id)
 		if err != nil {
 			return nil, err
 		}
-		if existing.GroupName == request.GroupName && existing.Model == request.Model {
-			for _, target := range existing.Targets {
+		for _, target := range existing.Targets {
+			existingTargetIDs[target.ID] = struct{}{}
+			if existing.GroupName == request.GroupName && existing.Model == request.Model {
 				existingChannelIDs[target.ChannelID] = struct{}{}
 			}
 		}
@@ -112,7 +115,19 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 	}
 	rows := make([]model.RouteTarget, 0, len(request.Targets))
 	channelsByID := make(map[int]*model.Channel)
+	seenTargetIDs := make(map[int]struct{})
 	for index, target := range request.Targets {
+		persistedTargetID := 0
+		if target.ID != nil {
+			requestedTargetID := *target.ID
+			_, belongsToPolicy := existingTargetIDs[requestedTargetID]
+			_, duplicate := seenTargetIDs[requestedTargetID]
+			if requestedTargetID <= 0 || id <= 0 || !belongsToPolicy || duplicate {
+				return nil, newRoutingPolicyServiceError("invalid_target_id", fmt.Sprintf("targets.%d.id", index), "target does not belong to this policy")
+			}
+			seenTargetIDs[requestedTargetID] = struct{}{}
+			persistedTargetID = requestedTargetID
+		}
 		if target.ChannelID <= 0 {
 			return nil, newRoutingPolicyServiceError("invalid_channel", fmt.Sprintf("targets.%d.channel_id", index), "channel is invalid")
 		}
@@ -163,7 +178,7 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 			return nil, newRoutingPolicyServiceError("routing_policy_error", fmt.Sprintf("targets.%d.constraints", index), err.Error())
 		}
 		rows = append(rows, model.RouteTarget{
-			ID:                       targetID,
+			ID:                       persistedTargetID,
 			PolicyID:                 id,
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
@@ -414,7 +429,9 @@ func routingPolicyWriteRequestFromView(view *RoutingPolicyView) RoutingPolicyWri
 		Targets:   make([]RouteTargetWriteRequest, 0, len(view.Targets)),
 	}
 	for _, target := range view.Targets {
+		targetID := target.ID
 		request.Targets = append(request.Targets, RouteTargetWriteRequest{
+			ID:                       &targetID,
 			ChannelID:                target.ChannelID,
 			Name:                     target.Name,
 			UpstreamModel:            target.UpstreamModel,

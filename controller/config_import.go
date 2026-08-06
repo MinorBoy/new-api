@@ -163,6 +163,20 @@ func PublishConfigImportBatch(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"batch_id": id, "status": "published"})
 }
 
+func ActivateConfigImportBatch(c *gin.Context) {
+	id, err := configImportID(c)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	detail, err := service.ActivateConfigImportBatch(c, id, c.GetInt("id"))
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, detail)
+}
+
 func RefreshConfigImportBatchCache(c *gin.Context) {
 	id, err := configImportID(c)
 	if err != nil {
@@ -176,10 +190,40 @@ func RefreshConfigImportBatchCache(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"batch_id": id, "status": "published"})
 }
 
+func PreviewConfigImportRouteOwnershipBackfill(c *gin.Context) {
+	report, err := service.PreviewConfigImportRouteOwnershipBackfill(c)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
+func ApplyConfigImportRouteOwnershipBackfill(c *gin.Context) {
+	report, err := service.ApplyConfigImportRouteOwnershipBackfill(c, c.GetInt("id"))
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
+func RollbackConfigImportRouteOwnershipBackfill(c *gin.Context) {
+	report, err := service.RollbackConfigImportRouteOwnershipBackfill(c, c.GetInt("id"), c.Param("operation_id"))
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
 func configImportID(c *gin.Context) (int64, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
-		return 0, errors.New("invalid config import batch id")
+		return 0, &service.ConfigImportSchemaError{
+			Code:    "SCHEMA_BATCH_ID",
+			Message: "invalid config import batch id",
+		}
 	}
 	return id, nil
 }
@@ -188,10 +232,26 @@ func writeConfigImportError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	var schemaErr *service.ConfigImportSchemaError
 	if errors.As(err, &schemaErr) {
-		if schemaErr.Code == "STALE_BASE_VERSION" {
+		switch schemaErr.Code {
+		case "STALE_BASE_VERSION", "ACTIVATION_BLOCKED", "ACTIVATION_CONCURRENT", "ROUTE_OWNERSHIP_ROLLBACK_CONFLICT":
 			status = http.StatusConflict
+		case "ACTIVATION_CACHE_REFRESH_PENDING":
+			status = http.StatusServiceUnavailable
 		}
-		c.JSON(status, gin.H{"success": false, "code": schemaErr.Code, "message": schemaErr.Message})
+		payload := gin.H{"success": false, "code": schemaErr.Code, "message": schemaErr.Message}
+		if schemaErr.Data != nil {
+			data := schemaErr.Data
+			if schemaErr.Code == "ACTIVATION_BLOCKED" {
+				switch preview := schemaErr.Data.(type) {
+				case dto.ConfigImportActivationPreview:
+					data = gin.H{"blockers": preview.Blockers}
+				case *dto.ConfigImportActivationPreview:
+					data = gin.H{"blockers": preview.Blockers}
+				}
+			}
+			payload["data"] = data
+		}
+		c.JSON(status, payload)
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "code": "CONFIG_IMPORT_ERROR", "message": err.Error()})

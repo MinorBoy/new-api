@@ -8,24 +8,32 @@ License, or (at your option) any later version.
 */
 import { useTranslation } from 'react-i18next'
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 
 import type { ConfigImportBatchDetail } from '../types'
 
 export interface PublishResultStepProps {
   batch: ConfigImportBatchDetail
   onValidate?: () => Promise<void>
+  onRefreshCache?: () => Promise<void>
+  isRefreshing?: boolean
 }
 
 export function PublishResultStep(props: PublishResultStepProps) {
   const { t } = useTranslation()
   const published = props.batch.status === 'published'
+  const activated = published && props.batch.activated_at != null
   const failed = props.batch.status === 'publish_failed'
   let title = t('Publish result')
   if (published) title = t('Published')
   if (failed) title = t('Publish failed')
-  const pendingCache = props.batch.issues.some(
-    (issue) => issue.code === 'CACHE_REFRESH_PENDING'
+  const pendingCacheIssue = props.batch.issues.find(
+    (issue) =>
+      (issue.code === 'CACHE_REFRESH_PENDING' ||
+        issue.code === 'ACTIVATION_CACHE_REFRESH_PENDING') &&
+      issue.resolution_status === 'open'
   )
   const createdCount = props.batch.items.filter(
     (item) => item.state === 'new'
@@ -48,7 +56,10 @@ export function PublishResultStep(props: PublishResultStepProps) {
       >
         {title}
       </h2>
-      {published && <p>{t('The import was published successfully.')}</p>}
+      {published && !activated && (
+        <p>{t('The import was published successfully.')}</p>
+      )}
+      {activated && <p>{t('The published configuration is active.')}</p>}
       {failed && (
         <div className='border-destructive/50 space-y-3 border px-3 py-3 text-sm'>
           <p>
@@ -64,12 +75,29 @@ export function PublishResultStep(props: PublishResultStepProps) {
           </Button>
         </div>
       )}
-      {pendingCache && (
-        <p className='border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm'>
-          {t(
-            'CACHE_REFRESH_PENDING: configuration changed, but cache refresh is still pending.'
-          )}
-        </p>
+      {pendingCacheIssue && (
+        <Alert>
+          <AlertTitle>{pendingCacheIssue.code}</AlertTitle>
+          <AlertDescription className='flex flex-col items-start gap-3'>
+            <p>
+              {t(
+                'CACHE_REFRESH_PENDING: configuration changed, but cache refresh is still pending.'
+              )}
+            </p>
+            {props.onRefreshCache && (
+              <Button
+                type='button'
+                variant='outline'
+                disabled={props.isRefreshing}
+                aria-busy={props.isRefreshing}
+                onClick={() => void props.onRefreshCache?.()}
+              >
+                {props.isRefreshing && <Spinner data-icon='inline-start' />}
+                {t('Retry cache refresh')}
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       <dl className='grid gap-3 text-sm sm:grid-cols-3'>
         <div className='border px-3 py-2'>

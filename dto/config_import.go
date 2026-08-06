@@ -128,6 +128,7 @@ type ConfigImportBatchSummary struct {
 	ItemCounts      types.ConfigImportEntityCounts `json:"item_counts"`
 	IssueCount      int                            `json:"issue_count"`
 	AllowedActions  []string                       `json:"allowed_actions"`
+	ActivatedAt     *int64                         `json:"activated_at,omitempty"`
 	CreatedAt       int64                          `json:"created_at"`
 	UpdatedAt       int64                          `json:"updated_at"`
 }
@@ -172,6 +173,24 @@ type ConfigImportBatchDetail struct {
 	Bindings              []ConfigImportBindingDetail                  `json:"bindings"`
 	Issues                []ConfigImportIssueDetail                    `json:"issues"`
 	ChannelModelSnapshots []types.ConfigImportChannelModelSnapshotDiff `json:"channel_model_snapshots"`
+	ActivationPreview     *ConfigImportActivationPreview               `json:"activation_preview,omitempty"`
+}
+
+type ConfigImportActivationBlocker struct {
+	Code           string `json:"code"`
+	Message        string `json:"message"`
+	LineRef        string `json:"line_ref,omitempty"`
+	RouteTargetRef string `json:"route_target_ref,omitempty"`
+	ChannelID      *int   `json:"channel_id,omitempty"`
+}
+
+type ConfigImportActivationPreview struct {
+	Ready             bool                            `json:"ready"`
+	ChannelCount      int                             `json:"channel_count"`
+	PolicyCount       int                             `json:"policy_count"`
+	TargetCount       int                             `json:"target_count"`
+	RetireTargetCount int                             `json:"retire_target_count"`
+	Blockers          []ConfigImportActivationBlocker `json:"blockers"`
 }
 
 type ConfigImportBindingDetail struct {
@@ -186,4 +205,23 @@ type ConfigImportBatchPage struct {
 	Total    int64                      `json:"total"`
 	Page     int                        `json:"page"`
 	PageSize int                        `json:"page_size"`
+}
+
+type ConfigImportRouteOwnershipCandidate struct {
+	RouteTargetID     int     `json:"route_target_id"`
+	PolicyID          int     `json:"policy_id"`
+	RouteTargetRef    string  `json:"route_target_ref"`
+	ChannelID         int     `json:"channel_id"`
+	BatchID           *int64  `json:"batch_id,omitempty"`
+	CandidateBatchIDs []int64 `json:"candidate_batch_ids,omitempty"`
+	Reason            string  `json:"reason"`
+}
+
+type ConfigImportRouteOwnershipReport struct {
+	OperationID   string                                `json:"operation_id,omitempty"`
+	Matched       []ConfigImportRouteOwnershipCandidate `json:"matched"`
+	Ambiguous     []ConfigImportRouteOwnershipCandidate `json:"ambiguous"`
+	Unmatched     []ConfigImportRouteOwnershipCandidate `json:"unmatched"`
+	AppliedCount  int                                   `json:"applied_count"`
+	RevertedCount int                                   `json:"reverted_count"`
 }

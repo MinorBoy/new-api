@@ -82,8 +82,9 @@ func RefreshPublishedConfig(keys ConfigImportRefreshKeys) error {
 	return nil
 }
 
-// PublishConfigImportBatch applies all reviewed proposals as one database
-// transaction. Cache and in-memory setting refreshes happen only after commit.
+// PublishConfigImportBatch freezes reviewed proposals and creates disabled,
+// batch-owned route candidates. Active configuration changes happen only in
+// the activation transaction.
 func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) error {
 	if adminID <= 0 {
 		return configImportError("SCHEMA_ADMIN", "admin ID is required")
@@ -94,11 +95,10 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var refresh ConfigImportRefreshKeys
 	publishStarted := false
 	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var batch model.ConfigImportBatch
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", batchID).First(&batch).Error; err != nil {
+		if err := model.LockModelForUpdate(tx, &model.ConfigImportBatch{}).Where("id = ?", batchID).First(&batch).Error; err != nil {
 			return err
 		}
 		switch types.ConfigImportBatchStatus(batch.Status) {
@@ -131,32 +131,14 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 		if err := tx.Where("batch_id = ?", batchID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
 			return err
 		}
-		if err := publishConfigImportAuthoritativeCostRules(tx, items, &refresh); err != nil {
-			return err
-		}
-		for _, item := range items {
-			if item.EntityType == "cost_rule_drafts" && item.MaterializedID != nil && item.State != string(types.ConfigImportItemStateExcluded) && item.State != string(types.ConfigImportItemStateUnchanged) {
-				var rule model.ChannelModelCostRule
-				if err := tx.Where("id = ? AND status = ?", *item.MaterializedID, types.CostRuleDraft).First(&rule).Error; err != nil {
-					return err
-				}
-				activated, err := model.ActivateChannelModelCostRuleWithTx(tx, rule.ID, adminID, common.GetTimestamp(), nil)
-				if err != nil {
-					return err
-				}
-				refresh.CostModelKeys = append(refresh.CostModelKeys, fmt.Sprintf("%d|%s|%s", activated.ChannelID, activated.BillableUpstreamModel, activated.CostVariantKey))
-			}
-		}
-		if err := publishConfigImportSaleOptions(tx, items, &refresh); err != nil {
-			return err
-		}
-		if err := publishConfigImportRoutes(tx, items, &refresh); err != nil {
-			return err
-		}
-		if err := publishConfigImportModelMappings(tx, items, &refresh); err != nil {
+		if err := publishConfigImportRoutes(tx, items, nil); err != nil {
 			return err
 		}
 		after, err := CaptureConfigImportBaseline(tx, batchID)
+		if err != nil {
+			return err
+		}
+		afterJSON, err := common.Marshal(after)
 		if err != nil {
 			return err
 		}
@@ -165,7 +147,7 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 			return err
 		}
 		return tx.Model(&model.ConfigImportBatch{}).Where("id = ? AND status = ?", batchID, types.ConfigImportBatchStatusPublishing).Updates(map[string]any{
-			"status": string(types.ConfigImportBatchStatusPublished), "published_at": now, "updated_at": now,
+			"status": string(types.ConfigImportBatchStatusPublished), "baseline_json": string(afterJSON), "published_at": now, "updated_at": now,
 		}).Error
 	})
 	if err != nil {
@@ -181,15 +163,6 @@ func PublishConfigImportBatch(ctx context.Context, batchID int64, adminID int) e
 			}
 		}
 		return err
-	}
-	if err := RefreshPublishedConfig(refresh); err != nil {
-		if markErr := markConfigImportCacheRefreshPending(ctx, batchID); markErr != nil {
-			common.SysError(fmt.Sprintf("failed to record pending config import cache refresh for batch %d: %v", batchID, markErr))
-		}
-		return fmt.Errorf("published but cache refresh failed: %w", err)
-	}
-	if err := recordPostPublishCostCoverage(ctx, batchID, refresh); err != nil {
-		common.SysError(fmt.Sprintf("failed to record post-publish cost coverage for batch %d: %v", batchID, err))
 	}
 	return nil
 }
@@ -276,11 +249,11 @@ func publishConfigImportAuthoritativeCostRules(tx *gorm.DB, items []model.Config
 	return nil
 }
 
-// recordPostPublishCostCoverage makes the cost-accounting consequence of an
+// recordPostActivationCostCoverage makes the cost-accounting consequence of an
 // import visible on the import batch itself. It is deliberately best-effort:
-// publication has already committed, so a coverage-check persistence failure
+// activation has already committed, so a coverage-check persistence failure
 // must not report the committed import as failed.
-func recordPostPublishCostCoverage(ctx context.Context, batchID int64, refresh ConfigImportRefreshKeys) error {
+func recordPostActivationCostCoverage(ctx context.Context, batchID int64, refresh ConfigImportRefreshKeys) error {
 	if !model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
 		return nil
 	}
@@ -405,8 +378,24 @@ func RetryConfigImportBatchCache(ctx context.Context, batchID int64, adminID int
 	if err != nil {
 		return err
 	}
-	if err := RefreshPublishedConfig(keys); err != nil {
-		if markErr := markConfigImportCacheRefreshPending(ctx, batchID); markErr != nil {
+	hadActivationPending := false
+	if model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
+		var pendingCount int64
+		if err := model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).
+			Where("batch_id = ? AND code = ? AND resolution_status = ?", batchID, "ACTIVATION_CACHE_REFRESH_PENDING", "open").
+			Count(&pendingCount).Error; err != nil {
+			return err
+		}
+		hadActivationPending = pendingCount > 0
+	}
+	if err := refreshConfigImportActivation(keys); err != nil {
+		var markErr error
+		if batch.ActivatedAt != nil {
+			markErr = markConfigImportActivationCacheRefreshPending(ctx, batchID)
+		} else {
+			markErr = markConfigImportCacheRefreshPending(ctx, batchID)
+		}
+		if markErr != nil {
 			common.SysError(fmt.Sprintf("failed to record pending config import cache refresh for batch %d: %v", batchID, markErr))
 		}
 		return fmt.Errorf("config import cache refresh failed: %w", err)
@@ -414,9 +403,17 @@ func RetryConfigImportBatchCache(ctx context.Context, batchID int64, adminID int
 	if !model.DB.Migrator().HasTable(&model.ConfigImportIssue{}) {
 		return nil
 	}
-	return model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).
-		Where("batch_id = ? AND code = ? AND resolution_status = ?", batchID, "CACHE_REFRESH_PENDING", "open").
-		Updates(map[string]any{"resolution_status": "resolved", "updated_at": common.GetTimestamp()}).Error
+	if err := model.DB.WithContext(ctx).Model(&model.ConfigImportIssue{}).
+		Where("batch_id = ? AND code IN ? AND resolution_status = ?", batchID, []string{"CACHE_REFRESH_PENDING", "ACTIVATION_CACHE_REFRESH_PENDING"}, "open").
+		Updates(map[string]any{"resolution_status": "resolved", "updated_at": common.GetTimestamp()}).Error; err != nil {
+		return err
+	}
+	if hadActivationPending {
+		if err := appendConfigImportActivationCacheAudit(ctx, batchID, adminID, "cache_refreshed"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRefreshKeys, error) {
@@ -945,7 +942,6 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 	sort.Ints(channelIDs)
 	hasAbilityTable := tx.Migrator().HasTable(&model.Ability{})
 	hasCostRuleTable := tx.Migrator().HasTable(&model.ChannelModelCostRule{})
-	hasRoutingTables := tx.Migrator().HasTable(&model.RoutingPolicy{}) && tx.Migrator().HasTable(&model.RouteTarget{})
 	for _, channelID := range channelIDs {
 		var channel model.Channel
 		if err := tx.Where("id = ?", channelID).First(&channel).Error; err != nil {
@@ -1006,33 +1002,6 @@ func publishConfigImportModelMappings(tx *gorm.DB, items []model.ConfigImportIte
 				}
 			}
 		}
-		if len(removedModels) > 0 && hasRoutingTables {
-			var routeTargets []model.RouteTarget
-			if err := tx.Where("channel_id = ? AND upstream_model IN ? AND enabled = ?", channelID, removedModels, true).
-				Order("policy_id ASC, id ASC").Find(&routeTargets).Error; err != nil {
-				return err
-			}
-			if len(routeTargets) > 0 {
-				targetIDs := make([]int, 0, len(routeTargets))
-				policyIDs := make([]int, 0, len(routeTargets))
-				for _, routeTarget := range routeTargets {
-					targetIDs = append(targetIDs, routeTarget.ID)
-					policyIDs = appendConfigImportRefreshInt(policyIDs, routeTarget.PolicyID)
-				}
-				if err := tx.Model(&model.RouteTarget{}).Where("id IN ?", targetIDs).Updates(map[string]any{
-					"enabled": false, "updated_at": common.GetTimestamp(),
-				}).Error; err != nil {
-					return err
-				}
-				var policies []model.RoutingPolicy
-				if err := tx.Where("id IN ?", policyIDs).Order("id ASC").Find(&policies).Error; err != nil {
-					return err
-				}
-				for _, policy := range policies {
-					refresh.RoutingPolicyKeys = appendConfigImportRefreshRoutingKey(refresh.RoutingPolicyKeys, model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model})
-				}
-			}
-		}
 		refresh.ChannelIDs = appendConfigImportRefreshInt(refresh.ChannelIDs, channelID)
 	}
 	return nil
@@ -1061,22 +1030,84 @@ type configImportPublishRouteBlueprint struct {
 	blueprint types.ConfigImportRouteBlueprint
 }
 
-func publishConfigImportRoutes(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {
+type configImportPublishedRoutePlan struct {
+	PolicyKey model.RoutingPolicyKey
+	MergeMode types.ConfigImportRouteMergeMode
+	Defaults  modelrouting.Defaults
+	Targets   []model.RouteTarget
+	ItemIDs   []int64
+}
+
+func publishConfigImportRoutes(tx *gorm.DB, items []model.ConfigImportItem, _ *ConfigImportRefreshKeys) error {
 	if !tx.Migrator().HasTable(&model.RoutingPolicy{}) || !tx.Migrator().HasTable(&model.RouteTarget{}) {
 		return nil
 	}
-	lineChannels, err := configImportPublishedLineChannels(tx, items)
+	if len(items) == 0 {
+		return nil
+	}
+	batchID := items[0].BatchID
+	if err := tx.Where("source_batch_id = ?", batchID).Delete(&model.RouteTarget{}).Error; err != nil {
+		return err
+	}
+	plans, err := buildConfigImportPublishedRoutePlans(tx, items)
 	if err != nil {
 		return err
 	}
+	for _, plan := range plans {
+		var policy model.RoutingPolicy
+		findErr := tx.Where("group_name = ? AND model = ?", plan.PolicyKey.GroupName, plan.PolicyKey.Model).First(&policy).Error
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			policy = model.RoutingPolicy{
+				GroupName:         plan.PolicyKey.GroupName,
+				Model:             plan.PolicyKey.Model,
+				Enabled:           false,
+				DefaultResolution: plan.Defaults.OutputResolution,
+				DefaultDuration:   plan.Defaults.DurationSeconds,
+				DefaultRatio:      plan.Defaults.AspectRatio,
+			}
+			if err := tx.Create(&policy).Error; err != nil {
+				return err
+			}
+		} else if findErr != nil {
+			return findErr
+		}
+		for index := range plan.Targets {
+			plan.Targets[index].ID = 0
+			plan.Targets[index].PolicyID = policy.ID
+			plan.Targets[index].ManagedBy = string(types.RouteTargetManagedByConfigImport)
+			plan.Targets[index].SourceBatchID = &batchID
+			plan.Targets[index].RetiredAt = nil
+			plan.Targets[index].Enabled = false
+		}
+		if len(plan.Targets) > 0 {
+			if err := tx.Create(&plan.Targets).Error; err != nil {
+				return err
+			}
+		}
+		if len(plan.ItemIDs) > 0 {
+			if err := tx.Model(&model.ConfigImportItem{}).Where("id IN ?", plan.ItemIDs).Updates(map[string]any{
+				"materialized_type": "routing_policy", "materialized_id": policy.ID,
+			}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func buildConfigImportPublishedRoutePlans(tx *gorm.DB, items []model.ConfigImportItem) ([]configImportPublishedRoutePlan, error) {
+	lineChannels, err := configImportPublishedLineChannels(tx, items)
+	if err != nil {
+		return nil, err
+	}
 	routeBlueprints := make([]configImportPublishRouteBlueprint, 0)
 	for _, item := range items {
-		if item.EntityType != "route_blueprints" || item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+		if item.EntityType != "route_blueprints" || item.State == string(types.ConfigImportItemStateExcluded) {
 			continue
 		}
 		var blueprint types.ConfigImportRouteBlueprint
 		if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
-			return err
+			return nil, err
 		}
 		if blueprint.MergeMode == types.ConfigImportRouteMergeModeSkip {
 			continue
@@ -1086,74 +1117,56 @@ func publishConfigImportRoutes(tx *gorm.DB, items []model.ConfigImportItem, refr
 		}
 		routeBlueprints = append(routeBlueprints, configImportPublishRouteBlueprint{item: item, blueprint: blueprint})
 	}
+	sort.SliceStable(routeBlueprints, func(i, j int) bool {
+		left, right := routeBlueprints[i].item, routeBlueprints[j].item
+		if left.BusinessID != right.BusinessID {
+			return left.BusinessID < right.BusinessID
+		}
+		return left.ID < right.ID
+	})
 	priorityOverrides := configImportRouteTargetPriorityOverrides(lineChannels, routeBlueprints)
+	plansByKey := make(map[model.RoutingPolicyKey]*configImportPublishedRoutePlan)
 	for _, routeBlueprint := range routeBlueprints {
 		item := routeBlueprint.item
 		blueprint := routeBlueprint.blueprint
 		policy, targets, err := configImportRouteRowsWithPriorityOverrides(lineChannels, blueprint, priorityOverrides)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		var existing model.RoutingPolicy
-		findErr := tx.Where("group_name = ? AND model = ?", policy.GroupName, policy.Model).First(&existing).Error
-		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return findErr
+		key := model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model}
+		defaults := modelrouting.Defaults{OutputResolution: policy.DefaultResolution, DurationSeconds: policy.DefaultDuration, AspectRatio: policy.DefaultRatio}
+		plan := plansByKey[key]
+		if plan == nil {
+			plan = &configImportPublishedRoutePlan{PolicyKey: key, MergeMode: blueprint.MergeMode, Defaults: defaults}
+			plansByKey[key] = plan
+		} else if plan.MergeMode != blueprint.MergeMode {
+			return nil, configImportError("PUBLISH_ROUTE_PLAN", "route blueprint %q conflicts with another blueprint for %s|%s", item.BusinessID, key.GroupName, key.Model)
 		}
-		policyID := 0
-		if findErr == nil {
-			policyID = existing.ID
-			if blueprint.MergeMode == types.ConfigImportRouteMergeModeMerge {
-				var current []model.RouteTarget
-				if err := tx.Where("policy_id = ?", existing.ID).
-					Order("channel_id ASC").
-					Order("target_priority DESC").
-					Order("name ASC").
-					Order("id ASC").
-					Find(&current).Error; err != nil {
-					return err
-				}
-				policy = existing
-				policy.Targets = nil
-				targets = configImportMergeRouteTargets(current, targets)
-			}
-		}
-		policy.ID = policyID
-		if _, err := model.ReplaceRoutingPolicyWithTx(tx, policyID, policy, targets); err != nil {
-			return configImportError("PUBLISH_ROUTE", "route blueprint %q failed validation: %v", item.BusinessID, err)
-		}
-		refresh.RoutingPolicyKeys = append(refresh.RoutingPolicyKeys, model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model})
+		plan.Targets = append(plan.Targets, targets...)
+		plan.ItemIDs = append(plan.ItemIDs, item.ID)
 	}
-	return nil
-}
-
-// configImportMergeRouteTargets leaves unrelated targets in place and replaces
-// only targets whose stable route_target_ref (stored as Name) is owned by this
-// import. ReplaceRoutingPolicyWithTx rewrites the complete target collection,
-// so the merged set must be assembled before that call.
-func configImportMergeRouteTargets(existing, incoming []model.RouteTarget) []model.RouteTarget {
-	merged := make([]model.RouteTarget, len(existing))
-	copy(merged, existing)
-	byName := make(map[string]int, len(existing))
-	for index := range merged {
-		byName[merged[index].Name] = index
+	keys := make([]model.RoutingPolicyKey, 0, len(plansByKey))
+	for key := range plansByKey {
+		keys = append(keys, key)
 	}
-	for _, target := range incoming {
-		if index, found := byName[target.Name]; found {
-			target.Enabled = merged[index].Enabled
-			merged[index] = target
-			continue
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].GroupName != keys[j].GroupName {
+			return keys[i].GroupName < keys[j].GroupName
 		}
-		byName[target.Name] = len(merged)
-		merged = append(merged, target)
+		return keys[i].Model < keys[j].Model
+	})
+	plans := make([]configImportPublishedRoutePlan, 0, len(keys))
+	for _, key := range keys {
+		plans = append(plans, *plansByKey[key])
 	}
-	return merged
+	return plans, nil
 }
 
 func configImportRouteRows(lineChannels map[string]int, blueprint types.ConfigImportRouteBlueprint) (model.RoutingPolicy, []model.RouteTarget, error) {
 	return configImportRouteRowsWithPriorityOverrides(lineChannels, blueprint, nil)
 }
 
-func configImportRouteRowsWithPriorityOverrides(lineChannels map[string]int, blueprint types.ConfigImportRouteBlueprint, priorityOverrides map[string]int) (model.RoutingPolicy, []model.RouteTarget, error) {
+func configImportRoutePolicy(blueprint types.ConfigImportRouteBlueprint) model.RoutingPolicy {
 	policy := model.RoutingPolicy{
 		GroupName:         "default",
 		Model:             configImportRuntimeCanonicalModel(blueprint.CanonicalModel),
@@ -1182,6 +1195,11 @@ func configImportRouteRowsWithPriorityOverrides(lineChannels map[string]int, blu
 			policy.DefaultRatio = first.AspectRatios[0]
 		}
 	}
+	return policy
+}
+
+func configImportRouteRowsWithPriorityOverrides(lineChannels map[string]int, blueprint types.ConfigImportRouteBlueprint, priorityOverrides map[string]int) (model.RoutingPolicy, []model.RouteTarget, error) {
+	policy := configImportRoutePolicy(blueprint)
 	priorities := configImportRouteTargetPriorities(lineChannels, blueprint.Targets)
 	for index, target := range blueprint.Targets {
 		if priority, found := priorityOverrides[target.RouteTargetRef]; found {

@@ -402,6 +402,36 @@ test('routing target copies retain their cost variant', () => {
   assert.equal(copiedPolicy.targets[0]?.cost_variant_key, '720p')
 })
 
+test('editing preserves the target id while copying removes it', () => {
+  const policy = createEmptyPolicyForm()
+  const target: RouteTargetFormValues = {
+    ...createEmptyTarget(),
+    id: 42,
+    channel_id: 1,
+    channel_name: 'A1',
+    name: 'target',
+    upstream_model: 'vendor-model',
+  }
+
+  const edited = toWriteRequest({
+    ...policy,
+    group_name: 'default',
+    enabled: true,
+    targets: [target],
+  })
+  assert.equal(edited.targets[0]?.id, 42)
+
+  const copied = copyTargetForm(target)
+  const copiedRequest = toWriteRequest({
+    ...policy,
+    group_name: 'default',
+    enabled: true,
+    targets: [copied],
+  })
+  assert.equal(copied.id, undefined)
+  assert.equal(copiedRequest.targets[0]?.id, undefined)
+})
+
 test('edits input modes and reference minimums in the submitted constraints', async () => {
   const mounted = await mountTargetEditor()
   try {

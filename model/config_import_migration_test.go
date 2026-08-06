@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
@@ -19,13 +20,14 @@ import (
 
 func TestConfigImportMigrationUsesTextForCanonicalJSON(t *testing.T) {
 	prepareConfigImportDB(t)
+	require.NoError(t, DB.AutoMigrate(&ConfigImportActivationAudit{}, &ConfigImportRouteOwnershipChange{}))
 
 	type schemaRow struct {
 		SQL string
 	}
 	var rows []schemaRow
 	require.NoError(t, DB.Raw(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name LIKE 'config_import_%'`).Scan(&rows).Error)
-	require.Len(t, rows, 6)
+	require.Len(t, rows, 8)
 	for _, row := range rows {
 		sql := strings.ToUpper(row.SQL)
 		assert.NotContains(t, sql, " JSON")
@@ -36,6 +38,40 @@ func TestConfigImportMigrationUsesTextForCanonicalJSON(t *testing.T) {
 	var itemDDL schemaRow
 	require.NoError(t, DB.Raw(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'config_import_items'`).Scan(&itemDDL).Error)
 	assert.Contains(t, strings.ToUpper(itemDDL.SQL), "`CANONICAL_JSON` TEXT")
+}
+
+func TestRouteTargetOwnershipMigrationBackfillsManualWithoutChangingRuntimeState(t *testing.T) {
+	prepareConfigImportDB(t)
+	require.NoError(t, DB.Migrator().DropTable(&RouteTarget{}))
+	require.NoError(t, DB.Exec(`CREATE TABLE route_targets (
+		id integer primary key,
+		policy_id integer not null,
+		channel_id integer not null,
+		name varchar(128) not null,
+		upstream_model varchar(255) not null,
+		cost_variant_key varchar(64) not null,
+		target_priority integer not null,
+		minimum_expected_margin_bps integer,
+		"constraints" text not null,
+		enabled numeric not null,
+		created_at bigint,
+		updated_at bigint
+	)`).Error)
+	require.NoError(t, DB.Exec(`INSERT INTO route_targets
+		(id, policy_id, channel_id, name, upstream_model, cost_variant_key, target_priority, constraints, enabled, created_at, updated_at)
+		VALUES (1, 2, 3, 'legacy', 'upstream', 'default', 10, '{}', 1, 11, 12)`).Error)
+
+	require.NoError(t, migrateRouteTargetOwnershipColumns())
+	require.NoError(t, DB.AutoMigrate(&RouteTarget{}, &ConfigImportActivationAudit{}, &ConfigImportRouteOwnershipChange{}))
+
+	var target RouteTarget
+	require.NoError(t, DB.First(&target, 1).Error)
+	assert.Equal(t, string(types.RouteTargetManagedByManual), target.ManagedBy)
+	assert.Nil(t, target.SourceBatchID)
+	assert.Nil(t, target.RetiredAt)
+	assert.True(t, target.Enabled)
+
+	require.NoError(t, migrateRouteTargetOwnershipColumns())
 }
 
 func TestConfigImportMigrationAllowsOneChannelAcrossMultipleLines(t *testing.T) {
@@ -112,6 +148,8 @@ func testConfigImportMigrationContracts(t *testing.T, db *gorm.DB, _ common.Data
 	t.Helper()
 	t.Cleanup(func() {
 		require.NoError(t, db.Migrator().DropTable(
+			&ConfigImportRouteOwnershipChange{},
+			&ConfigImportActivationAudit{},
 			&ConfigImportPublishAudit{},
 			&ConfigImportResolution{},
 			&ConfigImportIssue{},
@@ -127,6 +165,18 @@ func testConfigImportMigrationContracts(t *testing.T, db *gorm.DB, _ common.Data
 		&ConfigImportIssue{},
 		&ConfigImportResolution{},
 		&ConfigImportPublishAudit{},
+		&ConfigImportActivationAudit{},
+		&ConfigImportRouteOwnershipChange{},
+	))
+	require.NoError(t, db.AutoMigrate(
+		&ConfigImportBatch{},
+		&ConfigImportItem{},
+		&ConfigImportBinding{},
+		&ConfigImportIssue{},
+		&ConfigImportResolution{},
+		&ConfigImportPublishAudit{},
+		&ConfigImportActivationAudit{},
+		&ConfigImportRouteOwnershipChange{},
 	))
 
 	batch := ConfigImportBatch{SchemaVersion: 1, TemplateVersion: "1", SourceSHA256: "source", PayloadSHA256: "payload", Status: "binding", CreatedBy: 1}
@@ -140,4 +190,33 @@ func testConfigImportMigrationContracts(t *testing.T, db *gorm.DB, _ common.Data
 	channelID := 99
 	require.NoError(t, db.Create(&ConfigImportBinding{BatchID: batch.ID, LineRef: "line-a", Action: "bind", ChannelID: &channelID}).Error)
 	require.NoError(t, db.Create(&ConfigImportBinding{BatchID: batch.ID, LineRef: "line-b", Action: "bind", ChannelID: &channelID}).Error)
+
+	activation := ConfigImportActivationAudit{
+		BatchID:      batch.ID,
+		AdminID:      1,
+		Outcome:      "activated",
+		BeforeSHA256: "before",
+		AfterSHA256:  "after",
+		SummaryJSON:  `{"targets":1}`,
+	}
+	require.NoError(t, db.Create(&activation).Error)
+	var storedActivation ConfigImportActivationAudit
+	require.NoError(t, db.First(&storedActivation, activation.ID).Error)
+	assert.Equal(t, activation.SummaryJSON, storedActivation.SummaryJSON)
+	assert.NotEmpty(t, storedActivation.BeforeSHA256)
+	assert.NotEmpty(t, storedActivation.AfterSHA256)
+
+	change := ConfigImportRouteOwnershipChange{
+		OperationID:            "operation-1",
+		RouteTargetID:          101,
+		PreviousManagedBy:      string(types.RouteTargetManagedByManual),
+		AssignedBatchID:        batch.ID,
+		AppliedTargetUpdatedAt: 123,
+		AppliedTargetSHA256:    "target-sha256",
+		AppliedBy:              1,
+	}
+	require.NoError(t, db.Create(&change).Error)
+	duplicate := change
+	duplicate.ID = 0
+	assert.Error(t, db.Create(&duplicate).Error)
 }

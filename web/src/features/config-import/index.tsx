@@ -16,8 +16,10 @@ import { ChannelMutateDrawer } from '@/features/channels/components/drawers/chan
 import { listRoutingGroups } from '@/features/model-routing/api'
 
 import {
+  activateConfigImport,
   getConfigImportBatch,
   publishConfigImport,
+  refreshConfigImportCache,
   saveConfigImportBindings,
   saveConfigImportPricingReview,
   saveConfigImportResolutions,
@@ -26,6 +28,7 @@ import {
   uploadConfigImport,
   validateConfigImport,
 } from './api'
+import { ActivationStep } from './components/activation-step'
 import {
   ChannelBindingStep,
   type ConfigImportChannelCandidate,
@@ -59,6 +62,8 @@ export interface ConfigImportWizardProps {
   onStage?: (id: number) => Promise<ConfigImportBatchDetail>
   onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
   onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
+  onActivate?: (id: number) => Promise<ConfigImportBatchDetail>
+  onRefreshCache?: (id: number) => Promise<ConfigImportBatchDetail>
   onSaveBindings?: (
     id: number,
     request: ConfigImportBindingsRequest
@@ -190,6 +195,18 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           : ''
       if (code === 'STALE_BASE_VERSION') {
         setForcedStep('routing_diff')
+      }
+      if (code === 'ACTIVATION_CACHE_REFRESH_PENDING') {
+        try {
+          const reloaded = await (props.onLoadBatch ?? getConfigImportBatch)(
+            batch.id
+          )
+          setBatch(reloaded)
+          setForcedStep(undefined)
+          setReviewStep(undefined)
+        } catch {
+          // Preserve the activation error when recovery detail cannot be loaded.
+        }
       }
       setError(
         caught instanceof Error
@@ -394,9 +411,32 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           }}
         />
       )}
+      {step === 'activation' && (
+        <ActivationStep
+          batch={batch}
+          canActivate={state.canActivate}
+          isActivating={isBusy}
+          onActivate={async () => {
+            const activated = await runMutation(
+              props.onActivate ?? activateConfigImport
+            )
+            if (activated) setReviewStep(undefined)
+          }}
+        />
+      )}
       {step === 'publish_result' && (
         <PublishResultStep
           batch={batch}
+          isRefreshing={isBusy}
+          onRefreshCache={
+            batch.allowed_actions.includes('refresh_cache')
+              ? async () => {
+                  await runMutation(
+                    props.onRefreshCache ?? refreshConfigImportCache
+                  )
+                }
+              : undefined
+          }
           onValidate={
             batch.status === 'publish_failed'
               ? async () => {

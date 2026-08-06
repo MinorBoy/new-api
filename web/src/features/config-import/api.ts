@@ -128,3 +128,17 @@ export async function publishConfigImport(
   const response = await api.post(`${CONFIG_IMPORT_PATH}/${id}/publish`)
   return configImportPublishResponseSchema.parse(response.data).data
 }
+
+export async function activateConfigImport(
+  id: number
+): Promise<ConfigImportBatchDetail> {
+  const response = await api.post(`${CONFIG_IMPORT_PATH}/${id}/activate`)
+  return parseDetail(response.data)
+}
+
+export async function refreshConfigImportCache(
+  id: number
+): Promise<ConfigImportBatchDetail> {
+  await api.post(`${CONFIG_IMPORT_PATH}/${id}/refresh-cache`)
+  return getConfigImportBatch(id)
+}

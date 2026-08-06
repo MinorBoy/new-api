@@ -188,6 +188,23 @@ test('shows the strict description on hover even when strict mode is disabled', 
   }
 })
 
+test('positions descriptions below adjacent header controls', async () => {
+  const mounted = await mountToggle()
+  try {
+    await hover(findButton(mounted.container, 'Strict'))
+    const tooltip = browserWindow.document.querySelector(
+      '[data-slot="tooltip-content"]'
+    )
+    assert.ok(tooltip)
+    assert.match(
+      tooltip.parentElement?.getAttribute('style') ?? '',
+      /translate\([^,]+, 12px\)/
+    )
+  } finally {
+    await unmountToggle(mounted)
+  }
+})
+
 test('does not select strict mode while it is disabled', async () => {
   const mounted = await mountToggle()
   try {

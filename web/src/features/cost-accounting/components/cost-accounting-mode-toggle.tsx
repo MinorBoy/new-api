@@ -102,6 +102,7 @@ export function CostAccountingModeToggle(props: CostAccountingModeToggleProps) {
               />
               <TooltipContent
                 side='bottom'
+                sideOffset={12}
                 className='max-w-72 items-start text-pretty'
               >
                 {option.description}

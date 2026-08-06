@@ -108,9 +108,10 @@ type MountedToggle = {
 }
 
 async function mountToggle(): Promise<MountedToggle> {
-  const container = browserWindow.document.createElement('div')
-  browserWindow.document.body.append(container)
-  const root = createRoot(container as unknown as Container)
+  const containerElement = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(containerElement)
+  const container = containerElement as unknown as HTMLElement
+  const root = createRoot(container as Container)
   const changes: string[] = []
 
   await act(async () => {
@@ -145,14 +146,12 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
 async function hover(element: HTMLElement) {
   await act(async () => {
     element.dispatchEvent(
-      new browserWindow.PointerEvent('pointerover', {
+      new PointerEvent('pointerover', {
         bubbles: true,
         pointerType: 'mouse',
       })
     )
-    element.dispatchEvent(
-      new browserWindow.MouseEvent('mouseenter', { bubbles: false })
-    )
+    element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }))
     await Promise.resolve()
   })
 }

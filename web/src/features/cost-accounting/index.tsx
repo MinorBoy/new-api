@@ -28,7 +28,6 @@ import { Badge } from '@/components/ui/badge'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -49,10 +48,10 @@ import {
   updateCostAccountingSettings,
 } from './api'
 import { AnomalyQueue } from './components/anomaly-queue'
+import { CostAccountingModeToggle } from './components/cost-accounting-mode-toggle'
 import { ProfitFilters } from './components/profit-filters'
 import { ProfitSummary } from './components/profit-summary'
 import { ProfitTable } from './components/profit-table'
-import { isCostAccountingMode } from './lib/mode'
 import {
   costReportParamsFromSearch,
   canEnableStrictCostAccounting,
@@ -207,36 +206,23 @@ export function CostAccounting() {
                 <span className='text-muted-foreground text-sm'>%</span>
               </div>
             </Field>
-            <ToggleGroup
-              value={[mode]}
-              onValueChange={(selection) => {
-                const value = selection[0]
+            <CostAccountingModeToggle
+              mode={mode}
+              canEnableStrict={canEnableStrict}
+              disabled={modeMutation.isPending || settingsQuery.isLoading}
+              onChange={(value) => {
                 if (value === 'strict' && !canEnableStrict) {
                   toast.error(
                     t('Resolve uncovered models before enabling strict mode')
                   )
                   return
                 }
-                if (isCostAccountingMode(value)) {
-                  modeMutation.mutate({
-                    mode: value,
-                    minimum_expected_margin_bps: minimumExpectedMarginBPS,
-                  })
-                }
+                modeMutation.mutate({
+                  mode: value,
+                  minimum_expected_margin_bps: minimumExpectedMarginBPS,
+                })
               }}
-              disabled={modeMutation.isPending || settingsQuery.isLoading}
-              aria-label={t('Cost accounting mode')}
-            >
-              <ToggleGroupItem value='disabled'>
-                {t('Disabled')}
-              </ToggleGroupItem>
-              <ToggleGroupItem value='tracking'>
-                {t('Tracking')}
-              </ToggleGroupItem>
-              <ToggleGroupItem value='strict' disabled={!canEnableStrict}>
-                {t('Strict')}
-              </ToggleGroupItem>
-            </ToggleGroup>
+            />
           </div>
         ) : null}
       </SectionPageLayout.Actions>

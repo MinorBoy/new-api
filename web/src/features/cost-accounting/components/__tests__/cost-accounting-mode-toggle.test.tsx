@@ -48,8 +48,7 @@ const browserGlobals = {
   getComputedStyle: browserWindow.getComputedStyle.bind(browserWindow),
   requestAnimationFrame:
     browserWindow.requestAnimationFrame.bind(browserWindow),
-  cancelAnimationFrame:
-    browserWindow.cancelAnimationFrame.bind(browserWindow),
+  cancelAnimationFrame: browserWindow.cancelAnimationFrame.bind(browserWindow),
   IS_REACT_ACT_ENVIRONMENT: true,
 }
 const previousBrowserGlobals = Object.fromEntries(
@@ -136,7 +135,7 @@ async function unmountToggle(mounted: MountedToggle) {
 }
 
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find(
+  const button = [...container.querySelectorAll('button')].find(
     (item) => item.textContent?.trim() === label
   )
   assert.ok(button, `Expected to find the ${label} mode button`)

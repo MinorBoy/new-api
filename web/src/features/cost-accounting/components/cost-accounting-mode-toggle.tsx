@@ -18,13 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
 
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import { isCostAccountingMode } from '../lib/mode'
 import type { CostAccountingMode } from '../types'
@@ -36,9 +36,7 @@ type CostAccountingModeToggleProps = {
   onChange: (mode: CostAccountingMode) => void
 }
 
-export function CostAccountingModeToggle(
-  props: CostAccountingModeToggleProps
-) {
+export function CostAccountingModeToggle(props: CostAccountingModeToggleProps) {
   const { t } = useTranslation()
   const modes: ReadonlyArray<{
     value: CostAccountingMode

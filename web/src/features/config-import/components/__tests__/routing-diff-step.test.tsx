@@ -178,3 +178,47 @@ test('allows merge and skip review modes without a replacement confirmation', as
     await act(async () => root.unmount())
   }
 })
+
+test('does not review route blueprints already excluded by a skipped line', async () => {
+  const reviewed: unknown[] = []
+  const currentBatch: ConfigImportBatchDetail = {
+    ...batch,
+    items: [
+      {
+        ...batch.items[0],
+        canonical_json:
+          '{"canonical_model":"video-v2","merge_mode":"merge","targets":[{"route_target_ref":"target-720p","line_ref":"secure-no-face","upstream_model":"video-v2","sku_ref":"video-sku","cost_variant_key":"no-face","output_resolutions":["720p"],"duration_values":[5],"enabled":false}]}',
+      },
+      {
+        ...batch.items[0],
+        id: 2,
+        business_id: 'route-skipped',
+        canonical_json:
+          '{"canonical_model":"video-v2","merge_mode":"merge","targets":[{"route_target_ref":"target-skipped","line_ref":"megabyai-fast-real-person","upstream_model":"videos-fast","sku_ref":"video-sku","cost_variant_key":"default","output_resolutions":["720p"],"duration_values":[5],"enabled":false}]}',
+        state: 'excluded',
+      },
+    ],
+  }
+  const container = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(container)
+  const root = createRoot(container as unknown as Container)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <RoutingDiffStep
+          batch={currentBatch}
+          onReview={(value) => reviewed.push(value)}
+        />
+      </I18nextProvider>
+    )
+  })
+  try {
+    assert.doesNotMatch(container.textContent ?? '', /route-skipped/)
+    await act(async () => buttonByText(container, 'Continue').click())
+    assert.deepEqual(reviewed, [
+      [{ business_id: 'route-video', merge_mode: 'merge' }],
+    ])
+  } finally {
+    await act(async () => root.unmount())
+  }
+})

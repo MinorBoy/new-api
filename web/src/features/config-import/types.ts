@@ -142,6 +142,7 @@ export const configImportBatchSummarySchema = z
     item_counts: entityCountsSchema,
     issue_count: z.number().int().nonnegative(),
     allowed_actions: z.array(z.string()),
+    copied_from_batch_id: z.number().int().positive().nullish(),
     activated_at: z.number().int().positive().nullish(),
     created_at: z.number().int(),
     updated_at: z.number().int(),

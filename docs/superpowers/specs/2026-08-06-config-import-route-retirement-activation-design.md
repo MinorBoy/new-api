@@ -37,6 +37,22 @@
 
 发布到激活之间不能提前修改任何活动售价、活动成本规则、渠道模型快照、能力状态或旧路由状态，否则旧路由可能在切换前使用新成本或失去模型能力。现有发布函数中的活动配置写入必须移动到激活事务。
 
+### 显式复制为新绑定批次
+
+相同权威配置重复上传继续保持幂等，返回已有批次；不得因为已发布批次无法重新绑定而让普通上传静默创建重复批次。
+
+对需要重新绑定真实渠道的已发布批次，提供显式操作：
+
+```text
+POST /api/config-import/batches/:id/copy-for-binding
+```
+
+该操作在事务内创建一个新的 `binding` 批次，保留源批次的 schema、模板版本、源文件哈希、权威载荷哈希和规范化实体内容，并记录 `copied_from_batch_id` 和当前管理员。新批次不复制渠道绑定、凭据确认、冲突处理记录、问题状态、物化 ID、发布审计、激活审计、失败状态和缓存状态；所有实体状态重置为 `new`，由新绑定后的暂存与校验重新计算。
+
+`payload_sha256` 继续表达权威实体内容，因此源批次与复制批次允许相同。批次新增内部唯一 `deduplication_key`：普通上传固定使用 `upload:<payload_sha256>`，显式复制使用独立的 `copy:<uuid>`。这样既保留重复上传的并发幂等约束，也不会伪造新的权威载荷哈希。
+
+复制只接受 `published` 源批次；未发布批次继续通过原批次恢复流程维护。复制成功后前端立即进入新批次的渠道绑定步骤，源批次保持不变。
+
 ### 软退休
 
 “旧路由退休”定义为：
@@ -71,6 +87,8 @@
 ### 批次激活状态
 
 `ConfigImportBatch` 新增 `activated_at`。其语义是该批次首次成功完成激活事务的时间，不改变现有 `published` 状态机。
+
+`ConfigImportBatch` 同时新增内部唯一 `deduplication_key` 和可空 `copied_from_batch_id`。历史批次迁移为 `deduplication_key=upload:<payload_sha256>`；`payload_sha256` 从唯一索引调整为普通索引。`deduplication_key` 不通过 API 返回，`copied_from_batch_id` 作为无凭据来源信息返回。
 
 批次状态继续保持：
 
@@ -268,6 +286,8 @@ POST /api/config-import/route-ownership/backfill/:operation_id/rollback
 
 所有新增文案通过 `useTranslation()`，并通过规定脚本同步 `en`、`zh`、`zh-TW`、`fr`、`ja`、`ru`、`vi` 七种语言。
 
+已发布结果页提供“复制为新绑定批次”按钮。按钮只在后端 `allowed_actions` 包含 `copy_for_binding` 时可用；请求成功后向导切换到返回的新批次，不修改或覆盖源批次。
+
 ## 数据库兼容性
 
 - 迁移使用 GORM Migrator 和已有 `quoteIdentifier`，兼容 SQLite、MySQL 5.7.8+、PostgreSQL 9.6+。
@@ -313,3 +333,4 @@ POST /api/config-import/route-ownership/backfill/:operation_id/rollback
 - 历史回填支持 dry-run、歧义报告、幂等应用和受版本保护的回滚。
 - SQLite、MySQL 和 PostgreSQL 迁移与核心事务测试通过。
 - 前端能够完成发布后激活，并准确展示启用、退休和 blocker 数量。
+- 相同 JSON 重复上传仍返回原批次；显式复制同一已发布批次可以连续创建不同的新绑定批次，且每个新批次均无绑定、无审阅状态、无物化结果并可追溯到源批次。

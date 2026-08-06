@@ -17,6 +17,7 @@
 - Create `types/routing_ownership.go`: 路由目标来源常量与规范化函数。
 - Modify `model/routing_policy.go`: 路由目标来源字段和保留来源的增量保存。
 - Modify `model/config_import.go`: 批次激活时间、激活审计和历史归属变更审计。
+- Modify `model/config_import.go`: 批次实例去重键、复制来源和已发布批次复制语义。
 - Modify `model/locking.go`: 为 service 层提供统一的跨数据库模型行锁入口。
 - Modify `model/main.go`: 三种数据库兼容的来源列迁移和新审计表迁移。
 - Modify `model/config_import_migration_test.go`: SQLite/MySQL/PostgreSQL 迁移契约。
@@ -1861,7 +1862,75 @@ git add web/src/i18n/locales/en.json web/src/i18n/locales/zh.json web/src/i18n/l
 git commit -m "feat: translate config import activation"
 ```
 
-### Task 11: 执行全量验证、历史回填和真实链路前置验收
+### Task 11: 实现已发布批次显式复制为新绑定批次
+
+**Files:**
+- Modify: `model/config_import.go`
+- Modify: `model/main.go`
+- Modify: `model/config_import_migration_test.go`
+- Modify: `dto/config_import.go`
+- Modify: `service/config_import.go`
+- Modify: `service/config_import_test.go`
+- Modify: `controller/config_import.go`
+- Modify: `controller/config_import_test.go`
+- Modify: `router/config-import-router.go`
+- Modify: `router/config_import_router_test.go`
+- Modify: `web/src/features/config-import/api.ts`
+- Modify: `web/src/features/config-import/types.ts`
+- Modify: `web/src/features/config-import/index.tsx`
+- Modify: `web/src/features/config-import/components/publish-result-step.tsx`
+- Modify: `web/src/features/config-import/components/__tests__/config-import-wizard.test.tsx`
+- Modify via script: `web/src/i18n/locales/{en,zh,zh-TW,fr,ja,ru,vi}.json`
+
+- [ ] **Step 1: 写批次复制和迁移失败测试**
+
+覆盖：普通重复上传仍返回同一批次；已发布源批次复制后保留相同 `payload_sha256`，但新批次 ID 和 `deduplication_key` 不同；新批次状态为 `binding`，`copied_from_batch_id` 指向源批次，实体重置为 `new`，且不存在绑定、问题、处理记录、物化 ID、发布或激活时间。未发布源批次返回 `COPY_FOR_BINDING_SOURCE_STATUS`。迁移测试验证历史 `payload_sha256` 唯一索引被移除、历史批次去重键回填且相同载荷可保存复制批次。
+
+- [ ] **Step 2: 运行失败测试**
+
+Run: `go test ./model ./service -run 'ConfigImport.*(Copy|Identity|Idempotent)' -count=1`
+
+Expected: 因复制服务、迁移和字段尚不存在而 FAIL。
+
+- [ ] **Step 3: 实现模型、迁移和复制事务**
+
+`ConfigImportBatch` 新增可空唯一 `DeduplicationKey` 与 `CopiedFromBatchID`，将 `PayloadSHA256` 调整为普通索引。`migrateConfigImportBatchIdentity` 在 `migrateDB` 和 `migrateDBFast` 的 `AutoMigrate` 前执行：添加缺失列、逐批次回填 `upload:<payload_sha256>`、移除旧载荷唯一索引。普通上传使用 `upload:<payload_sha256>` 查询和写入；复制使用 `copy:<uuid>`。
+
+实现 `CopyConfigImportBatchForBinding(ctx, adminID, sourceBatchID)`：锁定并校验已发布源批次，复制批次元数据和规范化实体，清空运行时与审阅状态，不复制关联表，事务提交后返回新批次详情。
+
+- [ ] **Step 4: 实现控制器、权限路由和结构化响应**
+
+新增 `POST /api/config-import/batches/:id/copy-for-binding`，复用 `config_import.write` 权限。响应直接返回新批次详情；源状态不合法返回 409 和 `COPY_FOR_BINDING_SOURCE_STATUS`。已发布批次的 `allowed_actions` 增加 `copy_for_binding`。
+
+- [ ] **Step 5: 运行后端测试至通过**
+
+Run: `go test ./model ./service ./controller ./router -run 'ConfigImport.*(Copy|Identity|Idempotent)|ConfigImportAllowedActions' -count=1`
+
+Expected: PASS。
+
+- [ ] **Step 6: 先写前端交互失败测试**
+
+在已发布结果页点击“复制为新绑定批次”，断言只调用一次复制 API，并切换到返回的新批次渠道绑定步骤；请求期间按钮禁用。没有 `copy_for_binding` 允许动作时不显示按钮。
+
+- [ ] **Step 7: 实现前端 API、类型和入口**
+
+增加复制 API 函数和 `copied_from_batch_id` 类型。结果页使用带复制图标的按钮；向导收到新批次后清除结果页状态并进入渠道绑定。
+
+- [ ] **Step 8: 通过规定脚本同步七种语言**
+
+新增 `Copy as new binding batch` 和复制失败相关文案，使用 `web/scripts/add-missing-keys.mjs` 写入全部七种语言，再运行 `bun run i18n:sync`，最后删除临时脚本。
+
+- [ ] **Step 9: 运行前端验证**
+
+Run: `cd web; bun test --parallel=1 src/features/config-import; bun run typecheck; bunx oxlint -c .oxlintrc.json src/features/config-import`
+
+Expected: PASS。
+
+- [ ] **Step 10: 在本地真实数据库创建新绑定批次**
+
+从当前已发布批次 20 调用复制接口，记录新批次 ID；确认 `status=binding`、`copied_from_batch_id=20`、`payload_sha256` 与源批次相同、绑定数为 0、实体数与源批次一致。普通重新上传当前 JSON仍返回批次 20。
+
+### Task 12: 执行全量验证、历史回填和真实链路前置验收
 
 **Files:**
 - Verify only

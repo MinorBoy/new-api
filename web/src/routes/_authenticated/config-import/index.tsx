@@ -7,6 +7,7 @@ published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { z } from 'zod'
 
 import { ConfigImportWizard } from '@/features/config-import'
 import {
@@ -15,6 +16,10 @@ import {
   hasPermission,
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
+
+const configImportSearchSchema = z.object({
+  batch: z.number().int().positive().optional().catch(undefined),
+})
 
 export function requireConfigImportRead() {
   const { auth } = useAuthStore.getState()
@@ -31,5 +36,11 @@ export function requireConfigImportRead() {
 
 export const Route = createFileRoute('/_authenticated/config-import/')({
   beforeLoad: requireConfigImportRead,
-  component: ConfigImportWizard,
+  validateSearch: configImportSearchSchema,
+  component: ConfigImportRoute,
 })
+
+function ConfigImportRoute() {
+  const { batch } = Route.useSearch()
+  return <ConfigImportWizard restoreBatchID={batch} />
+}

@@ -118,19 +118,20 @@ type ConfigImportDetailResponse struct {
 // ConfigImportBatchSummary is the normalized, credential-free metadata that
 // can be listed without loading every persisted entity.
 type ConfigImportBatchSummary struct {
-	ID              int64                          `json:"id"`
-	SchemaVersion   int                            `json:"schema_version"`
-	TemplateVersion string                         `json:"template_version"`
-	SourceSHA256    string                         `json:"source_sha256"`
-	PayloadSHA256   string                         `json:"payload_sha256"`
-	Status          types.ConfigImportBatchStatus  `json:"status"`
-	CreatedBy       int                            `json:"created_by"`
-	ItemCounts      types.ConfigImportEntityCounts `json:"item_counts"`
-	IssueCount      int                            `json:"issue_count"`
-	AllowedActions  []string                       `json:"allowed_actions"`
-	ActivatedAt     *int64                         `json:"activated_at,omitempty"`
-	CreatedAt       int64                          `json:"created_at"`
-	UpdatedAt       int64                          `json:"updated_at"`
+	ID                int64                          `json:"id"`
+	SchemaVersion     int                            `json:"schema_version"`
+	TemplateVersion   string                         `json:"template_version"`
+	SourceSHA256      string                         `json:"source_sha256"`
+	PayloadSHA256     string                         `json:"payload_sha256"`
+	Status            types.ConfigImportBatchStatus  `json:"status"`
+	CreatedBy         int                            `json:"created_by"`
+	ItemCounts        types.ConfigImportEntityCounts `json:"item_counts"`
+	IssueCount        int                            `json:"issue_count"`
+	AllowedActions    []string                       `json:"allowed_actions"`
+	CopiedFromBatchID *int64                         `json:"copied_from_batch_id,omitempty"`
+	ActivatedAt       *int64                         `json:"activated_at,omitempty"`
+	CreatedAt         int64                          `json:"created_at"`
+	UpdatedAt         int64                          `json:"updated_at"`
 }
 
 // ConfigImportItemDetail exposes a normalized authoritative entity. It does

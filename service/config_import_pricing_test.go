@@ -669,6 +669,51 @@ func TestConfigImportRouteReviewPersistsMergeMode(t *testing.T) {
 	assert.Equal(t, string(types.ConfigImportItemStateChanged), item.State)
 }
 
+func TestConfigImportRouteReviewRecoversPublishFailedBatch(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	batch := createConfigImportStageBatch(t, 17, "line-a", "vendor-video")
+	require.NoError(t, model.DB.Model(&batch).Updates(map[string]any{
+		"status":          types.ConfigImportBatchStatusPublishFailed,
+		"failure_code":    "PUBLISH_LINE_UNBOUND",
+		"failure_message": "configuration publish transaction failed",
+		"failed_at":       int64(123),
+	}).Error)
+
+	detail, err := UpdateConfigImportRouteReviews(context.Background(), 42, batch.ID, []dto.ConfigImportRouteReviewInput{{
+		ItemBusinessID: "route-a", MergeMode: types.ConfigImportRouteMergeModeMerge,
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	assert.Equal(t, types.ConfigImportBatchStatusStaged, detail.Status)
+	var recovered model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&recovered, batch.ID).Error)
+	assert.Empty(t, recovered.FailureCode)
+	assert.Empty(t, recovered.FailureMessage)
+	assert.Nil(t, recovered.FailedAt)
+}
+
+func TestConfigImportRouteReviewDoesNotRestoreBlueprintExcludedBySkippedLine(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	batch := createConfigImportStageBatch(t, 17, "line-a", "vendor-video")
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "line-a", Action: types.ConfigImportBindingActionSkip,
+	}})
+	require.NoError(t, err)
+
+	var item model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "route-a").First(&item).Error)
+	require.Equal(t, string(types.ConfigImportItemStateExcluded), item.State)
+
+	_, err = UpdateConfigImportRouteReviews(context.Background(), 42, batch.ID, []dto.ConfigImportRouteReviewInput{{
+		ItemBusinessID: "route-a", MergeMode: types.ConfigImportRouteMergeModeMerge,
+	}})
+	require.NoError(t, err)
+
+	require.NoError(t, model.DB.Where("id = ?", item.ID).First(&item).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateExcluded), item.State)
+}
+
 func TestConfigImportResolutionRejectsMissingStructuredFields(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	batch := createConfigImportStageBatch(t, 0, "line-a", "vendor-video")

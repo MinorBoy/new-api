@@ -131,6 +131,7 @@ async function mount(
     onStage?: (id: number) => Promise<ConfigImportBatchDetail>
     onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
     onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
+    onCopyForBinding?: (id: number) => Promise<ConfigImportBatchDetail>
     onActivate?: (id: number) => Promise<ConfigImportBatchDetail>
     onRefreshCache?: (id: number) => Promise<ConfigImportBatchDetail>
     onSavePricingReview?: (
@@ -171,6 +172,16 @@ async function mount(
           onPublish={async (id) => {
             calls.push(`publish:${id}`)
             return options.onPublish?.(id) ?? publishedForActivation()
+          }}
+          onCopyForBinding={async (id) => {
+            calls.push(`copy:${id}`)
+            return (
+              options.onCopyForBinding?.(id) ??
+              batch('binding', ['bind'], {
+                id: id + 1,
+                copied_from_batch_id: id,
+              })
+            )
           }}
           onActivate={async (id) => {
             calls.push(`activate:${id}`)
@@ -290,7 +301,13 @@ test('returns to routing diffs when publish reports a stale baseline', async () 
     assert.ok(confirm)
     await act(async () => confirm.click())
     await act(async () => button(mounted.container, 'Publish import').click())
-    assert.match(mounted.container.textContent ?? '', /Routing diff/)
+    assert.ok(
+      mounted.container.querySelector('#config-import-routing-title')
+    )
+    assert.equal(
+      mounted.container.querySelector('#config-import-publish-review-title'),
+      null
+    )
     assert.match(mounted.container.textContent ?? '', /stale/i)
   } finally {
     await act(async () => mounted.root.unmount())
@@ -354,6 +371,7 @@ test('shows the publish result after a successful publish', async () => {
 test('does not activate a published batch with blockers', async () => {
   const mounted = await mount({
     currentBatch: publishedForActivation({
+      allowed_actions: ['activate', 'copy_for_binding'],
       activation_preview: {
         ready: false,
         channel_count: 1,
@@ -376,10 +394,54 @@ test('does not activate a published batch with blockers', async () => {
       /ACTIVATION_CHANNEL_KEY_MISSING/
     )
     assert.equal(button(mounted.container, 'Activate import').disabled, true)
+    await act(async () =>
+      button(mounted.container, 'Copy as new binding batch').click()
+    )
+    assert.match(mounted.container.textContent ?? '', /Channel bindings/)
     assert.equal(
       mounted.calls.some((call) => call.startsWith('activate:')),
       false
     )
+    assert.equal(mounted.calls.filter((call) => call === 'copy:12').length, 1)
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('returns to routing diffs when publish finds an unbound route line', async () => {
+  const publishError = Object.assign(
+    new Error(
+      'route target "route-target/MAP-MEGABYAI-R122-480" references unbound line "megabyai-fast-real-person"'
+    ),
+    {
+      response: {
+        data: { code: 'PUBLISH_LINE_UNBOUND' },
+      },
+    }
+  )
+  const mounted = await mount({
+    currentBatch: batch('ready', ['publish']),
+    onPublish: async () => {
+      throw publishError
+    },
+  })
+  try {
+    const confirmation = mounted.container.querySelector(
+      '[aria-label="Confirm publish"]'
+    ) as HTMLInputElement | null
+    assert.ok(confirmation)
+    await act(async () => confirmation.click())
+    await act(async () => button(mounted.container, 'Publish import').click())
+
+    assert.ok(
+      mounted.container.querySelector('#config-import-routing-title')
+    )
+    assert.equal(
+      mounted.container.querySelector('#config-import-publish-review-title'),
+      null
+    )
+    assert.match(mounted.container.textContent ?? '', /references unbound line/)
+    assert.deepEqual(mounted.calls, ['publish:12'])
   } finally {
     await act(async () => mounted.root.unmount())
   }
@@ -494,5 +556,44 @@ test('shows retry guidance for publish failures and a terminal published summary
     )
   } finally {
     await act(async () => published.root.unmount())
+  }
+})
+
+test('copies a published batch into a fresh binding batch', async () => {
+  const mounted = await mount({
+    currentBatch: batch('published', ['copy_for_binding'], {
+      activated_at: 123,
+    }),
+    onCopyForBinding: async () =>
+      batch('binding', ['bind'], {
+        id: 13,
+        copied_from_batch_id: 12,
+        activated_at: null,
+      }),
+  })
+  try {
+    await act(async () =>
+      button(mounted.container, 'Copy as new binding batch').click()
+    )
+    assert.match(mounted.container.textContent ?? '', /Channel bindings/)
+    assert.deepEqual(mounted.calls, ['copy:12'])
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('does not show the copy action when the backend disallows it', async () => {
+  const mounted = await mount({
+    currentBatch: batch('published', [], { activated_at: 123 }),
+  })
+  try {
+    assert.equal(
+      [...mounted.container.querySelectorAll('button')].some(
+        (candidate) => candidate.textContent === 'Copy as new binding batch'
+      ),
+      false
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
   }
 })

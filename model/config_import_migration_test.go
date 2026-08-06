@@ -100,6 +100,37 @@ func TestConfigImportMigrationDropsLegacyBatchChannelUniqueIndex(t *testing.T) {
 	require.NoError(t, migrateConfigImportBindingChannelIndex())
 }
 
+func TestConfigImportBatchIdentityMigrationPreservesPayloadHashAndAllowsCopies(t *testing.T) {
+	prepareConfigImportDB(t)
+	require.NoError(t, DB.Migrator().DropIndex(&ConfigImportBatch{}, "idx_config_import_batches_payload_sha256"))
+	require.NoError(t, DB.Exec(`CREATE UNIQUE INDEX idx_config_import_batches_payload_sha256 ON config_import_batches(payload_sha256)`).Error)
+	source := ConfigImportBatch{SchemaVersion: 1, TemplateVersion: "v1", SourceSHA256: "source", PayloadSHA256: "payload", Status: "published", CreatedBy: 42, SummaryJSON: "{}", BaselineJSON: "{}"}
+	require.NoError(t, DB.Create(&source).Error)
+
+	require.NoError(t, migrateConfigImportBatchIdentity())
+	require.NoError(t, DB.AutoMigrate(&ConfigImportBatch{}))
+
+	var loadedSource ConfigImportBatch
+	require.NoError(t, DB.First(&loadedSource, source.ID).Error)
+	require.NotNil(t, loadedSource.DeduplicationKey)
+	assert.Equal(t, "upload:payload", *loadedSource.DeduplicationKey)
+	assert.Nil(t, loadedSource.CopiedFromBatchID)
+
+	copyKey := "copy:operation-1"
+	copySourceID := loadedSource.ID
+	copyBatch := ConfigImportBatch{
+		SchemaVersion: loadedSource.SchemaVersion, TemplateVersion: loadedSource.TemplateVersion,
+		SourceSHA256: loadedSource.SourceSHA256, PayloadSHA256: loadedSource.PayloadSHA256,
+		DeduplicationKey: &copyKey, CopiedFromBatchID: &copySourceID,
+		Status: "binding", CreatedBy: 99, SummaryJSON: "{}", BaselineJSON: "{}",
+	}
+	require.NoError(t, DB.Create(&copyBatch).Error)
+	assert.NotEqual(t, loadedSource.ID, copyBatch.ID)
+	assert.Equal(t, loadedSource.PayloadSHA256, copyBatch.PayloadSHA256)
+
+	require.NoError(t, migrateConfigImportBatchIdentity())
+}
+
 func TestConfigImportMigrationConfiguredDatabases(t *testing.T) {
 	tests := []struct {
 		name      string

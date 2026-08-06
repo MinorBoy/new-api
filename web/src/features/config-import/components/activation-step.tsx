@@ -1,3 +1,4 @@
+import { Copy } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -20,15 +21,17 @@ export interface ActivationStepProps {
   canActivate: boolean
   isActivating?: boolean
   onActivate: () => Promise<void>
+  onCopyForBinding?: () => Promise<void>
 }
 
 export function ActivationStep(props: ActivationStepProps) {
   const { t } = useTranslation()
   const [confirmed, setConfirmed] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCopying, setIsCopying] = useState(false)
   const [error, setError] = useState<string>()
   const preview = props.batch.activation_preview
-  const busy = props.isActivating || isSubmitting
+  const busy = props.isActivating || isSubmitting || isCopying
   const disabled =
     !props.canActivate ||
     !preview?.ready ||
@@ -53,6 +56,21 @@ export function ActivationStep(props: ActivationStepProps) {
       )
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const copyForBinding = async () => {
+    if (!props.onCopyForBinding) return
+    setError(undefined)
+    setIsCopying(true)
+    try {
+      await props.onCopyForBinding()
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : t('Activation failed.')
+      )
+    } finally {
+      setIsCopying(false)
     }
   }
 
@@ -146,6 +164,21 @@ export function ActivationStep(props: ActivationStepProps) {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {props.batch.allowed_actions.includes('copy_for_binding') &&
+        props.onCopyForBinding && (
+          <Button
+            type='button'
+            variant='outline'
+            disabled={busy}
+            aria-busy={busy}
+            onClick={() => void copyForBinding()}
+          >
+            {isCopying && <Spinner data-icon='inline-start' />}
+            {!isCopying && <Copy data-icon='inline-start' />}
+            {t('Copy as new binding batch')}
+          </Button>
+        )}
 
       <label className='flex items-start gap-2 border px-3 py-3 text-sm'>
         <input

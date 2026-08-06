@@ -534,7 +534,7 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 		sort.Strings(optionKeys)
 		if len(optionKeys) > 0 {
 			var options []model.Option
-			if err := model.LockModelForUpdate(tx, &model.Option{}).Where("key IN ?", optionKeys).Order("key ASC").Find(&options).Error; err != nil {
+			if err := configImportActivationOptionsQuery(tx, optionKeys).Find(&options).Error; err != nil {
 				return nil, err
 			}
 		}
@@ -708,6 +708,16 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 	}
 	plan.Blockers = normalizeConfigImportActivationBlockers(plan.Blockers)
 	return plan, nil
+}
+
+func configImportActivationOptionsQuery(tx *gorm.DB, optionKeys []string) *gorm.DB {
+	optionValues := make([]any, 0, len(optionKeys))
+	for _, optionKey := range optionKeys {
+		optionValues = append(optionValues, optionKey)
+	}
+	return model.LockModelForUpdate(tx, &model.Option{}).
+		Where(clause.IN{Column: clause.Column{Name: "key"}, Values: optionValues}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}})
 }
 
 func configImportActivationTargetMatches(actual, expected model.RouteTarget) bool {

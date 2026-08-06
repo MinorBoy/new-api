@@ -58,6 +58,15 @@ export async function getConfigImportBatch(
   return parseDetail(response.data)
 }
 
+export async function copyConfigImportBatchForBinding(
+  id: number
+): Promise<ConfigImportBatchDetail> {
+  const response = await api.post(
+    `${CONFIG_IMPORT_PATH}/${id}/copy-for-binding`
+  )
+  return parseDetail(response.data)
+}
+
 export async function saveConfigImportBindings(
   id: number,
   request: ConfigImportBindingsRequest

@@ -17,6 +17,7 @@ import { listRoutingGroups } from '@/features/model-routing/api'
 
 import {
   activateConfigImport,
+  copyConfigImportBatchForBinding,
   getConfigImportBatch,
   publishConfigImport,
   refreshConfigImportCache,
@@ -63,6 +64,7 @@ export interface ConfigImportWizardProps {
   onValidate?: (id: number) => Promise<ConfigImportBatchDetail>
   onPublish?: (id: number) => Promise<ConfigImportBatchDetail>
   onActivate?: (id: number) => Promise<ConfigImportBatchDetail>
+  onCopyForBinding?: (id: number) => Promise<ConfigImportBatchDetail>
   onRefreshCache?: (id: number) => Promise<ConfigImportBatchDetail>
   onSaveBindings?: (
     id: number,
@@ -189,11 +191,29 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
       setBatch(updated)
       return updated
     } catch (caught) {
-      const code =
-        caught !== null && typeof caught === 'object' && 'code' in caught
-          ? String(caught.code)
-          : ''
-      if (code === 'STALE_BASE_VERSION') {
+      let code = ''
+      if (caught !== null && typeof caught === 'object') {
+        const response = 'response' in caught ? caught.response : undefined
+        const responseData =
+          response !== null &&
+          typeof response === 'object' &&
+          'data' in response
+            ? response.data
+            : undefined
+        if (
+          responseData !== null &&
+          typeof responseData === 'object' &&
+          'code' in responseData
+        ) {
+          code = String(responseData.code)
+        } else if ('code' in caught) {
+          code = String(caught.code)
+        }
+      }
+      if (
+        code === 'STALE_BASE_VERSION' ||
+        code === 'PUBLISH_LINE_UNBOUND'
+      ) {
         setForcedStep('routing_diff')
       }
       if (code === 'ACTIVATION_CACHE_REFRESH_PENDING') {
@@ -416,6 +436,20 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           batch={batch}
           canActivate={state.canActivate}
           isActivating={isBusy}
+          onCopyForBinding={
+            batch.allowed_actions.includes('copy_for_binding')
+              ? async () => {
+                  const copied = await runMutation(
+                    props.onCopyForBinding ?? copyConfigImportBatchForBinding
+                  )
+                  if (copied) {
+                    setBatch(copied)
+                    setForcedStep(undefined)
+                    setReviewStep(undefined)
+                  }
+                }
+              : undefined
+          }
           onActivate={async () => {
             const activated = await runMutation(
               props.onActivate ?? activateConfigImport
@@ -427,6 +461,21 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
       {step === 'publish_result' && (
         <PublishResultStep
           batch={batch}
+          isCopying={isBusy}
+          onCopyForBinding={
+            batch.allowed_actions.includes('copy_for_binding')
+              ? async () => {
+                  const copied = await runMutation(
+                    props.onCopyForBinding ?? copyConfigImportBatchForBinding
+                  )
+                  if (copied) {
+                    setBatch(copied)
+                    setForcedStep(undefined)
+                    setReviewStep(undefined)
+                  }
+                }
+              : undefined
+          }
           isRefreshing={isBusy}
           onRefreshCache={
             batch.allowed_actions.includes('refresh_cache')

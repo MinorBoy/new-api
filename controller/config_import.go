@@ -56,6 +56,20 @@ func GetConfigImportBatch(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+func CopyConfigImportBatchForBinding(c *gin.Context) {
+	id, err := configImportID(c)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	result, err := service.CopyConfigImportBatchForBinding(c, c.GetInt("id"), id)
+	if err != nil {
+		writeConfigImportError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
 func UpdateConfigImportBindings(c *gin.Context) {
 	id, err := configImportID(c)
 	if err != nil {
@@ -233,7 +247,7 @@ func writeConfigImportError(c *gin.Context, err error) {
 	var schemaErr *service.ConfigImportSchemaError
 	if errors.As(err, &schemaErr) {
 		switch schemaErr.Code {
-		case "STALE_BASE_VERSION", "ACTIVATION_BLOCKED", "ACTIVATION_CONCURRENT", "ROUTE_OWNERSHIP_ROLLBACK_CONFLICT":
+		case "STALE_BASE_VERSION", "ACTIVATION_BLOCKED", "ACTIVATION_CONCURRENT", "ROUTE_OWNERSHIP_ROLLBACK_CONFLICT", "COPY_FOR_BINDING_SOURCE_STATUS":
 			status = http.StatusConflict
 		case "ACTIVATION_CACHE_REFRESH_PENDING":
 			status = http.StatusServiceUnavailable

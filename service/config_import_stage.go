@@ -848,9 +848,14 @@ func UpdateConfigImportRouteReviews(ctx context.Context, adminID int, batchID in
 			return err
 		}
 		status := types.ConfigImportBatchStatus(batch.Status)
-		if status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged && status != types.ConfigImportBatchStatusReady {
+		if status != types.ConfigImportBatchStatusBinding && status != types.ConfigImportBatchStatusStaged && status != types.ConfigImportBatchStatusReady && status != types.ConfigImportBatchStatusPublishFailed {
 			return configImportError("ROUTE_REVIEW_BATCH_STATUS", "batch %d is not accepting route reviews", batchID)
 		}
+		skipOwners, err := configImportActiveSkipOwners(tx, batchID, "")
+		if err != nil {
+			return err
+		}
+		skippedItems := configImportSkippedItemStatesByID(skipOwners)
 		for _, review := range reviews {
 			var item model.ConfigImportItem
 			if err := tx.Where("batch_id = ? AND business_id = ? AND entity_type = ?", batchID, review.ItemBusinessID, "route_blueprints").First(&item).Error; err != nil {
@@ -858,6 +863,17 @@ func UpdateConfigImportRouteReviews(ctx context.Context, adminID int, batchID in
 					return configImportError("ROUTE_REVIEW_ITEM_NOT_FOUND", "route blueprint %q does not belong to batch %d", review.ItemBusinessID, batchID)
 				}
 				return err
+			}
+			if _, skipped := skippedItems[item.ID]; skipped {
+				if err := tx.Model(&item).Updates(map[string]any{
+					"state":            string(types.ConfigImportItemStateExcluded),
+					"exclusion_reason": "",
+					"conflict_reason":  "",
+					"updated_at":       common.GetTimestamp(),
+				}).Error; err != nil {
+					return err
+				}
+				continue
 			}
 			var blueprint types.ConfigImportRouteBlueprint
 			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &blueprint); err != nil {
@@ -882,10 +898,16 @@ func UpdateConfigImportRouteReviews(ctx context.Context, adminID int, batchID in
 				return err
 			}
 		}
-		if status == types.ConfigImportBatchStatusReady {
-			return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(map[string]any{
+		if status == types.ConfigImportBatchStatusReady || status == types.ConfigImportBatchStatusPublishFailed {
+			updates := map[string]any{
 				"status": string(types.ConfigImportBatchStatusStaged), "updated_at": common.GetTimestamp(),
-			}).Error
+			}
+			if status == types.ConfigImportBatchStatusPublishFailed {
+				updates["failure_code"] = ""
+				updates["failure_message"] = ""
+				updates["failed_at"] = nil
+			}
+			return tx.Model(&model.ConfigImportBatch{}).Where("id = ?", batchID).Updates(updates).Error
 		}
 		return nil
 	})

@@ -47,7 +47,8 @@ const i18n = createInstance()
 i18n.init({ lng: 'en', resources: { en: { translation: {} } } })
 
 function batch(
-  activationPreview: ConfigImportActivationPreview
+  activationPreview: ConfigImportActivationPreview,
+  allowedActions: string[] = ['activate']
 ): ConfigImportBatchDetail {
   return {
     id: 12,
@@ -69,7 +70,7 @@ function batch(
       unresolved_variants: 0,
     },
     issue_count: 0,
-    allowed_actions: ['activate'],
+    allowed_actions: allowedActions,
     activated_at: null,
     created_at: 1,
     updated_at: 1,
@@ -82,12 +83,15 @@ function batch(
 async function mount(
   preview: ConfigImportActivationPreview,
   options: {
+    allowedActions?: string[]
     canActivate?: boolean
     isActivating?: boolean
     onActivate?: () => Promise<void>
+    onCopyForBinding?: () => Promise<void>
   } = {}
 ) {
-  let calls = 0
+  let activateCalls = 0
+  let copyCalls = 0
   const container = browserWindow.document.createElement('div')
   browserWindow.document.body.append(container)
   const root = createRoot(container as unknown as Container)
@@ -95,18 +99,27 @@ async function mount(
     root.render(
       <I18nextProvider i18n={i18n}>
         <ActivationStep
-          batch={batch(preview)}
+          batch={batch(preview, options.allowedActions)}
           canActivate={options.canActivate ?? true}
           isActivating={options.isActivating}
           onActivate={async () => {
-            calls += 1
+            activateCalls += 1
             await options.onActivate?.()
+          }}
+          onCopyForBinding={async () => {
+            copyCalls += 1
+            await options.onCopyForBinding?.()
           }}
         />
       </I18nextProvider>
     )
   })
-  return { container, root, calls: () => calls }
+  return {
+    container,
+    root,
+    activateCalls: () => activateCalls,
+    copyCalls: () => copyCalls,
+  }
 }
 
 function button(container: HappyHTMLElement, text: string): HTMLButtonElement {
@@ -145,7 +158,7 @@ test('requires a ready preview and explicit confirmation', async () => {
     )
     assert.equal(activate.disabled, false)
     await act(async () => activate.click())
-    assert.equal(mounted.calls(), 1)
+    assert.equal(mounted.activateCalls(), 1)
   } finally {
     await act(async () => mounted.root.unmount())
   }
@@ -178,6 +191,35 @@ test('shows every blocker and keeps activation disabled', async () => {
     assert.match(content, /ACTIVATION_CHANNEL_AUTO_DISABLED/)
     assert.match(content, /9/)
     assert.equal(button(mounted.container, 'Activate import').disabled, true)
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('offers copying a blocked published batch when backend allows it', async () => {
+  const mounted = await mount(
+    {
+      ready: false,
+      channel_count: 1,
+      policy_count: 1,
+      target_count: 1,
+      retire_target_count: 0,
+      blockers: [
+        {
+          code: 'ACTIVATION_COST_DRAFT_MISSING',
+          message: 'Missing cost draft.',
+        },
+      ],
+    },
+    {
+      allowedActions: ['copy_for_binding'],
+    }
+  )
+  try {
+    const copy = button(mounted.container, 'Copy as new binding batch')
+    assert.equal(copy.disabled, false)
+    await act(async () => copy.click())
+    assert.equal(mounted.copyCalls(), 1)
   } finally {
     await act(async () => mounted.root.unmount())
   }

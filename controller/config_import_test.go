@@ -36,7 +36,7 @@ func TestConfigImportActivateReturnsBatchDetailAndIsIdempotent(t *testing.T) {
 	assert.Equal(t, batch.ID, firstResponse.Data.ID)
 	assert.Equal(t, types.ConfigImportBatchStatusPublished, firstResponse.Data.Status)
 	require.NotNil(t, firstResponse.Data.ActivatedAt)
-	assert.Empty(t, firstResponse.Data.AllowedActions)
+	assert.Equal(t, []string{"copy_for_binding"}, firstResponse.Data.AllowedActions)
 	assert.Nil(t, firstResponse.Data.ActivationPreview)
 
 	secondRecorder, secondContext := configImportControllerContext(http.MethodPost, batch.ID)
@@ -47,6 +47,56 @@ func TestConfigImportActivateReturnsBatchDetailAndIsIdempotent(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.ConfigImportActivationAudit{}).
 		Where("batch_id = ? AND outcome = ?", batch.ID, "activated").Count(&auditCount).Error)
 	assert.Equal(t, int64(1), auditCount)
+}
+
+func TestConfigImportCopyForBindingReturnsFreshBatchDetail(t *testing.T) {
+	prepareConfigImportControllerTest(t)
+	source := createPublishedConfigImportControllerBatch(t)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: source.ID, EntityType: "sources", BusinessID: "source-a", EntityHash: "hash-a",
+		CanonicalJSON: `{"business_id":"source-a"}`, State: string(types.ConfigImportItemStateChanged), SourceRef: "source-a",
+	}).Error)
+
+	recorder, context := configImportControllerContext(http.MethodPost, source.ID)
+	context.Set("id", 99)
+
+	CopyConfigImportBatchForBinding(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool                        `json:"success"`
+		Data    dto.ConfigImportBatchDetail `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, types.ConfigImportBatchStatusBinding, response.Data.Status)
+	require.NotNil(t, response.Data.CopiedFromBatchID)
+	assert.Equal(t, source.ID, *response.Data.CopiedFromBatchID)
+	assert.Equal(t, 99, response.Data.CreatedBy)
+	assert.Empty(t, response.Data.Bindings)
+	require.Len(t, response.Data.Items, 1)
+	assert.Equal(t, types.ConfigImportItemStateNew, response.Data.Items[0].State)
+}
+
+func TestConfigImportCopyForBindingRejectsUnpublishedBatch(t *testing.T) {
+	prepareConfigImportControllerTest(t)
+	source := createPublishedConfigImportControllerBatch(t)
+	require.NoError(t, model.DB.Model(&model.ConfigImportBatch{}).Where("id = ?", source.ID).
+		Update("status", string(types.ConfigImportBatchStatusBinding)).Error)
+
+	recorder, context := configImportControllerContext(http.MethodPost, source.ID)
+	context.Set("id", 99)
+
+	CopyConfigImportBatchForBinding(context)
+
+	assert.Equal(t, http.StatusConflict, recorder.Code)
+	var response struct {
+		Success bool   `json:"success"`
+		Code    string `json:"code"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Equal(t, "COPY_FOR_BINDING_SOURCE_STATUS", response.Code)
 }
 
 func TestConfigImportActivateReturnsStructuredBlockers(t *testing.T) {
@@ -122,7 +172,7 @@ func TestConfigImportActivationCacheFailureIsRecoverableFromBatchDetail(t *testi
 	require.NoError(t, common.Unmarshal(getRecorder.Body.Bytes(), &getResponse))
 	require.NotNil(t, getResponse.Data.ActivatedAt)
 	assert.Equal(t, activatedAt, *getResponse.Data.ActivatedAt)
-	assert.Equal(t, []string{"refresh_cache"}, getResponse.Data.AllowedActions)
+	assert.Equal(t, []string{"refresh_cache", "copy_for_binding"}, getResponse.Data.AllowedActions)
 }
 
 func prepareConfigImportControllerTest(t *testing.T) {

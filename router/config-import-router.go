@@ -21,6 +21,7 @@ var configImportPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/batches", permission: authz.ConfigImportWrite, handler: controller.CreateConfigImportBatch},
 	{method: http.MethodGet, path: "/batches", permission: authz.ConfigImportRead, handler: controller.ListConfigImportBatches},
 	{method: http.MethodGet, path: "/batches/:id", permission: authz.ConfigImportRead, handler: controller.GetConfigImportBatch},
+	{method: http.MethodPost, path: "/batches/:id/copy-for-binding", permission: authz.ConfigImportWrite, handler: controller.CopyConfigImportBatchForBinding},
 	{method: http.MethodPut, path: "/batches/:id/bindings", permission: authz.ConfigImportWrite, handler: controller.UpdateConfigImportBindings},
 	{method: http.MethodPut, path: "/batches/:id/resolutions", permission: authz.ConfigImportWrite, handler: controller.UpdateConfigImportResolutions},
 	{method: http.MethodPut, path: "/batches/:id/pricing-review", permission: authz.ConfigImportWrite, handler: controller.UpdateConfigImportPricingReview},

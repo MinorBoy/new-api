@@ -1227,7 +1227,7 @@ func TestRetryConfigImportBatchCacheDoesNotRepublishConfiguration(t *testing.T) 
 	require.NoError(t, model.DB.Create(&model.ConfigImportPublishAudit{BatchID: batch.ID, AdminID: 42, BeforeSHA256: "before", AfterSHA256: "after", Outcome: "published"}).Error)
 	require.NoError(t, markConfigImportCacheRefreshPending(context.Background(), batch.ID))
 
-	require.Equal(t, []string{"refresh_cache"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, []model.ConfigImportIssue{{Code: "CACHE_REFRESH_PENDING", ResolutionStatus: "open"}}))
+	require.Equal(t, []string{"refresh_cache", "copy_for_binding"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, []model.ConfigImportIssue{{Code: "CACHE_REFRESH_PENDING", ResolutionStatus: "open"}}))
 	require.NoError(t, RetryConfigImportBatchCache(context.Background(), batch.ID, 42))
 	var issue model.ConfigImportIssue
 	require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", batch.ID, "CACHE_REFRESH_PENDING").First(&issue).Error)

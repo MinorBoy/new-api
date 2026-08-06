@@ -49,8 +49,13 @@ func CreateConfigImportBatch(ctx context.Context, adminID int, reader io.Reader)
 		// after the initial lookup. Read the durable winner after rollback.
 		var existing model.ConfigImportBatch
 		lookupErr := model.DB.WithContext(ctx).
-			Where("payload_sha256 = ?", document.Manifest.PayloadSHA256).
+			Where("deduplication_key = ?", model.ConfigImportUploadDeduplicationKey(document.Manifest.PayloadSHA256)).
 			First(&existing).Error
+		if lookupErr != nil {
+			lookupErr = model.DB.WithContext(ctx).
+				Where("payload_sha256 = ? AND (deduplication_key IS NULL OR deduplication_key = '')", document.Manifest.PayloadSHA256).
+				First(&existing).Error
+		}
 		if lookupErr != nil {
 			return nil, false, err
 		}
@@ -68,13 +73,17 @@ func CreateConfigImportBatch(ctx context.Context, adminID int, reader io.Reader)
 func createConfigImportBatch(ctx context.Context, adminID int, document *types.ConfigImportDocument) (int64, bool, error) {
 	var batchID int64
 	created := false
+	deduplicationKey := model.ConfigImportUploadDeduplicationKey(document.Manifest.PayloadSHA256)
 	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing model.ConfigImportBatch
-		payloadQuery := tx.Where("payload_sha256 = ?", document.Manifest.PayloadSHA256)
+		payloadQuery := tx.Where("deduplication_key = ?", deduplicationKey)
 		if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 			payloadQuery = payloadQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		err := payloadQuery.First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = tx.Where("payload_sha256 = ? AND (deduplication_key IS NULL OR deduplication_key = '')", document.Manifest.PayloadSHA256).First(&existing).Error
+		}
 		if err == nil {
 			batchID = existing.ID
 			return nil
@@ -101,14 +110,15 @@ func createConfigImportBatch(ctx context.Context, adminID int, document *types.C
 		}
 		now := common.GetTimestamp()
 		batch := model.ConfigImportBatch{
-			SchemaVersion:   document.SchemaVersion,
-			TemplateVersion: document.TemplateVersion,
-			SourceSHA256:    document.Manifest.SourceSHA256,
-			PayloadSHA256:   document.Manifest.PayloadSHA256,
-			Status:          string(types.ConfigImportBatchStatusValidating),
-			CreatedBy:       adminID,
-			SummaryJSON:     model.ConfigImportSummaryJSON(summaryJSON),
-			BaselineJSON:    model.ConfigImportBaselineJSON(baselineJSON),
+			SchemaVersion:    document.SchemaVersion,
+			TemplateVersion:  document.TemplateVersion,
+			SourceSHA256:     document.Manifest.SourceSHA256,
+			PayloadSHA256:    document.Manifest.PayloadSHA256,
+			DeduplicationKey: &deduplicationKey,
+			Status:           string(types.ConfigImportBatchStatusValidating),
+			CreatedBy:        adminID,
+			SummaryJSON:      model.ConfigImportSummaryJSON(summaryJSON),
+			BaselineJSON:     model.ConfigImportBaselineJSON(baselineJSON),
 		}
 		if err := tx.Create(&batch).Error; err != nil {
 			return err
@@ -155,6 +165,89 @@ func createConfigImportBatch(ctx context.Context, adminID int, document *types.C
 		return nil
 	})
 	return batchID, created, err
+}
+
+// CopyConfigImportBatchForBinding creates an explicit fresh binding attempt
+// from a published batch. It preserves authoritative entities but never
+// carries over credentials, review state, issues, or materialized IDs.
+func CopyConfigImportBatchForBinding(ctx context.Context, adminID int, sourceBatchID int64) (*dto.ConfigImportBatchDetail, error) {
+	if adminID <= 0 {
+		return nil, configImportError("SCHEMA_ADMIN", "admin ID is required")
+	}
+	if sourceBatchID <= 0 {
+		return nil, configImportError("SCHEMA_BATCH_ID", "batch ID is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var copiedBatchID int64
+	err := model.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var source model.ConfigImportBatch
+		if err := model.LockModelForUpdate(tx, &model.ConfigImportBatch{}).Where("id = ?", sourceBatchID).First(&source).Error; err != nil {
+			return err
+		}
+		if types.ConfigImportBatchStatus(source.Status) != types.ConfigImportBatchStatusPublished {
+			return configImportError("COPY_FOR_BINDING_SOURCE_STATUS", "batch %d is not published", sourceBatchID)
+		}
+
+		var items []model.ConfigImportItem
+		if err := tx.Where("batch_id = ?", source.ID).Order("entity_type ASC, business_id ASC, id ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		var storedSummary configImportBatchSummaryStorage
+		if err := common.UnmarshalJsonStr(string(source.SummaryJSON), &storedSummary); err != nil {
+			return fmt.Errorf("decode config import batch %d summary: %w", source.ID, err)
+		}
+		storedSummary.IssueCount = 0
+		storedSummary.ChannelModelSnapshots = nil
+		summaryJSON, err := common.Marshal(storedSummary)
+		if err != nil {
+			return fmt.Errorf("marshal copied config import summary: %w", err)
+		}
+		baselineJSON, err := common.Marshal(map[string]any{})
+		if err != nil {
+			return fmt.Errorf("marshal copied config import baseline: %w", err)
+		}
+		deduplicationKey := "copy:" + common.GetUUID()
+		copiedFromBatchID := source.ID
+		batch := model.ConfigImportBatch{
+			SchemaVersion:     source.SchemaVersion,
+			TemplateVersion:   source.TemplateVersion,
+			SourceSHA256:      source.SourceSHA256,
+			PayloadSHA256:     source.PayloadSHA256,
+			DeduplicationKey:  &deduplicationKey,
+			CopiedFromBatchID: &copiedFromBatchID,
+			Status:            string(types.ConfigImportBatchStatusBinding),
+			CreatedBy:         adminID,
+			SummaryJSON:       model.ConfigImportSummaryJSON(summaryJSON),
+			BaselineJSON:      model.ConfigImportBaselineJSON(baselineJSON),
+		}
+		if err := tx.Create(&batch).Error; err != nil {
+			return err
+		}
+		for _, item := range items {
+			copiedItem := model.ConfigImportItem{
+				BatchID:       batch.ID,
+				EntityType:    item.EntityType,
+				BusinessID:    item.BusinessID,
+				EntityHash:    item.EntityHash,
+				CanonicalJSON: item.CanonicalJSON,
+				State:         string(types.ConfigImportItemStateNew),
+				SourceRef:     item.SourceRef,
+				SourceSheet:   item.SourceSheet,
+				SourceRow:     item.SourceRow,
+			}
+			if err := tx.Create(&copiedItem).Error; err != nil {
+				return err
+			}
+		}
+		copiedBatchID = batch.ID
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return GetConfigImportBatch(ctx, copiedBatchID)
 }
 
 // ListConfigImportBatches returns newest batches first. Pagination is bounded
@@ -440,19 +533,20 @@ func configImportBatchSummary(batch *model.ConfigImportBatch, issues []model.Con
 		return dto.ConfigImportBatchSummary{}, fmt.Errorf("decode config import batch %d summary: %w", batch.ID, err)
 	}
 	return dto.ConfigImportBatchSummary{
-		ID:              batch.ID,
-		SchemaVersion:   batch.SchemaVersion,
-		TemplateVersion: batch.TemplateVersion,
-		SourceSHA256:    batch.SourceSHA256,
-		PayloadSHA256:   batch.PayloadSHA256,
-		Status:          types.ConfigImportBatchStatus(batch.Status),
-		CreatedBy:       batch.CreatedBy,
-		ItemCounts:      stored.ItemCounts,
-		IssueCount:      stored.IssueCount,
-		AllowedActions:  configImportAllowedActions(types.ConfigImportBatchStatus(batch.Status), batch.ActivatedAt, issues),
-		ActivatedAt:     batch.ActivatedAt,
-		CreatedAt:       batch.CreatedAt,
-		UpdatedAt:       batch.UpdatedAt,
+		ID:                batch.ID,
+		SchemaVersion:     batch.SchemaVersion,
+		TemplateVersion:   batch.TemplateVersion,
+		SourceSHA256:      batch.SourceSHA256,
+		PayloadSHA256:     batch.PayloadSHA256,
+		Status:            types.ConfigImportBatchStatus(batch.Status),
+		CreatedBy:         batch.CreatedBy,
+		ItemCounts:        stored.ItemCounts,
+		IssueCount:        stored.IssueCount,
+		AllowedActions:    configImportAllowedActions(types.ConfigImportBatchStatus(batch.Status), batch.ActivatedAt, issues),
+		CopiedFromBatchID: batch.CopiedFromBatchID,
+		ActivatedAt:       batch.ActivatedAt,
+		CreatedAt:         batch.CreatedAt,
+		UpdatedAt:         batch.UpdatedAt,
 	}, nil
 }
 
@@ -471,13 +565,13 @@ func configImportAllowedActions(status types.ConfigImportBatchStatus, activatedA
 	if status == types.ConfigImportBatchStatusPublished {
 		for _, issue := range issues {
 			if (issue.Code == "CACHE_REFRESH_PENDING" || issue.Code == "ACTIVATION_CACHE_REFRESH_PENDING") && issue.ResolutionStatus == "open" {
-				return []string{"refresh_cache"}
+				return []string{"refresh_cache", "copy_for_binding"}
 			}
 		}
 		if activatedAt == nil {
-			return []string{"activate"}
+			return []string{"activate", "copy_for_binding"}
 		}
-		return []string{}
+		return []string{"copy_for_binding"}
 	}
 	if status == types.ConfigImportBatchStatusBlocked ||
 		status == types.ConfigImportBatchStatusPublishing || status == types.ConfigImportBatchStatusValidating {

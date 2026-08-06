@@ -56,7 +56,10 @@ function parseObject(value: string): Record<string, unknown> {
 
 function routeBlueprints(batch: ConfigImportBatchDetail): RouteBlueprint[] {
   return batch.items
-    .filter((item) => item.entity_type === 'route_blueprints')
+    .filter(
+      (item) =>
+        item.entity_type === 'route_blueprints' && item.state !== 'excluded'
+    )
     .map((item) => {
       const blueprint = parseObject(item.canonical_json)
       const mergeMode = blueprint.merge_mode

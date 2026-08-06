@@ -39,6 +39,47 @@ func TestPreviewConfigImportRouteOwnershipBackfillClassifiesWithoutWrites(t *tes
 	assert.Zero(t, changed)
 }
 
+func TestPreviewConfigImportRouteOwnershipBackfillSkipsLegacyRouteReferenceShape(t *testing.T) {
+	prepareConfigImportRouteOwnershipTest(t)
+	seedRouteOwnershipBackfillFixture(t)
+
+	publishedAt := int64(400)
+	batch := model.ConfigImportBatch{
+		SchemaVersion: 1, TemplateVersion: "legacy",
+		SourceSHA256: "legacy-source", PayloadSHA256: "legacy-payload",
+		Status: string(types.ConfigImportBatchStatusPublished), CreatedBy: 42, PublishedAt: &publishedAt,
+	}
+	require.NoError(t, model.DB.Create(&batch).Error)
+	channelID := 41
+	confirmedAt := int64(390)
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: batch.ID, LineRef: "legacy-line", Action: string(types.ConfigImportBindingActionBind),
+		ChannelID: &channelID, CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+	}).Error)
+	legacyBlueprint := types.ConfigImportRouteBlueprint{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: "legacy-route"},
+		CanonicalModel:                  "canonical-video",
+		ClientModel:                     "canonical-video",
+		MergeMode:                       types.ConfigImportRouteMergeModeMerge,
+		Targets: []types.ConfigImportRouteTarget{{
+			RouteTargetRef: "legacy-target", LineRef: "legacy-line", UpstreamModel: "upstream-video",
+			SKURef: "sku-video", CostVariantKey: "default",
+		}},
+	}
+	encoded, err := common.Marshal(legacyBlueprint)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ConfigImportItem{
+		BatchID: batch.ID, EntityType: "route_blueprints", BusinessID: legacyBlueprint.BusinessID,
+		EntityHash: "legacy-hash", CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error)
+
+	report, err := PreviewConfigImportRouteOwnershipBackfill(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, report.Matched, 2)
+	assert.Len(t, report.Ambiguous, 1)
+	assert.Len(t, report.Unmatched, 1)
+}
+
 func TestApplyConfigImportRouteOwnershipBackfillIsIdempotent(t *testing.T) {
 	prepareConfigImportRouteOwnershipTest(t)
 	fixture := seedRouteOwnershipBackfillFixture(t)

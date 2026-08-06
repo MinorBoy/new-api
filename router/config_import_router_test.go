@@ -28,6 +28,10 @@ func TestConfigImportActivateRouteRequiresPublishPermission(t *testing.T) {
 	require.Fail(t, "config import publish permission was not registered")
 }
 
+func TestConfigImportCopyForBindingRouteRequiresWritePermission(t *testing.T) {
+	assertConfigImportRoutePermission(t, http.MethodPost, "/batches/:id/copy-for-binding", authz.ConfigImportWrite, controller.CopyConfigImportBatchForBinding)
+}
+
 func TestConfigImportRouteOwnershipRoutesRequirePublishPermission(t *testing.T) {
 	assertConfigImportRoutePermission(t, http.MethodGet, "/route-ownership/backfill-preview", authz.ConfigImportPublish, controller.PreviewConfigImportRouteOwnershipBackfill)
 	assertConfigImportRoutePermission(t, http.MethodPost, "/route-ownership/backfill", authz.ConfigImportPublish, controller.ApplyConfigImportRouteOwnershipBackfill)

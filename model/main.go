@@ -271,6 +271,9 @@ func migrateDB() error {
 	if err := migrateConfigImportBindingChannelIndex(); err != nil {
 		return err
 	}
+	if err := migrateConfigImportBatchIdentity(); err != nil {
+		return err
+	}
 	// Extend cost rule and route target business keys with cost_variant_key
 	// before AutoMigrate runs, so the new column is present, backfilled, and
 	// the old three-column unique index is replaced by the four-column one.
@@ -362,6 +365,9 @@ func migrateDB() error {
 
 func migrateDBFast() error {
 	if err := migrateConfigImportBindingChannelIndex(); err != nil {
+		return err
+	}
+	if err := migrateConfigImportBatchIdentity(); err != nil {
 		return err
 	}
 
@@ -760,6 +766,53 @@ func migrateConfigImportBindingChannelIndex() error {
 	}
 	if err := DB.Migrator().DropIndex(&ConfigImportBinding{}, "idx_config_import_binding_channel"); err != nil {
 		return fmt.Errorf("drop legacy idx_config_import_binding_channel: %w", err)
+	}
+	return nil
+}
+
+// migrateConfigImportBatchIdentity preserves payload hashes while replacing
+// the legacy payload unique index with an explicit batch-instance key.
+func migrateConfigImportBatchIdentity() error {
+	if DB == nil || !DB.Migrator().HasTable(&ConfigImportBatch{}) {
+		return nil
+	}
+	columns := []struct {
+		Name string
+		DDL  string
+	}{
+		{Name: "deduplication_key", DDL: "VARCHAR(128) NULL"},
+		{Name: "copied_from_batch_id", DDL: "BIGINT NULL"},
+	}
+	for _, column := range columns {
+		if DB.Migrator().HasColumn(&ConfigImportBatch{}, column.Name) {
+			continue
+		}
+		statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s",
+			quoteIdentifier("config_import_batches"), quoteIdentifier(column.Name), column.DDL)
+		if err := DB.Exec(statement).Error; err != nil {
+			return fmt.Errorf("add config_import_batches.%s: %w", column.Name, err)
+		}
+	}
+	var batches []ConfigImportBatch
+	if err := DB.Where("deduplication_key IS NULL OR deduplication_key = ''").Order("id ASC").Find(&batches).Error; err != nil {
+		return err
+	}
+	for _, batch := range batches {
+		key := ConfigImportUploadDeduplicationKey(batch.PayloadSHA256)
+		if err := DB.Model(&ConfigImportBatch{}).Where("id = ?", batch.ID).Update("deduplication_key", key).Error; err != nil {
+			return fmt.Errorf("backfill config import batch %d identity: %w", batch.ID, err)
+		}
+	}
+	for _, indexName := range []string{
+		"idx_config_import_batches_payload_sha256",
+		"uni_config_import_batches_payload_sha256",
+	} {
+		if !DB.Migrator().HasIndex(&ConfigImportBatch{}, indexName) {
+			continue
+		}
+		if err := DB.Migrator().DropIndex(&ConfigImportBatch{}, indexName); err != nil {
+			return fmt.Errorf("drop legacy config import batch payload index %s: %w", indexName, err)
+		}
 	}
 	return nil
 }

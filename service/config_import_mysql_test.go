@@ -180,3 +180,21 @@ func TestRefreshPublishedConfigLoadsOptionRowsOnMySQL(t *testing.T) {
 	common.OptionMapRWMutex.RUnlock()
 	assert.Equal(t, value, refreshed)
 }
+
+func TestConfigImportActivationOptionLockQuotesReservedKeyOnMySQL(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_MYSQL_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_MYSQL_DSN is not configured")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+	var options []model.Option
+	result := configImportActivationOptionsQuery(db, []string{"ModelPrice"}).Find(&options)
+	require.NoError(t, result.Error)
+}

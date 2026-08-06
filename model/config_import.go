@@ -38,27 +38,33 @@ func (ConfigImportSummaryJSON) GormDBDataType(db *gorm.DB, _ *schema.Field) stri
 // ConfigImportBatch is the resumable record for one credential-free
 // configuration import document.
 type ConfigImportBatch struct {
-	ID              int64                    `json:"id" gorm:"primaryKey"`
-	SchemaVersion   int                      `json:"schema_version"`
-	TemplateVersion string                   `json:"template_version" gorm:"type:varchar(32)"`
-	SourceSHA256    string                   `json:"source_sha256" gorm:"type:varchar(64);index"`
-	PayloadSHA256   string                   `json:"payload_sha256" gorm:"type:varchar(64);uniqueIndex"`
-	Status          string                   `json:"status" gorm:"type:varchar(32);index"`
-	CreatedBy       int                      `json:"created_by" gorm:"index"`
-	SummaryJSON     ConfigImportSummaryJSON  `json:"summary_json"`
-	BaselineJSON    ConfigImportBaselineJSON `json:"baseline_json"`
-	FailureCode     string                   `json:"failure_code" gorm:"type:varchar(64)"`
-	FailureMessage  string                   `json:"failure_message" gorm:"type:text"`
-	ValidatedAt     *int64                   `json:"validated_at,omitempty"`
-	PublishedAt     *int64                   `json:"published_at,omitempty"`
-	ActivatedAt     *int64                   `json:"activated_at,omitempty"`
-	FailedAt        *int64                   `json:"failed_at,omitempty"`
-	CreatedAt       int64                    `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       int64                    `json:"updated_at" gorm:"autoUpdateTime"`
+	ID                int64                    `json:"id" gorm:"primaryKey"`
+	SchemaVersion     int                      `json:"schema_version"`
+	TemplateVersion   string                   `json:"template_version" gorm:"type:varchar(32)"`
+	SourceSHA256      string                   `json:"source_sha256" gorm:"type:varchar(64);index"`
+	PayloadSHA256     string                   `json:"payload_sha256" gorm:"type:varchar(64);index"`
+	DeduplicationKey  *string                  `json:"-" gorm:"type:varchar(128);uniqueIndex"`
+	CopiedFromBatchID *int64                   `json:"copied_from_batch_id,omitempty" gorm:"index"`
+	Status            string                   `json:"status" gorm:"type:varchar(32);index"`
+	CreatedBy         int                      `json:"created_by" gorm:"index"`
+	SummaryJSON       ConfigImportSummaryJSON  `json:"summary_json"`
+	BaselineJSON      ConfigImportBaselineJSON `json:"baseline_json"`
+	FailureCode       string                   `json:"failure_code" gorm:"type:varchar(64)"`
+	FailureMessage    string                   `json:"failure_message" gorm:"type:text"`
+	ValidatedAt       *int64                   `json:"validated_at,omitempty"`
+	PublishedAt       *int64                   `json:"published_at,omitempty"`
+	ActivatedAt       *int64                   `json:"activated_at,omitempty"`
+	FailedAt          *int64                   `json:"failed_at,omitempty"`
+	CreatedAt         int64                    `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt         int64                    `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (ConfigImportBatch) TableName() string {
 	return "config_import_batches"
+}
+
+func ConfigImportUploadDeduplicationKey(payloadSHA256 string) string {
+	return "upload:" + payloadSHA256
 }
 
 // ConfigImportItem persists a normalized authoritative entity and its

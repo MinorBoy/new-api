@@ -6,6 +6,7 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
+import { Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -17,7 +18,9 @@ import type { ConfigImportBatchDetail } from '../types'
 export interface PublishResultStepProps {
   batch: ConfigImportBatchDetail
   onValidate?: () => Promise<void>
+  onCopyForBinding?: () => Promise<void>
   onRefreshCache?: () => Promise<void>
+  isCopying?: boolean
   isRefreshing?: boolean
 }
 
@@ -60,6 +63,19 @@ export function PublishResultStep(props: PublishResultStepProps) {
         <p>{t('The import was published successfully.')}</p>
       )}
       {activated && <p>{t('The published configuration is active.')}</p>}
+      {published && props.onCopyForBinding && (
+        <Button
+          type='button'
+          variant='outline'
+          disabled={props.isCopying}
+          aria-busy={props.isCopying}
+          onClick={() => void props.onCopyForBinding?.()}
+        >
+          {props.isCopying && <Spinner data-icon='inline-start' />}
+          {!props.isCopying && <Copy data-icon='inline-start' />}
+          {t('Copy as new binding batch')}
+        </Button>
+      )}
       {failed && (
         <div className='border-destructive/50 space-y-3 border px-3 py-3 text-sm'>
           <p>

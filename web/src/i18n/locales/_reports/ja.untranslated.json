@@ -19,12 +19,14 @@
   "Code Samples": "Code Samples",
   "Content-Type": "Content-Type",
   "Created": "Created",
+  "Default: https://z5api.com": "Default: https://z5api.com",
   "Deploy your own gateway. Swap one URL. The whole catalog, one mesh.": "Deploy your own gateway. Swap one URL. The whole catalog, one mesh.",
   "Developer-first": "Developer-first",
   "Drop-in base URL": "Drop-in base URL",
   "Each model's price matches its upstream exactly. No markup, ever.": "Each model's price matches its upstream exactly. No markup, ever.",
   "Each upstream arrives on its own terms. YSRouter normalizes them into a single routable mesh.": "Each upstream arrives on its own terms. YSRouter normalizes them into a single routable mesh.",
   "Endpoint Info": "Endpoint Info",
+  "Enter the raw API key issued by Z5API": "Enter the raw API key issued by Z5API",
   "Every model,": "Every model,",
   "Everything an AI gateway should ship with. Switched on or off per channel.": "Everything an AI gateway should ship with. Switched on or off per channel.",
   "Excluded": "Excluded",
@@ -41,6 +43,7 @@
   "live demo": "live demo",
   "Living System": "Living System",
   "Many nodes.": "Many nodes.",
+  "Map client-visible Ark model names to verified Z5API upstream models": "Map client-visible Ark model names to verified Z5API upstream models",
   "Method": "Method",
   "Millisecond fan-out across upstreams. Stream tokens back with zero added latency.": "Millisecond fan-out across upstreams. Stream tokens back with zero added latency.",
   "minutes.": "minutes.",
@@ -99,5 +102,6 @@
   "Validate import": "Validate import",
   "View Models & Pricing": "View Models & Pricing",
   "Watch it route": "Watch it route",
-  "YSRouter adds no markup": "YSRouter adds no markup"
+  "YSRouter adds no markup": "YSRouter adds no markup",
+  "Z5API is task-only. Enable it only after real upstream contract acceptance.": "Z5API is task-only. Enable it only after real upstream contract acceptance."
 }

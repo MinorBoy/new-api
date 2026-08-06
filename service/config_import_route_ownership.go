@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -353,6 +354,14 @@ func configImportRouteOwnershipCandidates(db *gorm.DB) (map[configImportRouteOwn
 		}
 		policy, targets, err := configImportRouteRows(lineChannelsByBatch[item.BatchID], blueprint)
 		if err != nil {
+			// Older published imports predate the complete reference-bound
+			// contract. They cannot be matched deterministically, so leave
+			// their existing targets manual instead of blocking the full
+			// backfill preview. New publishes remain strict.
+			var schemaErr *ConfigImportSchemaError
+			if errors.As(err, &schemaErr) && schemaErr.Code == "PUBLISH_ROUTE_REFERENCE" {
+				continue
+			}
 			return nil, err
 		}
 		batch := batchesByID[item.BatchID]

@@ -89,15 +89,17 @@ func prepareConfigImportDB(t *testing.T) {
 
 func createConfigImportBatch(t *testing.T, payloadSHA256 string) ConfigImportBatch {
 	t.Helper()
+	deduplicationKey := ConfigImportUploadDeduplicationKey(payloadSHA256)
 	batch := ConfigImportBatch{
-		SchemaVersion:   1,
-		TemplateVersion: "1",
-		SourceSHA256:    "source-sha256",
-		PayloadSHA256:   payloadSHA256,
-		Status:          string(types.ConfigImportBatchStatusBinding),
-		CreatedBy:       42,
-		SummaryJSON:     `{"items":{"channels":1}}`,
-		BaselineJSON:    `{"channel_versions":{}}`,
+		SchemaVersion:    1,
+		TemplateVersion:  "1",
+		SourceSHA256:     "source-sha256",
+		PayloadSHA256:    payloadSHA256,
+		DeduplicationKey: &deduplicationKey,
+		Status:           string(types.ConfigImportBatchStatusBinding),
+		CreatedBy:        42,
+		SummaryJSON:      `{"items":{"channels":1}}`,
+		BaselineJSON:     `{"channel_versions":{}}`,
 	}
 	require.NoError(t, DB.Create(&batch).Error)
 	return batch
@@ -226,13 +228,19 @@ func TestConfigImportBindingChannelMayBeSharedAcrossLinesWhileLineRefsStayUnique
 	}).Error)
 }
 
-func TestConfigImportPayloadSHA256IsUnique(t *testing.T) {
+func TestConfigImportDeduplicationKeyIsUniqueWhilePayloadMayRepeat(t *testing.T) {
 	prepareConfigImportDB(t)
-	createConfigImportBatch(t, "payload-sha256-4")
-	duplicate := ConfigImportBatch{
+	source := createConfigImportBatch(t, "payload-sha256-4")
+	copyKey := "copy:batch-2"
+	copySourceID := source.ID
+	require.NoError(t, DB.Create(&ConfigImportBatch{
 		SchemaVersion: 1, TemplateVersion: "1", PayloadSHA256: "payload-sha256-4",
-	}
-	require.Error(t, DB.Create(&duplicate).Error)
+		DeduplicationKey: &copyKey, CopiedFromBatchID: &copySourceID,
+	}).Error)
+	uploadKey := ConfigImportUploadDeduplicationKey("payload-sha256-4")
+	require.Error(t, DB.Create(&ConfigImportBatch{
+		SchemaVersion: 1, TemplateVersion: "1", PayloadSHA256: "payload-sha256-4", DeduplicationKey: &uploadKey,
+	}).Error)
 }
 
 func TestUpdateConfigImportBatchStatusUsesCompareAndSwap(t *testing.T) {

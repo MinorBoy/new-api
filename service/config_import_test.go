@@ -45,6 +45,7 @@ func prepareConfigImportServiceDB(t *testing.T) {
 		&model.ConfigImportIssue{},
 		&model.ConfigImportResolution{},
 		&model.ConfigImportPublishAudit{},
+		&model.ConfigImportActivationAudit{},
 	))
 }
 
@@ -173,6 +174,89 @@ func TestConfigImportUploadIsIdempotentByPayloadHash(t *testing.T) {
 	assert.Equal(t, int64(1), itemCount)
 }
 
+func TestConfigImportPublishedBatchCopiesToFreshBindingBatch(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	payload := configImportDocumentJSON(t, map[string]any{})
+	source, created, err := CreateConfigImportBatch(context.Background(), 42, bytes.NewReader([]byte(payload)))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	publishedAt := common.GetTimestamp()
+	require.NoError(t, model.DB.Model(&model.ConfigImportBatch{}).Where("id = ?", source.ID).Updates(map[string]any{
+		"status": string(types.ConfigImportBatchStatusPublished), "published_at": publishedAt,
+	}).Error)
+	materializedID := 17
+	require.NoError(t, model.DB.Model(&model.ConfigImportItem{}).Where("batch_id = ?", source.ID).Updates(map[string]any{
+		"state": string(types.ConfigImportItemStateExcluded), "materialized_type": "source",
+		"materialized_id": materializedID, "conflict_reason": "reviewed", "exclusion_reason": "excluded",
+	}).Error)
+	channelID := 9
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: source.ID, LineRef: "line-a", Action: string(types.ConfigImportBindingActionBind), ChannelID: &channelID,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.ConfigImportIssue{
+		BatchID: source.ID, Severity: string(types.ConfigImportIssueSeverityWarning), Code: "REVIEWED",
+		Message: "reviewed issue", ResolutionStatus: "resolved",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.ConfigImportResolution{
+		BatchID: source.ID, ItemBusinessID: "source-workbook", Action: string(types.ConfigImportResolutionActionExclude),
+		DecisionJSON: `{}`, CreatedBy: 42,
+	}).Error)
+
+	firstCopy, err := CopyConfigImportBatchForBinding(context.Background(), 99, source.ID)
+	require.NoError(t, err)
+	secondCopy, err := CopyConfigImportBatchForBinding(context.Background(), 100, source.ID)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, source.ID, firstCopy.ID)
+	assert.NotEqual(t, firstCopy.ID, secondCopy.ID)
+	assert.Equal(t, source.PayloadSHA256, firstCopy.PayloadSHA256)
+	assert.Equal(t, types.ConfigImportBatchStatusBinding, firstCopy.Status)
+	require.NotNil(t, firstCopy.CopiedFromBatchID)
+	assert.Equal(t, source.ID, *firstCopy.CopiedFromBatchID)
+	assert.Equal(t, 99, firstCopy.CreatedBy)
+	assert.Equal(t, []string{"bind", "resolve", "stage"}, firstCopy.AllowedActions)
+	assert.Nil(t, firstCopy.ActivatedAt)
+	assert.Empty(t, firstCopy.Bindings)
+	assert.Empty(t, firstCopy.Issues)
+	require.Len(t, firstCopy.Items, 1)
+	assert.Equal(t, types.ConfigImportItemStateNew, firstCopy.Items[0].State)
+	assert.Empty(t, firstCopy.Items[0].MaterializedType)
+	assert.Nil(t, firstCopy.Items[0].MaterializedID)
+	assert.Empty(t, firstCopy.Items[0].ConflictReason)
+	assert.Empty(t, firstCopy.Items[0].ExclusionReason)
+
+	var persistedSource, persistedCopy model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&persistedSource, source.ID).Error)
+	require.NoError(t, model.DB.First(&persistedCopy, firstCopy.ID).Error)
+	require.NotNil(t, persistedSource.DeduplicationKey)
+	require.NotNil(t, persistedCopy.DeduplicationKey)
+	assert.Equal(t, "upload:"+source.PayloadSHA256, *persistedSource.DeduplicationKey)
+	assert.NotEqual(t, *persistedSource.DeduplicationKey, *persistedCopy.DeduplicationKey)
+	assert.True(t, strings.HasPrefix(*persistedCopy.DeduplicationKey, "copy:"))
+
+	for _, table := range []any{&model.ConfigImportBinding{}, &model.ConfigImportIssue{}, &model.ConfigImportResolution{}} {
+		var count int64
+		require.NoError(t, model.DB.Model(table).Where("batch_id = ?", firstCopy.ID).Count(&count).Error)
+		assert.Zero(t, count)
+	}
+}
+
+func TestConfigImportCopyForBindingRejectsUnpublishedSource(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	payload := configImportDocumentJSON(t, map[string]any{})
+	source, created, err := CreateConfigImportBatch(context.Background(), 42, bytes.NewReader([]byte(payload)))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	_, err = CopyConfigImportBatchForBinding(context.Background(), 99, source.ID)
+
+	requireCode(t, err, "COPY_FOR_BINDING_SOURCE_STATUS")
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ConfigImportBatch{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
 func TestConfigImportUploadCreatesNewBatchForChangedPayload(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	firstPayload := configImportDocumentJSON(t, map[string]any{})
@@ -291,10 +375,10 @@ func TestConfigImportAllowedActionsAreStatusBounded(t *testing.T) {
 	assert.Equal(t, []string{"resolve", "validate"}, configImportAllowedActions(types.ConfigImportBatchStatusStaged, nil, nil))
 	assert.Equal(t, []string{"publish"}, configImportAllowedActions(types.ConfigImportBatchStatusReady, nil, nil))
 	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublishing, nil, nil))
-	assert.Equal(t, []string{"activate"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, nil))
-	assert.Equal(t, []string{"refresh_cache"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, cacheIssue))
-	assert.Empty(t, configImportAllowedActions(types.ConfigImportBatchStatusPublished, &activatedAt, nil))
-	assert.Equal(t, []string{"refresh_cache"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, &activatedAt, activationCacheIssue))
+	assert.Equal(t, []string{"activate", "copy_for_binding"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, nil))
+	assert.Equal(t, []string{"refresh_cache", "copy_for_binding"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, nil, cacheIssue))
+	assert.Equal(t, []string{"copy_for_binding"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, &activatedAt, nil))
+	assert.Equal(t, []string{"refresh_cache", "copy_for_binding"}, configImportAllowedActions(types.ConfigImportBatchStatusPublished, &activatedAt, activationCacheIssue))
 	assert.Equal(t, []string{"validate"}, configImportAllowedActions(types.ConfigImportBatchStatusPublishFailed, nil, nil))
 }
 
@@ -306,7 +390,7 @@ func TestGetConfigImportBatchIncludesActivationPreviewUntilActivated(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, detail.ActivationPreview)
 	assert.True(t, detail.ActivationPreview.Ready)
-	assert.Equal(t, []string{"activate"}, detail.AllowedActions)
+	assert.Equal(t, []string{"activate", "copy_for_binding"}, detail.AllowedActions)
 	assert.Nil(t, detail.ActivatedAt)
 
 	activatedAt := common.GetTimestamp()
@@ -317,7 +401,7 @@ func TestGetConfigImportBatchIncludesActivationPreviewUntilActivated(t *testing.
 	assert.Nil(t, detail.ActivationPreview)
 	require.NotNil(t, detail.ActivatedAt)
 	assert.Equal(t, activatedAt, *detail.ActivatedAt)
-	assert.Empty(t, detail.AllowedActions)
+	assert.Equal(t, []string{"copy_for_binding"}, detail.AllowedActions)
 }
 
 func assertConfigImportPersistenceEmpty(t *testing.T) {

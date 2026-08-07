@@ -95,21 +95,23 @@ map[string]GroupRoutingRequirements
 
 ## 6. 配置导入
 
-模板增加可选 `group_routing_requirements` 节点：
+模板的 `document.entities` 增加可选 `group_routing_requirements` 节点：
 
 ```json
 {
-  "group_routing_requirements": [
-    {
-      "business_id": "group-routing-requirement:真人分组",
-      "entity_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "source_ref": "source:group-routing-requirements",
-      "group_name": "真人分组",
-      "requirements": {
-        "require_real_person": true
+  "entities": {
+    "group_routing_requirements": [
+      {
+        "business_id": "group-routing-requirement:真人分组",
+        "entity_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "source_ref": "source:group-routing-requirements",
+        "group_name": "真人分组",
+        "requirements": {
+          "require_real_person": true
+        }
       }
-    }
-  ]
+    ]
+  }
 }
 ```
 

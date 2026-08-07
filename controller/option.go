@@ -45,6 +45,16 @@ func isPositiveOptionValue(value string) bool {
 	return err == nil && floatValue > 0
 }
 
+func isSensitiveOptionKey(key string) bool {
+	lower := strings.ToLower(key)
+	return strings.HasSuffix(key, "Token") ||
+		strings.HasSuffix(key, "Secret") ||
+		strings.HasSuffix(key, "Key") ||
+		strings.HasSuffix(lower, "secret") ||
+		strings.HasSuffix(lower, "api_key") ||
+		strings.HasSuffix(lower, "secret_access_key")
+}
+
 func collectModelNamesFromOptionValue(raw string, modelNames map[string]struct{}) {
 	if strings.TrimSpace(raw) == "" {
 		return
@@ -97,12 +107,7 @@ func GetOptions(c *gin.Context) {
 		case "billing_setting.seedance_token_price":
 			value = billing_setting.SeedanceTokenPrice2JSONString()
 		}
-		isSensitiveKey := strings.HasSuffix(k, "Token") ||
-			strings.HasSuffix(k, "Secret") ||
-			strings.HasSuffix(k, "Key") ||
-			strings.HasSuffix(k, "secret") ||
-			strings.HasSuffix(k, "api_key")
-		if isSensitiveKey {
+		if isSensitiveOptionKey(k) {
 			continue
 		}
 		options = append(options, &model.Option{

@@ -183,6 +183,9 @@ export async function hashPayload(
       if (!Array.isArray(candidates)) {
         continue
       }
+      if (type === 'group_routing_requirements' && candidates.length === 0) {
+        continue
+      }
       normalizedEntities[type] = candidates
         .filter(
           (candidate): candidate is Record<string, unknown> =>

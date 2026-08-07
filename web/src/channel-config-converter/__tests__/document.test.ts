@@ -54,6 +54,8 @@ test('builds the corrected v1 import document without unresolved contracts', asy
   assert.equal(result.document.entities.cost_rule_drafts.length, 147)
   assert.equal(result.document.entities.model_mappings.length, 147)
   assert.equal(result.document.entities.route_blueprints.length, 147)
+  assert.equal(result.document.entities.group_routing_requirements.length, 0)
+  assert.equal(result.document.manifest.counts.group_routing_requirements, 0)
   assert.equal(result.document.entities.unresolved_variants.length, 0)
   assert.deepEqual(result.document.issues, [])
   assert.equal(result.hasFailures, false)
@@ -85,10 +87,12 @@ test('builds the corrected v1 import document without unresolved contracts', asy
     }
   }
   assert.ok(
-    result.document.entities.route_blueprints.every((blueprint) =>
-      (blueprint.targets as Array<{ enabled: boolean }>).every(
-        (target) => target.enabled === false
-      )
+    result.document.entities.route_blueprints.every(
+      (blueprint) =>
+        blueprint.group_name === 'default' &&
+        (blueprint.targets as Array<{ enabled: boolean }>).every(
+          (target) => target.enabled === false
+        )
     )
   )
 })

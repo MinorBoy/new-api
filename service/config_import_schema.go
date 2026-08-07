@@ -95,6 +95,11 @@ func ParseConfigImportDocument(reader io.Reader) (*types.ConfigImportDocument, e
 // constraint values before they are persisted as canonical entity rows. The
 // parser has already verified each entity hash against this normalization.
 func normalizeConfigImportDocument(document *types.ConfigImportDocument) {
+	for index := range document.Entities.RouteBlueprints {
+		if strings.TrimSpace(document.Entities.RouteBlueprints[index].GroupName) == "" {
+			document.Entities.RouteBlueprints[index].GroupName = "default"
+		}
+	}
 	canonicalizeConfigImportEntities(&document.Entities)
 }
 
@@ -286,15 +291,16 @@ func validateConfigImportManifest(manifest types.ConfigImportManifest) error {
 
 func validateConfigImportManifestCounts(counts *types.ConfigImportManifestCounts, entities types.ConfigImportEntities) error {
 	actual := types.ConfigImportEntityCounts{
-		Channels:           len(entities.Channels),
-		ChannelLines:       len(entities.ChannelLines),
-		ModelSKUs:          len(entities.ModelSKUs),
-		SaleProposals:      len(entities.SaleProposals),
-		CostRuleDrafts:     len(entities.CostRuleDrafts),
-		ModelMappings:      len(entities.ModelMappings),
-		RouteBlueprints:    len(entities.RouteBlueprints),
-		Sources:            len(entities.Sources),
-		UnresolvedVariants: len(entities.UnresolvedVariants),
+		Channels:                 len(entities.Channels),
+		ChannelLines:             len(entities.ChannelLines),
+		ModelSKUs:                len(entities.ModelSKUs),
+		SaleProposals:            len(entities.SaleProposals),
+		CostRuleDrafts:           len(entities.CostRuleDrafts),
+		ModelMappings:            len(entities.ModelMappings),
+		RouteBlueprints:          len(entities.RouteBlueprints),
+		GroupRoutingRequirements: len(entities.GroupRoutingRequirements),
+		Sources:                  len(entities.Sources),
+		UnresolvedVariants:       len(entities.UnresolvedVariants),
 	}
 	for _, count := range []struct {
 		name     string
@@ -321,6 +327,14 @@ func validateConfigImportManifestCounts(counts *types.ConfigImportManifestCounts
 			return configImportError("SCHEMA_MANIFEST_COUNTS", "manifest.counts.%s must equal %d", count.name, count.actual)
 		}
 	}
+	if counts.GroupRoutingRequirements != nil {
+		if *counts.GroupRoutingRequirements < 0 {
+			return configImportError("LIMIT_MANIFEST_COUNTS", "manifest.counts.group_routing_requirements cannot be negative")
+		}
+		if *counts.GroupRoutingRequirements != actual.GroupRoutingRequirements {
+			return configImportError("SCHEMA_MANIFEST_COUNTS", "manifest.counts.group_routing_requirements must equal %d", actual.GroupRoutingRequirements)
+		}
+	}
 	return nil
 }
 
@@ -339,7 +353,7 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 
 	count := len(entities.Channels) + len(entities.ChannelLines) + len(entities.ModelSKUs) +
 		len(entities.SaleProposals) + len(entities.CostRuleDrafts) + len(entities.ModelMappings) +
-		len(entities.RouteBlueprints) + len(entities.Sources) + len(entities.UnresolvedVariants)
+		len(entities.RouteBlueprints) + len(entities.GroupRoutingRequirements) + len(entities.Sources) + len(entities.UnresolvedVariants)
 	if count > configImportMaxAuthoritativeEntities {
 		return configImportError("LIMIT_AUTHORITATIVE_ENTITIES", "entities exceeds %d entries", configImportMaxAuthoritativeEntities)
 	}
@@ -494,6 +508,24 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 				return err
 			}
 		}
+	}
+	seenRequirementGroups := make(map[string]struct{}, len(entities.GroupRoutingRequirements))
+	for index := range entities.GroupRoutingRequirements {
+		requirement := &entities.GroupRoutingRequirements[index]
+		if err := validateConfigImportAuthoritativeEntity(&requirement.ConfigImportAuthoritativeEntity, "group_routing_requirements", index, businessIDs); err != nil {
+			return err
+		}
+		if err := validateConfigImportEntityHash("group_routing_requirements", index, requirement, requirement.EntityHash); err != nil {
+			return err
+		}
+		requirement.GroupName = strings.TrimSpace(requirement.GroupName)
+		if requirement.GroupName == "" {
+			return configImportError("SCHEMA_GROUP_ROUTING_REQUIREMENT", "group_routing_requirements[%d].group_name is required", index)
+		}
+		if _, exists := seenRequirementGroups[requirement.GroupName]; exists {
+			return configImportError("DUPLICATE_GROUP_ROUTING_REQUIREMENT", "group_routing_requirements[%d].group_name %q is duplicated", index, requirement.GroupName)
+		}
+		seenRequirementGroups[requirement.GroupName] = struct{}{}
 	}
 	for index := range entities.UnresolvedVariants {
 		variant := &entities.UnresolvedVariants[index]
@@ -767,6 +799,12 @@ func validateConfigImportEntityReferences(entities *types.ConfigImportEntities, 
 			}
 		}
 	}
+	for index := range entities.GroupRoutingRequirements {
+		requirement := entities.GroupRoutingRequirements[index]
+		if err := requireConfigImportSourceReference("group_routing_requirements", index, requirement.SourceRef, sourceIDs); err != nil {
+			return err
+		}
+	}
 	for index := range entities.UnresolvedVariants {
 		variant := entities.UnresolvedVariants[index]
 		if err := requireConfigImportSourceReference("unresolved_variants", index, variant.SourceRef, sourceIDs); err != nil {
@@ -818,7 +856,7 @@ func validateConfigImportIssues(issues []types.ConfigImportSourceIssue, business
 }
 
 func configImportBusinessIDs(entities types.ConfigImportEntities) map[string]string {
-	all := make(map[string]string, len(entities.Channels)+len(entities.ChannelLines)+len(entities.ModelSKUs)+len(entities.SaleProposals)+len(entities.CostRuleDrafts)+len(entities.ModelMappings)+len(entities.RouteBlueprints)+len(entities.Sources)+len(entities.UnresolvedVariants))
+	all := make(map[string]string, len(entities.Channels)+len(entities.ChannelLines)+len(entities.ModelSKUs)+len(entities.SaleProposals)+len(entities.CostRuleDrafts)+len(entities.ModelMappings)+len(entities.RouteBlueprints)+len(entities.GroupRoutingRequirements)+len(entities.Sources)+len(entities.UnresolvedVariants))
 	for _, source := range entities.Sources {
 		all[source.BusinessID] = "sources"
 	}
@@ -842,6 +880,9 @@ func configImportBusinessIDs(entities types.ConfigImportEntities) map[string]str
 	}
 	for _, blueprint := range entities.RouteBlueprints {
 		all[blueprint.BusinessID] = "route_blueprints"
+	}
+	for _, requirement := range entities.GroupRoutingRequirements {
+		all[requirement.BusinessID] = "group_routing_requirements"
 	}
 	for _, variant := range entities.UnresolvedVariants {
 		all[variant.BusinessID] = "unresolved_variants"
@@ -900,6 +941,9 @@ func canonicalizeConfigImportEntities(entities *types.ConfigImportEntities) {
 	})
 	sort.Slice(entities.RouteBlueprints, func(left, right int) bool {
 		return entities.RouteBlueprints[left].BusinessID < entities.RouteBlueprints[right].BusinessID
+	})
+	sort.Slice(entities.GroupRoutingRequirements, func(left, right int) bool {
+		return entities.GroupRoutingRequirements[left].BusinessID < entities.GroupRoutingRequirements[right].BusinessID
 	})
 	sort.Slice(entities.Sources, func(left, right int) bool {
 		return entities.Sources[left].BusinessID < entities.Sources[right].BusinessID

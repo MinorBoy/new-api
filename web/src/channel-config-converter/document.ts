@@ -41,6 +41,7 @@ export type ImportEntities = {
   channel_lines: ImportEntity[]
   channels: ImportEntity[]
   cost_rule_drafts: ImportEntity[]
+  group_routing_requirements: ImportEntity[]
   model_mappings: ImportEntity[]
   model_skus: ImportEntity[]
   route_blueprints: ImportEntity[]
@@ -423,6 +424,7 @@ export async function buildImportDocument(
     model_skus: [],
     sale_proposals: [],
     cost_rule_drafts: [],
+    group_routing_requirements: [],
     model_mappings: [],
     route_blueprints: [],
     sources: [],
@@ -845,6 +847,7 @@ export async function buildImportDocument(
           {
             canonical_model: field(route, 'canonical_model', '客户端模型'),
             client_model: field(route, 'client_model', '客户端模型'),
+            group_name: field(route, 'group_name') || 'default',
             merge_mode: field(route, 'merge_mode') || 'merge',
             model_mapping_refs: mappings.map((mapping) => mapping.businessId),
             targets: [
@@ -1067,6 +1070,7 @@ export async function buildImportDocument(
             {
               canonical_model: canonicalModel,
               client_model: field(mapping, 'client_model', '客户端模型'),
+              group_name: field(mapping, 'group_name') || 'default',
               merge_mode: 'merge',
               model_mapping_refs: [mapping.businessId],
               targets: [

@@ -408,7 +408,7 @@ func normalizedConfigImportItems(document *types.ConfigImportDocument) ([]model.
 	items := make([]model.ConfigImportItem, 0,
 		len(document.Entities.Channels)+len(document.Entities.ChannelLines)+len(document.Entities.ModelSKUs)+
 			len(document.Entities.SaleProposals)+len(document.Entities.CostRuleDrafts)+len(document.Entities.ModelMappings)+
-			len(document.Entities.RouteBlueprints)+len(document.Entities.Sources)+len(document.Entities.UnresolvedVariants),
+			len(document.Entities.RouteBlueprints)+len(document.Entities.GroupRoutingRequirements)+len(document.Entities.Sources)+len(document.Entities.UnresolvedVariants),
 	)
 	for index := range document.Entities.Channels {
 		item, err := normalizedConfigImportItem("channels", document.Entities.Channels[index].ConfigImportAuthoritativeEntity, document.Entities.Channels[index])
@@ -454,6 +454,13 @@ func normalizedConfigImportItems(document *types.ConfigImportDocument) ([]model.
 	}
 	for index := range document.Entities.RouteBlueprints {
 		item, err := normalizedConfigImportItem("route_blueprints", document.Entities.RouteBlueprints[index].ConfigImportAuthoritativeEntity, document.Entities.RouteBlueprints[index])
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	for index := range document.Entities.GroupRoutingRequirements {
+		item, err := normalizedConfigImportItem("group_routing_requirements", document.Entities.GroupRoutingRequirements[index].ConfigImportAuthoritativeEntity, document.Entities.GroupRoutingRequirements[index])
 		if err != nil {
 			return nil, err
 		}
@@ -515,15 +522,16 @@ func configImportPersistedIssues(document *types.ConfigImportDocument) []model.C
 
 func configImportEntityCounts(entities types.ConfigImportEntities) types.ConfigImportEntityCounts {
 	return types.ConfigImportEntityCounts{
-		Channels:           len(entities.Channels),
-		ChannelLines:       len(entities.ChannelLines),
-		ModelSKUs:          len(entities.ModelSKUs),
-		SaleProposals:      len(entities.SaleProposals),
-		CostRuleDrafts:     len(entities.CostRuleDrafts),
-		ModelMappings:      len(entities.ModelMappings),
-		RouteBlueprints:    len(entities.RouteBlueprints),
-		Sources:            len(entities.Sources),
-		UnresolvedVariants: len(entities.UnresolvedVariants),
+		Channels:                 len(entities.Channels),
+		ChannelLines:             len(entities.ChannelLines),
+		ModelSKUs:                len(entities.ModelSKUs),
+		SaleProposals:            len(entities.SaleProposals),
+		CostRuleDrafts:           len(entities.CostRuleDrafts),
+		ModelMappings:            len(entities.ModelMappings),
+		RouteBlueprints:          len(entities.RouteBlueprints),
+		GroupRoutingRequirements: len(entities.GroupRoutingRequirements),
+		Sources:                  len(entities.Sources),
+		UnresolvedVariants:       len(entities.UnresolvedVariants),
 	}
 }
 

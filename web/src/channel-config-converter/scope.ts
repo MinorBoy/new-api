@@ -28,6 +28,7 @@ const entityCollectionNames = [
   'channels',
   'channel_lines',
   'cost_rule_drafts',
+  'group_routing_requirements',
   'model_mappings',
   'model_skus',
   'route_blueprints',
@@ -79,6 +80,7 @@ function emptyEntities(): ImportEntities {
     channels: [],
     channel_lines: [],
     cost_rule_drafts: [],
+    group_routing_requirements: [],
     model_mappings: [],
     model_skus: [],
     route_blueprints: [],
@@ -334,6 +336,19 @@ export async function buildScopedImportDocument(
       }
     }
 
+    const selectedGroupNames = new Set(
+      entities.route_blueprints.map(
+        (route) => stringField(route, 'group_name') || 'default'
+      )
+    )
+    entities.group_routing_requirements = (
+      original.entities.group_routing_requirements ?? []
+    )
+      .filter((requirement) =>
+        selectedGroupNames.has(stringField(requirement, 'group_name'))
+      )
+      .map(cloneEntity)
+
     const selectedSKURefs = new Set<string>()
     for (const mapping of entities.model_mappings) {
       selectedSKURefs.add(stringField(mapping, 'sku_ref'))
@@ -362,6 +377,7 @@ export async function buildScopedImportDocument(
     for (const entity of [
       ...entities.cost_rule_drafts,
       ...entities.model_mappings,
+      ...entities.group_routing_requirements,
       ...entities.unresolved_variants,
     ]) {
       lineBoundIssueRefs.add(entity.business_id)

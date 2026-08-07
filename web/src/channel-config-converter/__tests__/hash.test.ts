@@ -155,6 +155,15 @@ test('payload hashing follows the import contract by retaining entity hashes and
   assert.equal(await hashPayload(first), await hashPayload(changedMetadata))
 })
 
+test('empty group routing requirements preserve legacy payload hashes', async () => {
+  const legacy = { entities: { sources: [] } }
+  const extended = {
+    entities: { sources: [], group_routing_requirements: [] },
+  }
+
+  assert.equal(await hashPayload(legacy), await hashPayload(extended))
+})
+
 test('payload hashing sorts typed route constraints but preserves reference mode order', async () => {
   const route = {
     business_id: 'route-a',

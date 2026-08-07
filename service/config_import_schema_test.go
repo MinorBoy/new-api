@@ -22,6 +22,82 @@ func TestConfigImportSchemaAcceptsCanonicalDocument(t *testing.T) {
 	require.Len(t, document.Entities.Sources, 1)
 }
 
+func TestConfigImportSchemaAcceptsGroupRoutingRequirementsAndRouteGroupName(t *testing.T) {
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+	entities["group_routing_requirements"] = []any{map[string]any{
+		"business_id": "group-requirement-real-person", "entity_hash": strings.Repeat("0", 64),
+		"source_ref": "source-workbook", "group_name": "真人分组",
+		"requirements": map[string]any{"require_real_person": true},
+	}}
+	routes := entities["route_blueprints"].([]any)
+	routes[0].(map[string]any)["group_name"] = "真人分组"
+
+	document, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+	require.NoError(t, err)
+	require.Len(t, document.Entities.GroupRoutingRequirements, 1)
+	require.Equal(t, "真人分组", document.Entities.GroupRoutingRequirements[0].GroupName)
+	require.Len(t, document.Entities.RouteBlueprints, 1)
+	require.Equal(t, "真人分组", document.Entities.RouteBlueprints[0].GroupName)
+}
+
+func TestConfigImportSchemaRejectsInvalidGroupRoutingRequirements(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(map[string]any)
+		wantErr string
+	}{
+		{
+			name: "empty group",
+			mutate: func(entities map[string]any) {
+				entities["group_routing_requirements"].([]any)[0].(map[string]any)["group_name"] = " "
+			},
+			wantErr: "SCHEMA_GROUP_ROUTING_REQUIREMENT",
+		},
+		{
+			name: "invalid boolean",
+			mutate: func(entities map[string]any) {
+				entities["group_routing_requirements"].([]any)[0].(map[string]any)["requirements"] = map[string]any{"require_real_person": "yes"}
+			},
+			wantErr: "SCHEMA_JSON",
+		},
+		{
+			name: "unknown field",
+			mutate: func(entities map[string]any) {
+				entities["group_routing_requirements"].([]any)[0].(map[string]any)["requirements"] = map[string]any{"unknown": true}
+			},
+			wantErr: "SCHEMA_JSON",
+		},
+		{
+			name: "duplicate group",
+			mutate: func(entities map[string]any) {
+				first := entities["group_routing_requirements"].([]any)[0].(map[string]any)
+				second := map[string]any{
+					"business_id": "group-requirement-default", "entity_hash": strings.Repeat("0", 64),
+					"source_ref": "source-workbook", "group_name": first["group_name"],
+					"requirements": map[string]any{"require_real_person": false},
+				}
+				entities["group_routing_requirements"] = append(entities["group_routing_requirements"].([]any), second)
+			},
+			wantErr: "DUPLICATE_GROUP_ROUTING_REQUIREMENT",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+			entities["group_routing_requirements"] = []any{map[string]any{
+				"business_id": "group-requirement-real-person", "entity_hash": strings.Repeat("0", 64),
+				"source_ref": "source-workbook", "group_name": "真人分组",
+				"requirements": map[string]any{"require_real_person": true},
+			}}
+			testCase.mutate(entities)
+			_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+			requireCode(t, err, testCase.wantErr)
+		})
+	}
+}
+
 func TestConfigImportSchemaRejectsLegacySourceFileField(t *testing.T) {
 	payload := strings.Replace(configImportDocumentJSON(t, map[string]any{}), `"source_file_name"`, `"source_file"`, 1)
 
@@ -778,7 +854,7 @@ func prepareConfigImportEntitiesForHash(t *testing.T, documentEntities, canonica
 	canonicalizeConfigImportEntitiesForHash(prepared)
 	for _, collection := range []string{
 		"channels", "channel_lines", "model_skus", "sale_proposals", "cost_rule_drafts",
-		"model_mappings", "route_blueprints", "sources", "unresolved_variants",
+		"model_mappings", "route_blueprints", "group_routing_requirements", "sources", "unresolved_variants",
 	} {
 		for _, item := range prepared[collection].([]any) {
 			entity := item.(map[string]any)
@@ -787,7 +863,7 @@ func prepareConfigImportEntitiesForHash(t *testing.T, documentEntities, canonica
 	}
 	for _, collection := range []string{
 		"channels", "channel_lines", "model_skus", "sale_proposals", "cost_rule_drafts",
-		"model_mappings", "route_blueprints", "sources", "unresolved_variants",
+		"model_mappings", "route_blueprints", "group_routing_requirements", "sources", "unresolved_variants",
 	} {
 		canonicalHashes := make(map[string]string)
 		for _, item := range prepared[collection].([]any) {
@@ -798,6 +874,9 @@ func prepareConfigImportEntitiesForHash(t *testing.T, documentEntities, canonica
 			entity := item.(map[string]any)
 			entity["entity_hash"] = canonicalHashes[entity["business_id"].(string)]
 		}
+	}
+	if len(prepared["group_routing_requirements"].([]any)) == 0 {
+		delete(prepared, "group_routing_requirements")
 	}
 	return prepared
 }
@@ -816,7 +895,7 @@ func configImportEntityHashForTest(t *testing.T, entity map[string]any) string {
 func canonicalizeConfigImportEntitiesForHash(entities map[string]any) {
 	for _, collection := range []string{
 		"channels", "channel_lines", "model_skus", "sale_proposals", "cost_rule_drafts",
-		"model_mappings", "route_blueprints", "sources", "unresolved_variants",
+		"model_mappings", "route_blueprints", "group_routing_requirements", "sources", "unresolved_variants",
 	} {
 		items, ok := entities[collection].([]any)
 		if !ok {
@@ -951,27 +1030,29 @@ func configImportAllObjectsWithKeyForHash(values []any, key string) bool {
 
 func configImportManifestCounts(entities map[string]any) map[string]any {
 	return map[string]any{
-		"channels":            len(entities["channels"].([]any)),
-		"channel_lines":       len(entities["channel_lines"].([]any)),
-		"model_skus":          len(entities["model_skus"].([]any)),
-		"sale_proposals":      len(entities["sale_proposals"].([]any)),
-		"cost_rule_drafts":    len(entities["cost_rule_drafts"].([]any)),
-		"model_mappings":      len(entities["model_mappings"].([]any)),
-		"route_blueprints":    len(entities["route_blueprints"].([]any)),
-		"sources":             len(entities["sources"].([]any)),
-		"unresolved_variants": len(entities["unresolved_variants"].([]any)),
+		"channels":                   len(entities["channels"].([]any)),
+		"channel_lines":              len(entities["channel_lines"].([]any)),
+		"model_skus":                 len(entities["model_skus"].([]any)),
+		"sale_proposals":             len(entities["sale_proposals"].([]any)),
+		"cost_rule_drafts":           len(entities["cost_rule_drafts"].([]any)),
+		"model_mappings":             len(entities["model_mappings"].([]any)),
+		"route_blueprints":           len(entities["route_blueprints"].([]any)),
+		"group_routing_requirements": len(entities["group_routing_requirements"].([]any)),
+		"sources":                    len(entities["sources"].([]any)),
+		"unresolved_variants":        len(entities["unresolved_variants"].([]any)),
 	}
 }
 
 func mergeConfigImportEntities(extra map[string]any) map[string]any {
 	entities := map[string]any{
-		"channels":         []any{},
-		"channel_lines":    []any{},
-		"model_skus":       []any{},
-		"sale_proposals":   []any{},
-		"cost_rule_drafts": []any{},
-		"model_mappings":   []any{},
-		"route_blueprints": []any{},
+		"channels":                   []any{},
+		"channel_lines":              []any{},
+		"model_skus":                 []any{},
+		"sale_proposals":             []any{},
+		"cost_rule_drafts":           []any{},
+		"model_mappings":             []any{},
+		"route_blueprints":           []any{},
+		"group_routing_requirements": []any{},
 		"sources": []any{map[string]any{
 			"business_id":     "source-workbook",
 			"entity_hash":     strings.Repeat("b", 64),

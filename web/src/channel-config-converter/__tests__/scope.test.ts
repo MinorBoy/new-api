@@ -116,6 +116,36 @@ test('selecting secure-enterprise retains only its dependency closure', async ()
   )
 })
 
+test('retains group routing requirements used by selected route blueprints', async () => {
+  const document = await loadDocument()
+  const sourceRef = document.entities.sources[0]?.business_id
+  assert.ok(sourceRef)
+  document.entities.group_routing_requirements = [
+    {
+      business_id: 'group-requirement-default',
+      entity_hash: 'a'.repeat(64),
+      source_ref: sourceRef,
+      group_name: 'default',
+      requirements: { require_real_person: true },
+    },
+  ]
+  document.manifest.counts.group_routing_requirements = 1
+
+  const scoped = await buildScopedImportDocument(
+    document,
+    new Set(['secure-enterprise'])
+  )
+
+  assert.equal(scoped.canUse, true)
+  assert.deepEqual(
+    scoped.document.entities.group_routing_requirements.map(
+      (requirement) => requirement.group_name
+    ),
+    ['default']
+  )
+  assert.equal(scoped.document.manifest.counts.group_routing_requirements, 1)
+})
+
 test('unselected MEGABYAI ambiguity neither appears nor blocks selected Secure scope', async () => {
   const scoped = await buildScopedImportDocument(
     await loadDocument(),

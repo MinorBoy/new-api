@@ -86,27 +86,29 @@ type ConfigImportManifest struct {
 // ConfigImportManifestCounts uses pointers so an absent count cannot be
 // confused with an explicitly supplied zero.
 type ConfigImportManifestCounts struct {
-	Channels           *int `json:"channels"`
-	ChannelLines       *int `json:"channel_lines"`
-	ModelSKUs          *int `json:"model_skus"`
-	SaleProposals      *int `json:"sale_proposals"`
-	CostRuleDrafts     *int `json:"cost_rule_drafts"`
-	ModelMappings      *int `json:"model_mappings"`
-	RouteBlueprints    *int `json:"route_blueprints"`
-	Sources            *int `json:"sources"`
-	UnresolvedVariants *int `json:"unresolved_variants"`
+	Channels                 *int `json:"channels"`
+	ChannelLines             *int `json:"channel_lines"`
+	ModelSKUs                *int `json:"model_skus"`
+	SaleProposals            *int `json:"sale_proposals"`
+	CostRuleDrafts           *int `json:"cost_rule_drafts"`
+	ModelMappings            *int `json:"model_mappings"`
+	RouteBlueprints          *int `json:"route_blueprints"`
+	GroupRoutingRequirements *int `json:"group_routing_requirements"`
+	Sources                  *int `json:"sources"`
+	UnresolvedVariants       *int `json:"unresolved_variants"`
 }
 
 type ConfigImportEntityCounts struct {
-	Channels           int `json:"channels"`
-	ChannelLines       int `json:"channel_lines"`
-	ModelSKUs          int `json:"model_skus"`
-	SaleProposals      int `json:"sale_proposals"`
-	CostRuleDrafts     int `json:"cost_rule_drafts"`
-	ModelMappings      int `json:"model_mappings"`
-	RouteBlueprints    int `json:"route_blueprints"`
-	Sources            int `json:"sources"`
-	UnresolvedVariants int `json:"unresolved_variants"`
+	Channels                 int `json:"channels"`
+	ChannelLines             int `json:"channel_lines"`
+	ModelSKUs                int `json:"model_skus"`
+	SaleProposals            int `json:"sale_proposals"`
+	CostRuleDrafts           int `json:"cost_rule_drafts"`
+	ModelMappings            int `json:"model_mappings"`
+	RouteBlueprints          int `json:"route_blueprints"`
+	GroupRoutingRequirements int `json:"group_routing_requirements"`
+	Sources                  int `json:"sources"`
+	UnresolvedVariants       int `json:"unresolved_variants"`
 }
 
 type ConfigImportChannelModelSnapshotDiff struct {
@@ -132,15 +134,16 @@ type ConfigImportAuthoritativeEntity struct {
 }
 
 type ConfigImportEntities struct {
-	Channels           []ConfigImportChannel           `json:"channels"`
-	ChannelLines       []ConfigImportChannelLine       `json:"channel_lines"`
-	ModelSKUs          []ConfigImportModelSKU          `json:"model_skus"`
-	SaleProposals      []ConfigImportSaleProposal      `json:"sale_proposals"`
-	CostRuleDrafts     []ConfigImportCostRuleDraft     `json:"cost_rule_drafts"`
-	ModelMappings      []ConfigImportModelMapping      `json:"model_mappings"`
-	RouteBlueprints    []ConfigImportRouteBlueprint    `json:"route_blueprints"`
-	Sources            []ConfigImportSource            `json:"sources"`
-	UnresolvedVariants []ConfigImportUnresolvedVariant `json:"unresolved_variants"`
+	Channels                 []ConfigImportChannel                 `json:"channels"`
+	ChannelLines             []ConfigImportChannelLine             `json:"channel_lines"`
+	ModelSKUs                []ConfigImportModelSKU                `json:"model_skus"`
+	SaleProposals            []ConfigImportSaleProposal            `json:"sale_proposals"`
+	CostRuleDrafts           []ConfigImportCostRuleDraft           `json:"cost_rule_drafts"`
+	ModelMappings            []ConfigImportModelMapping            `json:"model_mappings"`
+	RouteBlueprints          []ConfigImportRouteBlueprint          `json:"route_blueprints"`
+	GroupRoutingRequirements []ConfigImportGroupRoutingRequirement `json:"group_routing_requirements,omitempty"`
+	Sources                  []ConfigImportSource                  `json:"sources"`
+	UnresolvedVariants       []ConfigImportUnresolvedVariant       `json:"unresolved_variants"`
 }
 
 type ConfigImportChannel struct {
@@ -300,11 +303,22 @@ type ConfigImportRouteTarget struct {
 
 type ConfigImportRouteBlueprint struct {
 	ConfigImportAuthoritativeEntity
+	GroupName        string                     `json:"group_name,omitempty"`
 	CanonicalModel   string                     `json:"canonical_model"`
 	ClientModel      string                     `json:"client_model"`
 	ModelMappingRefs []string                   `json:"model_mapping_refs,omitempty"`
 	MergeMode        ConfigImportRouteMergeMode `json:"merge_mode,omitempty"`
 	Targets          []ConfigImportRouteTarget  `json:"targets"`
+}
+
+type ConfigImportGroupRoutingRequirement struct {
+	ConfigImportAuthoritativeEntity
+	GroupName    string                         `json:"group_name"`
+	Requirements ConfigImportGroupRoutingValues `json:"requirements"`
+}
+
+type ConfigImportGroupRoutingValues struct {
+	RequireRealPerson *bool `json:"require_real_person,omitempty"`
 }
 
 type ConfigImportSource struct {

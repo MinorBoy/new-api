@@ -146,5 +146,8 @@ func (s *Store) Probe(ctx context.Context) error {
 	if !exists {
 		return fmt.Errorf("object storage probe object was not found")
 	}
+	if _, err := s.PresignGet(ctx, key, 5*time.Minute); err != nil {
+		return err
+	}
 	return nil
 }

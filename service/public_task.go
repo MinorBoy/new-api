@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -50,7 +51,13 @@ func ProjectPublicTask(task *model.Task) *dto.PublicTaskDto {
 			hasVideoResult = true
 		}
 		if hasVideoResult {
-			public.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
+			if strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" {
+				if resolved, err := ResolveTaskResultURL(context.Background(), task); err == nil {
+					public.ResultURL = resolved
+				}
+			} else {
+				public.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
+			}
 		}
 		if task.Platform == constant.TaskPlatformSuno {
 			sources := publicTaskOutputSources(task)
@@ -192,8 +199,14 @@ func projectPublicTaskResult(task *model.Task, requestModel string) *dto.PublicT
 		}
 	}
 	if task.Status == model.TaskStatusSuccess {
+		videoURL := taskcommon.BuildProxyURL(task.TaskID)
+		if strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" {
+			if resolved, err := ResolveTaskResultURL(context.Background(), task); err == nil {
+				videoURL = resolved
+			}
+		}
 		response["content"] = map[string]interface{}{
-			"video_url": taskcommon.BuildProxyURL(task.TaskID),
+			"video_url": videoURL,
 		}
 	}
 	if err := NormalizeSeedanceTaskResponse(task, response); err != nil {
@@ -232,9 +245,13 @@ func projectPublicTaskResult(task *model.Task, requestModel string) *dto.PublicT
 	result.Model = requestModel
 	result.Status = SeedanceTaskStatus(task.Status)
 	if task.Status == model.TaskStatusSuccess {
-		result.Content = &dto.PublicTaskContent{
-			VideoURL: taskcommon.BuildProxyURL(task.TaskID),
+		videoURL := taskcommon.BuildProxyURL(task.TaskID)
+		if strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" {
+			if resolved, err := ResolveTaskResultURL(context.Background(), task); err == nil {
+				videoURL = resolved
+			}
 		}
+		result.Content = &dto.PublicTaskContent{VideoURL: videoURL}
 		result.Error = nil
 	} else {
 		result.Content = nil

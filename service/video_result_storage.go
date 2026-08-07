@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/objectstorage"
 	object_storage "github.com/QuantumNous/new-api/setting/object_storage"
@@ -193,7 +194,36 @@ func ResolveTaskResultURL(ctx context.Context, task *model.Task) (string, error)
 }
 
 func RewriteVideoResponseURL(ctx context.Context, task *model.Task, body []byte, format VideoResponseFormat) ([]byte, error) {
-	return body, nil
+	if task == nil || strings.TrimSpace(task.PrivateData.ResultObjectKey) == "" {
+		return body, nil
+	}
+	resolved, err := ResolveTaskResultURL(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	switch format {
+	case VideoResponseFormatMetadataURL:
+		metadata, _ := payload["metadata"].(map[string]any)
+		if metadata == nil {
+			metadata = make(map[string]any)
+		}
+		metadata["url"] = resolved
+		payload["metadata"] = metadata
+	case VideoResponseFormatVideoURL:
+		content, _ := payload["content"].(map[string]any)
+		if content == nil {
+			content = make(map[string]any)
+		}
+		content["video_url"] = resolved
+		payload["content"] = content
+	default:
+		return body, nil
+	}
+	return common.Marshal(payload)
 }
 
 func setDirectVideoResult(task *model.Task, sourceURL string) {

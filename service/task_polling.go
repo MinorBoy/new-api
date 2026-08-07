@@ -648,13 +648,29 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		} else if taskResult.Url != "" {
-			// Direct upstream URL (e.g. Kling, Ali, Doubao, etc.)
-			task.PrivateData.ResultURL = taskResult.Url
+			if err := ProcessVideoResultURL(ctx, task, taskResult.Url); err != nil {
+				task.Status = model.TaskStatusFailure
+				task.Progress = taskcommon.ProgressComplete
+				if task.FinishTime == 0 {
+					task.FinishTime = now
+				}
+				task.FailReason = "video result storage failed"
+				taskResult.Status = string(model.TaskStatusFailure)
+				taskResult.Reason = task.FailReason
+				taskResult.Progress = taskcommon.ProgressComplete
+				if quota != 0 {
+					shouldRefund = true
+				}
+				shouldSettle = false
+			} else {
+				// Direct upstream URL is retained only when domain policy skips transfer.
+				shouldSettle = true
+			}
 		} else {
 			// No URL from adaptor — construct proxy URL using public task ID
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
+			shouldSettle = true
 		}
-		shouldSettle = true
 	case model.TaskStatusFailure:
 		task.Status = model.TaskStatusFailure
 		task.Progress = taskcommon.ProgressComplete

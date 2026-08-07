@@ -277,4 +277,28 @@ func TestResolveTaskResultURLKeepsLegacyURL(t *testing.T) {
 	assert.Equal(t, task.PrivateData.ResultURL, resolved)
 }
 
+func TestRewriteVideoResponseURLReplacesMetadataURL(t *testing.T) {
+	configureVideoResultStorage(t, enabledVideoStorageValues("provider.example"))
+	store := &fakeVideoResultStore{presignURL: "https://cdn.example.com/model/task.mp4?X-Amz-Expires=86400"}
+	installVideoResultDependencies(t, store, http.DefaultClient, func(string) error { return nil })
+	task := testVideoTask()
+	task.PrivateData.ResultObjectKey = "model/task.mp4"
+
+	body, err := RewriteVideoResponseURL(context.Background(), task, []byte(`{"metadata":{"url":"https://provider.example/original.mp4"}}`), VideoResponseFormatMetadataURL)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"metadata":{"url":"https://cdn.example.com/model/task.mp4?X-Amz-Expires=86400"}}`, string(body))
+}
+
+func TestRewriteVideoResponseURLReplacesVideoURL(t *testing.T) {
+	configureVideoResultStorage(t, enabledVideoStorageValues("provider.example"))
+	store := &fakeVideoResultStore{presignURL: "https://cdn.example.com/model/task.mp4?X-Amz-Expires=86400"}
+	installVideoResultDependencies(t, store, http.DefaultClient, func(string) error { return nil })
+	task := testVideoTask()
+	task.PrivateData.ResultObjectKey = "model/task.mp4"
+
+	body, err := RewriteVideoResponseURL(context.Background(), task, []byte(`{"content":{"video_url":"https://provider.example/original.mp4"}}`), VideoResponseFormatVideoURL)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"content":{"video_url":"https://cdn.example.com/model/task.mp4?X-Amz-Expires=86400"}}`, string(body))
+}
+
 var _ videoResultObjectStore = (*fakeVideoResultStore)(nil)

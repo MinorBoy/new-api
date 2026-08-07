@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -266,6 +267,18 @@ func seedanceTaskResponse(task *model.Task) (map[string]interface{}, error) {
 	}
 	if err := service.NormalizeSeedanceTaskResponse(task, response); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" && task.Status == model.TaskStatusSuccess {
+		resolved, err := service.ResolveTaskResultURL(context.Background(), task)
+		if err != nil {
+			return nil, err
+		}
+		content, _ := response["content"].(map[string]interface{})
+		if content == nil {
+			content = make(map[string]interface{})
+		}
+		content["video_url"] = resolved
+		response["content"] = content
 	}
 	return response, nil
 }

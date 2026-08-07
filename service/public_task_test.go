@@ -3,6 +3,7 @@ package service
 import (
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -244,6 +245,26 @@ func TestProjectPublicTaskReturnsLocalResultURLForNonSeedanceVideo(t *testing.T)
 	require.NoError(t, err)
 	assert.Contains(t, string(payload), `"result_url":"https://gateway.example/v1/videos/task_video_public/content"`)
 	assert.NotContains(t, string(payload), "supplier.example")
+}
+
+func TestProjectPublicTaskReturnsFreshObjectStorageURL(t *testing.T) {
+	configureVideoResultStorage(t, enabledVideoStorageValues("provider.example"))
+	store := &fakeVideoResultStore{presignURL: "https://cdn.example.com/model/task_video_public.mp4?X-Amz-Expires=86400"}
+	installVideoResultDependencies(t, store, nil, func(string) error { return nil })
+	task := &model.Task{
+		TaskID:   "task_video_public",
+		Platform: constant.TaskPlatform("kling"),
+		Action:   constant.TaskActionGenerate,
+		Status:   model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{
+			ResultObjectKey: "model/task_video_public.mp4",
+		},
+	}
+
+	public := ProjectPublicTask(task)
+	require.NotNil(t, public)
+	assert.Equal(t, store.presignURL, public.ResultURL)
+	assert.Equal(t, 86400*time.Second, store.lastExpiry)
 }
 
 func TestProjectPublicTaskReturnsNilForNilInput(t *testing.T) {

@@ -514,7 +514,10 @@ func TestSeedRuntimeSettingsPersistsRoutingGroupWithoutOverwritingPricing(t *tes
 	})
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"seedance-2.0":7,"seedance-2.0-fast":8,"seedance-2.0-mini":9}`))
 
-	require.NoError(t, seedRuntimeSettings())
+	require.NoError(t, seedRuntimeSettings(seedRunSettings{
+		CostMode:                 types.CostAccountingTracking,
+		MinimumExpectedMarginBPS: 0,
+	}))
 
 	var usableGroupsOption model.Option
 	require.NoError(t, db.First(&usableGroupsOption, "key = ?", "UserUsableGroups").Error)
@@ -535,6 +538,33 @@ func TestSeedRuntimeSettingsPersistsRoutingGroupWithoutOverwritingPricing(t *tes
 	require.Equal(t, 7.0, modelRatios["seedance-2.0"])
 	require.Equal(t, 8.0, modelRatios["seedance-2.0-fast"])
 	require.Equal(t, 9.0, modelRatios["seedance-2.0-mini"])
+}
+
+func TestLoadSeedRunSettingsReadsStrictMargin(t *testing.T) {
+	t.Setenv("ARK_VIDEO_MATERIAL_SEED_COST_MODE", "strict")
+	t.Setenv("ARK_VIDEO_MATERIAL_SEED_MIN_MARGIN_BPS", "5000")
+
+	settings, err := loadSeedRunSettings()
+
+	require.NoError(t, err)
+	require.Equal(t, types.CostAccountingStrict, settings.CostMode)
+	require.Equal(t, 5_000, settings.MinimumExpectedMarginBPS)
+}
+
+func TestLoadSeedRunSettingsRejectsFiveHundredPercentMargin(t *testing.T) {
+	t.Setenv("ARK_VIDEO_MATERIAL_SEED_COST_MODE", "strict")
+	t.Setenv("ARK_VIDEO_MATERIAL_SEED_MIN_MARGIN_BPS", "50000")
+
+	_, err := loadSeedRunSettings()
+
+	require.ErrorContains(t, err, "between 0 and 10000 basis points")
+}
+
+func TestExpectedStrictRoutingBlockRequiresNoUpstreamCall(t *testing.T) {
+	require.True(t, expectedStrictRoutingBlock(types.CostAccountingStrict, http.StatusServiceUnavailable, 4, 4))
+	require.False(t, expectedStrictRoutingBlock(types.CostAccountingStrict, http.StatusServiceUnavailable, 4, 5))
+	require.False(t, expectedStrictRoutingBlock(types.CostAccountingTracking, http.StatusServiceUnavailable, 4, 4))
+	require.False(t, expectedStrictRoutingBlock(types.CostAccountingStrict, http.StatusBadRequest, 4, 4))
 }
 
 func TestLoadChannelDefinitionsPreservesImportedProviderTypesAndModels(t *testing.T) {

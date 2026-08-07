@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,11 @@ const (
 	seedAssetBaseURL = "https://cdn.openai.com/ark-matrix"
 	seedGroupRatio   = 1.25
 )
+
+type seedRunSettings struct {
+	CostMode                 types.CostAccountingMode
+	MinimumExpectedMarginBPS int
+}
 
 type matrixTarget struct {
 	CaseID                             string
@@ -91,29 +97,31 @@ type importedCostConfig struct {
 }
 
 type seedResult struct {
-	TotalTargets       int
-	AcceptedTasks      int
-	FailedMockTasks    int64
-	ContractBlocks     int
-	DisabledPricing    int
-	CommonLogs         int64
-	TaskRows           int64
-	TerminalResults    int64
-	QuotaDataRows      int64
-	CostRequests       int64
-	CostAttempts       int64
-	CostSettled        int64
-	CostConfirmedZero  int64
-	CostFailed         int64
-	ProfitComplete     int64
-	NegativeProfit     int64
-	RevenueNanoUSD     int64
-	CostNanoUSD        int64
-	GrossProfitNanoUSD int64
-	MaterialLimits     map[string]int
-	MockUpstreamCalls  int
-	UserID             int
-	TokenID            int
+	TotalTargets           int
+	AcceptedTasks          int
+	FailedMockTasks        int64
+	ContractBlocks         int
+	StrictRoutingBlocks    int
+	DisabledPricing        int
+	CommonLogs             int64
+	TaskRows               int64
+	TerminalResults        int64
+	QuotaDataRows          int64
+	CostRequests           int64
+	CostAttempts           int64
+	CostSettled            int64
+	CostConfirmedZero      int64
+	CostFailed             int64
+	ProfitComplete         int64
+	NegativeProfit         int64
+	RevenueNanoUSD         int64
+	CostNanoUSD            int64
+	GrossProfitNanoUSD     int64
+	MaterialLimits         map[string]int
+	StrictBlocksByMaterial map[string]int
+	MockUpstreamCalls      int
+	UserID                 int
+	TokenID                int
 }
 
 type mockVideoServer struct {
@@ -140,6 +148,10 @@ func main() {
 }
 
 func run() error {
+	runSettings, err := loadSeedRunSettings()
+	if err != nil {
+		return err
+	}
 	if err := initResources(); err != nil {
 		return err
 	}
@@ -195,7 +207,7 @@ func run() error {
 	if err := cleanupSeedData(user.Id, token.Id, channelIDs); err != nil {
 		return err
 	}
-	if err := seedRuntimeSettings(); err != nil {
+	if err := seedRuntimeSettings(runSettings); err != nil {
 		return err
 	}
 	if err := seedCostRules(targets, channelIDs); err != nil {
@@ -213,9 +225,11 @@ func run() error {
 		return err
 	}
 	materialLimits := make(map[string]int)
+	strictBlocksByMaterial := make(map[string]int)
 	createdTasks := make([]string, 0, len(targets))
 	acceptedTargets := make([]matrixTarget, 0, len(targets))
 	contractBlocks := 0
+	strictRoutingBlocks := 0
 	disabledPricing := 0
 
 	for _, target := range targets {
@@ -239,8 +253,14 @@ func run() error {
 		}
 		policyIDs[target.RuntimeModel] = policyID
 
+		upstreamCallsBefore := mock.count()
 		status, body := performJSONRequest(engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer "+seedToken, requestBody(target, seedAssetBaseURL))
 		if status != http.StatusOK {
+			if expectedStrictRoutingBlock(runSettings.CostMode, status, upstreamCallsBefore, mock.count()) {
+				strictRoutingBlocks++
+				strictBlocksByMaterial[fmt.Sprintf("%d%d%d", target.References.Images, target.References.Videos, target.References.Audios)]++
+				continue
+			}
 			return fmt.Errorf("%s: submit failed with HTTP %d: %s", target.CaseID, status, strings.TrimSpace(string(body)))
 		}
 		var created struct {
@@ -320,7 +340,7 @@ func run() error {
 	}
 
 	model.SaveQuotaDataCache()
-	result, err := summarizeResult(user.Id, token.Id, len(targets), len(createdTasks)-1, contractBlocks, disabledPricing, createdTasks, materialLimits, mock.count())
+	result, err := summarizeResult(user.Id, token.Id, len(targets), len(acceptedTargets), contractBlocks, strictRoutingBlocks, disabledPricing, createdTasks, materialLimits, strictBlocksByMaterial, mock.count())
 	if err != nil {
 		return err
 	}
@@ -341,6 +361,31 @@ func run() error {
 	}
 	printResult(result)
 	return nil
+}
+
+func loadSeedRunSettings() (seedRunSettings, error) {
+	settings := seedRunSettings{CostMode: types.CostAccountingTracking}
+	if value := strings.TrimSpace(os.Getenv("ARK_VIDEO_MATERIAL_SEED_COST_MODE")); value != "" {
+		settings.CostMode = types.CostAccountingMode(value)
+	}
+	if err := cost_setting.ValidateMode(settings.CostMode); err != nil {
+		return seedRunSettings{}, err
+	}
+	if value := strings.TrimSpace(os.Getenv("ARK_VIDEO_MATERIAL_SEED_MIN_MARGIN_BPS")); value != "" {
+		minimumExpectedMarginBPS, err := strconv.Atoi(value)
+		if err != nil {
+			return seedRunSettings{}, fmt.Errorf("parse minimum expected margin: %w", err)
+		}
+		settings.MinimumExpectedMarginBPS = minimumExpectedMarginBPS
+	}
+	if err := cost_setting.ValidateMinimumExpectedMarginBPS(settings.MinimumExpectedMarginBPS); err != nil {
+		return seedRunSettings{}, err
+	}
+	return settings, nil
+}
+
+func expectedStrictRoutingBlock(mode types.CostAccountingMode, status, upstreamCallsBefore, upstreamCallsAfter int) bool {
+	return mode == types.CostAccountingStrict && status == http.StatusServiceUnavailable && upstreamCallsBefore == upstreamCallsAfter
 }
 
 type arkTerminalResponse struct {
@@ -664,7 +709,7 @@ func cleanupSeedData(userID, tokenID int, channelIDs map[string]int) error {
 	return model.LOG_DB.Where("user_id = ?", userID).Delete(&model.Log{}).Error
 }
 
-func seedRuntimeSettings() error {
+func seedRuntimeSettings(runSettings seedRunSettings) error {
 	usableGroups := setting.GetUserUsableGroupsCopy()
 	usableGroups[seedGroup] = "ARK SDK material matrix local"
 	encodedGroups, err := common.Marshal(usableGroups)
@@ -687,8 +732,8 @@ func seedRuntimeSettings() error {
 
 	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
 	if err := config.UpdateConfigFromMap(costConfig, map[string]string{
-		cost_setting.KeyMode:                     string(types.CostAccountingTracking),
-		cost_setting.KeyMinimumExpectedMarginBPS: "0",
+		cost_setting.KeyMode:                     string(runSettings.CostMode),
+		cost_setting.KeyMinimumExpectedMarginBPS: strconv.Itoa(runSettings.MinimumExpectedMarginBPS),
 	}); err != nil {
 		return err
 	}
@@ -696,8 +741,8 @@ func seedRuntimeSettings() error {
 	return model.UpdateOptionsBulk(map[string]string{
 		"UserUsableGroups": string(encodedGroups),
 		"GroupRatio":       string(encodedGroupRatios),
-		cost_setting.ConfigName + "." + cost_setting.KeyMode:                     string(types.CostAccountingTracking),
-		cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS: "0",
+		cost_setting.ConfigName + "." + cost_setting.KeyMode:                     string(runSettings.CostMode),
+		cost_setting.ConfigName + "." + cost_setting.KeyMinimumExpectedMarginBPS: strconv.Itoa(runSettings.MinimumExpectedMarginBPS),
 	})
 }
 
@@ -1572,7 +1617,7 @@ func (m *mockVideoServer) count() int {
 	return len(m.requests)
 }
 
-func summarizeResult(userID, tokenID, totalTargets, acceptedTasks, contractBlocks, disabledPricing int, taskIDs []string, materialLimits map[string]int, upstreamCalls int) (seedResult, error) {
+func summarizeResult(userID, tokenID, totalTargets, acceptedTasks, contractBlocks, strictRoutingBlocks, disabledPricing int, taskIDs []string, materialLimits, strictBlocksByMaterial map[string]int, upstreamCalls int) (seedResult, error) {
 	var commonLogs int64
 	if err := model.LOG_DB.Model(&model.Log{}).Where("user_id = ?", userID).Count(&commonLogs).Error; err != nil {
 		return seedResult{}, err
@@ -1608,9 +1653,9 @@ func summarizeResult(userID, tokenID, totalTargets, acceptedTasks, contractBlock
 		return seedResult{}, err
 	}
 	result := seedResult{
-		TotalTargets: totalTargets, AcceptedTasks: acceptedTasks, FailedMockTasks: failedMockTasks, ContractBlocks: contractBlocks, DisabledPricing: disabledPricing,
+		TotalTargets: totalTargets, AcceptedTasks: acceptedTasks, FailedMockTasks: failedMockTasks, ContractBlocks: contractBlocks, StrictRoutingBlocks: strictRoutingBlocks, DisabledPricing: disabledPricing,
 		CommonLogs: commonLogs, TaskRows: taskRows, TerminalResults: terminalResults, QuotaDataRows: quotaDataRows,
-		CostRequests: int64(len(costRequestRows)), CostAttempts: int64(len(costAttemptRows)), MaterialLimits: materialLimits,
+		CostRequests: int64(len(costRequestRows)), CostAttempts: int64(len(costAttemptRows)), MaterialLimits: materialLimits, StrictBlocksByMaterial: strictBlocksByMaterial,
 		MockUpstreamCalls: upstreamCalls, UserID: userID, TokenID: tokenID,
 	}
 	for i := range costAttemptRows {
@@ -1655,7 +1700,7 @@ func summarizeResult(userID, tokenID, totalTargets, acceptedTasks, contractBlock
 func printResult(result seedResult) {
 	fmt.Println("ARK SDK video material matrix seed completed")
 	fmt.Printf("user: %s (id=%d), token: %s (id=%d), group: %s\n", seedUsername, result.UserID, seedToken, result.TokenID, seedGroup)
-	fmt.Printf("targets: %d, accepted tasks: %d, contract blocks before submit: %d, disabled pricing drafts: %d\n", result.TotalTargets, result.AcceptedTasks, result.ContractBlocks, result.DisabledPricing)
+	fmt.Printf("targets: %d, accepted tasks: %d, strict routing blocks: %d, contract blocks before submit: %d, disabled pricing drafts: %d\n", result.TotalTargets, result.AcceptedTasks, result.StrictRoutingBlocks, result.ContractBlocks, result.DisabledPricing)
 	fmt.Printf("task rows: %d, failed mock tasks: %d, terminal user results: %d, usage logs for user: %d, quota_data rows: %d\n", result.TaskRows, result.FailedMockTasks, result.TerminalResults, result.CommonLogs, result.QuotaDataRows)
 	fmt.Printf("cost accounting requests: %d, attempts: %d, mock upstream calls: %d\n", result.CostRequests, result.CostAttempts, result.MockUpstreamCalls)
 	fmt.Printf("cost settlement: settled=%d, confirmed_zero=%d, settlement_failed=%d, profit_complete=%d\n", result.CostSettled, result.CostConfirmedZero, result.CostFailed, result.ProfitComplete)
@@ -1665,6 +1710,7 @@ func printResult(result seedResult) {
 		decimal.NewFromInt(result.GrossProfitNanoUSD).Shift(-9).StringFixed(9),
 		result.NegativeProfit)
 	fmt.Printf("material limits: 431=%d, 900=%d, 903=%d, 933=%d\n", result.MaterialLimits["431"], result.MaterialLimits["900"], result.MaterialLimits["903"], result.MaterialLimits["933"])
+	fmt.Printf("strict blocks by material: 431=%d, 900=%d, 903=%d, 933=%d\n", result.StrictBlocksByMaterial["431"], result.StrictBlocksByMaterial["900"], result.StrictBlocksByMaterial["903"], result.StrictBlocksByMaterial["933"])
 	fmt.Println("view pages:")
 	fmt.Println("  http://127.0.0.1:3000/dashboard/overview")
 	fmt.Println("  http://127.0.0.1:3000/usage-logs/common")

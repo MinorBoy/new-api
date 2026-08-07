@@ -163,8 +163,8 @@ func objectStorageResponse(cfg object_storage.ObjectStorageConfig) objectStorage
 		UsePathStyle:              cfg.UsePathStyle,
 		MaxVideoSizeMB:            cfg.MaxVideoSizeMB,
 		ExpiresSeconds:            cfg.ExpiresSeconds,
-		TransferDomainWhitelist:   append([]string(nil), cfg.TransferDomainWhitelist...),
-		NoTransferDomainBlacklist: append([]string(nil), cfg.NoTransferDomainBlacklist...),
+		TransferDomainWhitelist:   append([]string{}, cfg.TransferDomainWhitelist...),
+		NoTransferDomainBlacklist: append([]string{}, cfg.NoTransferDomainBlacklist...),
 	}
 }
 

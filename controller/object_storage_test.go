@@ -65,6 +65,21 @@ func TestGetObjectStorageSettingsOmitsSecret(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), "access")
 }
 
+func TestGetObjectStorageSettingsReturnsEmptyDomainListsAsArrays(t *testing.T) {
+	setupOptionControllerVideoSettingTest(t)
+	configureObjectStorageControllerTest(t, map[string]string{
+		"enabled":           "false",
+		"region":            "us-east-1",
+		"max_video_size_mb": "512",
+		"expires_seconds":   "86400",
+	})
+
+	recorder := objectStorageRequest(t, http.MethodGet, "/api/object-storage/settings", "")
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"transfer_domain_whitelist":[]`)
+	assert.Contains(t, recorder.Body.String(), `"no_transfer_domain_blacklist":[]`)
+}
+
 func TestUpdateObjectStorageSettingsKeepsSecretWhenInputIsBlank(t *testing.T) {
 	db := setupOptionControllerVideoSettingTest(t)
 	configureObjectStorageControllerTest(t, map[string]string{

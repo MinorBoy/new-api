@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -114,6 +115,84 @@ func TestSelectCapabilityChannelPreservesLegacyWithoutPolicy(t *testing.T) {
 	assert.Equal(t, 11, channel.Id)
 	assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode))
 	assert.Equal(t, string(types.DefaultCostVariantKey), common.GetContextKeyString(c, constant.ContextKeyRoutingCostVariant))
+}
+
+func TestSelectCapabilityChannelAppliesGroupRealPersonRequirement(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	setGroupRoutingRequirementsForTest(t, `{"真人分组":{"require_real_person":true}}`)
+	seedRoutingCandidate(t, 11, "supports", "真人分组", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "generic", "真人分组", modelrouting.Seedance20, true)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", 12).Update("priority", 200).Error)
+
+	policy := capabilityPolicyRequest("真人分组", modelrouting.Seedance20, 11, "provider-face", "720p")
+	genericTarget := policy.Targets[0]
+	genericTarget.ChannelID = 12
+	genericTarget.Name = "provider-generic"
+	genericTarget.UpstreamModel = "provider-generic"
+	genericTarget.Constraints.SupportsRealPerson = common.GetPointer(false)
+	policy.Targets = append(policy.Targets, genericTarget)
+	_, err := service.SaveRoutingPolicy(0, policy)
+	require.NoError(t, err)
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 8, "16:9")
+	c := capabilitySelectionContext()
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "真人分组", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 11, channel.Id)
+	facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
+	require.True(t, ok)
+	assert.True(t, facts.RequireRealPerson)
+}
+
+func TestRequiredGroupRealPersonFailsClosedWithoutCapabilityPolicy(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	setGroupRoutingRequirementsForTest(t, `{"真人分组":{"require_real_person":true}}`)
+	seedRoutingCandidate(t, 11, "legacy", "真人分组", modelrouting.Seedance20, true)
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "真人分组", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0),
+	})
+	assert.Nil(t, channel)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, relaytypes.ErrorCodeNoCompatibleRoute, selectionErr.Code)
+	assert.Equal(t, http.StatusBadRequest, selectionErr.StatusCode)
+}
+
+func TestAutoGroupRoutingAppliesRequirementPerActualGroup(t *testing.T) {
+	prepareCapabilitySelectionTest(t)
+	prepareAutoGroupSelectionTest(t)
+	setGroupRoutingRequirementsForTest(t, `{"分组A":{"require_real_person":true}}`)
+	seedRoutingCandidate(t, 11, "generic", "分组A", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "supports", "分组B", modelrouting.Seedance20, true)
+
+	firstPolicy := capabilityPolicyRequest("分组A", modelrouting.Seedance20, 11, "provider-generic", "720p")
+	firstPolicy.Targets[0].Constraints.SupportsRealPerson = common.GetPointer(false)
+	_, err := service.SaveRoutingPolicy(0, firstPolicy)
+	require.NoError(t, err)
+	_, err = service.SaveRoutingPolicy(0, capabilityPolicyRequest("分组B", modelrouting.Seedance20, 12, "provider-face", "720p"))
+	require.NoError(t, err)
+
+	c := capabilitySelectionContext()
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "分组A")
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 8, "16:9")
+	channel, group, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "auto", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+	assert.Equal(t, "分组B", group)
+	facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
+	require.True(t, ok)
+	assert.Equal(t, "分组B", facts.GroupName)
+	assert.False(t, facts.RequireRealPerson)
 }
 
 func TestCostRoutingExcludesChannelWithoutCapabilityPolicy(t *testing.T) {
@@ -1000,6 +1079,15 @@ func prepareAutoGroupSelectionTest(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, setting.UpdateAutoGroupsByJsonString(previousAutoGroups))
 		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups))
+	})
+}
+
+func setGroupRoutingRequirementsForTest(t *testing.T, value string) {
+	t.Helper()
+	original := ratio_setting.GroupRoutingRequirements2JSONString()
+	require.NoError(t, ratio_setting.UpdateGroupRoutingRequirementsByJSONString(value))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRoutingRequirementsByJSONString(original))
 	})
 }
 

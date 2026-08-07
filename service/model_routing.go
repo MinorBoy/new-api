@@ -41,12 +41,26 @@ type groupRoutingResult struct {
 }
 
 func evaluateGroupRouting(param *RetryParam, group, modelName string) (groupRoutingResult, error) {
+	requirements := ratio_setting.GetGroupRoutingRequirements(group)
+	groupRequiresRealPerson := requirements.RequireRealPerson != nil && *requirements.RequireRealPerson
 	if param == nil || param.RoutingInput == nil {
+		if groupRequiresRealPerson {
+			return groupRoutingResult{}, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+				Err: errors.New("no compatible route supports this request"),
+			}
+		}
 		return groupRoutingResult{}, nil
 	}
 	canonicalModel := modelrouting.NormalizeCanonicalModel(modelName)
 	snapshot, ok := routingPolicySnapshotLookup(group, canonicalModel)
 	if !ok {
+		if groupRequiresRealPerson {
+			return groupRoutingResult{}, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+				Err: errors.New("no compatible route supports this request"),
+			}
+		}
 		return groupRoutingResult{}, nil
 	}
 	if !snapshot.Enabled || snapshot.ID <= 0 || snapshot.GroupName != group || snapshot.CanonicalModel != canonicalModel || snapshot.TargetsByChannel == nil {
@@ -57,6 +71,7 @@ func evaluateGroupRouting(param *RetryParam, group, modelName string) (groupRout
 	}
 	routingInput := *param.RoutingInput
 	routingInput.CanonicalModel = canonicalModel
+	routingInput.RequireRealPerson = routingInput.RequireRealPerson || groupRequiresRealPerson
 	facts, err := modelrouting.ResolveFacts(group, routingInput, snapshot.Defaults)
 	if err != nil {
 		return groupRoutingResult{}, &ChannelSelectionError{

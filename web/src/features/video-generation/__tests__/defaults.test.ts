@@ -12,7 +12,7 @@ describe('Seedance video defaults', () => {
     assert.equal(DEFAULT_VIDEO_FORM.media.audios.length, 1)
     assert.equal(DEFAULT_VIDEO_FORM.ratio, '16:9')
     assert.equal(DEFAULT_VIDEO_FORM.duration, 5)
-    assert.equal(DEFAULT_VIDEO_FORM.generateAudio, true)
+    assert.equal(DEFAULT_VIDEO_FORM.generateAudio, false)
     assert.equal(DEFAULT_VIDEO_FORM.watermark, false)
   })
 
@@ -22,7 +22,6 @@ describe('Seedance video defaults', () => {
     assert.deepEqual(Object.keys(request).sort(), [
       'content',
       'duration',
-      'generate_audio',
       'model',
       'ratio',
     ])

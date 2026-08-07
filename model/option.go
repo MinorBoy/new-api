@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
+	object_storage "github.com/QuantumNous/new-api/setting/object_storage"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -656,6 +657,8 @@ func handleConfigUpdate(key, value string) bool {
 		video_setting.UpdateAndSync()
 	} else if configName == cost_setting.ConfigName {
 		cost_setting.UpdateAndSync()
+	} else if configName == object_storage.ConfigName {
+		object_storage.UpdateAndSync()
 	}
 
 	return true // 已处理

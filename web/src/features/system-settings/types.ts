@@ -387,6 +387,43 @@ export type OperationsSettings = {
   'perf_metrics_setting.retention_days': number
 }
 
+export type ObjectStorageSettings = {
+  enabled: boolean
+  endpoint: string
+  public_endpoint: string
+  region: string
+  bucket: string
+  access_key_id: string
+  secret_configured: boolean
+  use_path_style: boolean
+  max_video_size_mb: number
+  expires_seconds: number
+  transfer_domain_whitelist: string[]
+  no_transfer_domain_blacklist: string[]
+}
+
+export type ObjectStorageSettingsRequest = Omit<
+  ObjectStorageSettings,
+  'secret_configured'
+> & {
+  secret_access_key: string
+  clear_secret: boolean
+}
+
+export type ObjectStorageSettingsResponse = {
+  success: boolean
+  message: string
+  data: ObjectStorageSettings
+}
+
+export type ObjectStorageTestResponse = {
+  success: boolean
+  message: string
+  data: {
+    connected: boolean
+  }
+}
+
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean
   ModelRequestRateLimitCount: number

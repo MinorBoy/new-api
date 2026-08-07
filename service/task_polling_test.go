@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -362,6 +363,49 @@ func TestSeedanceVersionedTaskDoesNotFinalizeWithoutUsage(t *testing.T) {
 	assert.Equal(t, 4000, stored.Quota)
 }
 
+func TestUpdateVideoSingleTaskTransfersWhitelistedVideoResult(t *testing.T) {
+	truncate(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "video-data")
+	}))
+	t.Cleanup(server.Close)
+	configureVideoResultStorage(t, enabledVideoStorageValues(sourceHost(t, server.URL)))
+	store := &fakeVideoResultStore{}
+	installVideoResultDependencies(t, store, server.Client(), func(string) error { return nil })
+	task := seedPollingTask(t, 0, "task_polling_storage", "upstream_polling_storage")
+	task.Properties.OriginModelName = "doubao-seedance-2-0-fast"
+	require.NoError(t, task.Update())
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), Url: server.URL + "/result.mp4"}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+	assert.Equal(t, "doubao-seedance-2-0-fast/task_polling_storage.mp4", task.PrivateData.ResultObjectKey)
+	assert.Empty(t, task.PrivateData.ResultURL)
+	assert.Equal(t, 1, store.putCalls)
+}
+
+func TestUpdateVideoSingleTaskFailsWhenVideoTransferFails(t *testing.T) {
+	truncate(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "video-data")
+	}))
+	t.Cleanup(server.Close)
+	configureVideoResultStorage(t, enabledVideoStorageValues(sourceHost(t, server.URL)))
+	store := &fakeVideoResultStore{putErr: fmt.Errorf("upload failed")}
+	installVideoResultDependencies(t, store, server.Client(), func(string) error { return nil })
+	task := seedPollingTask(t, 0, "task_polling_storage_failure", "upstream_polling_storage_failure")
+	task.Properties.OriginModelName = "doubao-seedance-2-0-fast"
+	require.NoError(t, task.Update())
+	adaptor := &taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), Url: server.URL + "/result.mp4"}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+	assert.Empty(t, task.PrivateData.ResultURL)
+	assert.Empty(t, task.PrivateData.ResultObjectKey)
+}
+
 func TestUpdateVideoSingleTaskHTTPRetryableLeavesTaskUnchanged(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -603,6 +647,39 @@ func TestSeedanceVideoPollingPersistsCompleteArkTerminalResponse(t *testing.T) {
 	assert.EqualValues(t, 108000, usage["completion_tokens"])
 	assert.EqualValues(t, 108000, usage["total_tokens"])
 	assert.NotContains(t, string(stored.PrivateData.UserResponseData), "upstream_private_seedance_audit")
+}
+
+func TestSeedanceVideoPollingAuditUsesStoredObjectURL(t *testing.T) {
+	truncate(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "video-data")
+	}))
+	t.Cleanup(server.Close)
+	configureVideoResultStorage(t, enabledVideoStorageValues(sourceHost(t, server.URL)))
+	store := &fakeVideoResultStore{presignURL: "https://cdn.example.com/videos/doubao-seedance-2-0/task_seedance_storage_audit.mp4?X-Amz-Expires=86400"}
+	installVideoResultDependencies(t, store, server.Client(), func(string) error { return nil })
+	task := seedPollingTask(t, 0, "task_seedance_storage_audit", "upstream_seedance_storage_audit")
+	task.Platform = constant.TaskPlatform(fmt.Sprint(constant.ChannelTypeFourSToken))
+	task.Properties.RequestPath = "/api/v3/contents/generations/tasks"
+	task.Properties.OriginModelName = "doubao-seedance-2-0"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		UsageProfile:             model.TaskUsageProfileSeedance,
+		RequestedDurationSeconds: 5,
+		Resolution:               "720p",
+		SeedanceTokenBilling:     seedanceTokenBilling720p(),
+	}
+	require.NoError(t, task.Update())
+	adaptor := &taskResponseAuditPollingAdaptor{&taskPollingFetchAdaptor{parseResult: &relaycommon.TaskInfo{
+		Status: string(model.TaskStatusSuccess),
+		Url:    server.URL + "/result.mp4",
+	}}}
+
+	require.NoError(t, runSinglePollingUpdate(t, adaptor, task))
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Contains(t, string(stored.PrivateData.UserResponseData), "cdn.example.com")
+	assert.NotContains(t, string(stored.PrivateData.UserResponseData), sourceHost(t, server.URL))
 }
 
 func TestNewAPIVideoNonSeedancePollingKeepsOpenAIAuditFormat(t *testing.T) {

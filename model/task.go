@@ -105,9 +105,11 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	Key                     string `json:"key,omitempty"`
+	UpstreamTaskID          string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL               string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	ResultObjectKey         string `json:"result_object_key,omitempty"`
+	ResultObjectContentType string `json:"result_object_content_type,omitempty"`
 	// UserRequestData and UpstreamResponseData are captured at submission.
 	// UserResponseData is captured from the terminal response returned to the
 	// task owner. Upstream and user-response payloads are administrator-only.
@@ -200,6 +202,8 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 	if p.Key == "" &&
 		p.UpstreamTaskID == "" &&
 		p.ResultURL == "" &&
+		p.ResultObjectKey == "" &&
+		p.ResultObjectContentType == "" &&
 		len(p.UserRequestData) == 0 &&
 		len(p.UpstreamResponseData) == 0 &&
 		len(p.UserResponseData) == 0 &&
@@ -515,13 +519,15 @@ func (Task *Task) Insert() error {
 }
 
 type taskSnapshot struct {
-	Status     TaskStatus
-	Progress   string
-	StartTime  int64
-	FinishTime int64
-	FailReason string
-	ResultURL  string
-	Data       json.RawMessage
+	Status                  TaskStatus
+	Progress                string
+	StartTime               int64
+	FinishTime              int64
+	FailReason              string
+	ResultURL               string
+	ResultObjectKey         string
+	ResultObjectContentType string
+	Data                    json.RawMessage
 }
 
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
@@ -531,18 +537,22 @@ func (s taskSnapshot) Equal(other taskSnapshot) bool {
 		s.FinishTime == other.FinishTime &&
 		s.FailReason == other.FailReason &&
 		s.ResultURL == other.ResultURL &&
+		s.ResultObjectKey == other.ResultObjectKey &&
+		s.ResultObjectContentType == other.ResultObjectContentType &&
 		bytes.Equal(s.Data, other.Data)
 }
 
 func (t *Task) Snapshot() taskSnapshot {
 	return taskSnapshot{
-		Status:     t.Status,
-		Progress:   t.Progress,
-		StartTime:  t.StartTime,
-		FinishTime: t.FinishTime,
-		FailReason: t.FailReason,
-		ResultURL:  t.PrivateData.ResultURL,
-		Data:       t.Data,
+		Status:                  t.Status,
+		Progress:                t.Progress,
+		StartTime:               t.StartTime,
+		FinishTime:              t.FinishTime,
+		FailReason:              t.FailReason,
+		ResultURL:               t.PrivateData.ResultURL,
+		ResultObjectKey:         t.PrivateData.ResultObjectKey,
+		ResultObjectContentType: t.PrivateData.ResultObjectContentType,
+		Data:                    t.Data,
 	}
 }
 

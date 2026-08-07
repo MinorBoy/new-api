@@ -860,6 +860,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 				taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
 				return
 			}
+			openAIVideoData, err = service.RewriteVideoResponseURL(c.Request.Context(), originTask, openAIVideoData, service.VideoResponseFormatMetadataURL)
+			if err != nil {
+				taskResp = service.TaskErrorWrapper(err, "rewrite_video_result_url_failed", http.StatusInternalServerError)
+				return
+			}
 			respBody = openAIVideoData
 			return
 		}
@@ -876,6 +881,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		converted, err := converter.ConvertToArkVideoTask(originTask)
 		if err != nil {
 			taskResp = service.TaskErrorWrapper(err, "convert_to_ark_video_failed", http.StatusInternalServerError)
+			return
+		}
+		converted, err = service.RewriteVideoResponseURL(c.Request.Context(), originTask, converted, service.VideoResponseFormatVideoURL)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "rewrite_video_result_url_failed", http.StatusInternalServerError)
 			return
 		}
 		respBody = converted
@@ -897,6 +907,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 			converted, err := converter.ConvertToArkVideoTask(originTask)
 			if err != nil {
 				taskResp = service.TaskErrorWrapper(err, "convert_to_ark_video_failed", http.StatusInternalServerError)
+				return
+			}
+			converted, err = service.RewriteVideoResponseURL(c.Request.Context(), originTask, converted, service.VideoResponseFormatVideoURL)
+			if err != nil {
+				taskResp = service.TaskErrorWrapper(err, "rewrite_video_result_url_failed", http.StatusInternalServerError)
 				return
 			}
 			respBody = converted
@@ -969,7 +984,18 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if strings.HasPrefix(ti.Url, "data:") {
 		// data: URI — kept in Data, not ResultURL
 	} else if ti.Url != "" {
-		task.PrivateData.ResultURL = ti.Url
+		if task.Status == model.TaskStatusSuccess {
+			if err := service.ProcessVideoResultURL(context.Background(), task, ti.Url); err != nil {
+				task.Status = model.TaskStatusFailure
+				task.Progress = taskcommon.ProgressComplete
+				task.FailReason = "video result storage failed"
+				task.PrivateData.ResultURL = ""
+				task.PrivateData.ResultObjectKey = ""
+				task.PrivateData.ResultObjectContentType = ""
+			}
+		} else {
+			task.PrivateData.ResultURL = ti.Url
+		}
 	} else if task.Status == model.TaskStatusSuccess {
 		// No URL from adaptor — construct proxy URL using public task ID
 		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
@@ -993,6 +1019,13 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		"status":   mapTaskStatusToSimple(task.Status),
 		"task_id":  task.TaskID,
 		"url":      task.GetResultURL(),
+	}
+	if strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" {
+		if resolved, err := service.ResolveTaskResultURL(context.Background(), task); err == nil {
+			out["url"] = resolved
+		} else {
+			out["url"] = ""
+		}
 	}
 	respBody, _ := common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
@@ -1043,6 +1076,14 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 	properties := task.Properties
 	data := task.Data
+	resultURL := task.GetResultURL()
+	if strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" {
+		if resolved, err := service.ResolveTaskResultURL(context.Background(), task); err == nil {
+			resultURL = resolved
+		} else {
+			resultURL = ""
+		}
+	}
 	if !includeAdmin && (isSeedanceTaskPlatform(task.Platform) || task.PrivateData.Routing != nil) {
 		properties = model.Properties{OriginModelName: task.Properties.OriginModelName}
 		data = nil
@@ -1060,7 +1101,7 @@ func TaskModel2Dto(task *model.Task, includeAdmin bool) *dto.TaskDto {
 		Action:          task.Action,
 		Status:          string(task.Status),
 		FailReason:      task.FailReason,
-		ResultURL:       task.GetResultURL(),
+		ResultURL:       resultURL,
 		SubmitTime:      task.SubmitTime,
 		StartTime:       task.StartTime,
 		FinishTime:      task.FinishTime,

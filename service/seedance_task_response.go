@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,6 +83,13 @@ func NormalizeSeedanceTaskResponse(task *model.Task, response map[string]interfa
 		videoURL, _ := content["video_url"].(string)
 		if strings.TrimSpace(videoURL) == "" && strings.TrimSpace(task.PrivateData.ResultURL) != "" {
 			videoURL = task.PrivateData.ResultURL
+		}
+		if strings.TrimSpace(videoURL) == "" && strings.TrimSpace(task.PrivateData.ResultObjectKey) != "" {
+			resolved, err := ResolveTaskResultURL(context.Background(), task)
+			if err != nil {
+				return err
+			}
+			videoURL = resolved
 		}
 		if strings.TrimSpace(videoURL) == "" {
 			return errors.New("successful Seedance task response is missing content.video_url")

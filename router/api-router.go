@@ -204,6 +204,13 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/subscription-product", controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
+		objectStorageRoute := apiRouter.Group("/object-storage")
+		objectStorageRoute.Use(middleware.RootAuth())
+		{
+			objectStorageRoute.GET("/settings", controller.GetObjectStorageSettings)
+			objectStorageRoute.PUT("/settings", controller.UpdateObjectStorageSettings)
+			objectStorageRoute.POST("/test", controller.TestObjectStorageSettings)
+		}
 
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")

@@ -47,6 +47,7 @@ func persistPolledTerminalTaskUserResponse(ctx context.Context, adaptor TaskPoll
 	var (
 		responseBody []byte
 		err          error
+		format       VideoResponseFormat
 	)
 	if IsSeedanceTask(task) {
 		converter, ok := adaptor.(taskArkVideoConverter)
@@ -77,17 +78,24 @@ func persistPolledTerminalTaskUserResponse(ctx context.Context, adaptor TaskPoll
 			return
 		}
 		responseBody, err = converter.ConvertToOpenAIVideo(task)
+		format = VideoResponseFormatMetadataURL
 	case strings.HasPrefix(requestPath, "/api/v3/contents/generations/tasks"):
 		converter, ok := adaptor.(taskArkVideoConverter)
 		if !ok {
 			return
 		}
 		responseBody, err = converter.ConvertToArkVideoTask(task)
+		format = VideoResponseFormatVideoURL
 	default:
 		return
 	}
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("build terminal task user response audit payload failed: task_id=%s request_path=%s error=%v", task.TaskID, requestPath, err))
+		return
+	}
+	responseBody, err = RewriteVideoResponseURL(ctx, task, responseBody, format)
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("rewrite terminal task user response audit URL failed: task_id=%s request_path=%s error=%v", task.TaskID, requestPath, err))
 		return
 	}
 	PersistTerminalTaskUserResponse(ctx, task, responseBody)

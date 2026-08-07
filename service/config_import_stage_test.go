@@ -125,6 +125,55 @@ func TestStageConfigImportBatchAllowsDifferentTargetDefaultsWithinPolicy(t *test
 	assert.Zero(t, conflictCount)
 }
 
+func TestStageConfigImportPreservesGroupRequirementsWhenSectionMissing(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Option{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	require.NoError(t, model.DB.Create(&model.Option{Key: "GroupRoutingRequirements", Value: `{"default":{"require_real_person":true}}`}).Error)
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, detail.Status)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "GroupRoutingRequirements").First(&option).Error)
+	assert.JSONEq(t, `{"default":{"require_real_person":true}}`, option.Value)
+}
+
+func TestStageConfigImportRejectsUnknownRoutingRequirementGroup(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Option{}, &model.ConfigImportIssue{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	require.NoError(t, persistConfigImportGroupRequirementItem(t, batch.ID, "req-unknown", "missing-group", true))
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusStaged, detail.Status)
+	var issue model.ConfigImportIssue
+	require.NoError(t, model.DB.Where("batch_id = ? AND code = ?", batch.ID, "GROUP_ROUTING_REQUIREMENT_GROUP_UNKNOWN").First(&issue).Error)
+	assert.Equal(t, string(types.ConfigImportIssueSeverityError), issue.Severity)
+}
+
+func persistConfigImportGroupRequirementItem(t *testing.T, batchID int64, businessID, groupName string, requireRealPerson bool) error {
+	t.Helper()
+	value := types.ConfigImportGroupRoutingRequirement{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: businessID},
+		GroupName:                       groupName,
+		Requirements:                    types.ConfigImportGroupRoutingValues{RequireRealPerson: &requireRealPerson},
+	}
+	encoded, err := common.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return model.DB.Create(&model.ConfigImportItem{
+		BatchID: batchID, EntityType: "group_routing_requirements", BusinessID: businessID,
+		CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error
+}
+
 func TestConfigImportBindingUsesMappingModelsForGlobalSKU(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

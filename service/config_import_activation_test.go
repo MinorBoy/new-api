@@ -106,6 +106,47 @@ func TestActivateConfigImportBatchAppliesConfigurationAtomically(t *testing.T) {
 	assert.Equal(t, int64(1), auditCount)
 }
 
+func TestActivateConfigImportPublishesGroupRoutingRequirementsAtomically(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	require.NoError(t, model.DB.Create(&model.Option{Key: "GroupRoutingRequirements", Value: `{}`}).Error)
+	require.NoError(t, persistConfigImportGroupRequirementItem(t, fixture.BatchID, "req-default", "default", true))
+	persistActivationBaseline(t, fixture.BatchID)
+	previousRefresh := refreshConfigImportActivation
+	var refreshed ConfigImportRefreshKeys
+	refreshConfigImportActivation = func(keys ConfigImportRefreshKeys) error { refreshed = keys; return nil }
+	t.Cleanup(func() { refreshConfigImportActivation = previousRefresh })
+
+	_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+	require.NoError(t, err)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "GroupRoutingRequirements").First(&option).Error)
+	assert.JSONEq(t, `{"default":{"require_real_person":true}}`, option.Value)
+	assert.Contains(t, refreshed.OptionKeys, "GroupRoutingRequirements")
+}
+
+func TestActivateConfigImportDoesNotPartiallyWriteGroupRequirements(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	require.NoError(t, model.DB.Create(&model.Option{Key: "GroupRoutingRequirements", Value: `{}`}).Error)
+	require.NoError(t, persistConfigImportGroupRequirementItem(t, fixture.BatchID, "req-default", "default", true))
+	persistActivationBaseline(t, fixture.BatchID)
+	callbackName := "test:config_import_activation_group_requirement_failure"
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(db *gorm.DB) {
+		if db.Statement != nil && db.Statement.Table == "options" {
+			db.AddError(errors.New("injected option update failure"))
+		}
+	}))
+	t.Cleanup(func() { require.NoError(t, model.DB.Callback().Update().Remove(callbackName)) })
+
+	_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+	require.ErrorContains(t, err, "injected option update failure")
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "GroupRoutingRequirements").First(&option).Error)
+	assert.JSONEq(t, `{}`, option.Value)
+	var batch model.ConfigImportBatch
+	require.NoError(t, model.DB.First(&batch, fixture.BatchID).Error)
+	assert.Nil(t, batch.ActivatedAt)
+}
+
 func TestActivateConfigImportBatchRetiresImportedTargetsByMergeMode(t *testing.T) {
 	for _, test := range []struct {
 		name                   string

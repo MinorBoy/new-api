@@ -110,6 +110,29 @@ func TestPublishConfigImportBatchCreatesNormalizedRouteCandidateWithoutApplyingP
 	assert.Equal(t, after.Hash, audit.AfterSHA256)
 }
 
+func TestPublishRouteBlueprintUsesDeclaredGroupName(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}, &model.Option{}, &model.RoutingPolicy{}, &model.RouteTarget{}, &model.ConfigImportPublishAudit{}))
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	var routeItem model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND entity_type = ?", batch.ID, "route_blueprints").First(&routeItem).Error)
+	var blueprint types.ConfigImportRouteBlueprint
+	require.NoError(t, common.UnmarshalJsonStr(routeItem.CanonicalJSON, &blueprint))
+	blueprint.GroupName = "vip"
+	encoded, err := common.Marshal(blueprint)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&routeItem).Update("canonical_json", string(encoded)).Error)
+	_, err = StageConfigImportBatch(context.Background(), 42, batch.ID)
+	require.NoError(t, err)
+	require.NoError(t, PublishConfigImportBatch(context.Background(), batch.ID, 42))
+
+	var policy model.RoutingPolicy
+	require.NoError(t, model.DB.Where("group_name = ? AND model = ?", "vip", configImportRuntimeCanonicalModel(blueprint.CanonicalModel)).First(&policy).Error)
+	assert.False(t, policy.Enabled)
+}
+
 func TestPublishConfigImportBatchDoesNotRecordPostActivationCostCoverage(t *testing.T) {
 	prepareConfigImportServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(

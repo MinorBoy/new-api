@@ -517,6 +517,8 @@ func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRe
 			for key := range optionPatches {
 				keys.OptionKeys = appendConfigImportRefreshString(keys.OptionKeys, key)
 			}
+		case "group_routing_requirements":
+			keys.OptionKeys = appendConfigImportRefreshString(keys.OptionKeys, "GroupRoutingRequirements")
 		case "model_mappings":
 			var mapping types.ConfigImportModelMapping
 			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
@@ -532,7 +534,7 @@ func configImportRefreshKeysForBatch(db *gorm.DB, batchID int64) (ConfigImportRe
 			}
 			if blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
 				keys.RoutingPolicyKeys = appendConfigImportRefreshRoutingKey(keys.RoutingPolicyKeys, model.RoutingPolicyKey{
-					GroupName: "default", Model: configImportRuntimeCanonicalModel(blueprint.CanonicalModel),
+					GroupName: configImportRouteGroupName(blueprint), Model: configImportRuntimeCanonicalModel(blueprint.CanonicalModel),
 				})
 			}
 		}
@@ -1168,7 +1170,7 @@ func configImportRouteRows(lineChannels map[string]int, blueprint types.ConfigIm
 
 func configImportRoutePolicy(blueprint types.ConfigImportRouteBlueprint) model.RoutingPolicy {
 	policy := model.RoutingPolicy{
-		GroupName:         "default",
+		GroupName:         configImportRouteGroupName(blueprint),
 		Model:             configImportRuntimeCanonicalModel(blueprint.CanonicalModel),
 		Enabled:           false,
 		DefaultResolution: "720p",
@@ -1196,6 +1198,14 @@ func configImportRoutePolicy(blueprint types.ConfigImportRouteBlueprint) model.R
 		}
 	}
 	return policy
+}
+
+func configImportRouteGroupName(blueprint types.ConfigImportRouteBlueprint) string {
+	groupName := strings.TrimSpace(blueprint.GroupName)
+	if groupName == "" {
+		return "default"
+	}
+	return groupName
 }
 
 func configImportRouteRowsWithPriorityOverrides(lineChannels map[string]int, blueprint types.ConfigImportRouteBlueprint, priorityOverrides map[string]int) (model.RoutingPolicy, []model.RouteTarget, error) {

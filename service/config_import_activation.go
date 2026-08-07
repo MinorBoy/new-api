@@ -12,6 +12,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -133,6 +135,9 @@ func ActivateConfigImportBatch(ctx context.Context, batchID int64, adminID int) 
 			)
 		}
 		if err := publishConfigImportSaleOptions(tx, items, &refresh); err != nil {
+			return err
+		}
+		if err := publishConfigImportGroupRoutingRequirements(tx, items, &refresh); err != nil {
 			return err
 		}
 		if err := publishConfigImportModelMappings(tx, items, &refresh); err != nil {
@@ -257,6 +262,55 @@ func ActivateConfigImportBatch(ctx context.Context, batchID int64, adminID int) 
 		common.SysError(fmt.Sprintf("failed to record post-activation cost coverage for batch %d: %v", batchID, err))
 	}
 	return GetConfigImportBatch(ctx, batchID)
+}
+
+func publishConfigImportGroupRoutingRequirements(tx *gorm.DB, items []model.ConfigImportItem, refresh *ConfigImportRefreshKeys) error {
+	if tx == nil || !tx.Migrator().HasTable(&model.Option{}) {
+		return nil
+	}
+	requirementsByGroup := make(map[string]ratio_setting.GroupRoutingRequirements)
+	var option model.Option
+	err := tx.Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: "GroupRoutingRequirements"}).First(&option).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if err == nil && strings.TrimSpace(option.Value) != "" {
+		if decodeErr := common.UnmarshalJsonStr(option.Value, &requirementsByGroup); decodeErr != nil {
+			return configImportError("ACTIVATION_GROUP_ROUTING_REQUIREMENT_OPTION", "GroupRoutingRequirements is not a JSON object: %v", decodeErr)
+		}
+	}
+	knownGroups := ratio_setting.GetGroupRatioCopy()
+	for groupName := range setting.GetUserUsableGroupsCopy() {
+		knownGroups[groupName] = 1
+	}
+	changed := false
+	for _, item := range items {
+		if item.EntityType != "group_routing_requirements" || item.State == string(types.ConfigImportItemStateExcluded) || item.State == string(types.ConfigImportItemStateUnchanged) {
+			continue
+		}
+		var imported types.ConfigImportGroupRoutingRequirement
+		if decodeErr := common.UnmarshalJsonStr(item.CanonicalJSON, &imported); decodeErr != nil {
+			return decodeErr
+		}
+		groupName := strings.TrimSpace(imported.GroupName)
+		if _, known := knownGroups[groupName]; !known {
+			return configImportError(configImportIssueGroupRoutingRequirementUnknown, "group routing requirement references unknown group %q", groupName)
+		}
+		requirementsByGroup[groupName] = ratio_setting.GroupRoutingRequirements{RequireRealPerson: imported.Requirements.RequireRealPerson}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	encoded, err := common.Marshal(requirementsByGroup)
+	if err != nil {
+		return err
+	}
+	if err := model.UpdateOptionsWithTx(tx, map[string]string{"GroupRoutingRequirements": string(encoded)}); err != nil {
+		return err
+	}
+	refresh.OptionKeys = appendConfigImportRefreshString(refresh.OptionKeys, "GroupRoutingRequirements")
+	return nil
 }
 
 func configImportActivationPreview(plan *configImportActivationPlan) dto.ConfigImportActivationPreview {
@@ -404,7 +458,12 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 		return nil, err
 	}
 	policyModels := make([]string, 0, len(publishedPlans))
+	seenPolicyModels := make(map[string]struct{}, len(publishedPlans))
 	for _, publishedPlan := range publishedPlans {
+		if _, exists := seenPolicyModels[publishedPlan.PolicyKey.Model]; exists {
+			continue
+		}
+		seenPolicyModels[publishedPlan.PolicyKey.Model] = struct{}{}
 		policyModels = append(policyModels, publishedPlan.PolicyKey.Model)
 	}
 	sort.Strings(policyModels)
@@ -414,14 +473,22 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 		if lock {
 			policiesQuery = model.LockModelForUpdate(tx, &model.RoutingPolicy{})
 		}
-		if err := policiesQuery.Where("group_name = ? AND model IN ?", "default", policyModels).Order("id ASC").Find(&policies).Error; err != nil {
+		if err := policiesQuery.Where("model IN ?", policyModels).Order("group_name ASC, model ASC, id ASC").Find(&policies).Error; err != nil {
 			return nil, err
 		}
+	}
+	requestedPolicyKeys := make(map[model.RoutingPolicyKey]struct{}, len(publishedPlans))
+	for _, publishedPlan := range publishedPlans {
+		requestedPolicyKeys[publishedPlan.PolicyKey] = struct{}{}
 	}
 	policiesByKey := make(map[model.RoutingPolicyKey]model.RoutingPolicy, len(policies))
 	policyIDs := make([]int, 0, len(policies))
 	for _, policy := range policies {
-		policiesByKey[model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model}] = policy
+		key := model.RoutingPolicyKey{GroupName: policy.GroupName, Model: policy.Model}
+		if _, requested := requestedPolicyKeys[key]; !requested {
+			continue
+		}
+		policiesByKey[key] = policy
 		policyIDs = append(policyIDs, policy.ID)
 	}
 	sort.Ints(policyIDs)

@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -1366,6 +1367,19 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 					scope.optionFields[optionKey][modelName] = struct{}{}
 				}
 			}
+		case "group_routing_requirements":
+			var requirement types.ConfigImportGroupRoutingRequirement
+			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &requirement); err != nil {
+				return nil, err
+			}
+			groupName := strings.TrimSpace(requirement.GroupName)
+			if groupName == "" {
+				continue
+			}
+			if scope.optionFields["GroupRoutingRequirements"] == nil {
+				scope.optionFields["GroupRoutingRequirements"] = make(map[string]struct{})
+			}
+			scope.optionFields["GroupRoutingRequirements"][groupName] = struct{}{}
 		case "model_mappings":
 			var mapping types.ConfigImportModelMapping
 			if err := common.UnmarshalJsonStr(item.CanonicalJSON, &mapping); err != nil {
@@ -1383,7 +1397,7 @@ func configImportBaselineScopeForBatch(db *gorm.DB, batchID int64) (*configImpor
 				return nil, err
 			}
 			if blueprint.MergeMode != types.ConfigImportRouteMergeModeSkip {
-				scope.routingPolicies[fmt.Sprintf("default|%s", configImportRuntimeCanonicalModel(blueprint.CanonicalModel))] = struct{}{}
+				scope.routingPolicies[fmt.Sprintf("%s|%s", configImportRouteGroupName(blueprint), configImportRuntimeCanonicalModel(blueprint.CanonicalModel))] = struct{}{}
 			}
 		}
 	}
@@ -1585,15 +1599,20 @@ func captureConfigImportBaseline(db *gorm.DB, batchID int64) (*ConfigImportBasel
 	}
 	if db.Migrator().HasTable(&model.RoutingPolicy{}) && len(scope.routingPolicies) > 0 {
 		models := make([]string, 0, len(scope.routingPolicies))
+		seenModels := make(map[string]struct{}, len(scope.routingPolicies))
 		for key := range scope.routingPolicies {
 			_, modelName, found := strings.Cut(key, "|")
 			if found {
+				if _, exists := seenModels[modelName]; exists {
+					continue
+				}
+				seenModels[modelName] = struct{}{}
 				models = append(models, modelName)
 			}
 		}
 		sort.Strings(models)
 		var policies []model.RoutingPolicy
-		if err := db.Where("group_name = ? AND model IN ?", "default", models).Order("group_name ASC, model ASC, id ASC").Find(&policies).Error; err != nil {
+		if err := db.Where("model IN ?", models).Order("group_name ASC, model ASC, id ASC").Find(&policies).Error; err != nil {
 			return nil, err
 		}
 		if db.Migrator().HasTable(&model.RouteTarget{}) && len(policies) > 0 {
@@ -1757,6 +1776,11 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 			return err
 		}
 		issues = append(issues, generatedIssues...)
+		generatedIssues, err = stageConfigImportGroupRoutingRequirements(tx, items)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, generatedIssues...)
 		if err := persistConfigImportStageIssues(tx, batchID, issues); err != nil {
 			return err
 		}
@@ -1820,6 +1844,77 @@ func StageConfigImportBatch(ctx context.Context, adminID int, batchID int64) (*d
 		return nil, err
 	}
 	return GetConfigImportBatch(ctx, batchID)
+}
+
+const configImportIssueGroupRoutingRequirementUnknown = "GROUP_ROUTING_REQUIREMENT_GROUP_UNKNOWN"
+
+func stageConfigImportGroupRoutingRequirements(db *gorm.DB, items []model.ConfigImportItem) ([]configImportStageIssue, error) {
+	issues := make([]configImportStageIssue, 0)
+	var option model.Option
+	err := gorm.ErrRecordNotFound
+	if db.Migrator().HasTable(&model.Option{}) {
+		err = db.Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: "GroupRoutingRequirements"}).First(&option).Error
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	current := make(map[string]ratio_setting.GroupRoutingRequirements)
+	if err == nil && strings.TrimSpace(option.Value) != "" {
+		if decodeErr := common.UnmarshalJsonStr(option.Value, &current); decodeErr != nil {
+			return nil, configImportError("STAGE_GROUP_ROUTING_REQUIREMENT_OPTION", "GroupRoutingRequirements is not a JSON object: %v", decodeErr)
+		}
+	}
+	knownGroups := ratio_setting.GetGroupRatioCopy()
+	for groupName := range setting.GetUserUsableGroupsCopy() {
+		knownGroups[groupName] = 1
+	}
+	for index := range items {
+		item := &items[index]
+		if item.EntityType != "group_routing_requirements" || item.State == string(types.ConfigImportItemStateExcluded) {
+			continue
+		}
+		var imported types.ConfigImportGroupRoutingRequirement
+		if decodeErr := common.UnmarshalJsonStr(item.CanonicalJSON, &imported); decodeErr != nil {
+			return nil, decodeErr
+		}
+		imported.GroupName = strings.TrimSpace(imported.GroupName)
+		if _, known := knownGroups[imported.GroupName]; !known {
+			item.State = string(types.ConfigImportItemStateConflict)
+			item.ConflictReason = configImportIssueGroupRoutingRequirementUnknown
+			if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+				return nil, persistErr
+			}
+			issues = append(issues, configImportStageIssue{
+				Code: configImportIssueGroupRoutingRequirementUnknown, Severity: types.ConfigImportIssueSeverityError,
+				BusinessID: item.BusinessID, Message: fmt.Sprintf("group routing requirement references unknown group %q", imported.GroupName),
+			})
+			continue
+		}
+		importedValue := ratio_setting.GroupRoutingRequirements{RequireRealPerson: imported.Requirements.RequireRealPerson}
+		currentValue, exists := current[imported.GroupName]
+		if !exists {
+			item.State = string(types.ConfigImportItemStateNew)
+		} else {
+			currentJSON, marshalErr := common.Marshal(currentValue)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			importedJSON, marshalErr := common.Marshal(importedValue)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			if string(currentJSON) == string(importedJSON) {
+				item.State = string(types.ConfigImportItemStateUnchanged)
+			} else {
+				item.State = string(types.ConfigImportItemStateChanged)
+			}
+		}
+		item.ConflictReason = ""
+		if persistErr := persistConfigImportItemState(db, item); persistErr != nil {
+			return nil, persistErr
+		}
+	}
+	return issues, nil
 }
 
 func stageConfigImportDisabledCostRules(db *gorm.DB, items []model.ConfigImportItem) error {

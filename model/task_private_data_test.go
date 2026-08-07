@@ -55,3 +55,26 @@ func TestTaskPrivateDataValueRetainsSeedanceUsageSnapshot(t *testing.T) {
 	require.NotNil(t, decoded.BillingContext.SeedanceTokenBilling)
 	assert.Equal(t, "0.1558219178082191625", decoded.BillingContext.SeedanceTokenBilling.FinalCharge)
 }
+
+func TestTaskPrivateDataValueRetainsObjectStorageResult(t *testing.T) {
+	privateData := TaskPrivateData{
+		ResultObjectKey:         "doubao-seedance-2-0-fast/task_public.mp4",
+		ResultObjectContentType: "video/mp4",
+	}
+
+	value, err := privateData.Value()
+	require.NoError(t, err)
+	require.NotNil(t, value)
+
+	var decoded TaskPrivateData
+	require.NoError(t, decoded.Scan(value))
+	assert.Equal(t, privateData.ResultObjectKey, decoded.ResultObjectKey)
+	assert.Equal(t, privateData.ResultObjectContentType, decoded.ResultObjectContentType)
+}
+
+func TestTaskPrivateDataScanKeepsLegacyResultURL(t *testing.T) {
+	var decoded TaskPrivateData
+	require.NoError(t, decoded.Scan([]byte(`{"result_url":"https://legacy.example/video.mp4"}`)))
+	assert.Equal(t, "https://legacy.example/video.mp4", decoded.ResultURL)
+	assert.Empty(t, decoded.ResultObjectKey)
+}

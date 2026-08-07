@@ -10,6 +10,7 @@
   "Auto-normalized to a single shape your SDK already speaks.": "Auto-normalized to a single shape your SDK already speaks.",
   "balance after": "balance after",
   "Browse all available API endpoints. Click any endpoint for full parameter details and code samples.": "Browse all available API endpoints. Click any endpoint for full parameter details and code samples.",
+  "Bucket": "Bucket",
   "CACHE_REFRESH_PENDING: configuration changed, but cache refresh is still pending.": "CACHE_REFRESH_PENDING: configuration changed, but cache refresh is still pending.",
   "capabilities": "capabilities",
   "Changed": "Changed",

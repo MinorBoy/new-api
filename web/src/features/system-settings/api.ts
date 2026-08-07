@@ -22,6 +22,9 @@ import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  ObjectStorageSettingsRequest,
+  ObjectStorageSettingsResponse,
+  ObjectStorageTestResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -33,6 +36,33 @@ import type {
 
 export async function getSystemOptions() {
   const res = await api.get<SystemOptionsResponse>('/api/option/')
+  return res.data
+}
+
+export async function getObjectStorageSettings() {
+  const res = await api.get<ObjectStorageSettingsResponse>(
+    '/api/object-storage/settings'
+  )
+  return res.data
+}
+
+export async function updateObjectStorageSettings(
+  request: ObjectStorageSettingsRequest
+) {
+  const res = await api.put<ObjectStorageSettingsResponse>(
+    '/api/object-storage/settings',
+    request
+  )
+  return res.data
+}
+
+export async function testObjectStorageSettings(
+  request: ObjectStorageSettingsRequest
+) {
+  const res = await api.post<ObjectStorageTestResponse>(
+    '/api/object-storage/test',
+    request
+  )
   return res.data
 }
 

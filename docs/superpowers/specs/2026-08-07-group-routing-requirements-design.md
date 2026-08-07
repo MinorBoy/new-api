@@ -58,6 +58,8 @@ map[string]GroupRoutingRequirements
 
 键为分组业务名称，不使用数据库 ID。配置挂载在现有 `ratio_setting` 全局配置体系中，并通过新的系统选项 `GroupRoutingRequirements` 持久化和加载。
 
+配置导入中的分组要求实体复用现有无凭据审计合同，包含 `business_id`、`entity_hash`、`source_ref`、`group_name` 和 `requirements`；运行时配置只使用其中的分组名称和要求对象。
+
 要求：
 
 - 服务器使用项目统一的 `common.Marshal` / `common.Unmarshal` 包装函数处理 JSON。
@@ -99,6 +101,9 @@ map[string]GroupRoutingRequirements
 {
   "group_routing_requirements": [
     {
+      "business_id": "group-routing-requirement:真人分组",
+      "entity_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "source_ref": "source:group-routing-requirements",
       "group_name": "真人分组",
       "requirements": {
         "require_real_person": true
@@ -116,6 +121,8 @@ map[string]GroupRoutingRequirements
 - 已存在分组按业务名称更新。
 - 分组路由要求与本批次相关路由策略在同一发布边界内生效；发布失败不得留下半套配置。
 - 预览显示新增、变更和保留项，但不显示任何 API Key 或供应商凭据。
+
+路由蓝图增加可选 `group_name` 字段。字段缺失时按 `default` 兼容旧模板；字段存在时，发布和刷新均使用该分组与模型组成的策略键。这样“真人分组 + 模型路由策略”可以在同一导入批次中建立，而不会被错误写入 `default`。
 
 ## 7. 测试与验收
 

@@ -67,8 +67,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 
 import { safeJsonParse } from '../utils/json-parser'
+import {
+  updateGroupRoutingRequirements,
+  type GroupRoutingRequirements,
+} from './group-routing-requirements'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
@@ -77,6 +82,8 @@ type GroupRatioVisualEditorProps = {
   groupGroupRatio: string
   autoGroups: string
   groupSpecialUsableGroup: string
+  groupRoutingRequirements: string
+  disabled?: boolean
   onChange: (field: string, value: string) => void
 }
 
@@ -258,6 +265,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupGroupRatio,
   autoGroups,
   groupSpecialUsableGroup,
+  groupRoutingRequirements,
+  disabled = false,
   onChange,
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
@@ -331,6 +340,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         topupGroupRatio={topupGroupRatio}
         onChange={onChange}
         onShowDetail={setDetailGroup}
+        groupRoutingRequirements={groupRoutingRequirements}
       />
 
       <GroupOverrideRules
@@ -411,6 +421,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         groupGroupRatio={groupGroupRatio}
         autoGroups={autoGroupsList}
         groupSpecialUsableGroup={groupSpecialUsableGroup}
+        groupRoutingRequirements={groupRoutingRequirements}
+        disabled={disabled}
+        onChange={onChange}
       />
     </div>
   )
@@ -420,6 +433,7 @@ type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
   topupGroupRatio: string
+  groupRoutingRequirements: string
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
 }
@@ -428,12 +442,21 @@ function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   topupGroupRatio,
+  groupRoutingRequirements,
   onChange,
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
     buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+  )
+  const routingRequirements = useMemo(
+    () =>
+      safeJsonParse<Record<string, GroupRoutingRequirements>>(
+        groupRoutingRequirements,
+        { fallback: {}, silent: true }
+      ),
+    [groupRoutingRequirements]
   )
 
   useEffect(() => {
@@ -606,6 +629,20 @@ function GroupPricingTable({
                     />
                   </div>
                 ),
+              },
+              {
+                id: 'routing-requirements',
+                header: t('Routing'),
+                className: 'min-w-44',
+                cell: (row) =>
+                  routingRequirements[row.name.trim()]?.require_real_person ===
+                  true ? (
+                    <StatusBadge variant='info' copyable={false}>
+                      {t('Require real person')}
+                    </StatusBadge>
+                  ) : (
+                    <span className='text-muted-foreground'>-</span>
+                  ),
               },
               {
                 id: 'description',
@@ -1123,6 +1160,9 @@ type GroupDetailSheetProps = {
   groupGroupRatio: string
   autoGroups: string[]
   groupSpecialUsableGroup: string
+  groupRoutingRequirements: string
+  disabled: boolean
+  onChange: (field: string, value: string) => void
 }
 
 type VisibilityRule = {
@@ -1159,6 +1199,9 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
       props.groupSpecialUsableGroup,
       { fallback: {}, silent: true }
     )
+    const routingRequirements = safeJsonParse<
+      Record<string, GroupRoutingRequirements>
+    >(props.groupRoutingRequirements, { fallback: {}, silent: true })
 
     // Overrides that apply when other user groups bill as this group
     const incomingOverrides: { userGroup: string; ratio: number }[] = []
@@ -1199,6 +1242,7 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
       outgoingOverrides,
       visibilityRules,
       autoIndex,
+      requireRealPerson: routingRequirements[name]?.require_real_person === true,
     }
   }, [
     name,
@@ -1208,6 +1252,7 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
     props.groupGroupRatio,
     props.autoGroups,
     props.groupSpecialUsableGroup,
+    props.groupRoutingRequirements,
   ])
 
   return (
@@ -1272,6 +1317,31 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
                   </dd>
                 </div>
               </dl>
+            </section>
+
+            <section className='space-y-3'>
+              <h3 className='text-sm font-semibold'>
+                {t('Group routing requirements')}
+              </h3>
+              <div className='flex items-center justify-between gap-4 rounded-md border px-3 py-2.5'>
+                <span className='text-sm'>{t('Require real person')}</span>
+                <Switch
+                  checked={detail.requireRealPerson}
+                  disabled={props.disabled}
+                  onCheckedChange={(checked) => {
+                    if (!name) return
+                    props.onChange(
+                      'GroupRoutingRequirements',
+                      updateGroupRoutingRequirements(
+                        props.groupRoutingRequirements,
+                        name,
+                        checked
+                      )
+                    )
+                  }}
+                  aria-label={t('Require real person')}
+                />
+              </div>
             </section>
 
             <section className='space-y-2'>

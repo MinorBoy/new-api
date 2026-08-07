@@ -133,6 +133,7 @@ const createGroupSchema = (t: Translate) =>
     }),
     DefaultUseAutoGroup: z.boolean(),
     GroupSpecialUsableGroup: createJsonStringField(t),
+    GroupRoutingRequirements: createJsonStringField(t),
   })
 
 type ModelFormValues = z.infer<ReturnType<typeof createModelSchema>>
@@ -211,6 +212,9 @@ export function RatioSettingsCard({
     GroupSpecialUsableGroup: normalizeJsonString(
       groupDefaults.GroupSpecialUsableGroup
     ),
+    GroupRoutingRequirements: normalizeJsonString(
+      groupDefaults.GroupRoutingRequirements
+    ),
   })
   const modelSchema = useMemo(() => createModelSchema(t), [t])
   const groupSchema = useMemo(() => createGroupSchema(t), [t])
@@ -248,6 +252,9 @@ export function RatioSettingsCard({
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
+      ),
+      GroupRoutingRequirements: formatJsonForTextarea(
+        groupDefaults.GroupRoutingRequirements
       ),
     },
   })
@@ -300,6 +307,9 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: normalizeJsonString(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupRoutingRequirements: normalizeJsonString(
+        groupDefaults.GroupRoutingRequirements
+      ),
     }
 
     groupForm.reset({
@@ -311,6 +321,9 @@ export function RatioSettingsCard({
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
+      ),
+      GroupRoutingRequirements: formatJsonForTextarea(
+        groupDefaults.GroupRoutingRequirements
       ),
     })
   }, [groupDefaults, groupForm])
@@ -372,12 +385,16 @@ export function RatioSettingsCard({
         GroupSpecialUsableGroup: normalizeJsonString(
           values.GroupSpecialUsableGroup
         ),
+        GroupRoutingRequirements: normalizeJsonString(
+          values.GroupRoutingRequirements
+        ),
       }
 
       // Map form field names to API keys (most are 1:1, except GroupSpecialUsableGroup)
       const apiKeyMap: Record<string, string> = {
         GroupSpecialUsableGroup:
           'group_ratio_setting.group_special_usable_group',
+        GroupRoutingRequirements: 'GroupRoutingRequirements',
       }
 
       const updates = (

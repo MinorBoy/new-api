@@ -6,20 +6,30 @@ import (
 	"strings"
 )
 
-func ShouldTransfer(rawURL string, whitelist, blacklist []string) (bool, error) {
+func ShouldTransfer(rawURL, mode string, whitelistEnabled, blacklistEnabled bool, whitelist, blacklist []string) (bool, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return false, fmt.Errorf("video result URL must be an absolute HTTP(S) URL")
 	}
+	if mode == "all" {
+		return true, nil
+	}
+	if mode != "rules" {
+		return false, nil
+	}
 	host := normalizeHost(u.Hostname())
-	for _, pattern := range blacklist {
-		if domainMatches(host, pattern) {
-			return false, nil
+	if blacklistEnabled {
+		for _, pattern := range blacklist {
+			if domainMatches(host, pattern) {
+				return false, nil
+			}
 		}
 	}
-	for _, pattern := range whitelist {
-		if domainMatches(host, pattern) {
-			return true, nil
+	if whitelistEnabled {
+		for _, pattern := range whitelist {
+			if domainMatches(host, pattern) {
+				return true, nil
+			}
 		}
 	}
 	return false, nil

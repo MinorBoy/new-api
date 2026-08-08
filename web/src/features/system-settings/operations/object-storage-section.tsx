@@ -219,11 +219,22 @@ function createObjectStorageSchema(
         }
       }
 
-      for (const [path, value] of [
-        ['transferDomainWhitelist', values.transferDomainWhitelist],
-        ['noTransferDomainBlacklist', values.noTransferDomainBlacklist],
-      ] as const) {
-        if (parseDomainList(value).invalid.length > 0) {
+      if (values.transferMode === 'rules') {
+        for (const [path, value, ruleEnabled] of [
+          [
+            'transferDomainWhitelist',
+            values.transferDomainWhitelist,
+            values.whitelistEnabled,
+          ],
+          [
+            'noTransferDomainBlacklist',
+            values.noTransferDomainBlacklist,
+            values.blacklistEnabled,
+          ],
+        ] as const) {
+          if (!ruleEnabled || parseDomainList(value).invalid.length === 0) {
+            continue
+          }
           context.addIssue({
             code: 'custom',
             path: [path],

@@ -25,9 +25,9 @@ type objectStorageSettingsRequest struct {
 	UsePathStyle              bool     `json:"use_path_style"`
 	MaxVideoSizeMB            int      `json:"max_video_size_mb"`
 	ExpiresSeconds            int      `json:"expires_seconds"`
-	TransferMode              string   `json:"transfer_mode"`
-	WhitelistEnabled          bool     `json:"whitelist_enabled"`
-	BlacklistEnabled          bool     `json:"blacklist_enabled"`
+	TransferMode              *string  `json:"transfer_mode"`
+	WhitelistEnabled          *bool    `json:"whitelist_enabled"`
+	BlacklistEnabled          *bool    `json:"blacklist_enabled"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }
@@ -140,6 +140,18 @@ func objectStorageConfigFromRequest(request objectStorageSettingsRequest, curren
 	} else if secret == "" {
 		secret = current.SecretAccessKey
 	}
+	transferMode := current.TransferMode
+	if request.TransferMode != nil {
+		transferMode = *request.TransferMode
+	}
+	whitelistEnabled := current.WhitelistEnabled
+	if request.WhitelistEnabled != nil {
+		whitelistEnabled = *request.WhitelistEnabled
+	}
+	blacklistEnabled := current.BlacklistEnabled
+	if request.BlacklistEnabled != nil {
+		blacklistEnabled = *request.BlacklistEnabled
+	}
 	return object_storage.ObjectStorageConfig{
 		Enabled:                   request.Enabled,
 		Endpoint:                  request.Endpoint,
@@ -151,9 +163,9 @@ func objectStorageConfigFromRequest(request objectStorageSettingsRequest, curren
 		UsePathStyle:              request.UsePathStyle,
 		MaxVideoSizeMB:            request.MaxVideoSizeMB,
 		ExpiresSeconds:            request.ExpiresSeconds,
-		TransferMode:              request.TransferMode,
-		WhitelistEnabled:          request.WhitelistEnabled,
-		BlacklistEnabled:          request.BlacklistEnabled,
+		TransferMode:              transferMode,
+		WhitelistEnabled:          whitelistEnabled,
+		BlacklistEnabled:          blacklistEnabled,
 		TransferDomainWhitelist:   request.TransferDomainWhitelist,
 		NoTransferDomainBlacklist: request.NoTransferDomainBlacklist,
 	}

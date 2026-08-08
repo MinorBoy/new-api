@@ -160,6 +160,28 @@ func TestUpdateObjectStorageSettingsPersistsTransferControls(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), `"whitelist_enabled":true`)
 }
 
+func TestUpdateObjectStorageSettingsPreservesTransferControlsWhenOmitted(t *testing.T) {
+	setupOptionControllerVideoSettingTest(t)
+	configureObjectStorageControllerTest(t, map[string]string{
+		"enabled":                      "false",
+		"region":                       "us-east-1",
+		"max_video_size_mb":            "512",
+		"expires_seconds":              "86400",
+		"transfer_mode":                object_storage.TransferModeAll,
+		"whitelist_enabled":            "true",
+		"blacklist_enabled":            "true",
+		"transfer_domain_whitelist":    `["provider.example.com"]`,
+		"no_transfer_domain_blacklist": `["official.example.com"]`,
+	})
+
+	body := `{"enabled":false,"endpoint":"https://new-s3.example.com","region":"us-east-1","max_video_size_mb":512,"expires_seconds":86400,"transfer_domain_whitelist":["provider.example.com"],"no_transfer_domain_blacklist":["official.example.com"]}`
+	recorder := objectStorageRequest(t, http.MethodPut, "/api/object-storage/settings", body)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, object_storage.TransferModeAll, object_storage.Runtime().TransferMode)
+	assert.True(t, object_storage.Runtime().WhitelistEnabled)
+	assert.True(t, object_storage.Runtime().BlacklistEnabled)
+}
+
 func TestUpdateObjectStorageSettingsRejectsInvalidEnabledConfig(t *testing.T) {
 	setupOptionControllerVideoSettingTest(t)
 	original := object_storage.Runtime()

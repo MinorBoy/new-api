@@ -228,6 +228,30 @@ test('turning on all transfer turns off domain rules', async () => {
   await unmount(mounted)
 })
 
+test('switching transfer modes preserves domain rule state and text', async () => {
+  const mounted = await renderSection()
+  const allTransfer = getSwitch(mounted, 'Enable all video transfer')
+  const domainRules = getSwitch(mounted, 'Enable domain rules')
+
+  await act(async () => allTransfer.click())
+  assert.equal(
+    mounted.container.querySelector(
+      'textarea[aria-label="Transfer domain whitelist"]'
+    ),
+    null
+  )
+
+  await act(async () => domainRules.click())
+  const whitelistSwitch = getSwitch(mounted, 'Enable transfer whitelist')
+  const whitelist = mounted.container.querySelector(
+    'textarea[aria-label="Transfer domain whitelist"]'
+  ) as unknown as HTMLTextAreaElement
+  assert.equal(whitelistSwitch.getAttribute('aria-checked'), 'true')
+  assert.equal(whitelist.value, 'provider.example.com')
+
+  await unmount(mounted)
+})
+
 test('disabled domain rule keeps its input value', async () => {
   const mounted = await renderSection()
   const blacklistSwitch = getSwitch(mounted, 'Enable transfer blacklist')
@@ -249,6 +273,46 @@ test('disabled domain rule keeps its input value', async () => {
   assert.equal(blacklist.value, 'official.example.com')
 
   await unmount(mounted)
+})
+
+test('saves each whitelist and blacklist switch combination', async () => {
+  for (const expected of [
+    { whitelist: true, blacklist: false },
+    { whitelist: false, blacklist: false },
+    { whitelist: true, blacklist: true },
+    { whitelist: false, blacklist: true },
+  ]) {
+    const mounted = await renderSection()
+    const whitelistSwitch = getSwitch(mounted, 'Enable transfer whitelist')
+    const blacklistSwitch = getSwitch(mounted, 'Enable transfer blacklist')
+    const endpoint = mounted.container.querySelector(
+      'input[aria-label="Endpoint"]'
+    ) as unknown as HTMLInputElement
+    const saveButton = [...mounted.actions.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Save object storage settings')
+    )
+    assert.ok(endpoint)
+    assert.ok(saveButton)
+
+    await act(async () =>
+      setInputValue(endpoint, 'https://updated-s3.internal.example.com')
+    )
+    if (!expected.whitelist) {
+      await act(async () => whitelistSwitch.click())
+    }
+    if (expected.blacklist) {
+      await act(async () => blacklistSwitch.click())
+    }
+    await act(async () => {
+      saveButton.click()
+      await Promise.resolve()
+    })
+
+    assert.equal(savedRequest?.whitelist_enabled, expected.whitelist)
+    assert.equal(savedRequest?.blacklist_enabled, expected.blacklist)
+    savedRequest = undefined
+    await unmount(mounted)
+  }
 })
 
 test('main transfer switch preserves domain rule settings', async () => {
@@ -308,6 +372,32 @@ test('explicitly clears the stored secret and normalizes domain lines on save', 
     'provider.example.com',
     '*.media.example.com',
   ])
+
+  await unmount(mounted)
+})
+
+test('hidden inactive domain rules do not block saving', async () => {
+  const mounted = await renderSection()
+  const whitelist = mounted.container.querySelector(
+    'textarea[aria-label="Transfer domain whitelist"]'
+  ) as unknown as HTMLTextAreaElement
+  const allTransfer = getSwitch(mounted, 'Enable all video transfer')
+  const saveButton = [...mounted.actions.querySelectorAll('button')].find(
+    (button) => button.textContent?.includes('Save object storage settings')
+  )
+  assert.ok(whitelist)
+  assert.ok(saveButton)
+
+  await act(async () => {
+    setInputValue(whitelist, 'https://invalid.example.com/video.mp4')
+    allTransfer.click()
+  })
+  await act(async () => {
+    saveButton.click()
+    await Promise.resolve()
+  })
+
+  assert.equal(savedRequest?.transfer_mode, 'all')
 
   await unmount(mounted)
 })

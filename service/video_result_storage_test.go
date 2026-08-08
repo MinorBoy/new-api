@@ -107,6 +107,9 @@ func enabledVideoStorageValues(host string) map[string]string {
 		"use_path_style":               "true",
 		"max_video_size_mb":            "1",
 		"expires_seconds":              "86400",
+		"transfer_mode":                object_storage.TransferModeRules,
+		"whitelist_enabled":            "true",
+		"blacklist_enabled":            "false",
 		"transfer_domain_whitelist":    fmt.Sprintf(`[%q]`, host),
 		"no_transfer_domain_blacklist": `[]`,
 	}
@@ -147,17 +150,45 @@ func TestProcessVideoResultTransfersWhitelistedURL(t *testing.T) {
 	assert.Equal(t, []byte("video-data"), store.lastBody)
 }
 
+func TestProcessVideoResultTransfersAllModeWithoutDomainMatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "video-data")
+	}))
+	t.Cleanup(server.Close)
+	values := enabledVideoStorageValues("unmatched.example")
+	values["transfer_mode"] = object_storage.TransferModeAll
+	values["whitelist_enabled"] = "false"
+	values["transfer_domain_whitelist"] = `[]`
+	configureVideoResultStorage(t, values)
+	store := &fakeVideoResultStore{}
+	installVideoResultDependencies(t, store, server.Client(), func(string) error { return nil })
+	task := testVideoTask()
+
+	require.NoError(t, ProcessVideoResultURL(context.Background(), task, server.URL+"/result.mp4"))
+	assert.Equal(t, "doubao-seedance-2-0-fast/task_public.mp4", task.PrivateData.ResultObjectKey)
+	assert.Equal(t, 1, store.putCalls)
+}
+
 func TestProcessVideoResultLeavesBlacklistedAndDefaultURLs(t *testing.T) {
 	for _, tt := range []struct {
-		name      string
-		whitelist string
-		blacklist string
+		name             string
+		mode             string
+		whitelistEnabled string
+		blacklistEnabled string
+		whitelist        string
+		blacklist        string
 	}{
-		{"blacklist", `["provider.example"]`, `["provider.example"]`},
-		{"default", `[]`, `[]`},
+		{"blacklist wins", object_storage.TransferModeRules, "true", "true", `["provider.example"]`, `["provider.example"]`},
+		{"default mode", object_storage.TransferModeDefault, "true", "false", `["provider.example"]`, `[]`},
+		{"rules disabled", object_storage.TransferModeRules, "false", "false", `["provider.example"]`, `[]`},
+		{"blacklist only unmatched", object_storage.TransferModeRules, "false", "true", `[]`, `["other.example"]`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			values := enabledVideoStorageValues("provider.example")
+			values["transfer_mode"] = tt.mode
+			values["whitelist_enabled"] = tt.whitelistEnabled
+			values["blacklist_enabled"] = tt.blacklistEnabled
 			values["transfer_domain_whitelist"] = tt.whitelist
 			values["no_transfer_domain_blacklist"] = tt.blacklist
 			configureVideoResultStorage(t, values)

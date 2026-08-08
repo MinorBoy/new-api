@@ -77,7 +77,14 @@ func ProcessVideoResultURL(ctx context.Context, task *model.Task, sourceURL stri
 		clearStoredVideoResult(task)
 		return newVideoResultStorageError("invalid_configuration", err)
 	}
-	transfer, err := objectstorage.ShouldTransfer(sourceURL, cfg.TransferDomainWhitelist, cfg.NoTransferDomainBlacklist)
+	transfer, err := objectstorage.ShouldTransfer(
+		sourceURL,
+		cfg.TransferMode,
+		cfg.WhitelistEnabled,
+		cfg.BlacklistEnabled,
+		cfg.TransferDomainWhitelist,
+		cfg.NoTransferDomainBlacklist,
+	)
 	if err != nil {
 		clearStoredVideoResult(task)
 		return newVideoResultStorageError("invalid_source_url", err)

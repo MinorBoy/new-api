@@ -398,6 +398,9 @@ export type ObjectStorageSettings = {
   use_path_style: boolean
   max_video_size_mb: number
   expires_seconds: number
+  transfer_mode: 'default' | 'all' | 'rules'
+  whitelist_enabled: boolean
+  blacklist_enabled: boolean
   transfer_domain_whitelist: string[]
   no_transfer_domain_blacklist: string[]
 }

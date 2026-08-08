@@ -25,6 +25,9 @@ type objectStorageSettingsRequest struct {
 	UsePathStyle              bool     `json:"use_path_style"`
 	MaxVideoSizeMB            int      `json:"max_video_size_mb"`
 	ExpiresSeconds            int      `json:"expires_seconds"`
+	TransferMode              string   `json:"transfer_mode"`
+	WhitelistEnabled          bool     `json:"whitelist_enabled"`
+	BlacklistEnabled          bool     `json:"blacklist_enabled"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }
@@ -40,6 +43,9 @@ type objectStorageSettingsResponse struct {
 	UsePathStyle              bool     `json:"use_path_style"`
 	MaxVideoSizeMB            int      `json:"max_video_size_mb"`
 	ExpiresSeconds            int      `json:"expires_seconds"`
+	TransferMode              string   `json:"transfer_mode"`
+	WhitelistEnabled          bool     `json:"whitelist_enabled"`
+	BlacklistEnabled          bool     `json:"blacklist_enabled"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }
@@ -145,6 +151,9 @@ func objectStorageConfigFromRequest(request objectStorageSettingsRequest, curren
 		UsePathStyle:              request.UsePathStyle,
 		MaxVideoSizeMB:            request.MaxVideoSizeMB,
 		ExpiresSeconds:            request.ExpiresSeconds,
+		TransferMode:              request.TransferMode,
+		WhitelistEnabled:          request.WhitelistEnabled,
+		BlacklistEnabled:          request.BlacklistEnabled,
 		TransferDomainWhitelist:   request.TransferDomainWhitelist,
 		NoTransferDomainBlacklist: request.NoTransferDomainBlacklist,
 	}
@@ -163,6 +172,9 @@ func objectStorageResponse(cfg object_storage.ObjectStorageConfig) objectStorage
 		UsePathStyle:              cfg.UsePathStyle,
 		MaxVideoSizeMB:            cfg.MaxVideoSizeMB,
 		ExpiresSeconds:            cfg.ExpiresSeconds,
+		TransferMode:              cfg.TransferMode,
+		WhitelistEnabled:          cfg.WhitelistEnabled,
+		BlacklistEnabled:          cfg.BlacklistEnabled,
 		TransferDomainWhitelist:   append([]string{}, cfg.TransferDomainWhitelist...),
 		NoTransferDomainBlacklist: append([]string{}, cfg.NoTransferDomainBlacklist...),
 	}

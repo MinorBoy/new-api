@@ -80,6 +80,27 @@ func TestGetObjectStorageSettingsReturnsEmptyDomainListsAsArrays(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), `"no_transfer_domain_blacklist":[]`)
 }
 
+func TestGetObjectStorageSettingsReturnsTransferControls(t *testing.T) {
+	setupOptionControllerVideoSettingTest(t)
+	configureObjectStorageControllerTest(t, map[string]string{
+		"enabled":                      "false",
+		"region":                       "us-east-1",
+		"max_video_size_mb":            "512",
+		"expires_seconds":              "86400",
+		"transfer_mode":                object_storage.TransferModeRules,
+		"whitelist_enabled":            "true",
+		"blacklist_enabled":            "false",
+		"transfer_domain_whitelist":    `["provider.example.com"]`,
+		"no_transfer_domain_blacklist": `[]`,
+	})
+
+	recorder := objectStorageRequest(t, http.MethodGet, "/api/object-storage/settings", "")
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"transfer_mode":"rules"`)
+	assert.Contains(t, recorder.Body.String(), `"whitelist_enabled":true`)
+	assert.Contains(t, recorder.Body.String(), `"blacklist_enabled":false`)
+}
+
 func TestUpdateObjectStorageSettingsKeepsSecretWhenInputIsBlank(t *testing.T) {
 	db := setupOptionControllerVideoSettingTest(t)
 	configureObjectStorageControllerTest(t, map[string]string{
@@ -118,6 +139,25 @@ func TestUpdateObjectStorageSettingsClearsSecretExplicitly(t *testing.T) {
 	recorder := objectStorageRequest(t, http.MethodPut, "/api/object-storage/settings", body)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Empty(t, object_storage.Runtime().SecretAccessKey)
+}
+
+func TestUpdateObjectStorageSettingsPersistsTransferControls(t *testing.T) {
+	setupOptionControllerVideoSettingTest(t)
+	configureObjectStorageControllerTest(t, map[string]string{
+		"enabled":           "false",
+		"region":            "us-east-1",
+		"max_video_size_mb": "512",
+		"expires_seconds":   "86400",
+	})
+
+	body := `{"enabled":false,"region":"us-east-1","max_video_size_mb":512,"expires_seconds":86400,"transfer_mode":"all","whitelist_enabled":true,"blacklist_enabled":false,"transfer_domain_whitelist":["provider.example.com"],"no_transfer_domain_blacklist":[]}`
+	recorder := objectStorageRequest(t, http.MethodPut, "/api/object-storage/settings", body)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, object_storage.TransferModeAll, object_storage.Runtime().TransferMode)
+	assert.True(t, object_storage.Runtime().WhitelistEnabled)
+	assert.False(t, object_storage.Runtime().BlacklistEnabled)
+	assert.Contains(t, recorder.Body.String(), `"transfer_mode":"all"`)
+	assert.Contains(t, recorder.Body.String(), `"whitelist_enabled":true`)
 }
 
 func TestUpdateObjectStorageSettingsRejectsInvalidEnabledConfig(t *testing.T) {

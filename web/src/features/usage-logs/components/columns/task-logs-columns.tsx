@@ -157,6 +157,34 @@ function projectPublicTaskOutputs(log: TaskLog): PublicTaskOutput[] {
   })
 }
 
+const VIDEO_TASK_ACTIONS = new Set<string>([
+  TASK_ACTIONS.GENERATE,
+  TASK_ACTIONS.TEXT_GENERATE,
+  TASK_ACTIONS.FIRST_TAIL_GENERATE,
+  TASK_ACTIONS.REFERENCE_GENERATE,
+  TASK_ACTIONS.REMIX_GENERATE,
+])
+
+// Extracts the stored/transfer video URL (proxy or object-storage backed)
+// for a successful video task. Returns '' when there is no previewable video.
+// Mirrors the resolution that previously lived inline in the Details column.
+function resolveTaskVideoURL(log: TaskLog, isAdmin: boolean): string {
+  if (log.status !== TASK_STATUS.SUCCESS) return ''
+  if (!VIDEO_TASK_ACTIONS.has(log.action)) return ''
+
+  const expectedVideoPath = `/v1/videos/${encodeURIComponent(log.task_id)}/content`
+  const publicResult = projectPublicTaskResult(log)
+  const publicVideoURL =
+    publicResult?.content?.video_url ||
+    projectPublicProxyURL(log.result_url, expectedVideoPath)
+
+  // Admins can always reach the task content endpoint; non-admins need a
+  // resolvable proxy/storage URL.
+  if (publicVideoURL) return publicVideoURL
+  if (isAdmin) return `/v1/videos/${log.task_id}/content`
+  return ''
+}
+
 function projectPublicTaskResult(log: TaskLog): PublicTaskResult | null {
   let data = log.user_response_data
   if (typeof data === 'string') {
@@ -690,6 +718,19 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
       size: 120,
     },
     {
+      id: 'preview',
+      header: t('Preview'),
+      cell: function PreviewCell({ row }) {
+        const log = row.original
+        const videoURL = resolveTaskVideoURL(log, isAdmin)
+        if (!videoURL) {
+          return <span className='text-muted-foreground/60 text-xs'>-</span>
+        }
+        return <VideoPreviewCell videoURL={videoURL} />
+      },
+      size: 140,
+    },
+    {
       accessorKey: 'fail_reason',
       header: t('Details'),
       cell: function DetailsCell({ row }) {
@@ -714,29 +755,8 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           }
         }
 
-        const isVideoTask =
-          log.action === TASK_ACTIONS.GENERATE ||
-          log.action === TASK_ACTIONS.TEXT_GENERATE ||
-          log.action === TASK_ACTIONS.FIRST_TAIL_GENERATE ||
-          log.action === TASK_ACTIONS.REFERENCE_GENERATE ||
-          log.action === TASK_ACTIONS.REMIX_GENERATE
-        const isSuccess = status === TASK_STATUS.SUCCESS
-        const isUrl = failReason?.startsWith('http')
-        const publicResult = projectPublicTaskResult(log)
-        const expectedVideoPath = `/v1/videos/${encodeURIComponent(log.task_id)}/content`
-        const publicVideoURL =
-          publicResult?.content?.video_url ||
-          projectPublicProxyURL(log.result_url, expectedVideoPath)
-
-        if (
-          isSuccess &&
-          isVideoTask &&
-          (publicVideoURL || (isAdmin && isUrl))
-        ) {
-          const videoURL =
-            publicVideoURL || `/v1/videos/${log.task_id}/content`
-          return <VideoPreviewCell videoURL={videoURL} />
-        }
+        // Video previews now live in the dedicated Preview column; the Details
+        // column keeps audio previews and the failure-reason dialog.
 
         if (!failReason) {
           return <span className='text-muted-foreground/60 text-xs'>-</span>

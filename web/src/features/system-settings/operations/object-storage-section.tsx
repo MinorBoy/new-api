@@ -59,6 +59,8 @@ import type {
 } from '@/features/system-settings/types'
 
 import {
+  SettingsControlChildren,
+  SettingsControlGroup,
   SettingsForm,
   SettingsSwitchContent,
   SettingsSwitchItem,
@@ -76,6 +78,9 @@ type DomainList = {
 
 type ObjectStorageFormValues = {
   enabled: boolean
+  transferMode: ObjectStorageSettings['transfer_mode']
+  whitelistEnabled: boolean
+  blacklistEnabled: boolean
   endpoint: string
   publicEndpoint: string
   region: string
@@ -143,6 +148,9 @@ function createObjectStorageSchema(
   return z
     .object({
       enabled: z.boolean(),
+      transferMode: z.enum(['default', 'all', 'rules']),
+      whitelistEnabled: z.boolean(),
+      blacklistEnabled: z.boolean(),
       endpoint: z.string(),
       publicEndpoint: z.string(),
       region: z.string(),
@@ -231,6 +239,9 @@ function settingsToFormValues(
 ): ObjectStorageFormValues {
   return {
     enabled: settings.enabled,
+    transferMode: settings.transfer_mode,
+    whitelistEnabled: settings.whitelist_enabled,
+    blacklistEnabled: settings.blacklist_enabled,
     endpoint: settings.endpoint,
     publicEndpoint: settings.public_endpoint,
     region: settings.region,
@@ -251,6 +262,9 @@ function formValuesToRequest(
 ): ObjectStorageSettingsRequest {
   return {
     enabled: values.enabled,
+    transfer_mode: values.transferMode,
+    whitelist_enabled: values.whitelistEnabled,
+    blacklist_enabled: values.blacklistEnabled,
     endpoint: values.endpoint.trim(),
     public_endpoint: values.publicEndpoint.trim(),
     region: values.region.trim(),
@@ -319,6 +333,9 @@ export function ObjectStorageSection() {
     resolver: zodResolver(schema) as Resolver<ObjectStorageFormValues>,
     defaultValues: {
       enabled: false,
+      transferMode: 'default',
+      whitelistEnabled: false,
+      blacklistEnabled: false,
       endpoint: '',
       publicEndpoint: '',
       region: 'us-east-1',
@@ -343,6 +360,10 @@ export function ObjectStorageSection() {
 
   const whitelist = form.watch('transferDomainWhitelist')
   const blacklist = form.watch('noTransferDomainBlacklist')
+  const enabled = form.watch('enabled')
+  const transferMode = form.watch('transferMode')
+  const whitelistEnabled = form.watch('whitelistEnabled')
+  const blacklistEnabled = form.watch('blacklistEnabled')
   const whitelistInfo = useMemo(() => parseDomainList(whitelist), [whitelist])
   const blacklistInfo = useMemo(() => parseDomainList(blacklist), [blacklist])
   const conflicts = useMemo(() => {
@@ -433,7 +454,7 @@ export function ObjectStorageSection() {
                     <FormLabel>{t('Enable video result transfer')}</FormLabel>
                     <FormDescription>
                       {t(
-                        'Only domains in the transfer whitelist are uploaded. Blacklisted and unmatched domains are not transferred.'
+                        'Turn off to return upstream video links without object storage transfer.'
                       )}
                     </FormDescription>
                   </SettingsSwitchContent>
@@ -448,6 +469,65 @@ export function ObjectStorageSection() {
                 </SettingsSwitchItem>
               )}
             />
+
+            <SettingsControlGroup>
+              <FormField
+                control={form.control}
+                name='transferMode'
+                render={({ field }) => (
+                  <SettingsSwitchItem className='py-2'>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Enable all video transfer')}</FormLabel>
+                      <FormDescription>
+                        {t('All eligible videos are uploaded.')}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        aria-label={t('Enable all video transfer')}
+                        checked={field.value === 'all'}
+                        onCheckedChange={(checked) =>
+                          field.onChange(checked ? 'all' : 'default')
+                        }
+                        disabled={isBusy}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='transferMode'
+                render={({ field }) => (
+                  <SettingsSwitchItem className='py-2'>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Enable domain rules')}</FormLabel>
+                      <FormDescription>
+                        {t('Use whitelist and blacklist rules to decide.')}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        aria-label={t('Enable domain rules')}
+                        checked={field.value === 'rules'}
+                        onCheckedChange={(checked) =>
+                          field.onChange(checked ? 'rules' : 'default')
+                        }
+                        disabled={isBusy}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+            </SettingsControlGroup>
+
+            {!enabled && (
+              <Alert className='lg:col-span-2'>
+                <AlertTitle>
+                  {t('Transfer is paused while the main switch is off.')}
+                </AlertTitle>
+              </Alert>
+            )}
           </FormGroup>
 
           <FormGroup
@@ -719,80 +799,138 @@ export function ObjectStorageSection() {
             />
           </FormGroup>
 
-          <FormGroup
-            icon={<ShieldCheck />}
-            title={t('Domain rules')}
-            description={t(
-              'Blacklisted domains take priority. Domains not listed in either list are not transferred.'
-            )}
-          >
-            <FormField
-              control={form.control}
-              name='transferDomainWhitelist'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Transfer domain whitelist')}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      aria-label={t('Transfer domain whitelist')}
-                      rows={5}
-                      placeholder={'provider.example.com\n*.media.example.com'}
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t(
-                      'Videos from these domains must be transferred to object storage.'
-                    )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
+          {transferMode === 'rules' && (
+            <FormGroup
+              icon={<ShieldCheck />}
+              title={t('Domain rules')}
+              description={t(
+                'Domains not selected by an enabled rule are not transferred.'
               )}
-            />
-            <FormField
-              control={form.control}
-              name='noTransferDomainBlacklist'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('No-transfer domain blacklist')}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      aria-label={t('No-transfer domain blacklist')}
-                      rows={5}
-                      placeholder={
-                        'official.example.com\n*.trusted.example.com'
-                      }
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t(
-                      'Videos from these domains are returned without object storage transfer.'
+            >
+              <SettingsControlGroup>
+                <FormField
+                  control={form.control}
+                  name='whitelistEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem className='py-2'>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Enable transfer whitelist')}</FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Videos from these domains must be transferred to object storage.'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          aria-label={t('Enable transfer whitelist')}
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          disabled={isBusy}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+                <SettingsControlChildren>
+                  <FormField
+                    control={form.control}
+                    name='transferDomainWhitelist'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Transfer domain whitelist')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            aria-label={t('Transfer domain whitelist')}
+                            rows={5}
+                            placeholder={
+                              'provider.example.com\n*.media.example.com'
+                            }
+                            {...field}
+                            disabled={!whitelistEnabled || isBusy}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
+                  />
+                </SettingsControlChildren>
+              </SettingsControlGroup>
+
+              <SettingsControlGroup>
+                <FormField
+                  control={form.control}
+                  name='blacklistEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem className='py-2'>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Enable transfer blacklist')}</FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Videos from these domains are returned without object storage transfer.'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          aria-label={t('Enable transfer blacklist')}
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          disabled={isBusy}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+                <SettingsControlChildren>
+                  <FormField
+                    control={form.control}
+                    name='noTransferDomainBlacklist'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('No-transfer domain blacklist')}
+                        </FormLabel>
+                        <FormControl>
+                          <Textarea
+                            aria-label={t('No-transfer domain blacklist')}
+                            rows={5}
+                            placeholder={
+                              'official.example.com\n*.trusted.example.com'
+                            }
+                            {...field}
+                            disabled={!blacklistEnabled || isBusy}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </SettingsControlChildren>
+              </SettingsControlGroup>
+
+              {(whitelistInfo.duplicates.length > 0 ||
+                blacklistInfo.duplicates.length > 0) && (
+                <Alert className='lg:col-span-2'>
+                  <AlertTitle>
+                    {t('Duplicate domains will be removed when saved.')}
+                  </AlertTitle>
+                </Alert>
               )}
-            />
-            {(whitelistInfo.duplicates.length > 0 ||
-              blacklistInfo.duplicates.length > 0) && (
-              <Alert className='lg:col-span-2'>
-                <AlertTitle>
-                  {t('Duplicate domains will be removed when saved.')}
-                </AlertTitle>
-              </Alert>
-            )}
-            {conflicts.length > 0 && (
-              <Alert className='lg:col-span-2'>
-                <AlertTitle>
-                  {t('Some domains appear in both lists.')}
-                </AlertTitle>
-                <AlertDescription>
-                  {t('The blacklist takes priority for conflicting domains.')}
-                </AlertDescription>
-              </Alert>
-            )}
-          </FormGroup>
+              {whitelistEnabled && blacklistEnabled && (
+                <Alert className='lg:col-span-2'>
+                  <AlertTitle>
+                    {t('The blacklist takes priority when both rules match.')}
+                  </AlertTitle>
+                  {conflicts.length > 0 && (
+                    <AlertDescription>
+                      {t('Some domains appear in both lists.')}
+                    </AlertDescription>
+                  )}
+                </Alert>
+              )}
+            </FormGroup>
+          )}
 
           <div
             data-settings-form-span='full'

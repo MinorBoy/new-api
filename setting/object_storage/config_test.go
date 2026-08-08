@@ -85,3 +85,41 @@ func TestNormalizeConfigTrimsAndDefaults(t *testing.T) {
 	assert.Equal(t, []string{"own.example.com"}, normalized.TransferDomainWhitelist)
 	assert.Equal(t, []string{"cdn.example.com"}, normalized.NoTransferDomainBlacklist)
 }
+
+func TestNormalizeConfigMigratesLegacyDomainLists(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TransferMode = ""
+	cfg.TransferDomainWhitelist = []string{"Own.Example.com"}
+	cfg.NoTransferDomainBlacklist = []string{"CDN.Example.com"}
+
+	got := NormalizeConfig(cfg)
+	require.Equal(t, TransferModeRules, got.TransferMode)
+	require.True(t, got.WhitelistEnabled)
+	require.True(t, got.BlacklistEnabled)
+}
+
+func TestNormalizeConfigDefaultsToNoTransfer(t *testing.T) {
+	got := NormalizeConfig(DefaultConfig())
+	require.Equal(t, TransferModeDefault, got.TransferMode)
+	require.False(t, got.WhitelistEnabled)
+	require.False(t, got.BlacklistEnabled)
+}
+
+func TestNormalizeConfigPreservesExplicitModeAndRules(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TransferMode = TransferModeAll
+	cfg.WhitelistEnabled = true
+	cfg.TransferDomainWhitelist = []string{"provider.example.com"}
+
+	got := NormalizeConfig(cfg)
+	require.Equal(t, TransferModeAll, got.TransferMode)
+	require.True(t, got.WhitelistEnabled)
+	require.Equal(t, []string{"provider.example.com"}, got.TransferDomainWhitelist)
+}
+
+func TestNormalizeConfigRejectsUnknownModeByDefaulting(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TransferMode = "unsupported"
+
+	require.Equal(t, TransferModeDefault, NormalizeConfig(cfg).TransferMode)
+}

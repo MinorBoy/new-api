@@ -10,7 +10,10 @@ import (
 )
 
 const (
-	ConfigName = "object_storage"
+	ConfigName          = "object_storage"
+	TransferModeDefault = "default"
+	TransferModeAll     = "all"
+	TransferModeRules   = "rules"
 
 	DefaultRegion         = "us-east-1"
 	DefaultMaxVideoSizeMB = 512
@@ -32,6 +35,9 @@ type ObjectStorageConfig struct {
 	UsePathStyle              bool     `json:"use_path_style"`
 	MaxVideoSizeMB            int      `json:"max_video_size_mb"`
 	ExpiresSeconds            int      `json:"expires_seconds"`
+	TransferMode              string   `json:"transfer_mode"`
+	WhitelistEnabled          bool     `json:"whitelist_enabled"`
+	BlacklistEnabled          bool     `json:"blacklist_enabled"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }
@@ -50,10 +56,10 @@ func init() {
 
 func DefaultConfig() ObjectStorageConfig {
 	return ObjectStorageConfig{
-		Region:          DefaultRegion,
-		MaxVideoSizeMB:  DefaultMaxVideoSizeMB,
-		ExpiresSeconds:  DefaultExpiresSeconds,
-		UsePathStyle:    false,
+		Region:                    DefaultRegion,
+		MaxVideoSizeMB:            DefaultMaxVideoSizeMB,
+		ExpiresSeconds:            DefaultExpiresSeconds,
+		UsePathStyle:              false,
 		TransferDomainWhitelist:   []string{},
 		NoTransferDomainBlacklist: []string{},
 	}
@@ -73,6 +79,7 @@ func UpdateAndSync() {
 }
 
 func NormalizeConfig(cfg ObjectStorageConfig) ObjectStorageConfig {
+	legacyTransferMode := strings.TrimSpace(cfg.TransferMode) == ""
 	cfg.Endpoint = strings.TrimSpace(cfg.Endpoint)
 	cfg.PublicEndpoint = strings.TrimSpace(cfg.PublicEndpoint)
 	cfg.Region = strings.TrimSpace(cfg.Region)
@@ -90,6 +97,21 @@ func NormalizeConfig(cfg ObjectStorageConfig) ObjectStorageConfig {
 	}
 	cfg.TransferDomainWhitelist = normalizeDomains(cfg.TransferDomainWhitelist)
 	cfg.NoTransferDomainBlacklist = normalizeDomains(cfg.NoTransferDomainBlacklist)
+	if legacyTransferMode {
+		if len(cfg.TransferDomainWhitelist) > 0 || len(cfg.NoTransferDomainBlacklist) > 0 {
+			cfg.TransferMode = TransferModeRules
+			cfg.WhitelistEnabled = len(cfg.TransferDomainWhitelist) > 0
+			cfg.BlacklistEnabled = len(cfg.NoTransferDomainBlacklist) > 0
+		} else {
+			cfg.TransferMode = TransferModeDefault
+		}
+	} else {
+		switch cfg.TransferMode {
+		case TransferModeDefault, TransferModeAll, TransferModeRules:
+		default:
+			cfg.TransferMode = TransferModeDefault
+		}
+	}
 	return cfg
 }
 
@@ -105,10 +127,10 @@ func ValidateConfig(cfg ObjectStorageConfig) error {
 		return nil
 	}
 	for field, value := range map[string]string{
-		"endpoint":         cfg.Endpoint,
-		"public_endpoint":  cfg.PublicEndpoint,
-		"bucket":           cfg.Bucket,
-		"access_key_id":    cfg.AccessKeyID,
+		"endpoint":          cfg.Endpoint,
+		"public_endpoint":   cfg.PublicEndpoint,
+		"bucket":            cfg.Bucket,
+		"access_key_id":     cfg.AccessKeyID,
 		"secret_access_key": cfg.SecretAccessKey,
 	} {
 		if value == "" {

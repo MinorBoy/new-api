@@ -43,13 +43,16 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			target: videoContractTarget("videos-standard", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 		},
 		{
-			name: "megabyai rejects 1080p", channelType: constant.ChannelTypeMegaByAI,
-			target:   videoContractTarget("videos-standard", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
-			wantCode: "route_contract_resolution",
+			name: "megabyai accepts 1080p", channelType: constant.ChannelTypeMegaByAI,
+			target: videoContractTarget("videos-standard", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 		},
 		{
-			name: "megabyai rejects 4k", channelType: constant.ChannelTypeMegaByAI,
-			target:   videoContractTarget("videos-standard", []string{"4k"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+			name: "megabyai accepts 4k", channelType: constant.ChannelTypeMegaByAI,
+			target: videoContractTarget("videos-standard", []string{"4k"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+		{
+			name: "megabyai rejects 1440p", channelType: constant.ChannelTypeMegaByAI,
+			target:   videoContractTarget("videos-standard", []string{"1440p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
 			wantCode: "route_contract_resolution",
 		},
 		{

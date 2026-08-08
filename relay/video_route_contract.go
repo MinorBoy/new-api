@@ -35,8 +35,8 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 		}
 		return nil
 	case constant.ChannelTypeMegaByAI:
-		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
-			return newVideoRouteContractError("route_contract_resolution", "MegaByAI routes support only 480p and 720p")
+		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p", "1080p", "4k") {
+			return newVideoRouteContractError("route_contract_resolution", "MegaByAI routes support 480p, 720p, 1080p, and 4k")
 		}
 		return nil
 	case constant.ChannelTypePaipu:

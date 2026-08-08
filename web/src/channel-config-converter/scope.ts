@@ -287,7 +287,11 @@ export async function buildScopedImportDocument(
     }
 
     entities.cost_rule_drafts = original.entities.cost_rule_drafts
-      .filter((cost) => selectedLineIDs.has(stringField(cost, 'line_ref')))
+      .filter(
+        (cost) =>
+          selectedLineIDs.has(stringField(cost, 'line_ref')) &&
+          cost.enabled !== false
+      )
       .map(cloneEntity)
     entities.model_mappings = original.entities.model_mappings
       .filter((mapping) =>

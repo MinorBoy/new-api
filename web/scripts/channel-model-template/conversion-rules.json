@@ -11,7 +11,8 @@
     "8": "CH-MEGABYAI",
     "9": "CH-4STOKEN",
     "10": "CH-OMEGAAI",
-    "11": "CH-Z5API"
+    "11": "CH-Z5API",
+    "12": "CH-APIAW"
   },
   "defaults": {
     "currency": "CNY",
@@ -22,5 +23,9 @@
     "groupRatio": "1"
   },
   "modelRules": {},
-  "overrides": {}
+  "overrides": {
+    "6/R100": {
+      "status": "draft"
+    }
+  }
 }

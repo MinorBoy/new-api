@@ -133,6 +133,27 @@ func TestBuildMegaByAIRequest(t *testing.T) {
 	}`, string(body))
 }
 
+func TestBuildMegaByAIRequestSupportsHighResolutions(t *testing.T) {
+	for _, resolution := range []string{"1080p", "4k"} {
+		t.Run(resolution, func(t *testing.T) {
+			request, err := parseARKRequest([]byte(`{
+				"model":"doubao-seedance-2-0-260128",
+				"content":[{"type":"text","text":"high resolution video"}],
+				"resolution":"`+resolution+`"
+			}`), megaByAIProtocolProfile())
+			require.NoError(t, err)
+
+			body, err := buildMegaByAIRequest(request, "videos-standard")
+			require.NoError(t, err)
+			assert.JSONEq(t, `{
+				"model":"videos-standard",
+				"prompt":"high resolution video",
+				"resolution":"`+resolution+`"
+			}`, string(body))
+		})
+	}
+}
+
 func TestBuildMegaByAIRequestTreatsSingleFrameImageAsReference(t *testing.T) {
 	for _, role := range []string{"", "first_frame"} {
 		t.Run(fmt.Sprintf("role_%s", role), func(t *testing.T) {
@@ -185,7 +206,7 @@ func TestMegaByAIValidationRejectsInvalidRequestsBeforeBuild(t *testing.T) {
 		{name: "duration below minimum", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duration":3}`, code: "InvalidParameter.duration"},
 		{name: "duration above maximum", body: `{"model":"m","content":[{"type":"text","text":"text"}],"duration":16}`, code: "InvalidParameter.duration"},
 		{name: "unsupported ratio", body: `{"model":"m","content":[{"type":"text","text":"text"}],"ratio":"4:3"}`, code: "InvalidParameter.ratio"},
-		{name: "unsupported resolution", body: `{"model":"m","content":[{"type":"text","text":"text"}],"resolution":"1080p"}`, code: "InvalidParameter.resolution"},
+		{name: "unsupported resolution", body: `{"model":"m","content":[{"type":"text","text":"text"}],"resolution":"1440p"}`, code: "InvalidParameter.resolution"},
 		{name: "last frame", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"last_frame","image_url":{"url":"https://8.8.8.8/last.jpg"}}]}`, code: "InvalidParameter.content"},
 		{name: "non HTTP media", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"asset://ref"}}]}`, code: "InvalidParameter.content"},
 		{name: "loopback image", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"http://127.0.0.1/ref.jpg"}}]}`, code: "InvalidParameter.content"},

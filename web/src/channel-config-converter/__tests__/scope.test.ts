@@ -116,6 +116,27 @@ test('selecting secure-enterprise retains only its dependency closure', async ()
   )
 })
 
+test('scope export removes draft costs whose routes are not publishable', async () => {
+  const document = await loadDocument()
+  const draft = document.entities.cost_rule_drafts.find(
+    (candidate) => candidate.enabled === false
+  )
+  assert.ok(draft)
+
+  const scoped = await buildScopedImportDocument(
+    document,
+    new Set([String(draft.line_ref)])
+  )
+
+  assert.equal(scoped.canUse, true)
+  assert.equal(
+    scoped.document.entities.cost_rule_drafts.some(
+      (candidate) => candidate.business_id === draft.business_id
+    ),
+    false
+  )
+})
+
 test('retains group routing requirements used by selected route blueprints', async () => {
   const document = await loadDocument()
   const sourceRef = document.entities.sources[0]?.business_id

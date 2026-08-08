@@ -366,12 +366,12 @@ function channelContractIssues(
 
   if (
     channelCode === 'CH-MEGABYAI' &&
-    !['480p', '720p'].includes(resolutionValue)
+    !['480p', '720p', '1080p', '4k'].includes(resolutionValue)
   ) {
     return [
       fail(
         'CHANNEL_CONTRACT_RESOLUTION',
-        `MegaByAI 仅支持 480p 和 720p，源行声明为 ${resolutionValue}。`
+        `MegaByAI 不支持分辨率 ${resolutionValue}。`
       ),
     ]
   }
@@ -860,16 +860,23 @@ function buildCostsAndMappings(
       )
     }
     const duration = parseDuration(field(record, '时长范围'))
+    const contractIssues = channelContractIssues(
+      record,
+      channelCode,
+      upstreamModel,
+      resolutionValue,
+      duration.min,
+      duration.max,
+      reference.contract
+    )
     issues.push(
-      ...channelContractIssues(
-        record,
-        channelCode,
-        upstreamModel,
-        resolutionValue,
-        duration.min,
-        duration.max,
-        reference.contract
-      )
+      ...(override?.status === 'draft'
+        ? contractIssues.map((item) => ({
+            ...item,
+            severity: 'WARN' as const,
+            suggestion: '该行已由转换规则隔离为 draft，不会生成启用映射。',
+          }))
+        : contractIssues)
     )
     const billingMultiplier = numericField(record, '计费倍率') ?? new Decimal(1)
     const feeRate = numericField(record, '手续费') ?? new Decimal(0)

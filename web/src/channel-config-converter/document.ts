@@ -947,15 +947,6 @@ export async function buildImportDocument(
           (candidate) => candidate.businessId === lineRef
         )
         const canonicalModel = field(sku, 'canonical_model', '模型')
-        entities.model_mappings.push(
-          await authoritativeEntity(mapping, mappingSource, {
-            canonical_model: canonicalModel,
-            client_model: field(mapping, 'client_model', '客户端模型'),
-            line_ref: lineRef,
-            sku_ref: skuRef,
-            upstream_model: field(mapping, 'upstream_model', '上游模型'),
-          })
-        )
         const referenceBounds = mappingReferenceBounds(mapping)
         if (!referenceBounds) {
           issues.push(
@@ -970,6 +961,8 @@ export async function buildImportDocument(
         }
         const targetRef = `route-target/${mapping.businessId}`
         const costMode = field(cost, 'cost_mode', '成本模式')
+        const isActive =
+          field(cost, 'status', '状态').trim().toLowerCase() === 'active'
         const commonCostFields = {
           billing_multiplier: optionalDecimal(
             cost,
@@ -1034,8 +1027,7 @@ export async function buildImportDocument(
         const costFields: Record<string, unknown> = {
           ...costContract,
           cost_variant_key: variant,
-          enabled:
-            field(cost, 'status', '状态').trim().toLowerCase() === 'active',
+          enabled: isActive,
           line_ref: lineRef,
           route_target_ref: targetRef,
           scenario: field(cost, 'scenario', '定价场景'),
@@ -1043,6 +1035,17 @@ export async function buildImportDocument(
         }
         entities.cost_rule_drafts.push(
           await authoritativeEntity(cost, source, costFields)
+        )
+        if (!isActive) continue
+
+        entities.model_mappings.push(
+          await authoritativeEntity(mapping, mappingSource, {
+            canonical_model: canonicalModel,
+            client_model: field(mapping, 'client_model', '客户端模型'),
+            line_ref: lineRef,
+            sku_ref: skuRef,
+            upstream_model: field(mapping, 'upstream_model', '上游模型'),
+          })
         )
 
         const durationMin = optionalInteger(

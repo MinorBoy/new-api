@@ -35,7 +35,7 @@ func validateMegaByAIRequest(request arkRequest) error {
 	}
 	if request.Resolution != nil {
 		switch *request.Resolution {
-		case "480p", "720p":
+		case "480p", "720p", "1080p", "4k":
 		default:
 			return &arkRequestError{Code: "InvalidParameter.resolution", Message: "MegaByAI resolution is unsupported"}
 		}

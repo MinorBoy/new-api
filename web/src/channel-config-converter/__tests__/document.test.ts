@@ -52,8 +52,8 @@ test('builds the corrected v1 import document without unresolved contracts', asy
   }
 
   assert.equal(result.document.entities.cost_rule_drafts.length, 147)
-  assert.equal(result.document.entities.model_mappings.length, 147)
-  assert.equal(result.document.entities.route_blueprints.length, 147)
+  assert.equal(result.document.entities.model_mappings.length, 146)
+  assert.equal(result.document.entities.route_blueprints.length, 146)
   assert.equal(result.document.entities.group_routing_requirements.length, 0)
   assert.equal(result.document.manifest.counts.group_routing_requirements, 0)
   assert.equal(result.document.entities.unresolved_variants.length, 0)
@@ -120,6 +120,54 @@ test('omits channel lines that have no imported model mapping or route target', 
     false
   )
   assert.equal(result.document.manifest.counts.channel_lines, 14)
+})
+
+test('keeps draft cost evidence without publishing its mapping or route', async () => {
+  const bytes = await fs.readFile(fixturePath)
+  const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))
+  const cost = extracted.costRuleDrafts.find(
+    (candidate) => candidate.businessId === 'COST-4STOKEN-R128-480-DUR'
+  )
+  const mapping = extracted.modelMappings.find(
+    (candidate) => candidate.businessId === 'MAP-4STOKEN-R128-480'
+  )
+  assert.ok(cost)
+  assert.ok(mapping)
+  cost.fields['状态'] = {
+    value: 'draft',
+    formula: null,
+    formulaResult: null,
+  }
+  mapping.fields['启用'] = {
+    value: '否',
+    formula: null,
+    formulaResult: null,
+  }
+
+  const result = await buildImportDocument({
+    extracted,
+    sourceBytes: bytes,
+    sourceFileName: 'channel-config-v1-corrected.xlsx',
+  })
+
+  const draft = result.document.entities.cost_rule_drafts.find(
+    (candidate) => candidate.business_id === cost.businessId
+  )
+  assert.ok(draft)
+  assert.equal(draft.enabled, false)
+  assert.equal(
+    result.document.entities.model_mappings.some(
+      (candidate) => candidate.business_id === mapping.businessId
+    ),
+    false
+  )
+  assert.equal(
+    result.document.entities.route_blueprints.some(
+      (candidate) =>
+        candidate.business_id === `route-blueprint/${mapping.businessId}`
+    ),
+    false
+  )
 })
 
 test('builds explicit Seedance official token sale contracts from USD per million prices', async () => {

@@ -92,7 +92,7 @@ func TestBuildMegaByAIRequest(t *testing.T) {
 }
 ```
 
-增加表驱动测试，精确断言：时长 3/16、比例 `4:3`、分辨率 `1080p`、`last_frame`、非 HTTP URL、纯音频、超过 9 图/3 视频/3 音频均返回对应 `arkRequestError`；单张无 role 或 `first_frame` 图片进入 `referenceImages`。视频 metadata 为 9000+6000 ms、音频 resolver 为 7000+8000 ms 时通过；任一类别为 15001 ms 时返回 `InvalidParameter.content`。
+增加表驱动测试，精确断言：时长 3/16、比例 `4:3`、分辨率 `1440p`、`last_frame`、非 HTTP URL、纯音频、超过 9 图/3 视频/3 音频均返回对应 `arkRequestError`；单张无 role 或 `first_frame` 图片进入 `referenceImages`。另覆盖 `1080p`、`4k` 原样转发。视频 metadata 为 9000+6000 ms、音频 resolver 为 7000+8000 ms 时通过；任一类别为 15001 ms 时返回 `InvalidParameter.content`。
 
 每个非法用例必须通过 `NewMegaByAITaskAdaptor().ValidateRequestAndSetAction(...)` 进入，而不是只直接调用编码器；断言返回 HTTP 400 和准确的 Ark 错误码，且尚未调用 `BuildRequestBody`。再保留一个直接调用 `buildMegaByAIRequest` 的防御性测试，证明内部调用方也不能绕过相同校验。
 
@@ -193,7 +193,7 @@ func validateMegaByAIRequest(request arkRequest) error {
 	if request.Ratio != "" && request.Ratio != "16:9" && request.Ratio != "9:16" && request.Ratio != "1:1" {
 		return &arkRequestError{Code: "InvalidParameter.ratio", Message: "MegaByAI ratio is unsupported"}
 	}
-	if request.Resolution != "" && request.Resolution != "480p" && request.Resolution != "720p" {
+	if request.Resolution != "" && request.Resolution != "480p" && request.Resolution != "720p" && request.Resolution != "1080p" && request.Resolution != "4k" {
 		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "MegaByAI resolution is unsupported"}
 	}
 	for _, item := range request.Content {

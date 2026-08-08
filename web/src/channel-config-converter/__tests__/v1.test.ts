@@ -452,7 +452,7 @@ test('v1 document rejects an unresolved legacy reference limit', async () => {
     result.document.entities.model_mappings.some(
       (mapping) => mapping.business_id === 'MAP-8YES-R60-480'
     ),
-    true
+    false
   )
   assert.ok(
     result.document.issues.some(

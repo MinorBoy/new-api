@@ -513,7 +513,7 @@ test('blocks verified channel contract conflicts before workbook generation', ()
       channel: 8,
       mutate: (model: SourceWorkbook['models'][number]) => {
         model.fields.模型ID = 'videos-standard'
-        model.fields.清晰度 = '1080p'
+        model.fields.清晰度 = '1440p'
       },
       code: 'CHANNEL_CONTRACT_RESOLUTION',
     },
@@ -551,6 +551,92 @@ test('blocks verified channel contract conflicts before workbook generation', ()
       testCase.name
     )
   }
+})
+
+test('accepts MegaByAI 1080p and 4k resolutions from the source contract', () => {
+  for (const resolutionValue of ['1080p', '4k']) {
+    const source = sourceWithOfficialPrice()
+    const channel = source.channels[0]
+    const model = source.models[0]
+    const officialPrice = source.officialPrices[0]
+    assert.ok(channel)
+    assert.ok(model)
+    assert.ok(officialPrice)
+    channel.fields.渠道 = 8
+    model.fields.渠道 = 8
+    model.fields.模型ID = 'videos-standard'
+    model.fields.清晰度 = resolutionValue
+    officialPrice.fields.分辨率 = resolutionValue
+
+    const output = buildTemplateData(
+      source,
+      parseRules({
+        ...rulesInput,
+        channelCodes: { '8': 'CH-MEGABYAI' },
+        modelRules: {},
+      })
+    )
+
+    assert.equal(
+      output.issues.some(
+        (item) => item.code === 'CHANNEL_CONTRACT_RESOLUTION'
+      ),
+      false,
+      resolutionValue
+    )
+    assert.equal(
+      output.costs.every((cost) => cost.status === 'active'),
+      true,
+      resolutionValue
+    )
+    assert.equal(output.mappings[0]?.enabled, '是', resolutionValue)
+  }
+})
+
+test('quarantines an explicit draft contract conflict without blocking the workbook', () => {
+  const source = sourceWithOfficialPrice()
+  const channel = source.channels[0]
+  const model = source.models[0]
+  assert.ok(channel)
+  assert.ok(model)
+  channel.fields.渠道 = 6
+  model.fields.渠道 = 6
+  model.fields.模型ID = 'seedance-2.0'
+  model.fields.参考图数 = 5
+  model.fields.参考视频数 = 3
+  model.fields.参考音频数 = 1
+  model.fields.最大素材数 = 9
+  model.fields.视频音频合计上限 = null
+  model.fields.最小参考图数 = 0
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { '6': 'CH-CANGYUANSUANLI' },
+      modelRules: {},
+      overrides: { '6/R3': { status: 'draft' } },
+    })
+  )
+
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.code === 'CHANNEL_CONTRACT_REFERENCES' &&
+        item.severity === 'FAIL'
+    ),
+    false
+  )
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.code === 'CHANNEL_CONTRACT_REFERENCES' &&
+        item.severity === 'WARN'
+    ),
+    true
+  )
+  assert.equal(output.costs.every((cost) => cost.status === 'draft'), true)
+  assert.equal(output.mappings[0]?.enabled, '否')
 })
 
 test('uses the configured exchange rate for official sale previews', () => {

@@ -1,7 +1,7 @@
 # MegaByAI Seedance 渠道接入设计
 
 **日期：** 2026-07-26  
-**状态：** 已确认，进入接入计划阶段
+**状态：** 已确认；2026-08-08 按最新版 `sd收录.xlsx` 修订分辨率合同
 
 ## 1. 目标
 
@@ -24,7 +24,7 @@
 - 模型：`videos-standard`、`videos-fast`、`videos-mini`
 - 时长：4 至 15 秒，默认 5 秒
 - 比例：`16:9`、`9:16`、`1:1`
-- 分辨率：`480p`、`720p`
+- 分辨率：`480p`、`720p`、`1080p`、`4k`
 - 参考图最多 9 张，参考视频最多 3 个且总时长不超过 15 秒，参考音频最多 3 个且总时长不超过 15 秒
 - 素材仅支持公开 HTTP(S) URL
 - 上游不支持 `first_image`、`last_image` 字段
@@ -49,7 +49,7 @@
 - `model`、`content` 必填，且必须恰有一个非空文本项。
 - Ark `duration` 转为上游整数 `duration`。
 - Ark `ratio` 原样转为上游 `ratio`。
-- Ark `resolution` 原样转发，只允许 `480p`、`720p`。
+- Ark `resolution` 原样转发，只允许 `480p`、`720p`、`1080p`、`4k`。模型目录和可售组合以最新版 `sd收录.xlsx` 为准。
 - `reference_image`、`reference_video`、`reference_audio` 分别进入三个上游数组。
 - 参考视频和参考音频分别在提交前解析总时长；任一类别超过 15 秒返回 `InvalidParameter.content`，素材无效返回 400，元数据解析服务不可用返回 503，且都发生在预扣前。
 - 单张无 role 或 `first_frame` 图片可作为普通参考图进入 `referenceImages`。

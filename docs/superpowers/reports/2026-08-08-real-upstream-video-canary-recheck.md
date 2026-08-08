@@ -96,6 +96,46 @@ Paipu 的两次失败请求均按供应商失败语义确认为零收入、零�
 
 两条请求的任务日志均显示渠道 `#46`，上游创建响应模型为 `videos-4-mini`（首条上游任务 ID 为 `task_Z2VewkXVMP9sYVjbdy7VSfUuwqcdyxp9`）。路由策略页进一步确认，“不卡真人”和“卡真人”当前都绑定同一个目标 `route-target/MAP-8YES-R60-480`。因此，本轮证明了 8yes 上游对这组素材/请求触发了内容审核拦截，但尚未形成两个分组之间的渠道差异化验收；若期望“卡真人”与“不卡真人”验证不同上游，必须先为两个分组绑定不同的路由目标，再重新执行同一组请求。
 
+### 分组路由更新后的第二轮复验
+
+路由策略更新后，使用完全相同的提示词、两张图片和生成参数再次执行真实上游复验。本轮明确跳过已复验的 `route-target/MAP-8YES-R60-480`，两条请求均未命中 8yes。
+
+| 分组 | 路由与实际上游 | 任务与终态 | 审核/失败结论 |
+| --- | --- | --- | --- |
+| 不卡真人 | 策略 `#8`、目标 `#120202` `route-target/MAP-PAIPU-R30-480`、Paipu `#22`、`lec-seedance-videos-mini` | 本地任务 `task_YAOuHpFaZgm6cYTNqDsIDhhAAhJaD8KC`；上游任务 `task_Xm1C6cMIzLEVUXnddEXPuCoKyo0OroXe`；约 7 分 14 秒后失败 | 上游已接受任务，终态错误为 `账号积分不足`，没有返回内容审核拦截；受余额问题影响，仍不能据此宣称该目标已通过真人素材生成验收 |
+| 卡真人 | 策略 `#7`、目标 `#120217` `route-target/MAP-CLMM-R6-480`、CLMM `#21`、`mg-seedance2.0 -480p mini` | 本地任务 `task_AdtNdKgfLBe1COy33lqFVM9eivHxuYP4`；上游任务 `task_5h6VD4Wojpl6NlqPqJnaPfzYnkjzdnbb`；约 1 分 16 秒后失败 | 明确返回 `内容审核未通过，请调整提示词或参考素材后重试`，确认 CLMM 对本组素材执行了审核拦截 |
+
+两条请求分别生成成本请求 `4771`、`4772`。两条尝试均记录 `upstream_accepted=1`、`task_failed_no_charge`，最终用户扣费、供应商成本和毛利润均为 `$0`，收入状态为 `confirmed_zero`、利润状态为 `complete`；创建阶段各预扣 `63291` quota，终态后均已退款并归零。
+
+另发现页面“生成音频”开关未开启，提交预览也未包含 `generate_audio`，但两条终态响应均显示 `generate_audio=true`。本轮失败任务没有因此产生费用，但仍需单独确认未勾选时应明确发送 `false`，还是沿用上游默认值。
+
+第二轮证明分组路由差异化已经生效：`卡真人` 与 `不卡真人` 分别到达 CLMM 和 Paipu，不再共用 8yes 目标。当前可确认 CLMM 的审核拦截符合“卡真人”预期；Paipu 因积分不足未完成生成，补充余额后仍需使用同一组素材复验，才能完成“不卡真人”目标的最终验收。
+
+### 五轮未覆盖目标真实复验
+
+继续使用同一提示词和两张审核素材执行 5 轮、共 10 次固定渠道真实请求。所有请求均为 `doubao-seedance-2-0-mini-260615`、4 秒、16:9，并按目标合同使用 480p 或 720p。为命中 4SToken 的 933 目标，第 3、4 轮“不卡真人”请求将同一组两张素材重复组成 5 个图片引用；其余请求均为 2 个图片引用。
+
+本轮排除此前已经复验的 `route-target/MAP-8YES-R60-480`、`route-target/MAP-CLMM-R6-480` 和 `route-target/MAP-PAIPU-R30-480`。10 个成本尝试均记录 `upstream_accepted=1`，没有自动重试或切换目标。
+
+| 轮次 | 分组 | 实际目标与渠道 | 本地/上游任务 | 终态 |
+| --- | --- | --- | --- | --- |
+| 1 | 卡真人 | `#120214` `MAP-CANGYUANSUANLI-R96-480`，Cangyuan `#23`，`seedance-2.0-mini` | `task_Jd1Dn9Dj5SMEL82CeCeNqeJqF34MXsGk` / `task_Kpze5zpBSGscIVCJ6tA4p8HFDRTTbpO9` | 50 秒后失败；素材已上传并通过基础检查，但上游未提供具体原因，不能明确归因为内容审核 |
+| 1 | 不卡真人 | `#120198` `MAP-4STOKEN-R164-480`，4SToken `#48`，`4sdance_mini431` | `task_ZRh36iVUQPaJPkeKm0VCMFoA5O1HSAwR` / `vid-bca9f1c003e149b7ab429d4fb419e98e` | 255 秒后失败：`素材过于典型，卡验证了，请重试看看` |
+| 2 | 卡真人 | `#120213` `MAP-CANGYUANSUANLI-R101-720`，Cangyuan `#23`，`seedance-2.0-mini-720p` | 成本请求任务标记 `task_AsRIVJ8yRZCqOIDWNHxTyY1Uznp5cgg8` | 创建阶段上游 HTTP 400：`model seedance-2.0-mini-720p not found` |
+| 2 | 不卡真人 | `#120199` `MAP-4STOKEN-R165-720`，4SToken `#48`，`4sdance_mini431` | `task_4vegUZetxrJ1wb9qdjX8k3QUzuYr8NWm` / `vid-52b6a78b79a443c9a3a22be92a796b90` | 223 秒后失败：`素材过于典型，卡验证了，请重试看看` |
+| 3 | 卡真人 | `#119882` `MAP-CLMM-R8-720`，CLMM `#21`，`mg-seedance2.0 -720p mini` | `task_yNQFiJz7k6dWmj8i7sgCJbGdgghzFP0t` / `task_qtj9vbwoZffznFLMlpH6eWOwrKjzds2Y` | 68 秒后明确返回内容审核未通过 |
+| 3 | 不卡真人 | `#120200` `MAP-4STOKEN-R166-480`，4SToken `#48`，`4sdance_mini933` | 成本请求任务标记 `task_CgNIvEswUWC9FPOIL4XtUjhBQ0N2kHlA` | 创建阶段上游 HTTP 400：`模型不存在或不可用` |
+| 4 | 卡真人 | `#120209` `MAP-8YES-R70-480`，8yes `#46`，`videos-4-mini-480p` | `task_x12bOrQ8XYSLGetlYFcI7dc0mx7M9Ww7` / `task_NKKd5pXzLEDAlvZSMo6XynAD1rngl1EW` | 58 秒后明确返回内容审核未通过 |
+| 4 | 不卡真人 | `#120201` `MAP-4STOKEN-R167-720`，4SToken `#48`，`4sdance_mini933` | 成本请求任务标记 `task_h8xNCeCdmJG0li7br4nCoWCWLtU1zsje` | 创建阶段上游 HTTP 400：`模型不存在或不可用` |
+| 5 | 卡真人 | `#120210` `MAP-8YES-R71-720`，8yes `#46`，`videos-4-mini-720p` | `task_YetmZxTlkKFoFU0fs09WCaXYr1zx1Dc0` / `task_7nFeTeji7EJzVwXiyEuCIyZQhXTTduxg` | 50 秒后明确返回内容审核未通过 |
+| 5 | 不卡真人 | `#120203` `MAP-PAIPU-R31-720`，Paipu `#22`，`lec-seedance-videos-mini` | `task_upwXb14yqVf9VUw6i6sVlEU4fQKTZV8V` / `task_1R1zXEJzo0ySzIQdQt6at8jyL5UxUWIi` | 73 秒后失败：`账号积分不足` |
+
+成本请求 `4773`、`4774`、`4776`、`4777`、`4779`、`4781`、`4782` 均在终态确认为 `task_failed_no_charge`，用户收入、供应商成本和毛利润均为 `$0`，状态为 `confirmed_zero / complete`。创建阶段被拒绝的 `4775`、`4778`、`4780` 最终用户 quota 已归零，但供应商成本仍为未知，尝试状态为 `upstream_response_rejected / cost_unknown`，请求仍停留在 `pending / incomplete_revenue`。
+
+五轮没有任何成功视频。“卡真人”侧 5 个目标中，CLMM 720p 和 8yes 480p/720p 共 3 个目标明确执行了内容审核拦截；Cangyuan 480p 只返回通用生成失败，720p 目标则配置了上游不存在的模型。“不卡真人”侧两个 4SToken 431 目标仍对本组素材触发供应商验证拦截，两个 933 目标不可用，Paipu 仍受积分不足阻断，因此该分组仍没有真人素材成功证据。
+
+真实复验后已执行运行时止损：卡真人策略 `#7` 禁用目标 `#120213`；不卡真人策略 `#8` 禁用目标 `#120200`、`#120201`；默认 Mini 策略 `#2` 同步禁用批次 24 目标 `#120180`、`#120174`、`#120175`。前两组通过管理后台保存并立即刷新路由缓存；默认策略目标在数据库中禁用，并由周期缓存同步加载。缓存门禁复核分别使用默认 Key 和“不卡真人”Key 固定 4SToken、提交 5 图片请求，两次均在本地返回 `no_compatible_route`，成本请求最大 ID 保持 `4782`，确认没有再次请求已禁用的 933 目标。默认策略的三个目标仍由配置导入批次 24 管理，后续重新导入可能再次启用，因此必须在 `sd收录.xlsx` 或模板生成规则中同步修正上游模型记录。
+
 ## 本地验证
 
 | 检查 | 结果 |
@@ -121,12 +161,17 @@ Paipu 的两次失败请求均按供应商失败语义确认为零收入、零�
 5. OmegaAI 的 `seedance-v2-720p` 被供应商判定为不可用，`lingjing-video-v1` 则返回积分余额不足；需要补充 OmegaAI Key 余额后再复测。
 6. Paipu 本轮实际选择 `lec-seedance-videos-mini`，而不是同条件下名义成本更低的 `lec-seedance-videos-stable-mini`。当前能力路由先按目标优先级选择匹配目标，成本跟踪模式不会在同一渠道内重新按成本排序；后续应单独审核模板生成的目标优先级是否符合“最低成本优先”的运营预期。
 7. 批次激活后的 `COST_COVERAGE_INCOMPLETE` 警告仍存在：本批次关联 5 条历史映射缺少成本规则。该警告不阻断激活，但严格成本模式仍不能宣称全量成本闭环。
+8. Cangyuan 目标 `MAP-CANGYUANSUANLI-R101-720` 当前绑定的 `seedance-2.0-mini-720p` 被上游判定不存在；该目标不应继续作为可用候选。
+9. 4SToken 的 `MAP-4STOKEN-R166-480`、`MAP-4STOKEN-R167-720` 均绑定 `4sdance_mini933`，真实创建请求被上游判定模型不可用；两个目标的 `supports_real_person=true` 也尚无真实成功证据。
+10. 4SToken 的 `4sdance_mini431` 虽有普通素材成功历史，但本轮 480p、720p 真人审核素材均返回供应商验证拦截；不能把普通 Canary 成功直接等同为真人素材通过。
 
 ## 后续动作
 
-1. Paipu Stable 933 已通过真实 Canary；若要开放 Standard 1080p，需先补充供应商积分后单独复测。
+1. Paipu Stable 933 已通过真实 Canary；Standard 1080p 和本轮 Mini 真人素材请求均因供应商积分不足失败，需先补充供应商积分后分别复测。
 2. Secure 折扣向供应商确认 `video-2.0-pro` 的 HTTP 500 传输错误；在获得明确错误或修复后再验收。
 3. OmegaAI 补充供应商积分，并确认 `lingjing-video-v1` 的可用性后再复测；不在 Canary 中临时切换未收录模型。
 4. 修复提交阶段失败后的收入确认，使全额退款请求落为 `confirmed_zero`，成本未知时利润状态体现为 `incomplete_cost`。
 5. 审核并明确同渠道多个兼容目标的优先级生成规则，决定采用“收录表顺序优先”还是“预测成本优先”。
 6. 补齐 5 条本批次关联的历史成本覆盖缺口后，再进行严格模式全量真实上游联测。
+7. Cangyuan 720p 的 `seedance-2.0-mini-720p` 目标及 4SToken 的两个 `4sdance_mini933` 目标已在当前运行时禁用；下一步更新源收录表或生成规则，防止后续配置导入重新启用。修复真实模型 ID 后再单独复验。
+8. 复核 4SToken `4sdance_mini431` 的真人素材政策；若供应商确认该模型会拦截此类素材，应将两个目标从“不卡真人”策略移除或把 `supports_real_person` 改为 `false`。

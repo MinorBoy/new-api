@@ -275,17 +275,17 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			require.Equal(t, target.Resolution, seedanceBilling.Resolution, target.CaseID)
 			require.Equal(t, target.Duration, seedanceBilling.OutputDurationSeconds, target.CaseID)
 			require.Positive(t, seedanceBilling.OutputTokens, target.CaseID)
-			require.Equal(t, seedanceBilling.InputTokens+seedanceBilling.OutputTokens, seedanceBilling.TotalTokens, target.CaseID)
+			require.Zero(t, seedanceBilling.InputTokens, target.CaseID)
+			require.Equal(t, seedanceBilling.OutputTokens, seedanceBilling.TotalTokens, target.CaseID)
 			if hasVideoInput {
 				require.Positive(t, seedanceBilling.InputVideoDurationMS, target.CaseID)
-				require.Positive(t, seedanceBilling.InputTokens, target.CaseID)
 			} else {
 				require.Zero(t, seedanceBilling.InputVideoDurationMS, target.CaseID)
 				require.Zero(t, seedanceBilling.InputTokens, target.CaseID)
 			}
 			require.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion, target.CaseID)
 			require.Positive(t, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
-			require.GreaterOrEqual(t, task.PrivateData.BillingContext.UsageTotalTokens, task.PrivateData.BillingContext.UsageCompletionTokens, target.CaseID)
+			require.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, task.PrivateData.BillingContext.UsageTotalTokens, target.CaseID)
 			preConsumedQuota := task.Quota
 
 			summary := service.RunTaskPollingOnce(context.Background(), nil)
@@ -309,7 +309,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 			}
 			require.NoError(t, common.Unmarshal(single, &publicTask), target.CaseID)
 			require.Positive(t, publicTask.Usage.CompletionTokens, target.CaseID)
-			require.GreaterOrEqual(t, publicTask.Usage.TotalTokens, publicTask.Usage.CompletionTokens, target.CaseID)
+			require.Equal(t, publicTask.Usage.CompletionTokens, publicTask.Usage.TotalTokens, target.CaseID)
 			require.Equal(t, task.PrivateData.BillingContext.UsageCompletionTokens, publicTask.Usage.CompletionTokens, target.CaseID)
 			require.Equal(t, task.PrivateData.BillingContext.UsageTotalTokens, publicTask.Usage.TotalTokens, target.CaseID)
 			require.Equal(t, task.PrivateData.BillingContext.UsageTotalTokens, task.PrivateData.BillingContext.BillingTokens, target.CaseID)

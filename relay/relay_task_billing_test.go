@@ -96,8 +96,8 @@ func TestTaskSeedanceTokenQuotaUsesOfficialFormulaTokens(t *testing.T) {
 		HasVideoInput:            true,
 		InputVideoDurationMS:     3000,
 		SeedanceTokenUsage: types.SeedanceTokenUsage{
-			InputTokens:  30132,
-			OutputTokens: 40176,
+			InputTokens:  0,
+			OutputTokens: 70308,
 			TotalTokens:  70308,
 		},
 		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1.25},

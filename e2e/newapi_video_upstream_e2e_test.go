@@ -238,7 +238,7 @@ func TestNewAPIVideoARKLifecycleE2E(t *testing.T) {
 	require.NoError(t, common.Unmarshal(task.PrivateData.UserResponseData, &terminalResponse))
 	assert.Equal(t, publicID, terminalResponse["id"])
 	assert.Equal(t, "succeeded", terminalResponse["status"])
-	assertNewAPIVideoLifecycleQueries(t, engine, publicID, 216000, 324000)
+	assertNewAPIVideoLifecycleQueries(t, engine, publicID, 324000, 324000)
 
 	invalid := `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://x/a.png"},"role":"first_frame"}]}`
 	status, invalidResponse := performJSONRequest(t, engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", invalid)

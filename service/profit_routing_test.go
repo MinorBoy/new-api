@@ -109,22 +109,6 @@ func TestEstimateSeedanceTokensUsesResolutionProfileAndFrameRate(t *testing.T) {
 	inputTokens, outputTokens, totalTokens, err := EstimateSeedanceTokens(facts)
 	require.NoError(t, err)
 
-	expectedInput := decimal.NewFromInt(3000).
-		Mul(decimal.NewFromInt(int64(profile.Width))).
-		Mul(decimal.NewFromInt(int64(profile.Height))).
-		Mul(decimal.NewFromInt(profile.FrameRateNum)).
-		Div(decimal.NewFromInt(profile.FrameRateDen)).
-		Div(decimal.NewFromInt(1024)).
-		Div(decimal.NewFromInt(1000)).
-		Ceil()
-	expectedOutput := decimal.NewFromInt(5000).
-		Mul(decimal.NewFromInt(int64(profile.Width))).
-		Mul(decimal.NewFromInt(int64(profile.Height))).
-		Mul(decimal.NewFromInt(profile.FrameRateNum)).
-		Div(decimal.NewFromInt(profile.FrameRateDen)).
-		Div(decimal.NewFromInt(1024)).
-		Div(decimal.NewFromInt(1000)).
-		Ceil()
 	expectedTotal := decimal.NewFromInt(3000 + 5000).
 		Mul(decimal.NewFromInt(int64(profile.Width))).
 		Mul(decimal.NewFromInt(int64(profile.Height))).
@@ -134,11 +118,25 @@ func TestEstimateSeedanceTokensUsesResolutionProfileAndFrameRate(t *testing.T) {
 		Div(decimal.NewFromInt(1000)).
 		Ceil()
 
-	assert.Equal(t, expectedInput.IntPart(), inputTokens)
-	assert.Equal(t, expectedOutput.IntPart(), outputTokens)
+	assert.Zero(t, inputTokens)
+	assert.Equal(t, expectedTotal.IntPart(), outputTokens)
 	assert.Equal(t, expectedTotal.IntPart(), totalTokens)
-	// total must be computed on the unrounded input+output sum, not by adding rounded values.
-	assert.NotEqual(t, inputTokens+outputTokens, totalTokens+1) // sanity: ceil-after-sum differs in general
+}
+
+func TestEstimateSeedanceTokensUsesCombinedVideoDurationAsCompletionUsage(t *testing.T) {
+	inputTokens, outputTokens, totalTokens, err := EstimateSeedanceTokens(ProfitRoutingFacts{
+		InputDurationMS:       3000,
+		OutputDurationSeconds: 5,
+		Width:                 864,
+		Height:                496,
+		FrameRateNum:          24,
+		FrameRateDen:          1,
+	})
+
+	require.NoError(t, err)
+	assert.Zero(t, inputTokens)
+	assert.Equal(t, int64(80352), outputTokens)
+	assert.Equal(t, int64(80352), totalTokens)
 }
 
 func TestEstimateSeedanceTokensTotalComputedBeforeCeil(t *testing.T) {

@@ -468,15 +468,8 @@ func completeSeedanceUsage(response map[string]interface{}) {
 	if !ok {
 		completionTokens = 0
 	}
-	totalTokens, ok := boundedSeedanceInteger(usage["total_tokens"], 0, int64(relaycommon.MaxTokensLimit))
-	if !ok {
-		totalTokens = 0
-	}
-	if totalTokens < completionTokens {
-		totalTokens = completionTokens
-	}
 	usage["completion_tokens"] = completionTokens
-	usage["total_tokens"] = totalTokens
+	usage["total_tokens"] = completionTokens
 	response["usage"] = usage
 }
 

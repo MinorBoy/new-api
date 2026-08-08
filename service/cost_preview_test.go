@@ -100,7 +100,7 @@ func TestPreviewFinalUserQuotaSeedanceTokenAndDurationInputsAgree(t *testing.T) 
 	durationQuota, err := PreviewFinalUserQuota(ctx, newInfo(), UserBillingPreviewInput{DurationSeconds: &duration})
 	require.NoError(t, err)
 	tokenQuota, err := PreviewFinalUserQuota(ctx, newInfo(), UserBillingPreviewInput{Usage: &relaydto.Usage{
-		PromptTokens: 30132, CompletionTokens: 40176, TotalTokens: 70308,
+		PromptTokens: 0, CompletionTokens: 70308, TotalTokens: 70308,
 	}, DurationSeconds: &duration})
 	require.NoError(t, err)
 

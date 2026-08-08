@@ -152,7 +152,7 @@ func assertLucenARKTaskResponse(t *testing.T, body []byte, publicID string) {
 	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
 	assert.Equal(t, "succeeded", response["status"])
 	assert.Equal(t, map[string]any{"video_url": "https://example.com/video.mp4"}, response["content"])
-	assert.Equal(t, map[string]any{"completion_tokens": float64(216000), "total_tokens": float64(324000)}, response["usage"])
+	assert.Equal(t, map[string]any{"completion_tokens": float64(324000), "total_tokens": float64(324000)}, response["usage"])
 }
 
 func assertLucenPublicTaskBody(t *testing.T, body []byte) {

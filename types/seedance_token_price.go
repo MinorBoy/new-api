@@ -130,15 +130,9 @@ func (p SeedanceTokenPrice) CalculateCharge(
 	if !hasVideoInput && inputVideoDurationMS != 0 {
 		return SeedanceTokenCharge{}, fmt.Errorf("Seedance input video duration is present for a no-video scenario")
 	}
-	if usage.InputTokens < 0 || usage.OutputTokens <= 0 || usage.TotalTokens > maxTokens ||
-		usage.InputTokens+usage.OutputTokens != usage.TotalTokens {
+	if usage.InputTokens != 0 || usage.OutputTokens <= 0 || usage.TotalTokens > maxTokens ||
+		usage.OutputTokens != usage.TotalTokens {
 		return SeedanceTokenCharge{}, fmt.Errorf("Seedance token usage is invalid")
-	}
-	if hasVideoInput && usage.InputTokens <= 0 {
-		return SeedanceTokenCharge{}, fmt.Errorf("Seedance input token usage is required")
-	}
-	if !hasVideoInput && usage.InputTokens != 0 {
-		return SeedanceTokenCharge{}, fmt.Errorf("Seedance input token usage is present for a no-video scenario")
 	}
 
 	scenarioName := SeedanceTokenScenarioNoVideo

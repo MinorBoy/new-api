@@ -27,7 +27,7 @@ type SeedanceTaskUsage struct {
 
 func IsValidSeedanceUsage(completionTokens, totalTokens int64) bool {
 	return completionTokens > 0 &&
-		totalTokens >= completionTokens &&
+		totalTokens == completionTokens &&
 		completionTokens <= int64(relaycommon.MaxTokensLimit) &&
 		totalTokens <= int64(relaycommon.MaxTokensLimit)
 }
@@ -41,8 +41,7 @@ func IsValidSeedanceUpstreamUsage(completionTokens, totalTokens int64) bool {
 func PersistedSeedanceTaskUsage(bc *model.TaskBillingContext) (SeedanceTaskUsage, bool) {
 	if bc == nil || bc.UsageSnapshotVersion != model.TaskUsageSnapshotVersion1 ||
 		!IsValidSeedanceUsage(int64(bc.UsageCompletionTokens), int64(bc.UsageTotalTokens)) ||
-		bc.UsageInputTokens < 0 || bc.UsageInputTokens > relaycommon.MaxTokensLimit ||
-		bc.UsageInputTokens+bc.UsageCompletionTokens != bc.UsageTotalTokens {
+		bc.UsageInputTokens != 0 {
 		return SeedanceTaskUsage{}, false
 	}
 	return SeedanceTaskUsage{
@@ -90,9 +89,7 @@ func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) 
 	}
 
 	calculatedUsage, calculationErr := CalculateSeedanceTaskUsage(billingContext, SeedanceTerminalFacts{})
-	upstreamInputTokens := result.TotalTokens - result.CompletionTokens
 	upstreamUsageMatchesFormula := calculationErr == nil &&
-		upstreamInputTokens == calculatedUsage.InputTokens &&
 		result.CompletionTokens == calculatedUsage.CompletionTokens &&
 		result.TotalTokens == calculatedUsage.TotalTokens
 	if result.BillingClamp == nil &&
@@ -100,7 +97,7 @@ func NormalizeSeedanceTaskUsage(task *model.Task, result *relaycommon.TaskInfo) 
 		IsValidSeedanceUpstreamUsage(int64(result.CompletionTokens), int64(result.TotalTokens)) &&
 		upstreamUsageMatchesFormula {
 		applySeedanceTaskUsage(task, result, SeedanceTaskUsage{
-			InputTokens:      upstreamInputTokens,
+			InputTokens:      0,
 			CompletionTokens: result.CompletionTokens,
 			TotalTokens:      result.TotalTokens,
 		}, model.TaskUsageSourceUpstream)

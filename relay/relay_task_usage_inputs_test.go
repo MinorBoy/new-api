@@ -50,8 +50,8 @@ func TestPrepareSeedanceUsageSnapshot(t *testing.T) {
 			inputVideoDurationMS: 3000,
 			resolution:           "720p",
 			hasVideoInput:        true,
-			wantInputTokens:      64800,
-			wantCompletionTokens: 108000,
+			wantInputTokens:      0,
+			wantCompletionTokens: 172800,
 			wantTotalTokens:      172800,
 		},
 		{

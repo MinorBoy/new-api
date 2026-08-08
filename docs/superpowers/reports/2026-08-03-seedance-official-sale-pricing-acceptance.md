@@ -82,19 +82,19 @@
 
 110 条成功任务全部使用 `official-token-v1`，并满足以下不变量：
 
-- `input_tokens`、`output_tokens`、`total_tokens` 与冻结的输入时长、输出时长、宽、高、帧率一致。
+- `input_tokens=0`，`completion_tokens=output_tokens=total_tokens`，完整 Token 用量与冻结的输入时长、输出时长、宽、高、帧率一致。
 - `base_charge = price_per_million × total_tokens / 1,000,000`。
 - `final_charge = base_charge × 1.25`，公式误差记录为 0。
 - 最终配额由统一配额转换函数生成，并与使用日志、任务快照和成本核算请求一致。
-- 参考视频时长参与输入 Token，不再只是审计字段。
+- 参考视频时长参与完整的生成 Token 公式，但不产生输入 Token。
 
 典型快照为 Seedance 2.0 Mini `480p + with_video + 输入 3000 ms + 输出 4 秒`：
 
 ```text
 width=864, height=496, frame_rate=24
-input_tokens=ceil(3 × 864 × 496 × 24 / 1024)=30132
-output_tokens=ceil(4 × 864 × 496 × 24 / 1024)=40176
-total_tokens=ceil(7 × 864 × 496 × 24 / 1024)=70308
+input_tokens=0
+completion_tokens=output_tokens=ceil(7 × 864 × 496 × 24 / 1024)=70308
+total_tokens=completion_tokens=70308
 price_per_million=1.917808219178082 USD
 base_charge=1.917808219178082 × 70308 / 1,000,000
            =0.134837260273972589256 USD
@@ -104,7 +104,7 @@ final_charge=0.16854657534246573657 USD
 
 这取代了旧报告中只按输出 4 秒计算出的 `$0.0965753424657535`。旧值漏计 3 秒输入视频 Token，不符合官方公式。
 
-任务终态用量还执行统一信任边界：无参考视频且上游 Token 自洽时保留可信上游用量；有参考视频但上游没有给出输入 Token 时，拒绝该不可信用量并按请求时长和冻结几何重算。例如 720p、输入 5 秒、输出 10 秒会得到 `input_tokens=108000`、`output_tokens=216000`、`total_tokens=324000`，不会采用上游错误返回的 `216900/216900`。
+任务终态用量还执行统一信任边界：上游必须返回相等的 `completion_tokens` 和 `total_tokens`，且该值与冻结公式一致，才能作为可信上游用量；否则按请求时长和冻结几何重算。例如 720p、输入 5 秒、输出 10 秒会得到 `input_tokens=0`、`completion_tokens=output_tokens=total_tokens=324000`，不会采用旧式拆分或与公式不一致的用量。
 
 用户售价用量与供应商成本计量在任务终态明确分离：上游同时返回实际时长和 Token 时，用户售价仍只接受冻结的官方 Token 公式；供应商 `per_token` 成本读取终态上游 Token 快照，供应商 `per_duration` 成本读取上游时长快照。上游 Token 与冻结售价不一致不会再造成供应商成本计量丢失或错误改用另一种计量源。
 

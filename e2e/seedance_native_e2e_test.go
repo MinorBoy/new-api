@@ -38,7 +38,7 @@ const (
 	upstreamTaskID                  = "cgt-mock-seedance-2-0"
 	failedUpstreamTaskID            = "cgt-20260717171624-cr2n9"
 	seedance20MultimodalRequestBody = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"全程使用视频1的第一视角构图，全程使用音频1作为背景音乐。第一人称视角果茶宣传广告，seedance牌「苹苹安安」苹果果茶限定款。"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-1.jpg"},"role":"reference_image"},{"type":"image_url","image_url":{"url":"https://mock.example/reference-image-2.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"}],"generate_audio":true,"ratio":"16:9","duration":11,"watermark":true}`
-	successUpstreamTaskResponse     = `{"id":"cgt-mock-seedance-2-0","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"},"usage":{"completion_tokens":108000,"total_tokens":216000},"created_at":1779348818,"updated_at":1779348874,"seed":78674,"resolution":"720p","ratio":"16:9","duration":5,"framespersecond":24,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
+	successUpstreamTaskResponse     = `{"id":"cgt-mock-seedance-2-0","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"},"usage":{"completion_tokens":216000,"total_tokens":216000},"created_at":1779348818,"updated_at":1779348874,"seed":78674,"resolution":"720p","ratio":"16:9","duration":5,"framespersecond":24,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
 	failedUpstreamTaskResponse      = `{"id":"cgt-20260717171624-cr2n9","model":"doubao-seedance-2-0-260128","status":"failed","error":{"code":"OutputVideoSensitiveContentDetected.PolicyViolation","message":"The request failed because the output video may be related to copyright restrictions. Request id: 02178427978698300000000000000000000ffffac1923a9fc42b8"},"created_at":1784279786,"updated_at":1784280145,"service_tier":"default","execution_expires_after":172800,"generate_audio":true,"draft":false,"priority":0}`
 	dimensioMultimodalRequestBody   = `{"model":"doubao-seedance-2-0-260128","content":[{"type":"image_url","image_url":{"url":"https://mock.example/reference-image.jpg"},"role":"reference_image"},{"type":"video_url","video_url":{"url":"https://mock.example/reference-video.mp4"},"role":"reference_video"},{"type":"audio_url","audio_url":{"url":"https://mock.example/reference-audio.mp3"},"role":"reference_audio"},{"type":"text","text":"参考图中主体、参考视频动作和参考音频节奏，镜头缓慢向前推进"}],"ratio":"16:9","duration":6,"resolution":"720p","intelligent_ratio":false,"face_grid":true}`
 )
@@ -667,7 +667,7 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 		true,
 		5000,
 		11,
-		&types.SeedanceTokenUsage{InputTokens: 108000, OutputTokens: 237600, TotalTokens: 345600},
+		&types.SeedanceTokenUsage{InputTokens: 0, OutputTokens: 345600, TotalTokens: 345600},
 		1,
 	)
 	t.Logf("提交后内部任务状态: status=%s progress=%s platform=%s unfinished=%d", task.Status, task.Progress, task.Platform, len(model.GetAllUnFinishSyncTasks(100)))
@@ -738,7 +738,7 @@ func TestSeedanceNativeSeedance20MultimodalE2E(t *testing.T) {
 	assert.Equal(t, "doubao-seedance-2-0-260128", successfulFields["model"])
 	assert.Equal(t, "succeeded", successfulFields["status"])
 	assert.Equal(t, map[string]interface{}{"video_url": "https://ark-content-generation-cn-beijing.tos-cn-beijing.volces.com/xxx"}, successfulFields["content"])
-	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(237600), "total_tokens": float64(345600)}, successfulFields["usage"])
+	assert.Equal(t, map[string]interface{}{"completion_tokens": float64(345600), "total_tokens": float64(345600)}, successfulFields["usage"])
 	assert.Equal(t, float64(1779348818), successfulFields["created_at"])
 	assert.Equal(t, float64(1779348874), successfulFields["updated_at"])
 	assert.Equal(t, float64(78674), successfulFields["seed"])

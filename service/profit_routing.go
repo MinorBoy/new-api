@@ -37,7 +37,8 @@ const (
 // ProfitRoutingFacts is the request-level snapshot of the values the profit predictor
 // needs. Pixel dimensions and frame rate come from pkg/seedancepricing; the input
 // duration is the aggregate from the standalone metadata service; the output duration
-// is the validated request value. Tokens are populated by EstimateSeedanceTokens.
+// is the validated request value. Tokens are populated by EstimateSeedanceTokens using
+// the official Seedance usage contract.
 type ProfitRoutingFacts struct {
 	OutputDurationSeconds int
 	InputDurationMS       int64
@@ -104,14 +105,10 @@ var (
 	tokenDurationDivisor = decimal.NewFromInt(1000)
 )
 
-// EstimateSeedanceTokens computes the predicted input, output and total token counts
-// for a Seedance video request. Input uses the aggregated input-video duration;
-// output uses the validated requested duration. The intermediate math uses Decimal,
-// and each meter that becomes a billing multiplier is ceil-rounded independently.
-//
-// total_tokens is computed as ceil of the exact (input + output) Decimal sum, NOT by
-// adding the already-rounded input and output values — adding two ceils can under-
-// estimate the true sum by up to 2 tokens and thus under-price the channel.
+// EstimateSeedanceTokens computes the official Seedance usage tuple. Input video
+// duration contributes to the completion-token formula, but the public input-token
+// field is always zero and total_tokens equals completion_tokens. The intermediate
+// math uses Decimal and the exact combined duration is ceil-rounded once.
 //
 // Any result that would exceed relaycommon.MaxTokensLimit fails closed (returning an
 // error) so the caller excludes the candidate with meter_unknown rather than letting
@@ -126,9 +123,10 @@ func EstimateSeedanceTokens(facts ProfitRoutingFacts) (inputTokens, outputTokens
 	inputRaw := decimal.NewFromInt(facts.InputDurationMS).Mul(pixels).Mul(frameRate).Div(tokenPixelDivisor).Div(tokenDurationDivisor)
 	outputRaw := decimal.NewFromInt(int64(facts.OutputDurationSeconds) * 1000).Mul(pixels).Mul(frameRate).Div(tokenPixelDivisor).Div(tokenDurationDivisor)
 
-	inputCeil, inputErr := boundedCeilTokens(inputRaw)
-	outputCeil, outputErr := boundedCeilTokens(outputRaw)
-	if inputErr != nil || outputErr != nil {
+	if _, err := boundedCeilTokens(inputRaw); err != nil {
+		return 0, 0, 0, fmt.Errorf("seedance token estimate is out of range")
+	}
+	if _, err := boundedCeilTokens(outputRaw); err != nil {
 		return 0, 0, 0, fmt.Errorf("seedance token estimate is out of range")
 	}
 	totalRaw := inputRaw.Add(outputRaw)
@@ -136,7 +134,7 @@ func EstimateSeedanceTokens(facts ProfitRoutingFacts) (inputTokens, outputTokens
 	if totalErr != nil {
 		return 0, 0, 0, fmt.Errorf("seedance token estimate is out of range")
 	}
-	return inputCeil, outputCeil, totalCeil, nil
+	return 0, totalCeil, totalCeil, nil
 }
 
 // boundedCeilTokens ceil-rounds a Decimal token count and rejects anything beyond
@@ -842,15 +840,15 @@ func recheckFacts(c *gin.Context, ctx context.Context, info *relaycommon.RelayIn
 	}
 	durationSeconds := duration
 	revenueNanoUSD, err := PreviewRoutingRevenue(ctx, RoutingRevenuePreviewInput{
-		OriginModelName: info.OriginModelName,
-		Group:           group,
-		RequestPath:     relaycommon.SafeRequestPath(info.RequestURLPath),
-		RelayMode:       info.RelayMode,
-		DurationSeconds: &durationSeconds,
-		OutputResolution: resolution,
-		HasReferenceVideo: hasReferenceVideo,
+		OriginModelName:      info.OriginModelName,
+		Group:                group,
+		RequestPath:          relaycommon.SafeRequestPath(info.RequestURLPath),
+		RelayMode:            info.RelayMode,
+		DurationSeconds:      &durationSeconds,
+		OutputResolution:     resolution,
+		HasReferenceVideo:    hasReferenceVideo,
 		InputVideoDurationMS: inputDurationMS,
-		UserId:          info.UserId,
+		UserId:               info.UserId,
 	})
 	if err != nil {
 		return facts, 0, false

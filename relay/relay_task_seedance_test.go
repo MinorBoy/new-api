@@ -966,9 +966,9 @@ func TestSeedanceTaskResponseCompletesSimplifiedSuccessResponse(t *testing.T) {
 			BillingContext: &model.TaskBillingContext{
 				UsageProfile:             model.TaskUsageProfileSeedance,
 				UsageSnapshotVersion:     model.TaskUsageSnapshotVersion1,
-				UsageInputTokens:         20,
+				UsageInputTokens:         0,
 				UsageCompletionTokens:    100,
-				UsageTotalTokens:         120,
+				UsageTotalTokens:         100,
 				UsageSource:              model.TaskUsageSourceLocalCalculated,
 				RequestedDurationSeconds: 5,
 				Resolution:               "720p",
@@ -1002,7 +1002,7 @@ func TestSeedanceTaskResponseCompletesSimplifiedSuccessResponse(t *testing.T) {
 	usage, ok := response["usage"].(map[string]interface{})
 	require.True(t, ok)
 	assert.EqualValues(t, 100, usage["completion_tokens"])
-	assert.EqualValues(t, 120, usage["total_tokens"])
+	assert.EqualValues(t, 100, usage["total_tokens"])
 }
 
 func TestSeedanceTaskResponseUsesExplicitDefaultsWhenFactsAreUnavailable(t *testing.T) {
@@ -1216,14 +1216,14 @@ func TestSeedanceTaskResponseUsesPersistedFinalUsage(t *testing.T) {
 		Status: model.TaskStatusSuccess, Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
 		PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
-			UsageInputTokens: 100, UsageCompletionTokens: 108900, UsageTotalTokens: 109000, UsageSource: model.TaskUsageSourceUpstream,
+			UsageInputTokens: 0, UsageCompletionTokens: 109000, UsageTotalTokens: 109000, UsageSource: model.TaskUsageSourceUpstream,
 		}},
 		Data: json.RawMessage(`{"status":"succeeded","content":{"video_url":"https://x/video.mp4"}}`),
 	}
 	response, err := seedanceTaskResponse(task)
 	require.NoError(t, err)
 	usage := response["usage"].(map[string]interface{})
-	assert.EqualValues(t, 108900, usage["completion_tokens"])
+	assert.EqualValues(t, 109000, usage["completion_tokens"])
 	assert.EqualValues(t, 109000, usage["total_tokens"])
 }
 
@@ -1307,7 +1307,7 @@ func TestSeedanceTaskResponseCalculatesReferenceVideoUsage(t *testing.T) {
 	require.NoError(t, err)
 	usage, ok := response["usage"].(map[string]interface{})
 	require.True(t, ok)
-	assert.EqualValues(t, 108000, usage["completion_tokens"])
+	assert.EqualValues(t, 172800, usage["completion_tokens"])
 	assert.EqualValues(t, 172800, usage["total_tokens"])
 }
 

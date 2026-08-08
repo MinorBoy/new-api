@@ -188,7 +188,7 @@ func TestPersistSubmittedSeedanceTaskFreezesOfficialTokenBilling(t *testing.T) {
 			}},
 			SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
 				Scenario: "with_video", Resolution: "720p", PricePerMillion: "1.917808219178082",
-				InputTokens: 64800, OutputTokens: 108000, TotalTokens: 172800,
+				InputTokens: 0, OutputTokens: 172800, TotalTokens: 172800,
 				Width: 1248, Height: 704, FrameRate: 24, PricingVersion: "official-token-v1",
 				Source: "sd官价!A1", BaseCharge: "0.3313972602739725696", GroupRatio: "1", FinalCharge: "0.3313972602739725696",
 			},
@@ -198,8 +198,8 @@ func TestPersistSubmittedSeedanceTaskFreezesOfficialTokenBilling(t *testing.T) {
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
 			PublicTaskID:          "task-seedance-profile",
 			InputVideoDurationMS:  3000,
-			UsageInputTokens:      64800,
-			UsageCompletionTokens: 108000,
+			UsageInputTokens:      0,
+			UsageCompletionTokens: 172800,
 			UsageTotalTokens:      172800,
 		},
 	}
@@ -217,8 +217,8 @@ func TestPersistSubmittedSeedanceTaskFreezesOfficialTokenBilling(t *testing.T) {
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
 	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
-	assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
-	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
+	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageCompletionTokens)
 	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
 	assert.True(t, task.PrivateData.BillingContext.PerCallBilling)
 	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenPrice)
@@ -248,7 +248,7 @@ func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *t
 			}},
 			SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
 				Scenario: "with_video", Resolution: "720p", PricePerMillion: "1.917808219178082",
-				InputTokens: 64800, OutputTokens: 108000, TotalTokens: 172800,
+				InputTokens: 0, OutputTokens: 172800, TotalTokens: 172800,
 				Width: 1248, Height: 704, FrameRate: 24, PricingVersion: "official-token-v1",
 				Source: "sd官价!A1", BaseCharge: "0.3313972602739725696", GroupRatio: "1", FinalCharge: "0.3313972602739725696",
 			},
@@ -261,8 +261,8 @@ func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *t
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
 			PublicTaskID:          "task-mapped-seedance-profile",
 			InputVideoDurationMS:  3000,
-			UsageInputTokens:      64800,
-			UsageCompletionTokens: 108000,
+			UsageInputTokens:      0,
+			UsageCompletionTokens: 172800,
 			UsageTotalTokens:      172800,
 		},
 	}
@@ -280,8 +280,8 @@ func TestPersistSubmittedMappedSeedanceTaskUsesUpstreamModelForUsageProfile(t *t
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, model.TaskUsageProfileSeedance, task.PrivateData.BillingContext.UsageProfile)
 	assert.Equal(t, model.TaskUsageSnapshotVersion1, task.PrivateData.BillingContext.UsageSnapshotVersion)
-	assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
-	assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
+	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageCompletionTokens)
 	assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
 	assert.True(t, task.PrivateData.BillingContext.PerCallBilling)
 }

@@ -175,7 +175,7 @@ func TestCostPreviewUserBillingQuotaSupportsSeedanceTokenAndDurationInputs(t *te
 	durationQuota, snapshot, err := PreviewUserBillingQuota(ctx, baseInput)
 	require.NoError(t, err)
 
-	baseInput.Usage = &relaydto.Usage{PromptTokens: 30132, CompletionTokens: 40176, TotalTokens: 70308}
+	baseInput.Usage = &relaydto.Usage{PromptTokens: 0, CompletionTokens: 70308, TotalTokens: 70308}
 	tokenQuota, _, err := PreviewUserBillingQuota(ctx, baseInput)
 	require.NoError(t, err)
 

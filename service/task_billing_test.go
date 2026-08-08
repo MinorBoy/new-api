@@ -312,8 +312,8 @@ func TestTaskBillingOtherIncludesSeedanceOfficialTokenSnapshot(t *testing.T) {
 			Scenario:              types.SeedanceTokenScenarioWithVideo,
 			Resolution:            "480p",
 			PricePerMillion:       "1.917808219178082",
-			InputTokens:           30132,
-			OutputTokens:          40176,
+			InputTokens:           0,
+			OutputTokens:          70308,
 			TotalTokens:           70308,
 			InputVideoDurationMS:  3000,
 			OutputDurationSeconds: 4,
@@ -332,8 +332,8 @@ func TestTaskBillingOtherIncludesSeedanceOfficialTokenSnapshot(t *testing.T) {
 
 	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, other["billing_mode"])
 	assert.Equal(t, "1.917808219178082", other["price_per_million"])
-	assert.Equal(t, 30132, other["input_tokens"])
-	assert.Equal(t, 40176, other["output_tokens"])
+	assert.Equal(t, 0, other["input_tokens"])
+	assert.Equal(t, 70308, other["output_tokens"])
 	assert.Equal(t, 70308, other["total_tokens"])
 	assert.Equal(t, 864, other["output_width"])
 	assert.Equal(t, 496, other["output_height"])
@@ -419,7 +419,7 @@ func TestLogTaskConsumptionIncludesSeedanceOfficialTokenSnapshot(t *testing.T) {
 			},
 			SeedanceTokenBilling: &types.SeedanceTokenBillingBreakdown{
 				Scenario: types.SeedanceTokenScenarioWithVideo, Resolution: "480p",
-				PricePerMillion: "1.917808219178082", InputTokens: 30132, OutputTokens: 40176, TotalTokens: 70308,
+				PricePerMillion: "1.917808219178082", InputTokens: 0, OutputTokens: 70308, TotalTokens: 70308,
 				InputVideoDurationMS: 3000, OutputDurationSeconds: 4, Width: 864, Height: 496, FrameRate: 24,
 				PricingVersion: "official-token-v1", Source: "sd官价!A1",
 				BaseCharge: "0.134837260273972589256", GroupRatio: "1.25", FinalCharge: "0.16854657534246573657",
@@ -435,8 +435,8 @@ func TestLogTaskConsumptionIncludesSeedanceOfficialTokenSnapshot(t *testing.T) {
 	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
 	assert.Equal(t, billing_setting.BillingModeSeedanceTokens, other["billing_mode"])
 	assert.Equal(t, "1.917808219178082", other["price_per_million"])
-	assert.Equal(t, float64(30132), other["input_tokens"])
-	assert.Equal(t, float64(40176), other["output_tokens"])
+	assert.Equal(t, float64(0), other["input_tokens"])
+	assert.Equal(t, float64(70308), other["output_tokens"])
 	assert.Equal(t, float64(70308), other["total_tokens"])
 	assert.Equal(t, "0.16854657534246573657", other["final_charge"])
 	assert.NotContains(t, other, "model_price")
@@ -1352,7 +1352,7 @@ func TestSettle_SeedanceOfficialTokenBillingUsesFrozenTotalTokens(t *testing.T) 
 	require.NoError(t, model.DB.Create(task).Error)
 	result := &relaycommon.TaskInfo{
 		Status:                  string(model.TaskStatusSuccess),
-		CompletionTokens:        40176,
+		CompletionTokens:        70308,
 		CompletionTokensPresent: true,
 		TotalTokens:             70308,
 		TotalTokensPresent:      true,
@@ -1368,8 +1368,8 @@ func TestSettle_SeedanceOfficialTokenBillingUsesFrozenTotalTokens(t *testing.T) 
 	assert.Equal(t, initQuota+(preConsumed-expectedQuota), getUserQuota(t, userID))
 	assert.Equal(t, tokenRemain+(preConsumed-expectedQuota), getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, 70308, task.PrivateData.BillingContext.BillingTokens)
-	assert.Equal(t, 30132, task.PrivateData.BillingContext.UsageInputTokens)
-	assert.Equal(t, 40176, task.PrivateData.BillingContext.UsageCompletionTokens)
+	assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
+	assert.Equal(t, 70308, task.PrivateData.BillingContext.UsageCompletionTokens)
 	assert.Equal(t, 70308, task.PrivateData.BillingContext.UsageTotalTokens)
 	assert.Equal(t, model.TaskUsageSourceUpstream, task.PrivateData.BillingContext.UsageSource)
 	require.NotNil(t, task.PrivateData.BillingContext.SeedanceTokenBilling)
@@ -1412,7 +1412,7 @@ func TestSettle_SeedanceOfficialTokenBillingAllowsZeroGroupRatio(t *testing.T) {
 	require.NoError(t, model.DB.Create(task).Error)
 	result := &relaycommon.TaskInfo{
 		Status:                  string(model.TaskStatusSuccess),
-		CompletionTokens:        40176,
+		CompletionTokens:        70308,
 		CompletionTokensPresent: true,
 		TotalTokens:             70308,
 		TotalTokensPresent:      true,

@@ -48,7 +48,7 @@ func TestCalculateSeedanceTaskUsage(t *testing.T) {
 				InputVideoDurationMS:     3000,
 				SeedanceTokenBilling:     seedanceTokenBilling720p(),
 			},
-			want: SeedanceTaskUsage{InputTokens: 64800, CompletionTokens: 108000, TotalTokens: 172800},
+			want: SeedanceTaskUsage{InputTokens: 0, CompletionTokens: 172800, TotalTokens: 172800},
 		},
 		{
 			name: "terminal facts do not replace frozen pricing facts",
@@ -163,11 +163,11 @@ func TestPersistedSeedanceTaskUsage(t *testing.T) {
 			name: "version one snapshot",
 			bc: &model.TaskBillingContext{
 				UsageSnapshotVersion:  model.TaskUsageSnapshotVersion1,
-				UsageInputTokens:      64800,
-				UsageCompletionTokens: 108000,
+				UsageInputTokens:      0,
+				UsageCompletionTokens: 172800,
 				UsageTotalTokens:      172800,
 			},
-			want: SeedanceTaskUsage{InputTokens: 64800, CompletionTokens: 108000, TotalTokens: 172800},
+			want: SeedanceTaskUsage{InputTokens: 0, CompletionTokens: 172800, TotalTokens: 172800},
 			ok:   true,
 		},
 		{
@@ -307,7 +307,7 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 		assert.Equal(t, 108000, task.PrivateData.BillingContext.BillingTokens)
 	})
 
-	t.Run("reference video rejects upstream usage without input tokens", func(t *testing.T) {
+	t.Run("reference video uses combined duration as completion usage", func(t *testing.T) {
 		task := &model.Task{
 			Status: model.TaskStatusSuccess,
 			PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
@@ -321,32 +321,32 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 		}
 		result := &relaycommon.TaskInfo{
 			Status:                  string(model.TaskStatusSuccess),
-			CompletionTokens:        108900,
+			CompletionTokens:        172800,
 			CompletionTokensPresent: true,
-			TotalTokens:             108900,
+			TotalTokens:             172800,
 			TotalTokensPresent:      true,
 		}
 
 		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
 
-		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.Equal(t, 172800, result.CompletionTokens)
 		assert.Equal(t, 172800, result.TotalTokens)
-		assert.Equal(t, model.TaskUsageSourceLocalCalculated, result.UsageSource)
-		assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
+		assert.Equal(t, model.TaskUsageSourceUpstream, result.UsageSource)
+		assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
 		assert.Equal(t, 172800, task.PrivateData.BillingContext.BillingTokens)
 	})
 
 	t.Run("inconsistent upstream usage cannot replace persisted pair", func(t *testing.T) {
 		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
-			UsageInputTokens: 64800, UsageCompletionTokens: 108000, UsageTotalTokens: 172800,
+			UsageInputTokens: 0, UsageCompletionTokens: 172800, UsageTotalTokens: 172800,
 			HasVideoInput: true, InputVideoDurationMS: 3000,
 		}}}
 		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess), CompletionTokens: 108900, CompletionTokensPresent: true, TotalTokens: 109000, TotalTokensPresent: true}
 		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
-		assert.Equal(t, 108000, task.PrivateData.BillingContext.UsageCompletionTokens)
+		assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageCompletionTokens)
 		assert.Equal(t, 172800, task.PrivateData.BillingContext.UsageTotalTokens)
-		assert.Equal(t, 64800, task.PrivateData.BillingContext.UsageInputTokens)
+		assert.Equal(t, 0, task.PrivateData.BillingContext.UsageInputTokens)
 		assert.Equal(t, 172800, task.PrivateData.BillingContext.BillingTokens)
 		assert.Equal(t, model.TaskUsageSourceLocalCalculated, task.PrivateData.BillingContext.UsageSource)
 	})
@@ -367,12 +367,12 @@ func TestNormalizeSeedanceTaskUsage(t *testing.T) {
 	t.Run("broken request facts use persisted fallback", func(t *testing.T) {
 		bc := &model.TaskBillingContext{
 			UsageProfile: model.TaskUsageProfileSeedance, UsageSnapshotVersion: model.TaskUsageSnapshotVersion1,
-			UsageInputTokens: 64800, UsageCompletionTokens: 108000, UsageTotalTokens: 172800, HasVideoInput: true,
+			UsageInputTokens: 0, UsageCompletionTokens: 172800, UsageTotalTokens: 172800, HasVideoInput: true,
 		}
 		task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: bc}}
 		result := &relaycommon.TaskInfo{Status: string(model.TaskStatusSuccess)}
 		require.NoError(t, NormalizeSeedanceTaskUsage(task, result))
-		assert.Equal(t, 108000, result.CompletionTokens)
+		assert.Equal(t, 172800, result.CompletionTokens)
 		assert.Equal(t, 172800, result.TotalTokens)
 	})
 

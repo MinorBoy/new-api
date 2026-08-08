@@ -77,6 +77,11 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 			}
 		}
 	}
+	if a.activeProfile().requestDialect == videoRequestDialectZ5APIMedia {
+		result.DurationPresent = false
+		result.DurationSeconds = 0
+		result.CostMeter = nil
+	}
 	return result, nil
 }
 
@@ -223,8 +228,22 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 	if err != nil {
 		return nil, err
 	}
+	projectionBody := body
+	var projection map[string]json.RawMessage
+	if err := common.Unmarshal(body, &projection); err == nil {
+		if rawDuration, exists := projection["duration"]; exists {
+			if duration, ok := parseProviderNumber(rawDuration, "s"); ok {
+				projection["duration"] = json.RawMessage(duration.String())
+				normalized, err := common.Marshal(projection)
+				if err != nil {
+					return nil, fmt.Errorf("marshal normalized direct ARK task projection: %w", err)
+				}
+				projectionBody = normalized
+			}
+		}
+	}
 	var nested arkTaskData
-	if err := common.Unmarshal(body, &nested); err != nil {
+	if err := common.Unmarshal(projectionBody, &nested); err != nil {
 		return nil, fmt.Errorf("unmarshal direct ARK task projection: %w", err)
 	}
 	progress := ""
@@ -238,8 +257,7 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 		Nested:    &nested,
 		Usage:     direct.Usage,
 	}
-	if direct.Seconds != nil {
-		seconds := json.Number(*direct.Seconds)
+	if seconds, ok := parseProviderNumber(direct.Seconds, ""); ok {
 		nested.Duration = &seconds
 	}
 	if nested.CreatedAt != nil {
@@ -277,6 +295,31 @@ func parseDirectTask(body []byte, envelopeMessage string) (*parsedTask, error) {
 		parsed.Reason = sanitizePublicTaskFailure(parsed.Reason, upstreamTaskID)
 	}
 	return parsed, nil
+}
+
+func parseProviderNumber(raw json.RawMessage, suffix string) (json.Number, bool) {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return "", false
+	}
+	var number json.Number
+	if err := common.Unmarshal(raw, &number); err == nil {
+		if _, err := decimal.NewFromString(number.String()); err == nil {
+			return number, true
+		}
+	}
+	var text string
+	if err := common.Unmarshal(raw, &text); err != nil {
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	if suffix != "" {
+		text = strings.TrimSpace(strings.TrimSuffix(text, suffix))
+	}
+	value, err := decimal.NewFromString(text)
+	if err != nil {
+		return "", false
+	}
+	return json.Number(value.String()), true
 }
 
 func directTaskVideoURL(task directTask) string {
@@ -509,6 +552,9 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		Usage:                 nested.Usage,
 		Error:                 nested.Error,
 	}
+	if a.activeProfile().requestDialect == videoRequestDialectZ5APIMedia {
+		response.Duration = z5APIRequestedDuration(task)
+	}
 	if response.CreatedAt == nil {
 		createdAt := parsed.CreatedAt
 		if createdAt == 0 {
@@ -555,6 +601,30 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		}
 	}
 	return common.Marshal(response)
+}
+
+func z5APIRequestedDuration(task *model.Task) *json.Number {
+	var request struct {
+		Duration json.RawMessage `json:"duration"`
+	}
+	if err := common.Unmarshal(task.PrivateData.UserRequestData, &request); err == nil {
+		if duration, ok := parseProviderNumber(request.Duration, ""); ok {
+			value, err := decimal.NewFromString(duration.String())
+			if err == nil && value.GreaterThan(decimal.Zero) &&
+				value.LessThanOrEqual(decimal.NewFromInt(relaycommon.MaxTaskDurationSeconds)) {
+				return &duration
+			}
+		}
+	}
+	if task.PrivateData.BillingContext == nil {
+		return nil
+	}
+	durationSeconds := task.PrivateData.BillingContext.RequestedDurationSeconds
+	if durationSeconds <= 0 || durationSeconds > relaycommon.MaxTaskDurationSeconds {
+		return nil
+	}
+	duration := json.Number(strconv.Itoa(durationSeconds))
+	return &duration
 }
 
 func parsePublicTaskProjection(task *model.Task) (*parsedTask, error) {

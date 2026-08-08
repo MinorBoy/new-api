@@ -1071,7 +1071,7 @@ func TestSeedanceTaskResponseAppliesTerminalFactPriority(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			task := &model.Task{
 				TaskID:     "task_priority",
-				Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
+				Platform:   constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeNewAPIVideo)),
 				Status:     model.TaskStatusSuccess,
 				Properties: model.Properties{OriginModelName: "doubao-seedance-2-0-260128"},
 				PrivateData: model.TaskPrivateData{

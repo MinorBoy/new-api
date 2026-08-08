@@ -361,6 +361,40 @@ func TestParseTaskFailureSanitizesUpstreamMessage(t *testing.T) {
 	assert.NotContains(t, result.Reason, "signed-secret")
 }
 
+func TestParseTaskResultAcceptsSecureDurationWithUnit(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"id":"task_upstream",
+		"status":"succeeded",
+		"seconds":"5",
+		"duration":"5s",
+		"content":{"video_url":"https://assets.example/video.mp4"}
+	}`))
+	require.NoError(t, err)
+
+	assert.True(t, result.DurationPresent)
+	assert.Equal(t, 5, result.DurationSeconds)
+	require.NotNil(t, result.CostMeter)
+	require.NotNil(t, result.CostMeter.DurationSeconds)
+	assert.Equal(t, "5", *result.CostMeter.DurationSeconds)
+}
+
+func TestParseTaskResultAcceptsNumericSecureSeconds(t *testing.T) {
+	result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"id":"task_upstream",
+		"status":"completed",
+		"seconds":4,
+		"progress":100,
+		"video_url":"https://assets.example/video.mp4"
+	}`))
+	require.NoError(t, err)
+
+	assert.True(t, result.DurationPresent)
+	assert.Equal(t, 4, result.DurationSeconds)
+	require.NotNil(t, result.CostMeter)
+	require.NotNil(t, result.CostMeter.DurationSeconds)
+	assert.Equal(t, "4", *result.CostMeter.DurationSeconds)
+}
+
 func TestConvertToOpenAIVideoUsesOnlyPublicTaskFacts(t *testing.T) {
 	task := reportTaskFixture()
 	body, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)

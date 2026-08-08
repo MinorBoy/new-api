@@ -116,17 +116,17 @@ type detailedEnvelope struct {
 }
 
 type directTask struct {
-	ID          string  `json:"id"`
-	TaskID      string  `json:"task_id"`
-	Status      string  `json:"status"`
-	Progress    int     `json:"progress"`
-	CreatedAt   int64   `json:"created_at"`
-	CompletedAt int64   `json:"completed_at"`
-	Object      string  `json:"object"`
-	Seconds     *string `json:"seconds"`
-	URL         string  `json:"url"`
-	VideoURL    string  `json:"video_url"`
-	ResultURL   string  `json:"result_url"`
+	ID          string          `json:"id"`
+	TaskID      string          `json:"task_id"`
+	Status      string          `json:"status"`
+	Progress    int             `json:"progress"`
+	CreatedAt   int64           `json:"created_at"`
+	CompletedAt int64           `json:"completed_at"`
+	Object      string          `json:"object"`
+	Seconds     json.RawMessage `json:"seconds"`
+	URL         string          `json:"url"`
+	VideoURL    string          `json:"video_url"`
+	ResultURL   string          `json:"result_url"`
 	Output      []struct {
 		URL string `json:"url,omitempty"`
 	} `json:"output,omitempty"`

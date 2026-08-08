@@ -176,9 +176,7 @@ function setInputValue(
 }
 
 function getSwitch(mounted: Mounted, label: string) {
-  const element = mounted.container.querySelector(
-    `[aria-label="${label}"]`
-  )
+  const element = mounted.container.querySelector(`[aria-label="${label}"]`)
   assert.ok(element)
   return element as unknown as HTMLButtonElement
 }

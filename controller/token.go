@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -43,6 +44,86 @@ func GetAllTokens(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
 	common.ApiSuccess(c, pageInfo)
+}
+
+// tokenUsageWindow is the span covered by the 30-day usage column (seconds).
+const tokenUsageWindowSeconds = 30 * 24 * 3600
+
+// GetTokensUsage returns today's and the last 30 days' consumed quota per
+// token id for the calling user. It powers the "Usage" column on the API key
+// list. Only consume logs (type=LogTypeConsume) are summed. Tokens not owned
+// by the caller are silently dropped from the result.
+func GetTokensUsage(c *gin.Context) {
+	userId := c.GetInt("id")
+	rawIds := strings.TrimSpace(c.Query("token_ids"))
+	if rawIds == "" {
+		common.ApiErrorMsg(c, "token_ids is required")
+		return
+	}
+
+	parts := strings.Split(rawIds, ",")
+	tokenIds := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := strconv.Atoi(p)
+		if err != nil || id <= 0 {
+			continue
+		}
+		tokenIds = append(tokenIds, id)
+	}
+	if len(tokenIds) == 0 {
+		common.ApiErrorMsg(c, "token_ids is required")
+		return
+	}
+	if len(tokenIds) > 100 {
+		common.ApiErrorMsg(c, "too many token_ids (max 100)")
+		return
+	}
+
+	// Authorize: only keep ids that belong to the calling user.
+	ownedIds, err := model.GetUserTokenIds(userId, tokenIds)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(ownedIds) == 0 {
+		common.ApiSuccess(c, map[string]any{})
+		return
+	}
+
+	// "Today" is anchored to the server's local midnight; created_at is written
+	// as time.Now().Unix() so the same clock applies.
+	now := time.Now()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	end := now.Unix()
+	start30d := end - tokenUsageWindowSeconds
+
+	todayUsage, err := model.SumUsedQuotaByTokens(ownedIds, startOfToday, end)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	monthUsage, err := model.SumUsedQuotaByTokens(ownedIds, start30d, end)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	data := make(map[string]gin.H, len(ownedIds))
+	for _, id := range ownedIds {
+		data[strconv.Itoa(id)] = gin.H{
+			"today":       todayUsage[id],
+			"thirty_days": monthUsage[id],
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    data,
+	})
 }
 
 func SearchTokens(c *gin.Context) {
@@ -250,6 +331,7 @@ func DeleteToken(c *gin.Context) {
 func UpdateToken(c *gin.Context) {
 	userId := c.GetInt("id")
 	statusOnly := c.Query("status_only")
+	groupOnly := c.Query("group_only")
 	token := model.Token{}
 	err := c.ShouldBindJSON(&token)
 	if err != nil {
@@ -286,9 +368,14 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
-	if statusOnly != "" {
+	switch {
+	case statusOnly != "":
 		cleanToken.Status = token.Status
-	} else {
+	case groupOnly != "":
+		// Partial update: only the group and its cross-group-retry toggle.
+		cleanToken.Group = token.Group
+		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+	default:
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime

@@ -45,14 +45,14 @@ import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getApiKeys, searchApiKeys } from '../api'
+import { getApiKeys, getTokenUsage, searchApiKeys } from '../api'
 import {
   API_KEY_STATUS,
   API_KEY_STATUS_OPTIONS,
   API_KEY_STATUSES,
   ERROR_MESSAGES,
 } from '../constants'
-import type { ApiKey } from '../types'
+import type { ApiKey, TokenUsageMap } from '../types'
 import { ApiKeyCell, UnlimitedQuotaBadge } from './api-keys-cells'
 import { useApiKeysColumns } from './api-keys-columns'
 import { useApiKeys } from './api-keys-provider'
@@ -93,12 +93,71 @@ function ApiKeysMobileSkeleton() {
   )
 }
 
-function ApiKeysMobileList({
+function UsageRow({
+  apiKeyId,
+  usageMap,
+  variant = 'row',
+}: {
+  apiKeyId: number
+  usageMap?: TokenUsageMap
+  variant?: 'row' | 'inline'
+}) {
+  const { t } = useTranslation()
+  const usage = usageMap?.[String(apiKeyId)]
+
+  if (variant === 'inline') {
+    if (!usage) {
+      return (
+        <div className='flex items-center justify-between gap-2 text-xs'>
+          <span className='text-muted-foreground'>{t('Usage')}</span>
+          <span className='text-muted-foreground tabular-nums'>-</span>
+        </div>
+      )
+    }
+    return (
+      <div className='flex items-center justify-between gap-2 text-xs'>
+        <span className='text-muted-foreground'>{t('Usage')}</span>
+        <span className='tabular-nums text-muted-foreground'>
+          {t('Today')}{' '}
+          <span className='font-medium text-foreground'>
+            {formatQuota(usage.today)}
+          </span>
+          <span className='px-1'>·</span>
+          {t('Last 30 days')}{' '}
+          <span className='font-medium text-foreground'>
+            {formatQuota(usage.thirty_days)}
+          </span>
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className='space-y-0.5 text-xs'>
+      <div className='flex items-center justify-between gap-2'>
+        <span className='text-muted-foreground'>{t('Today')}</span>
+        <span className='font-medium tabular-nums'>
+          {usage ? formatQuota(usage.today) : '-'}
+        </span>
+      </div>
+      <div className='flex items-center justify-between gap-2'>
+        <span className='text-muted-foreground'>{t('Last 30 days')}</span>
+        <span className='font-medium tabular-nums'>
+          {usage ? formatQuota(usage.thirty_days) : '-'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+export function ApiKeysMobileList({
   table,
   isLoading,
+  usageMap,
 }: {
   table: TanstackTable<ApiKey>
   isLoading: boolean
+  usageMap?: TokenUsageMap
 }) {
   const { t } = useTranslation()
   const rows = table.getRowModel().rows
@@ -179,6 +238,8 @@ function ApiKeysMobileList({
                 </span>
               )}
             </div>
+
+            <UsageRow apiKeyId={apiKey.id} usageMap={usageMap} variant='inline' />
           </div>
         )
       })}
@@ -190,7 +251,6 @@ export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
   const [now, setNow] = useState(() => Date.now())
-  const columns = useApiKeysColumns(now)
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -276,6 +336,25 @@ export function ApiKeysTable() {
 
   const apiKeys = data?.items || []
 
+  // Fetch per-token usage (today + last 30 days) for the current page.
+  // Bound to refreshTrigger so edits/status toggles invalidate it.
+  // eslint-disable-next-line @tanstack/query/exhaustive-deps
+  const tokenIds = apiKeys.map((k) => k.id)
+  const { data: usageData } = useQuery({
+    queryKey: ['keys-usage', tokenIds, refreshTrigger],
+    queryFn: async () => {
+      const result = await getTokenUsage(tokenIds)
+      if (!result.success) return {} as TokenUsageMap
+      return result.data ?? {}
+    },
+    enabled: tokenIds.length > 0,
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
+  })
+  const usageMap = usageData
+
+  const columns = useApiKeysColumns(now, usageMap)
+
   const { table } = useDataTable({
     data: apiKeys,
     columns,
@@ -325,7 +404,13 @@ export function ApiKeysTable() {
           },
         ],
       }}
-      mobile={<ApiKeysMobileList table={table} isLoading={isLoading} />}
+      mobile={
+        <ApiKeysMobileList
+          table={table}
+          isLoading={isLoading}
+          usageMap={usageMap}
+        />
+      }
       getRowClassName={(row) =>
         isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
       }

@@ -85,6 +85,17 @@ func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	return tokens, err
 }
 
+// GetUserTokenIds returns the subset of tokenIds that belong to userId, so
+// callers can authorize a batch of token ids before further processing.
+func GetUserTokenIds(userId int, tokenIds []int) ([]int, error) {
+	if len(tokenIds) == 0 {
+		return nil, nil
+	}
+	var ids []int
+	err := DB.Model(&Token{}).Where("user_id = ? AND id IN ?", userId, tokenIds).Pluck("id", &ids).Error
+	return ids, err
+}
+
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
 // 规则：
 //  1. 转义 ! 和 _（使用 ! 作为 ESCAPE 字符，兼容 MySQL/PostgreSQL/SQLite）

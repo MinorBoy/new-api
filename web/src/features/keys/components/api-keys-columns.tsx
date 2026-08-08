@@ -20,8 +20,6 @@ import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
-import { BadgeCell, TruncatedCell } from '@/components/data-table'
-import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
@@ -37,7 +35,8 @@ import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { API_KEY_STATUSES } from '../constants'
-import type { ApiKey } from '../types'
+import type { ApiKey, TokenUsageMap } from '../types'
+import { ApiKeyGroupCell } from './api-key-group-cell'
 import { ApiKeyTimestampCell } from './api-key-timestamp-cell'
 import {
   ApiKeyCell,
@@ -73,7 +72,10 @@ function useGroupRatios(): Record<string, number> {
   return data ?? {}
 }
 
-export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
+export function useApiKeysColumns(
+  now: number,
+  usageMap?: TokenUsageMap
+): ColumnDef<ApiKey>[] {
   const { t, i18n } = useTranslation()
   const groupRatios = useGroupRatios()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -190,48 +192,39 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       size: 170,
     },
     {
-      accessorKey: 'group',
-      header: t('Group'),
+      id: 'usage',
+      header: t('Usage'),
       cell: ({ row }) => {
         const apiKey = row.original
-        const group = row.getValue('group') as string
-        const ratio = group && group !== 'auto' ? groupRatios[group] : undefined
-
-        if (group === 'auto') {
-          return (
-            <Tooltip>
-              <TooltipTrigger
-                render={<BadgeCell className='gap-1.5 text-xs' />}
-              >
-                <GroupBadge group='auto' />
-                {apiKey.cross_group_retry && (
-                  <StatusBadge
-                    label={t('Cross-group')}
-                    variant='info'
-                    copyable={false}
-                  />
-                )}
-              </TooltipTrigger>
-              <TooltipContent>
-                <span className='text-xs'>
-                  {t(
-                    'Automatically selects the best available group with circuit breaker mechanism'
-                  )}
-                </span>
-              </TooltipContent>
-            </Tooltip>
-          )
-        }
+        const usage = usageMap?.[String(apiKey.id)]
         return (
-          <TruncatedCell
-            className='-ml-1.5'
-            tooltipContent={group || '-'}
-            tooltipClassName='break-all'
-          >
-            <GroupBadge group={group} ratio={ratio} />
-          </TruncatedCell>
+          <div className='space-y-0.5 text-xs'>
+            <div className='flex items-center justify-between gap-2'>
+              <span className='text-muted-foreground'>{t('Today')}</span>
+              <span className='font-medium tabular-nums'>
+                {usage ? formatQuota(usage.today) : '-'}
+              </span>
+            </div>
+            <div className='flex items-center justify-between gap-2'>
+              <span className='text-muted-foreground'>{t('Last 30 days')}</span>
+              <span className='font-medium tabular-nums'>
+                {usage ? formatQuota(usage.thirty_days) : '-'}
+              </span>
+            </div>
+          </div>
         )
       },
+      enableSorting: false,
+      size: 150,
+      meta: { mobileHidden: true },
+    },
+    {
+      accessorKey: 'group',
+      header: t('Group'),
+      cell: ({ row }) => (
+        <ApiKeyGroupCell apiKey={row.original} groupRatios={groupRatios} />
+      ),
+      enableSorting: false,
       size: 160,
       meta: { mobileHidden: true },
     },

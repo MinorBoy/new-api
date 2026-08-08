@@ -25,6 +25,7 @@ import type {
   GetApiKeysResponse,
   SearchApiKeysParams,
   ApiKeyFormData,
+  TokenUsageMap,
 } from './types'
 
 // ============================================================================
@@ -96,6 +97,30 @@ export async function updateApiKeyStatus(
   status: number
 ): Promise<ApiResponse<ApiKey>> {
   const res = await api.put('/api/token/?status_only=true', { id, status })
+  return res.data
+}
+
+// Update API key group (and its cross-group-retry toggle) only
+export async function updateApiKeyGroup(
+  id: number,
+  group: string,
+  crossGroupRetry: boolean
+): Promise<ApiResponse<ApiKey>> {
+  const res = await api.put('/api/token/?group_only=true', {
+    id,
+    group,
+    cross_group_retry: crossGroupRetry,
+  })
+  return res.data
+}
+
+// Fetch today's and last-30-days consumed quota for a set of tokens
+export async function getTokenUsage(
+  ids: number[]
+): Promise<{ success: boolean; message?: string; data?: TokenUsageMap }> {
+  const res = await api.get(
+    `/api/token/usage?token_ids=${ids.join(',')}`
+  )
   return res.data
 }
 

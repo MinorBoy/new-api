@@ -82,6 +82,15 @@ export interface SearchApiKeysParams {
   size?: number
 }
 
+// Per-token usage (consumed quota) returned by GET /api/token/usage.
+export interface TokenUsage {
+  today: number
+  thirty_days: number
+}
+
+// Map keyed by token id (as string, matching the JSON object response).
+export type TokenUsageMap = Record<string, TokenUsage>
+
 export interface ApiKeyFormData {
   name: string
   remain_quota: number

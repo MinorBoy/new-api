@@ -652,6 +652,41 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return stat, nil
 }
 
+// SumUsedQuotaByTokens returns the summed consume quota per token_id over an
+// optional [startTimestamp, endTimestamp] window. Only type=LogTypeConsume rows
+// are counted. Tokens with no matching rows are absent from the map (caller
+// treats a missing key as 0). An empty tokenIds slice returns an empty map.
+func SumUsedQuotaByTokens(tokenIds []int, startTimestamp, endTimestamp int64) (map[int]int, error) {
+	result := make(map[int]int, len(tokenIds))
+	if len(tokenIds) == 0 {
+		return result, nil
+	}
+
+	type row struct {
+		TokenId int `gorm:"column:token_id"`
+		Quota   int `gorm:"column:quota"`
+	}
+	var rows []row
+	tx := LOG_DB.Table("logs").
+		Select("token_id, COALESCE(sum(quota), 0) as quota").
+		Where("token_id IN ?", tokenIds).
+		Where("type = ?", LogTypeConsume)
+	if startTimestamp > 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp > 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if err := tx.Group("token_id").Scan(&rows).Error; err != nil {
+		common.SysError("failed to query token usage stat: " + err.Error())
+		return result, errors.New("查询统计数据失败")
+	}
+	for _, r := range rows {
+		result[r.TokenId] = r.Quota
+	}
+	return result, nil
+}
+
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0)")
 	if username != "" {

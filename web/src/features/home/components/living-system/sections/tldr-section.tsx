@@ -36,8 +36,8 @@ const ITEMS = [
   },
   {
     num: '04',
-    titleKey: 'Self-host, free',
-    subKey: 'AGPL-3.0. Run it on your own infra, forever.',
+    titleKey: 'Always available',
+    subKey: 'Multi-region deployment with automatic failover keeps every request online.',
   },
 ] as const
 

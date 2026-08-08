@@ -16,39 +16,44 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
+import { getLobeIcon } from '@/lib/lobe-icon'
+
 interface Provider {
-  glyph: string
+  // lobehub dotted key, e.g. 'OpenAI' (mono) or 'Gemini.Color' (full color).
+  // The key matches what the /pricing model square renders for the same
+  // vendor, so the homepage wall and the catalog stay visually consistent.
+  icon: string
   name: string
-  color: string
 }
 
 const PROVIDERS: Provider[] = [
-  { glyph: 'O', name: 'OpenAI', color: 'var(--color-emerald)' },
-  { glyph: 'A', name: 'Anthropic', color: 'var(--color-amber)' },
-  { glyph: 'G', name: 'Gemini', color: 'var(--color-blue)' },
-  { glyph: 'M', name: 'Mistral', color: 'var(--color-cyan)' },
-  { glyph: 'D', name: 'DeepSeek', color: 'var(--color-violet)' },
-  { glyph: 'X', name: 'xAI', color: 'var(--color-rose)' },
-  { glyph: 'C', name: 'Cohere', color: 'var(--color-emerald)' },
-  { glyph: 'K', name: 'Moonshot', color: 'var(--color-amber)' },
-  { glyph: 'Q', name: 'Qwen', color: 'var(--color-blue)' },
-  { glyph: 'Z', name: 'Zhipu', color: 'var(--color-cyan)' },
-  { glyph: 'D', name: 'Doubao', color: 'var(--color-violet)' },
-  { glyph: 'Y', name: 'Yi', color: 'var(--color-rose)' },
-  { glyph: 'B', name: 'Baichuan', color: 'var(--color-emerald)' },
-  { glyph: 'M', name: 'Minimax', color: 'var(--color-amber)' },
-  { glyph: 'S', name: 'Spark', color: 'var(--color-blue)' },
-  { glyph: 'A', name: 'Azure', color: 'var(--color-cyan)' },
-  { glyph: 'B', name: 'Bedrock', color: 'var(--color-violet)' },
+  { icon: 'OpenAI', name: 'OpenAI' },
+  { icon: 'Anthropic', name: 'Anthropic' },
+  { icon: 'Gemini.Color', name: 'Gemini' },
+  { icon: 'Mistral.Color', name: 'Mistral' },
+  { icon: 'DeepSeek.Color', name: 'DeepSeek' },
+  { icon: 'XAI', name: 'xAI' },
+  { icon: 'Cohere.Color', name: 'Cohere' },
+  { icon: 'Moonshot', name: 'Moonshot' },
+  { icon: 'Qwen.Color', name: 'Qwen' },
+  { icon: 'Zhipu.Color', name: 'Zhipu' },
+  { icon: 'Doubao.Color', name: 'Doubao' },
+  { icon: 'Yi.Color', name: 'Yi' },
+  { icon: 'Baichuan.Color', name: 'Baichuan' },
+  { icon: 'Minimax.Color', name: 'Minimax' },
+  { icon: 'Spark.Color', name: 'Spark' },
+  { icon: 'Azure.Color', name: 'Azure' },
+  { icon: 'Bedrock.Color', name: 'Bedrock' },
 ]
 
 /**
- * Model wall — the infinite-canvas / node-graph view of upstreams.
- * Each cell is a circular node with an italic serif glyph (Instrument
- * Serif) tinted by a raw palette color, and a small green status dot
- * to read as "online". The last cell is a dashed "+30 more" affordance.
+ * Model wall — the routable mesh of upstreams. Each cell shows the
+ * provider's real brand logo (via getLobeIcon, same pipeline as the
+ * /pricing model square) with a small green status dot to read as
+ * "online". The last cell is a dashed link into the full model square.
  */
 export function ModelsSection() {
   const { t } = useTranslation()
@@ -80,47 +85,28 @@ export function ModelsSection() {
         {PROVIDERS.map((p) => (
           <div
             key={p.name}
-            className='bg-muted/30 hover:bg-muted/50 relative flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border transition duration-200 hover:-translate-y-0.5'
-            style={{ '--node-color': p.color } as React.CSSProperties}
+            className='bg-muted/30 hover:bg-muted/50 relative flex aspect-square flex-col items-center justify-center gap-2 rounded-xl border transition duration-200'
           >
             <span className='absolute top-2 right-2 size-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px] shadow-emerald-500' />
-            <span
-              className='grid size-9 place-items-center rounded-full [font-family:var(--font-display)] text-[18px] font-medium not-italic'
-              style={{
-                background:
-                  'color-mix(in srgb, var(--node-color) 15%, transparent)',
-                border:
-                  '1px solid color-mix(in srgb, var(--node-color) 40%, transparent)',
-                color: 'var(--node-color)',
-              }}
-            >
-              {p.glyph}
+            <span className='grid size-9 place-items-center'>
+              {getLobeIcon(p.icon, 28)}
             </span>
             <span className='text-muted-foreground font-mono text-[11px] tracking-[0.02em]'>
               {p.name}
             </span>
           </div>
         ))}
-        <div
-          className='border-border flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed'
-          style={{ '--node-color': 'var(--color-rose)' } as React.CSSProperties}
+        <Link
+          to='/pricing'
+          className='border-border hover:bg-muted/50 hover:border-rose/40 group relative flex aspect-square cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition duration-200'
         >
-          <span
-            className='grid size-9 place-items-center rounded-full font-mono text-sm font-semibold'
-            style={{
-              background:
-                'color-mix(in srgb, var(--node-color) 15%, transparent)',
-              border:
-                '1px solid color-mix(in srgb, var(--node-color) 40%, transparent)',
-              color: 'var(--node-color)',
-            }}
-          >
-            +30
+          <span className='from-violet via-blue to-cyan grid size-9 place-items-center rounded-full bg-gradient-to-br font-mono text-sm font-semibold text-white transition duration-200 group-hover:scale-105'>
+            +
           </span>
           <span className='text-muted-foreground font-mono text-[11px] tracking-[0.02em]'>
             {t('more integrated')}
           </span>
-        </div>
+        </Link>
       </div>
     </section>
   )

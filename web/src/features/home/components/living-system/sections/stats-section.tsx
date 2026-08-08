@@ -24,6 +24,9 @@ interface Stat {
   end: number
   labelKey: string
   color: string
+  // Defaults to '+'. Overridden per-stat (e.g. the uptime figure uses '%').
+  suffix?: string
+  decimals?: number
 }
 
 const STATS: Stat[] = [
@@ -43,9 +46,11 @@ const STATS: Stat[] = [
     color: 'var(--color-cyan)',
   },
   {
-    end: 10,
-    labelKey: 'scheduling controls',
+    end: 99.9,
+    labelKey: 'service uptime',
     color: 'var(--color-emerald)',
+    suffix: '%',
+    decimals: 1,
   },
 ]
 
@@ -87,7 +92,11 @@ export function StatsSection() {
                   'linear-gradient(135deg, var(--stat-color), color-mix(in srgb, var(--stat-color) 50%, white))',
               }}
             >
-              <Counter end={s.end} suffix='+' />
+              <Counter
+                end={s.end}
+                suffix={s.suffix ?? '+'}
+                decimals={s.decimals ?? 0}
+              />
             </div>
             <div className='text-muted-foreground mt-2.5 font-mono text-xs leading-snug tracking-[0.04em]'>
               {t(s.labelKey)}

@@ -118,7 +118,7 @@ export function HeroSection({ isAuthenticated }: HeroSectionProps) {
 
       <p className='text-muted-foreground mx-auto mt-7 max-w-[560px] text-lg leading-relaxed'>
         {t(
-          'Fifty upstream AI services. One OpenAI-compatible URL. Zero client changes.'
+          'One key calls every model. Top up and pay per token at provider cost — no markup, no setup.'
         )}
       </p>
 

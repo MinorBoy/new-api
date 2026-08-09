@@ -46,7 +46,7 @@ func TestCheckGroupRoutingRequirementsRejectsUnsafeDynamicProfiles(t *testing.T)
 		{name: "auto pseudo group", raw: `{"auto":{"status":"active","routing_source":"default"}}`},
 		{name: "invalid real person mode", raw: `{"客户A":{"status":"draft","routing_source":"default","real_person_mode":"sometimes"}}`},
 		{name: "invalid cost mode", raw: `{"客户A":{"status":"draft","routing_source":"default","allowed_cost_modes":["per_minute"]}}`},
-		{name: "legacy conflict", raw: `{"客户A":{"require_real_person":true,"real_person_mode":"forbidden"}}`},
+		{name: "legacy conflict", raw: `{"客户A":{"status":"draft","routing_source":"default","require_real_person":true,"real_person_mode":"forbidden"}}`},
 		{name: "missing dynamic status", raw: `{"客户A":{"routing_source":"default"}}`},
 		{name: "unsupported routing source", raw: `{"客户A":{"status":"active","routing_source":"backup"}}`},
 		{name: "status without routing source", raw: `{"客户A":{"status":"draft"}}`},

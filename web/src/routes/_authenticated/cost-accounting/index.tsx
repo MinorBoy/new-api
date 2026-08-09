@@ -28,7 +28,7 @@ import {
 import { useAuthStore } from '@/stores/auth-store'
 
 const costAccountingSearchSchema = z.object({
-  tab: z.enum(['profit', 'anomalies']).optional().catch('profit'),
+  tab: z.enum(['profit', 'catalog', 'anomalies']).optional().catch('profit'),
   timeBasis: z
     .enum(['profit_recognized_at', 'requested_at'])
     .optional()
@@ -42,6 +42,38 @@ const costAccountingSearchSchema = z.object({
   usingGroup: z.string().optional().catch(''),
   billingSource: z.string().optional().catch(''),
   status: z.string().optional().catch(''),
+  catalogChannelId: z.number().int().positive().optional().catch(undefined),
+  catalogModel: z.string().optional().catch(''),
+  catalogCostMode: z
+    .enum(['free', 'per_request', 'per_duration', 'per_token'])
+    .optional()
+    .catch(undefined),
+  catalogStatus: z
+    .enum(['active', 'draft', 'retired', 'all'])
+    .optional()
+    .catch('active'),
+  catalogCurrency: z.string().optional().catch(''),
+  catalogSource: z.string().optional().catch(''),
+  catalogPage: z.number().int().positive().optional().catch(1),
+  catalogPageSize: z
+    .union([z.literal(25), z.literal(50), z.literal(100)])
+    .optional()
+    .catch(50),
+  catalogSort: z
+    .enum([
+      'channel_name',
+      'channel_id',
+      'billable_upstream_model',
+      'cost_variant_key',
+      'status',
+      'version',
+      'cost_mode',
+      'source',
+      'effective_from',
+    ])
+    .optional()
+    .catch('channel_name'),
+  catalogOrder: z.enum(['asc', 'desc']).optional().catch('asc'),
 })
 
 export function requireCostAccountingRead() {

@@ -718,6 +718,12 @@ func writeCostAccountingError(c *gin.Context, err error) {
 	} else if errors.Is(err, service.ErrCostReportInconsistent) {
 		status = http.StatusInternalServerError
 		code = "cost_report_inconsistent"
+	} else if errors.Is(err, service.ErrCostCatalogExportTooLarge) {
+		status = http.StatusRequestEntityTooLarge
+		code = "cost_catalog_export_too_large"
+	} else if errors.Is(err, service.ErrCostCatalogUnavailable) {
+		status = http.StatusInternalServerError
+		code = "cost_catalog_unavailable"
 	}
 	message := strings.TrimSpace(err.Error())
 	if status >= http.StatusInternalServerError {

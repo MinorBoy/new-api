@@ -454,3 +454,109 @@ export interface CostProfitBreakdown extends CostProfitSummary {
   billable_upstream_model: string
   attempt_count: number
 }
+
+export type CostCatalogPriceStatus = 'available' | 'unavailable'
+export type CostCatalogSort =
+  | 'channel_name'
+  | 'channel_id'
+  | 'billable_upstream_model'
+  | 'cost_variant_key'
+  | 'status'
+  | 'version'
+  | 'cost_mode'
+  | 'source'
+  | 'effective_from'
+
+export interface CostCatalogPrice {
+  key: string
+  unit: string
+  native_amount: string
+  normalized_usd_amount: string
+}
+
+export interface CostCatalogItem {
+  rule_id: number
+  channel_id: number
+  channel_name: string
+  channel_type: number
+  channel_missing: boolean
+  billable_upstream_model: string
+  cost_variant_key: string
+  version: number
+  status: CostRuleStatus
+  cost_mode: CostMode
+  schema_version: number
+  currency: string
+  prices: CostCatalogPrice[]
+  comparison_15s_equivalent_usd_per_second?: string
+  charge_event?: CostChargeEvent
+  meter_source?: CostMeterSource
+  token_mode?: CostTokenMode
+  source: string
+  note: string
+  effective_from?: number
+  effective_to?: number
+  created_at: number
+  updated_at: number
+  price_status: CostCatalogPriceStatus
+  issues: string[]
+}
+
+export interface CostCatalogHistoryEntry extends CostCatalogItem {
+  created_by: number
+  activated_by: number
+}
+
+export interface CostCatalogDetail {
+  rule: CostCatalogHistoryEntry
+  config?: CostRuleConfigV1
+  history: CostCatalogHistoryEntry[]
+}
+
+export interface CostCatalogSummary {
+  channel_count: number
+  active_rule_count: number
+  draft_rule_count: number
+  retired_rule_count: number
+}
+
+export interface CostCatalogChannelFacet {
+  id: number
+  name: string
+  type: number
+  missing: boolean
+}
+
+export interface CostCatalogFacets {
+  channels: CostCatalogChannelFacet[]
+  currencies: string[]
+  sources: string[]
+}
+
+export interface CostCatalogPage {
+  items: CostCatalogItem[]
+  total: number
+  page: number
+  page_size: number
+  summary: CostCatalogSummary
+  facets: CostCatalogFacets
+}
+
+export interface CostCatalogExportResult {
+  blob: Blob
+  filename: string
+  rowCount: number
+}
+
+export interface CostCatalogParams {
+  channel_id?: number
+  billable_upstream_model?: string
+  cost_mode?: CostMode
+  status?: CostRuleStatus | 'all'
+  currency?: string
+  source?: string
+  page?: number
+  page_size?: 25 | 50 | 100
+  sort_by?: CostCatalogSort
+  sort_order?: 'asc' | 'desc'
+}

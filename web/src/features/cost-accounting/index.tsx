@@ -52,9 +52,13 @@ import { CostAccountingModeToggle } from './components/cost-accounting-mode-togg
 import { ProfitFilters } from './components/profit-filters'
 import { ProfitSummary } from './components/profit-summary'
 import { ProfitTable } from './components/profit-table'
+import { SupplierCostCatalog } from './components/supplier-cost-catalog'
 import {
+  COST_ACCOUNTING_TABS,
   costReportParamsFromSearch,
   canEnableStrictCostAccounting,
+  isCostCatalogTab,
+  updateCostAccountingTab,
   type CostAccountingSearch,
 } from './lib/report'
 
@@ -230,14 +234,22 @@ export function CostAccounting() {
         <Tabs
           value={tab}
           onValueChange={(value) => {
-            if (value === 'profit' || value === 'anomalies') {
-              updateSearch({ ...search, tab: value })
+            if ((COST_ACCOUNTING_TABS as readonly string[]).includes(value)) {
+              updateSearch(
+                updateCostAccountingTab(
+                  search,
+                  value as (typeof COST_ACCOUNTING_TABS)[number]
+                )
+              )
             }
           }}
           className='h-full min-h-0'
         >
           <TabsList variant='line' className='shrink-0'>
             <TabsTrigger value='profit'>{t('Profit report')}</TabsTrigger>
+            <TabsTrigger value='catalog'>
+              {t('Supplier cost catalog')}
+            </TabsTrigger>
             <TabsTrigger value='anomalies'>{t('Anomalies')}</TabsTrigger>
           </TabsList>
           <TabsContent
@@ -256,6 +268,16 @@ export function CostAccounting() {
               loading={breakdownQuery.isLoading}
               error={breakdownQuery.error}
               onRetry={() => void breakdownQuery.refetch()}
+            />
+          </TabsContent>
+          <TabsContent
+            value='catalog'
+            className='min-h-0 overflow-hidden pr-1 pb-2'
+          >
+            <SupplierCostCatalog
+              enabled={isCostCatalogTab(tab)}
+              search={search}
+              onSearchChange={updateSearch}
             />
           </TabsContent>
           <TabsContent

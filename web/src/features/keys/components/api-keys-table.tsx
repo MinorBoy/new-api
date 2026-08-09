@@ -54,6 +54,7 @@ import {
 } from '../constants'
 import type { ApiKey, TokenUsageMap } from '../types'
 import { ApiKeyCell, UnlimitedQuotaBadge } from './api-keys-cells'
+import { ApiAddressBar } from './api-address-bar'
 import { useApiKeysColumns } from './api-keys-columns'
 import { useApiKeys } from './api-keys-provider'
 import { DataTableBulkActions } from './data-table-bulk-actions'
@@ -411,6 +412,7 @@ export function ApiKeysTable() {
           usageMap={usageMap}
         />
       }
+      beforeTable={<ApiAddressBar />}
       getRowClassName={(row) =>
         isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
       }

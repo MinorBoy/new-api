@@ -215,6 +215,12 @@ export type DataTablePageProps<TData> = {
   afterTable?: React.ReactNode
 
   /**
+   * Extra content rendered between the toolbar and the table/mobile list.
+   * E.g. a contextual info bar that applies to the current view.
+   */
+  beforeTable?: React.ReactNode
+
+  /**
    * Outer wrapper className (applied to the toolbar+table column).
    */
   className?: string
@@ -344,6 +350,7 @@ export function DataTablePage<TData>(props: DataTablePageProps<TData>) {
         )}
       >
         {toolbarNode}
+        {props.beforeTable}
         {mobileNode}
         {desktopNode}
         {props.afterTable}

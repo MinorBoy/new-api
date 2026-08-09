@@ -23,6 +23,9 @@ func registerCostAccountingRoutes(apiRouter *gin.RouterGroup) {
 var costAccountingPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/settings", permission: authz.CostAccountingRead, handler: controller.GetCostAccountingSettings},
 	{method: http.MethodPut, path: "/settings", permission: authz.CostAccountingWrite, handler: controller.UpdateCostAccountingSettings},
+	{method: http.MethodGet, path: "/catalog", permission: authz.CostAccountingRead, handler: controller.ListSupplierCostCatalog},
+	{method: http.MethodGet, path: "/catalog/export", permission: authz.CostAccountingRead, handler: controller.ExportSupplierCostCatalog},
+	{method: http.MethodGet, path: "/catalog/:rule_id", permission: authz.CostAccountingRead, handler: controller.GetSupplierCostCatalogDetail},
 	{method: http.MethodGet, path: "/rules", permission: authz.CostAccountingRead, handler: controller.ListCostRules},
 	{method: http.MethodPost, path: "/rules", permission: authz.CostAccountingWrite, handler: controller.CreateCostRule},
 	{method: http.MethodPut, path: "/rules/:id", permission: authz.CostAccountingWrite, handler: controller.UpdateCostRule},

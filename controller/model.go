@@ -228,6 +228,11 @@ func ListModels(c *gin.Context, modelType int) {
 		return
 	}
 	ownerGroups := groups.ownerGroups
+	enabledGroupModels := service.GetGroupsEnabledModels(ownerGroups)
+	groupModels := make(map[string]struct{}, len(enabledGroupModels))
+	for _, modelName := range enabledGroupModels {
+		groupModels[modelName] = struct{}{}
+	}
 	modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
 	if modelLimitEnable {
 		s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
@@ -238,6 +243,9 @@ func ListModels(c *gin.Context, modelType int) {
 			tokenModelLimit = map[string]bool{}
 		}
 		for allowModel, _ := range tokenModelLimit {
+			if _, enabled := groupModels[allowModel]; !enabled {
+				continue
+			}
 			if !acceptUnsetRatioModel {
 				if !helper.HasModelBillingConfig(allowModel) {
 					continue
@@ -246,8 +254,7 @@ func ListModels(c *gin.Context, modelType int) {
 			userModelNames = append(userModelNames, allowModel)
 		}
 	} else {
-		models := service.GetGroupsEnabledModels(ownerGroups)
-		for _, modelName := range models {
+		for _, modelName := range enabledGroupModels {
 			if !acceptUnsetRatioModel {
 				if !helper.HasModelBillingConfig(modelName) {
 					continue

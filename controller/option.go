@@ -3,12 +3,14 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
@@ -140,6 +142,7 @@ type OptionUpdateRequest struct {
 
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
+	var groupRoutingAuditParams map[string]interface{}
 	err := common.DecodeJson(c.Request.Body, &option)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -265,12 +268,28 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "GroupRoutingRequirements":
-		err = ratio_setting.CheckGroupRoutingRequirements(option.Value.(string))
+		raw := option.Value.(string)
+		if err := ratio_setting.CheckGroupRoutingRequirements(raw); err != nil {
+			writeOptionValidationError(c, err)
+			return
+		}
+		if err := service.ValidateActiveGroupRoutingProfiles(raw); err != nil {
+			writeOptionValidationError(c, err)
+			return
+		}
+		beforeProfiles, err := ratio_setting.ParseGroupRoutingRequirementsJSONString(ratio_setting.GroupRoutingRequirements2JSONString())
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
+			common.ApiError(c, err)
+			return
+		}
+		afterProfiles, err := ratio_setting.ParseGroupRoutingRequirementsJSONString(raw)
+		if err != nil {
+			writeOptionValidationError(c, err)
+			return
+		}
+		groupRoutingAuditParams, err = groupRoutingRequirementsAuditSummary(beforeProfiles, afterProfiles)
+		if err != nil {
+			common.ApiError(c, err)
 			return
 		}
 	case "gemini.safety_settings":
@@ -457,12 +476,92 @@ func UpdateOption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	// 出于安全考虑只记录被修改的配置项名称，不记录配置值（可能含密钥等敏感信息）。
-	recordManageAudit(c, "option.update", map[string]interface{}{
-		"key": option.Key,
-	})
+	// 出于安全考虑不记录配置值；分组路由配置仅附加不含目标键的差异摘要。
+	auditParams := map[string]interface{}{"key": option.Key}
+	for key, value := range groupRoutingAuditParams {
+		auditParams[key] = value
+	}
+	recordManageAudit(c, "option.update", auditParams)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 	})
+}
+
+func writeOptionValidationError(c *gin.Context, err error) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": false,
+		"message": err.Error(),
+	})
+}
+
+func groupRoutingRequirementsAuditSummary(
+	before map[string]ratio_setting.GroupRoutingRequirements,
+	after map[string]ratio_setting.GroupRoutingRequirements,
+) (map[string]interface{}, error) {
+	groupSet := make(map[string]struct{}, len(before)+len(after))
+	for groupName := range before {
+		groupSet[groupName] = struct{}{}
+	}
+	for groupName := range after {
+		groupSet[groupName] = struct{}{}
+	}
+	groupNames := make([]string, 0, len(groupSet))
+	for groupName := range groupSet {
+		groupNames = append(groupNames, groupName)
+	}
+	sort.Strings(groupNames)
+
+	changedGroups := make([]string, 0)
+	activatedGroups := make([]string, 0)
+	draftGroups := make([]string, 0)
+	exclusionsAdded := 0
+	exclusionsRemoved := 0
+	for _, groupName := range groupNames {
+		beforeProfile, hadBefore := before[groupName]
+		afterProfile, hasAfter := after[groupName]
+		beforeJSON, err := common.Marshal(beforeProfile)
+		if err != nil {
+			return nil, err
+		}
+		afterJSON, err := common.Marshal(afterProfile)
+		if err != nil {
+			return nil, err
+		}
+		if hadBefore != hasAfter || string(beforeJSON) != string(afterJSON) {
+			changedGroups = append(changedGroups, groupName)
+		}
+		if hasAfter && afterProfile.IsDynamic() && afterProfile.Status == ratio_setting.GroupRoutingProfileActive &&
+			(!hadBefore || beforeProfile.Status != ratio_setting.GroupRoutingProfileActive) {
+			activatedGroups = append(activatedGroups, groupName)
+		}
+		if hasAfter && afterProfile.IsDynamic() && afterProfile.Status == ratio_setting.GroupRoutingProfileDraft &&
+			(!hadBefore || beforeProfile.Status != ratio_setting.GroupRoutingProfileDraft) {
+			draftGroups = append(draftGroups, groupName)
+		}
+
+		beforeExclusions := make(map[string]struct{}, len(beforeProfile.ExcludedTargetKeys))
+		for _, targetKey := range beforeProfile.ExcludedTargetKeys {
+			beforeExclusions[targetKey] = struct{}{}
+		}
+		afterExclusions := make(map[string]struct{}, len(afterProfile.ExcludedTargetKeys))
+		for _, targetKey := range afterProfile.ExcludedTargetKeys {
+			afterExclusions[targetKey] = struct{}{}
+			if _, existed := beforeExclusions[targetKey]; !existed {
+				exclusionsAdded++
+			}
+		}
+		for targetKey := range beforeExclusions {
+			if _, exists := afterExclusions[targetKey]; !exists {
+				exclusionsRemoved++
+			}
+		}
+	}
+	return map[string]interface{}{
+		"changed_groups":     changedGroups,
+		"activated_groups":   activatedGroups,
+		"draft_groups":       draftGroups,
+		"exclusions_added":   exclusionsAdded,
+		"exclusions_removed": exclusionsRemoved,
+	}, nil
 }

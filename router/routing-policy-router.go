@@ -23,6 +23,8 @@ func registerRoutingPolicyRoutes(apiRouter *gin.RouterGroup) {
 var routingPolicyPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/", permission: authz.ChannelRead, handler: controller.ListRoutingPolicies},
 	{method: http.MethodGet, path: "/candidates", permission: authz.ChannelRead, handler: controller.ListRoutingPolicyCandidates},
+	{method: http.MethodPost, path: "/group-profile/summaries", permission: authz.ChannelRead, handler: controller.PreviewGroupRoutingProfileSummaries},
+	{method: http.MethodPost, path: "/group-profile/targets", permission: authz.ChannelRead, handler: controller.PreviewGroupRoutingProfileTargets},
 	{method: http.MethodGet, path: "/:id", permission: authz.ChannelRead, handler: controller.GetRoutingPolicy},
 	{method: http.MethodPost, path: "/", permission: authz.ChannelWrite, handler: controller.CreateRoutingPolicy},
 	{method: http.MethodPut, path: "/:id", permission: authz.ChannelWrite, handler: controller.UpdateRoutingPolicy},

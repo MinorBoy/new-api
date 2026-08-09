@@ -1,11 +1,13 @@
 package service
 
 import (
+	"math"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
@@ -293,6 +295,186 @@ func TestResolveGroupRoutingProfilePoliciesBatchesAcrossPoliciesAndTargets(t *te
 	}
 }
 
+func TestPreviewGroupRoutingProfileReturnsMatchedAndExcludedTargets(t *testing.T) {
+	excludedTargetKey := seedGroupRoutingProfileCatalog(t)
+	page, err := PreviewGroupRoutingProfile(GroupRoutingProfilePreviewInput{
+		GroupName: "客户A",
+		Profile: ratio_setting.GroupRoutingRequirements{
+			Status:             ratio_setting.GroupRoutingProfileDraft,
+			RoutingSource:      ratio_setting.GroupRoutingSourceDefault,
+			AllowedCostModes:   []types.CostMode{types.CostModePerDuration},
+			ExcludedTargetKeys: []string{excludedTargetKey, "grt_stale"},
+		},
+		Page:     1,
+		PageSize: 25,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, page.Summary.Models)
+	assert.Equal(t, 1, page.Summary.MatchedModels)
+	assert.Equal(t, 2, page.Summary.Targets)
+	assert.Equal(t, 1, page.Summary.MatchedTargets)
+	assert.Equal(t, 1, page.Summary.StaleExclusions)
+	require.Len(t, page.Items, 2)
+	assert.Equal(t, GroupRoutingTargetMatched, page.Items[0].Status)
+	assert.Equal(t, GroupRoutingTargetExcluded, page.Items[1].Status)
+	assert.NotEmpty(t, page.Facets.CostModes)
+	assert.Equal(t, []types.CostMode{types.CostModePerDuration}, page.Facets.CostModes)
+}
+
+func TestPreviewGroupRoutingProfileRejectsUnsupportedPageSize(t *testing.T) {
+	_, err := PreviewGroupRoutingProfile(GroupRoutingProfilePreviewInput{
+		GroupName: "客户A",
+		Profile: ratio_setting.GroupRoutingRequirements{
+			Status:        ratio_setting.GroupRoutingProfileDraft,
+			RoutingSource: ratio_setting.GroupRoutingSourceDefault,
+		},
+		Page:     1,
+		PageSize: 20,
+	})
+	require.ErrorContains(t, err, "page size")
+}
+
+func TestPreviewGroupRoutingProfileHandlesPageOffsetOverflow(t *testing.T) {
+	seedGroupRoutingProfileCatalog(t)
+	page, err := PreviewGroupRoutingProfile(GroupRoutingProfilePreviewInput{
+		GroupName: "客户A",
+		Profile: ratio_setting.GroupRoutingRequirements{
+			Status:        ratio_setting.GroupRoutingProfileDraft,
+			RoutingSource: ratio_setting.GroupRoutingSourceDefault,
+		},
+		Page:     math.MaxInt,
+		PageSize: 100,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, page.Items)
+}
+
+func TestPreviewGroupRoutingProfileFiltersCostRuleWarnings(t *testing.T) {
+	seedGroupRoutingProfileCatalog(t)
+	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	InvalidateCostCoverage(0, "", "")
+	page, err := PreviewGroupRoutingProfile(GroupRoutingProfilePreviewInput{
+		GroupName: "客户A",
+		Profile: ratio_setting.GroupRoutingRequirements{
+			Status:        ratio_setting.GroupRoutingProfileDraft,
+			RoutingSource: ratio_setting.GroupRoutingSourceDefault,
+		},
+		Status:   GroupRoutingTargetCostRuleMissing,
+		Page:     1,
+		PageSize: 25,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, page.Total)
+	assert.Contains(t, page.Facets.Statuses, GroupRoutingTargetCostRuleMissing)
+}
+
+func TestValidateActiveGroupRoutingProfilesRejectsZeroMatches(t *testing.T) {
+	seedGroupRoutingProfileCatalog(t)
+	err := ValidateActiveGroupRoutingProfiles(`{
+		"客户A":{"status":"active","routing_source":"default","allowed_cost_modes":["per_token"]}
+	}`)
+	require.ErrorContains(t, err, "客户A")
+}
+
+func TestValidateActiveGroupRoutingProfilesIgnoresDraftAndLegacyProfiles(t *testing.T) {
+	seedGroupRoutingProfileCatalog(t)
+	err := ValidateActiveGroupRoutingProfiles(`{
+		"客户A":{"status":"draft","routing_source":"default","allowed_cost_modes":["per_token"]},
+		"legacy":{"require_real_person":true}
+	}`)
+	require.NoError(t, err)
+}
+
+func TestValidateActiveGroupRoutingProfilesRejectsUnknownGroup(t *testing.T) {
+	seedGroupRoutingProfileCatalog(t)
+	err := ValidateActiveGroupRoutingProfiles(`{
+		"missing":{"status":"active","routing_source":"default"}
+	}`)
+	require.ErrorContains(t, err, "missing")
+}
+
+func TestPreviewGroupRoutingProfileSummariesBatchesProfiles(t *testing.T) {
+	seedGroupRoutingProfileCatalog(t)
+	queryCount := 0
+	const callbackName = "test:count-group-routing-profile-summary-queries"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(*gorm.DB) {
+		queryCount++
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Query().Remove(callbackName)
+		}
+	})
+
+	summaries, err := PreviewGroupRoutingProfileSummaries(map[string]ratio_setting.GroupRoutingRequirements{
+		"客户A": {
+			Status:             ratio_setting.GroupRoutingProfileDraft,
+			RoutingSource:      ratio_setting.GroupRoutingSourceDefault,
+			AllowedCostModes:   []types.CostMode{types.CostModePerDuration},
+			ExcludedTargetKeys: []string{"grt_stale"},
+		},
+		"客户B": {
+			Status:           ratio_setting.GroupRoutingProfileDraft,
+			RoutingSource:    ratio_setting.GroupRoutingSourceDefault,
+			AllowedCostModes: []types.CostMode{types.CostModePerToken},
+		},
+		"legacy": {RequireRealPerson: profileBoolPointer(true)},
+	})
+	require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	callbackRegistered = false
+	require.NoError(t, err)
+	assert.Equal(t, 5, queryCount)
+	assert.Equal(t, 2, summaries["客户A"].MatchedTargets)
+	assert.Zero(t, summaries["客户B"].MatchedTargets)
+	assert.NotContains(t, summaries, "legacy")
+}
+
+func seedGroupRoutingProfileCatalog(t *testing.T) string {
+	t.Helper()
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.RoutingPolicy{}, &model.RouteTarget{}, &model.Ability{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"默认分组","客户A":"客户 A","客户B":"客户 B"}`))
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups))
+		model.DB.Exec("DELETE FROM route_targets")
+		model.DB.Exec("DELETE FROM routing_policies")
+		model.DB.Exec("DELETE FROM abilities")
+	})
+
+	policy := model.RoutingPolicy{
+		GroupName: ratio_setting.GroupRoutingSourceDefault, Model: modelrouting.Seedance20, Enabled: true,
+		DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9",
+	}
+	require.NoError(t, model.DB.Create(&policy).Error)
+	constraints, err := common.Marshal(profileTarget(0, 7, 100, "", "").Constraints)
+	require.NoError(t, err)
+	targets := []model.RouteTarget{
+		{PolicyID: policy.ID, ChannelID: 7, Name: "duration-primary", UpstreamModel: "duration-primary", CostVariantKey: string(types.DefaultCostVariantKey), TargetPriority: 100, Enabled: true, Constraints: string(constraints)},
+		{PolicyID: policy.ID, ChannelID: 7, Name: "duration-secondary", UpstreamModel: "duration-secondary", CostVariantKey: string(types.DefaultCostVariantKey), TargetPriority: 50, Enabled: true, Constraints: string(constraints)},
+	}
+	require.NoError(t, model.DB.Create(&targets).Error)
+	priority := int64(100)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: ratio_setting.GroupRoutingSourceDefault, Model: modelrouting.Seedance20,
+		ChannelId: 7, Enabled: true, Priority: &priority, Weight: 10,
+	}).Error)
+	now := common.GetTimestamp()
+	seedActiveCostRuleRow(t, 7, "duration-primary", types.CostModePerDuration, 1, &now)
+	seedActiveCostRuleRow(t, 7, "duration-secondary", types.CostModePerDuration, 1, &now)
+	InvalidateCostCoverage(0, "", "")
+
+	excluded := profileTarget(targets[1].ID, 7, 50, targets[1].Name, targets[1].UpstreamModel)
+	return GroupRoutingTargetKey(ratio_setting.GroupRoutingSourceDefault, modelrouting.Seedance20, excluded)
+}
+
 type profileRuleFixture struct {
 	candidate CostRuleCandidate
 	rule      *model.ChannelModelCostRule
@@ -364,5 +546,9 @@ func profileRequirementsWithCostModes(modes ...types.CostMode) ratio_setting.Gro
 }
 
 func profileIntPointer(value int) *int {
+	return &value
+}
+
+func profileBoolPointer(value bool) *bool {
 	return &value
 }

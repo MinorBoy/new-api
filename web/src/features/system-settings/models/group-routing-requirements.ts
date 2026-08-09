@@ -144,6 +144,27 @@ export function toggleGroupRoutingTargetExclusion(
   return serializeGroupRoutingProfiles(profiles)
 }
 
+export function removeStaleGroupRoutingExclusions(
+  source: string,
+  groupName: string,
+  liveTargetKeys: string[]
+): string {
+  const normalizedGroupName = requireGroupName(groupName)
+  const profiles = parseGroupRoutingProfiles(source)
+  const profile = profiles[normalizedGroupName]
+  if (!profile) {
+    return source
+  }
+
+  const liveTargets = new Set(liveTargetKeys)
+  return updateGroupRoutingProfile(source, normalizedGroupName, {
+    ...profile,
+    excluded_target_keys: (profile.excluded_target_keys ?? []).filter(
+      (targetKey) => liveTargets.has(targetKey)
+    ),
+  })
+}
+
 export function updateGroupRoutingRequirements(
   source: string,
   groupName: string,

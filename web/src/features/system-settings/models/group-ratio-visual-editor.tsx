@@ -85,6 +85,7 @@ import {
   type GroupCostMode,
   type GroupRoutingProfiles,
 } from './group-routing-requirements'
+import { GroupRoutingTargetsDialog } from './group-routing-targets-dialog'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
@@ -284,7 +285,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
   const [detailGroup, setDetailGroup] = useState<string | null>(null)
-  const [, setRoutingTargetsGroup] = useState<string | null>(null)
+  const [routingTargetsGroup, setRoutingTargetsGroup] = useState<string | null>(
+    null
+  )
 
   const routingProfileState = useMemo(() => {
     let profiles: GroupRoutingProfiles = {}
@@ -495,6 +498,16 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         disabled={disabled}
         onChange={onChange}
         onViewTargets={(groupName) => setRoutingTargetsGroup(groupName)}
+      />
+      <GroupRoutingTargetsDialog
+        open={routingTargetsGroup !== null}
+        groupName={routingTargetsGroup ?? ''}
+        groupRoutingRequirements={groupRoutingRequirements}
+        disabled={disabled}
+        onOpenChange={(open) => {
+          if (!open) setRoutingTargetsGroup(null)
+        }}
+        onChange={(value) => onChange('GroupRoutingRequirements', value)}
       />
     </div>
   )

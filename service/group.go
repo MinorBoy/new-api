@@ -32,8 +32,13 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 			}
 		}
 		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup
-		if _, ok := groupsCopy[userGroup]; !ok {
+		if _, ok := groupsCopy[userGroup]; !ok && ratio_setting.IsGroupEnabled(userGroup) {
 			groupsCopy[userGroup] = "用户分组"
+		}
+	}
+	for group := range groupsCopy {
+		if !ratio_setting.IsGroupEnabled(group) {
+			delete(groupsCopy, group)
 		}
 	}
 	return groupsCopy
@@ -72,6 +77,9 @@ func GetGroupsEnabledModels(groups []string) []string {
 }
 
 func GetGroupEnabledModelsForRouting(group string) []string {
+	if !ratio_setting.IsGroupEnabled(group) {
+		return []string{}
+	}
 	profile := ratio_setting.GetGroupRoutingRequirements(group)
 	if !profile.IsDynamic() {
 		return model.GetGroupEnabledModels(group)

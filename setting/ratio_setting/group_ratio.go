@@ -32,6 +32,7 @@ type GroupRatioSetting struct {
 	GroupGroupRatio          *types.RWMap[string, map[string]float64]       `json:"group_group_ratio"`
 	GroupSpecialUsableGroup  *types.RWMap[string, map[string]string]        `json:"group_special_usable_group"`
 	GroupRoutingRequirements *types.RWMap[string, GroupRoutingRequirements] `json:"group_routing_requirements"`
+	GroupStatus              *types.RWMap[string, bool]                     `json:"group_status"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -48,6 +49,7 @@ func init() {
 		GroupRatio:               groupRatioMap,
 		GroupGroupRatio:          groupGroupRatioMap,
 		GroupRoutingRequirements: groupRoutingRequirementsMap,
+		GroupStatus:              groupStatusMap,
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -60,6 +62,9 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 	}
 	if groupRatioSetting.GroupRoutingRequirements == nil {
 		groupRatioSetting.GroupRoutingRequirements = groupRoutingRequirementsMap
+	}
+	if groupRatioSetting.GroupStatus == nil {
+		groupRatioSetting.GroupStatus = groupStatusMap
 	}
 	return &groupRatioSetting
 }

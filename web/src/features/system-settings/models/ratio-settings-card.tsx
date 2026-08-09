@@ -27,7 +27,7 @@ import * as z from 'zod'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-import { resetModelRatios } from '../api'
+import { resetModelRatios, updateGroupSettings } from '../api'
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -133,6 +133,7 @@ const createGroupSchema = (t: Translate) =>
     }),
     DefaultUseAutoGroup: z.boolean(),
     GroupSpecialUsableGroup: createJsonStringField(t),
+    GroupStatus: createJsonStringField(t),
     GroupRoutingRequirements: createJsonStringField(t),
   })
 
@@ -165,6 +166,10 @@ export function RatioSettingsCard({
   const updateOption = useUpdateOption()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const {
+    mutateAsync: saveGroupSettings,
+    isPending: isGroupSettingsPending,
+  } = useMutation({ mutationFn: updateGroupSettings })
 
   const resetMutation = useMutation({
     mutationFn: resetModelRatios,
@@ -212,6 +217,7 @@ export function RatioSettingsCard({
     GroupSpecialUsableGroup: normalizeJsonString(
       groupDefaults.GroupSpecialUsableGroup
     ),
+    GroupStatus: normalizeJsonString(groupDefaults.GroupStatus),
     GroupRoutingRequirements: normalizeJsonString(
       groupDefaults.GroupRoutingRequirements
     ),
@@ -253,6 +259,7 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupStatus: formatJsonForTextarea(groupDefaults.GroupStatus),
       GroupRoutingRequirements: formatJsonForTextarea(
         groupDefaults.GroupRoutingRequirements
       ),
@@ -307,6 +314,7 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: normalizeJsonString(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupStatus: normalizeJsonString(groupDefaults.GroupStatus),
       GroupRoutingRequirements: normalizeJsonString(
         groupDefaults.GroupRoutingRequirements
       ),
@@ -322,6 +330,7 @@ export function RatioSettingsCard({
       GroupSpecialUsableGroup: formatJsonForTextarea(
         groupDefaults.GroupSpecialUsableGroup
       ),
+      GroupStatus: formatJsonForTextarea(groupDefaults.GroupStatus),
       GroupRoutingRequirements: formatJsonForTextarea(
         groupDefaults.GroupRoutingRequirements
       ),
@@ -385,30 +394,59 @@ export function RatioSettingsCard({
         GroupSpecialUsableGroup: normalizeJsonString(
           values.GroupSpecialUsableGroup
         ),
+        GroupStatus: normalizeJsonString(values.GroupStatus),
         GroupRoutingRequirements: normalizeJsonString(
           values.GroupRoutingRequirements
         ),
       }
 
-      // Map form field names to API keys (most are 1:1, except GroupSpecialUsableGroup)
-      const apiKeyMap: Record<string, string> = {
-        GroupSpecialUsableGroup:
-          'group_ratio_setting.group_special_usable_group',
-        GroupRoutingRequirements: 'GroupRoutingRequirements',
+      if (
+        Object.keys(normalized).every(
+          (key) =>
+            normalized[key as keyof typeof normalized] ===
+            groupNormalizedDefaults.current[key as keyof typeof normalized]
+        )
+      ) {
+        toast.info(t('No group ratio changes to save'))
+        return
       }
 
-      const updates = (
-        Object.keys(normalized) as Array<keyof typeof normalized>
-      ).filter(
-        (key) => normalized[key] !== groupNormalizedDefaults.current[key]
-      )
-
-      for (const key of updates) {
-        const apiKey = apiKeyMap[key] || key
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
+      const response = await saveGroupSettings({
+        group_ratio: normalized.GroupRatio,
+        group_status: normalized.GroupStatus,
+        topup_group_ratio: normalized.TopupGroupRatio,
+        user_usable_groups: normalized.UserUsableGroups,
+        group_group_ratio: normalized.GroupGroupRatio,
+        auto_groups: normalized.AutoGroups,
+        default_use_auto_group: normalized.DefaultUseAutoGroup,
+        group_special_usable_group: normalized.GroupSpecialUsableGroup,
+        group_routing_requirements: normalized.GroupRoutingRequirements,
+      })
+      if (!response.success) {
+        toast.error(response.message || t('Failed to update setting'))
+        return
       }
+
+      groupNormalizedDefaults.current = normalized
+      groupForm.reset({
+        ...normalized,
+        GroupRatio: formatJsonForTextarea(normalized.GroupRatio),
+        TopupGroupRatio: formatJsonForTextarea(normalized.TopupGroupRatio),
+        UserUsableGroups: formatJsonForTextarea(normalized.UserUsableGroups),
+        GroupGroupRatio: formatJsonForTextarea(normalized.GroupGroupRatio),
+        AutoGroups: formatJsonForTextarea(normalized.AutoGroups),
+        GroupSpecialUsableGroup: formatJsonForTextarea(
+          normalized.GroupSpecialUsableGroup
+        ),
+        GroupStatus: formatJsonForTextarea(normalized.GroupStatus),
+        GroupRoutingRequirements: formatJsonForTextarea(
+          normalized.GroupRoutingRequirements
+        ),
+      })
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      toast.success(t('Setting updated successfully'))
     },
-    [updateOption]
+    [groupForm, queryClient, saveGroupSettings, t]
   )
 
   const handleResetRatios = useCallback(() => {
@@ -456,7 +494,7 @@ export function RatioSettingsCard({
         <GroupRatioForm
           form={groupForm}
           onSave={saveGroupRatios}
-          isSaving={updateOption.isPending}
+          isSaving={isGroupSettingsPending}
         />
       )
     }

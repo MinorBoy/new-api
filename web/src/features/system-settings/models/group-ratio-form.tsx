@@ -70,6 +70,7 @@ type GroupFormValues = {
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   GroupSpecialUsableGroup: string
+  GroupStatus: string
   GroupRoutingRequirements: string
 }
 

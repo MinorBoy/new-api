@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
@@ -23,10 +24,12 @@ const (
 	GroupRealPersonRequired  GroupRealPersonMode = "required"
 	GroupRealPersonForbidden GroupRealPersonMode = "forbidden"
 
-	GroupRoutingSourceDefault  = "default"
-	maxGroupRoutingProfiles    = 200
-	maxExcludedTargetsPerGroup = 500
-	maxExcludedTargetKeyLength = 128
+	GroupRoutingSourceDefault            = "default"
+	maxGroupRoutingRequirementsJSONBytes = 1 << 20
+	maxGroupRoutingProfileNameLength     = 64
+	maxGroupRoutingProfiles              = 200
+	maxExcludedTargetsPerGroup           = 500
+	maxExcludedTargetKeyLength           = 128
 )
 
 // GroupRoutingRequirements describes routing constraints that are enforced for
@@ -86,6 +89,9 @@ func CheckGroupRoutingRequirements(value string) error {
 }
 
 func ParseGroupRoutingRequirementsJSONString(value string) (map[string]GroupRoutingRequirements, error) {
+	if len(value) > maxGroupRoutingRequirementsJSONBytes {
+		return nil, fmt.Errorf("group routing requirements must not exceed %d bytes", maxGroupRoutingRequirementsJSONBytes)
+	}
 	if common.GetJsonType([]byte(value)) != "object" {
 		return nil, errors.New("group routing requirements must be a JSON object")
 	}
@@ -103,6 +109,9 @@ func ParseGroupRoutingRequirementsJSONString(value string) (map[string]GroupRout
 		if strings.TrimSpace(groupName) == "" {
 			return nil, errors.New("group routing requirement group name must not be empty")
 		}
+		if utf8.RuneCountInString(groupName) > maxGroupRoutingProfileNameLength {
+			return nil, fmt.Errorf("group routing requirement group name must not exceed %d characters", maxGroupRoutingProfileNameLength)
+		}
 		if common.GetJsonType(raw) != "object" {
 			return nil, fmt.Errorf("group routing requirements for %q must be an object", groupName)
 		}
@@ -110,16 +119,28 @@ func ParseGroupRoutingRequirementsJSONString(value string) (map[string]GroupRout
 		if err := common.DecodeJsonStrict(strings.NewReader(string(raw)), &requirements); err != nil {
 			return nil, fmt.Errorf("invalid group routing requirements for %q: %w", groupName, err)
 		}
+		var fields map[string]json.RawMessage
+		if err := common.Unmarshal(raw, &fields); err != nil {
+			return nil, fmt.Errorf("invalid group routing requirements for %q: %w", groupName, err)
+		}
 
 		if groupName == "auto" {
 			return nil, errors.New("group routing requirements must not define the auto pseudo group")
 		}
+		_, hasRoutingSource := fields["routing_source"]
+		_, hasStatus := fields["status"]
+		_, hasRealPersonMode := fields["real_person_mode"]
+		_, hasAllowedCostModes := fields["allowed_cost_modes"]
+		_, hasExcludedTargetKeys := fields["excluded_target_keys"]
+		if !hasRoutingSource && (hasStatus || hasRealPersonMode || hasAllowedCostModes || hasExcludedTargetKeys) {
+			return nil, fmt.Errorf("dynamic group routing requirements for %q must provide routing_source", groupName)
+		}
+		if hasRoutingSource && requirements.RoutingSource != GroupRoutingSourceDefault {
+			return nil, fmt.Errorf("invalid routing source %q for group %q", requirements.RoutingSource, groupName)
+		}
 		if requirements.IsDynamic() {
 			if groupName == GroupRoutingSourceDefault {
 				return nil, errors.New("default group routing requirements must not inherit from itself")
-			}
-			if requirements.RoutingSource != GroupRoutingSourceDefault {
-				return nil, fmt.Errorf("invalid routing source %q for group %q", requirements.RoutingSource, groupName)
 			}
 			if requirements.Status != GroupRoutingProfileDraft && requirements.Status != GroupRoutingProfileActive {
 				return nil, fmt.Errorf("dynamic group routing requirements for %q must have draft or active status", groupName)

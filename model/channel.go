@@ -771,9 +771,16 @@ func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 }
 
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {
-	if common.MemoryCacheEnabled {
+	memoryCacheEnabled := common.MemoryCacheEnabled
+	refreshChannelCache := false
+	if memoryCacheEnabled {
 		channelStatusLock.Lock()
-		defer channelStatusLock.Unlock()
+		defer func() {
+			if refreshChannelCache {
+				InitChannelCache()
+			}
+			channelStatusLock.Unlock()
+		}()
 
 		channelCache, _ := CacheGetChannel(channelId)
 		if channelCache == nil {
@@ -802,14 +809,6 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	}
 
 	shouldUpdateAbilities := false
-	defer func() {
-		if shouldUpdateAbilities {
-			err := UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled)
-			if err != nil {
-				common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
-			}
-		}
-	}()
 	channel, err := GetChannelById(channelId, true)
 	if err != nil {
 		return false
@@ -841,6 +840,14 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
 			return false
 		}
+	}
+	if shouldUpdateAbilities {
+		err := UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
+			return true
+		}
+		refreshChannelCache = memoryCacheEnabled && status == common.ChannelStatusEnabled
 	}
 	return true
 }

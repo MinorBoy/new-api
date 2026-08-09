@@ -30,7 +30,10 @@ func InitChannelCache() {
 	newChannelId2channel := make(map[int]*Channel)
 	newChannel2advancedCustomConfig := make(map[int]*dto.AdvancedCustomConfig)
 	var channels []*Channel
-	DB.Find(&channels)
+	if err := DB.Find(&channels).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to load channels for cache: %v", err))
+		return
+	}
 	for _, channel := range channels {
 		newChannelId2channel[channel.Id] = channel
 		if channel.Type == constant.ChannelTypeAdvancedCustom {
@@ -40,7 +43,10 @@ func InitChannelCache() {
 		}
 	}
 	var abilities []*Ability
-	DB.Where("enabled = ?", true).Find(&abilities)
+	if err := DB.Where("enabled = ?", true).Find(&abilities).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to load abilities for channel cache: %v", err))
+		return
+	}
 	newGroup2model2channels := make(map[string]map[string][]int)
 	for _, ability := range abilities {
 		channel, exists := newChannelId2channel[ability.ChannelId]

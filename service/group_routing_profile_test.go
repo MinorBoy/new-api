@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestGroupRoutingTargetKeyIgnoresDatabaseIDs(t *testing.T) {
@@ -155,9 +156,76 @@ func TestEvaluateGroupRoutingProfileReportsStaticTargetStatuses(t *testing.T) {
 	}
 }
 
-func TestResolveGroupRoutingProfilePoliciesResolvesRulesAndAvailabilityInBatch(t *testing.T) {
+func TestEvaluateGroupRoutingProfilePreservesExactIssueOrder(t *testing.T) {
+	profile := profileRequirementsWithCostModes(types.CostModePerDuration)
+	profile.RealPersonMode = ratio_setting.GroupRealPersonRequired
+	target := profileTargetWithRealPerson(11, 23, "vendor-model", nil)
+	target.Enabled = false
+	profile.ExcludedTargetKeys = []string{GroupRoutingTargetKey(profile.RoutingSource, modelrouting.Seedance20, target)}
+
+	result := EvaluateGroupRoutingProfile(profile, profileTestSnapshot(target), nil, nil)
+	require.Len(t, result.Targets, 1)
+	assert.Equal(t, GroupRoutingTargetDisabled, result.Targets[0].Status)
+	assert.Equal(t, []GroupRoutingTargetStatus{
+		GroupRoutingTargetDisabled,
+		GroupRoutingTargetChannelUnavailable,
+		GroupRoutingTargetRealPersonUnknown,
+		GroupRoutingTargetExcluded,
+		GroupRoutingTargetCostRuleMissing,
+	}, result.Targets[0].Issues)
+}
+
+func TestEvaluateGroupRoutingProfileTreatsInvalidCostVariantAsMissingRuleWarning(t *testing.T) {
+	target := profileTarget(11, 23, 100, "invalid-variant", "vendor-model")
+	target.CostVariantKey = "invalid variant!"
+	snapshot := profileTestSnapshot(target)
+	available := map[GroupRoutingAvailabilityKey]struct{}{
+		{CanonicalModel: snapshot.CanonicalModel, ChannelID: target.ChannelID}: {},
+	}
+
+	result := EvaluateGroupRoutingProfile(profileRequirements(), snapshot, nil, available)
+	require.Len(t, result.Targets, 1)
+	assert.True(t, result.Targets[0].Eligible)
+	assert.Equal(t, GroupRoutingTargetMatched, result.Targets[0].Status)
+	assert.Equal(t, []GroupRoutingTargetStatus{GroupRoutingTargetCostRuleMissing}, result.Targets[0].Issues)
+}
+
+func TestEvaluateGroupRoutingProfileHandlesNilAndEmptyInputs(t *testing.T) {
+	tests := []struct {
+		name         string
+		snapshot     modelrouting.PolicySnapshot
+		rules        map[CostRuleCandidate]*model.ChannelModelCostRule
+		availability map[GroupRoutingAvailabilityKey]struct{}
+	}{
+		{name: "nil"},
+		{
+			name:         "empty",
+			snapshot:     modelrouting.PolicySnapshot{TargetsByChannel: map[int][]modelrouting.Target{}},
+			rules:        map[CostRuleCandidate]*model.ChannelModelCostRule{},
+			availability: map[GroupRoutingAvailabilityKey]struct{}{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			expectedSnapshot := test.snapshot
+			expectedSnapshot.TargetsByChannel = map[int][]modelrouting.Target{}
+			expected := GroupRoutingProfileEvaluation{
+				Snapshot:       expectedSnapshot,
+				Targets:        []GroupRoutingTargetEvaluation{},
+				MismatchCounts: map[GroupRoutingTargetStatus]int{},
+				CostRules:      test.rules,
+			}
+
+			result := EvaluateGroupRoutingProfile(ratio_setting.GroupRoutingRequirements{}, test.snapshot, test.rules, test.availability)
+			assert.Equal(t, expected, result)
+		})
+	}
+}
+
+func TestResolveGroupRoutingProfilePoliciesBatchesAcrossPoliciesAndTargets(t *testing.T) {
 	prepareCostRuleServiceDB(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
 	previousMemoryCacheEnabled := common.MemoryCacheEnabled
 	common.MemoryCacheEnabled = false
 	t.Cleanup(func() {
@@ -165,32 +233,64 @@ func TestResolveGroupRoutingProfilePoliciesResolvesRulesAndAvailabilityInBatch(t
 		model.DB.Where("channel_id = ?", 7).Delete(&model.Ability{})
 	})
 	priority := int64(100)
-	require.NoError(t, model.DB.Create(&model.Ability{
-		Group: "default", Model: modelrouting.Seedance20, ChannelId: 7, Enabled: true, Priority: &priority, Weight: 10,
+	require.NoError(t, model.DB.Create(&[]model.Ability{
+		{Group: "default", Model: modelrouting.Seedance20, ChannelId: 7, Enabled: true, Priority: &priority, Weight: 10},
+		{Group: "default", Model: modelrouting.Seedance20Fast, ChannelId: 7, Enabled: true, Priority: &priority, Weight: 10},
 	}).Error)
 	now := common.GetTimestamp()
-	seedActiveCostRuleRow(t, 7, "profile-duration-model", types.CostModePerDuration, 1, &now)
-	target := profileTarget(11, 7, 100, "duration-target", "profile-duration-model")
-	constraints, err := common.Marshal(target.Constraints)
-	require.NoError(t, err)
-	policies := []model.RoutingPolicy{{
-		ID: 11, GroupName: "default", Model: modelrouting.Seedance20, Enabled: true,
-		DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9",
-		Targets: []model.RouteTarget{{
-			ID: target.ID, PolicyID: 11, ChannelID: target.ChannelID, Name: target.Name,
-			UpstreamModel: target.UpstreamModel, CostVariantKey: target.CostVariantKey,
-			TargetPriority: target.Priority, Enabled: true, Constraints: string(constraints),
-		}},
-	}}
+	for _, upstreamModel := range []string{"duration-a", "duration-b", "duration-fast-a", "duration-fast-b"} {
+		seedActiveCostRuleRow(t, 7, upstreamModel, types.CostModePerDuration, 1, &now)
+	}
+	policies := []model.RoutingPolicy{
+		{ID: 11, GroupName: "default", Model: modelrouting.Seedance20, Enabled: true, DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9"},
+		{ID: 12, GroupName: "default", Model: modelrouting.Seedance20Fast, Enabled: true, DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9"},
+	}
+	targetsByPolicy := [][]modelrouting.Target{
+		{
+			profileTarget(21, 7, 100, "duration-a", "duration-a"),
+			profileTarget(22, 7, 50, "duration-b", "duration-b"),
+		},
+		{
+			profileTarget(23, 7, 100, "duration-fast-a", "duration-fast-a"),
+			profileTarget(24, 7, 50, "duration-fast-b", "duration-fast-b"),
+		},
+	}
+	for policyIndex := range policies {
+		for _, target := range targetsByPolicy[policyIndex] {
+			constraints, err := common.Marshal(target.Constraints)
+			require.NoError(t, err)
+			policies[policyIndex].Targets = append(policies[policyIndex].Targets, model.RouteTarget{
+				ID: target.ID, PolicyID: policies[policyIndex].ID, ChannelID: target.ChannelID, Name: target.Name,
+				UpstreamModel: target.UpstreamModel, CostVariantKey: target.CostVariantKey,
+				TargetPriority: target.Priority, Enabled: true, Constraints: string(constraints),
+			})
+		}
+	}
+	InvalidateCostCoverage(0, "", "")
+	queryCount := 0
+	const callbackName = "test:count-group-routing-profile-resolver-queries"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(*gorm.DB) {
+		queryCount++
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Query().Remove(callbackName)
+		}
+	})
 
 	results, err := ResolveGroupRoutingProfilePolicies(profileRequirementsWithCostModes(types.CostModePerDuration), policies)
+	require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	callbackRegistered = false
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	require.Len(t, results[0].Targets, 1)
-	assert.True(t, results[0].Targets[0].Eligible)
-	assert.NotZero(t, results[0].Targets[0].CostRuleID)
-	assert.Equal(t, 1, results[0].Targets[0].CostVersion)
-	assert.Len(t, results[0].CostRules, 1)
+	assert.Equal(t, 3, queryCount)
+	require.Len(t, results, 2)
+	for _, result := range results {
+		require.Len(t, result.Targets, 2)
+		assert.True(t, result.Targets[0].Eligible)
+		assert.True(t, result.Targets[1].Eligible)
+		assert.Len(t, result.CostRules, 4)
+	}
 }
 
 type profileRuleFixture struct {

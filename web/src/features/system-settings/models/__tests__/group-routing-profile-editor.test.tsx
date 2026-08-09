@@ -158,12 +158,16 @@ describe('group routing profile editor', () => {
         )
       })
 
-      assert.equal(
-        findControl(container, 'Adapt from default').hasAttribute(
-          'data-disabled'
-        ),
-        true
+      const adaptSwitch = container.querySelector(
+        '[role="switch"][aria-label="Adapt from default"]'
       )
+      assert.ok(adaptSwitch instanceof HTMLElement)
+      assert.equal(adaptSwitch.hasAttribute('data-disabled'), true)
+      const adaptButton = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Adapt from default'
+      )
+      assert.ok(adaptButton instanceof HTMLButtonElement)
+      assert.equal(adaptButton.disabled, true)
 
       await act(async () => root.unmount())
       container.remove()

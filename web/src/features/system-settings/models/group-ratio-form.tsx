@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Code2, Eye, HelpCircle } from 'lucide-react'
 import { memo, useCallback, useMemo, useState, type ReactNode } from 'react'
-import type { UseFormReturn } from 'react-hook-form'
+import { useWatch, type UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -106,7 +106,10 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const watchedGroupRatio = form.watch('GroupRatio')
   const watchedUserUsableGroups = form.watch('UserUsableGroups')
   const watchedTopupGroupRatio = form.watch('TopupGroupRatio')
-  const watchedGroupRoutingRequirements = form.watch('GroupRoutingRequirements')
+  const watchedGroupRoutingRequirements = useWatch({
+    control: form.control,
+    name: 'GroupRoutingRequirements',
+  })
   const groupNames = useMemo(() => {
     const ratioMap = safeJsonParse<Record<string, number>>(watchedGroupRatio, {
       fallback: {},

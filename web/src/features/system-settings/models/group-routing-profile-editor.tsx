@@ -83,6 +83,7 @@ export function GroupRoutingProfileEditor(
   const hasNoCompatibleTargets = props.summary?.matched_targets === 0
   const canAdaptFromDefault =
     props.groupName !== 'default' && props.groupName !== 'auto'
+  const adaptDisabled = props.disabled || (!dynamic && !canAdaptFromDefault)
 
   const updateProfile = (
     changes: Partial<{
@@ -103,16 +104,47 @@ export function GroupRoutingProfileEditor(
     )
   }
 
+  const setAdaptFromDefault = (checked: boolean) => {
+    if (checked) {
+      const nextProfiles = parseGroupRoutingProfiles(
+        props.groupRoutingRequirements
+      )
+      const currentProfile = nextProfiles[props.groupName]
+      const initialRealPersonMode =
+        currentProfile?.require_real_person === true ? 'required' : 'any'
+      nextProfiles[props.groupName] = {
+        ...currentProfile,
+        status: 'draft',
+        routing_source: 'default',
+        real_person_mode: initialRealPersonMode,
+        allowed_cost_modes: [],
+      }
+      props.onChange(JSON.stringify(nextProfiles, null, 2))
+      return
+    }
+    props.onChange(
+      removeDynamicGroupRoutingProfile(
+        props.groupRoutingRequirements,
+        props.groupName
+      )
+    )
+  }
+
   return (
     <FieldGroup>
       <Field
         orientation='horizontal'
-        data-disabled={
-          props.disabled || (!dynamic && !canAdaptFromDefault) || undefined
-        }
+        data-disabled={adaptDisabled || undefined}
       >
         <div>
-          <FieldTitle>{t('Adapt from default')}</FieldTitle>
+          <button
+            type='button'
+            className='cursor-pointer text-left text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50'
+            disabled={adaptDisabled}
+            onClick={() => setAdaptFromDefault(!dynamic)}
+          >
+            {t('Adapt from default')}
+          </button>
           <FieldDescription>
             {canAdaptFromDefault
               ? t(
@@ -123,34 +155,8 @@ export function GroupRoutingProfileEditor(
         </div>
         <Switch
           checked={dynamic}
-          disabled={props.disabled || (!dynamic && !canAdaptFromDefault)}
-          onCheckedChange={(checked) => {
-            if (checked) {
-              const nextProfiles = parseGroupRoutingProfiles(
-                props.groupRoutingRequirements
-              )
-              const currentProfile = nextProfiles[props.groupName]
-              const initialRealPersonMode =
-                currentProfile?.require_real_person === true
-                  ? 'required'
-                  : 'any'
-              nextProfiles[props.groupName] = {
-                ...currentProfile,
-                status: 'draft',
-                routing_source: 'default',
-                real_person_mode: initialRealPersonMode,
-                allowed_cost_modes: [],
-              }
-              props.onChange(JSON.stringify(nextProfiles, null, 2))
-              return
-            }
-            props.onChange(
-              removeDynamicGroupRoutingProfile(
-                props.groupRoutingRequirements,
-                props.groupName
-              )
-            )
-          }}
+          disabled={adaptDisabled}
+          onCheckedChange={setAdaptFromDefault}
           aria-label={t('Adapt from default')}
         />
       </Field>

@@ -64,11 +64,11 @@ func WalkCostCatalogRows(query CostCatalogQuery, batchSize int, visit func([]Cos
 	}
 	offset := query.Offset
 	for {
-		batchQuery := query
-		batchQuery.Offset = offset
-		batchQuery.Limit = batchSize
-		rows, _, err := ListCostCatalogRows(batchQuery)
-		if err != nil {
+		rows := make([]CostCatalogRow, 0, batchSize)
+		db := applyCostCatalogOrder(costCatalogBaseQuery(query), query.SortBy, query.SortOrder).
+			Offset(offset).
+			Limit(batchSize)
+		if err := db.Find(&rows).Error; err != nil {
 			return err
 		}
 		if len(rows) == 0 {

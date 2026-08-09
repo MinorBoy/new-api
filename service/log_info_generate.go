@@ -70,13 +70,16 @@ func routingAuditFromContext(c *gin.Context) *modelrouting.Audit {
 		return nil
 	}
 	mismatchCounts, _ := common.GetContextKeyType[map[modelrouting.MismatchReason]int](c, constant.ContextKeyRoutingMismatchCounts)
+	profileMismatchCounts, _ := common.GetContextKeyType[map[string]int](c, constant.ContextKeyRoutingProfileMismatchCounts)
 	return &modelrouting.Audit{
-		PolicyID:       policyID,
-		TargetID:       targetID,
-		TargetName:     common.GetContextKeyString(c, constant.ContextKeyRoutingTargetName),
-		UpstreamModel:  upstreamModel,
-		Facts:          facts,
-		MismatchCounts: mismatchCounts,
+		PolicyID:              policyID,
+		TargetID:              targetID,
+		TargetName:            common.GetContextKeyString(c, constant.ContextKeyRoutingTargetName),
+		UpstreamModel:         upstreamModel,
+		Facts:                 facts,
+		MismatchCounts:        mismatchCounts,
+		SourceGroup:           common.GetContextKeyString(c, constant.ContextKeyRoutingSourceGroup),
+		ProfileMismatchCounts: profileMismatchCounts,
 	}
 }
 

@@ -779,6 +779,12 @@ func publishRoutingDecision(c *gin.Context, result groupRoutingResult, target mo
 	common.SetContextKey(c, constant.ContextKeyRoutingCostVariant, variant)
 	common.SetContextKey(c, constant.ContextKeyRoutingFacts, result.Facts)
 	common.SetContextKey(c, constant.ContextKeyRoutingMismatchCounts, result.Evaluation.MismatchCounts)
+	common.SetContextKey(c, constant.ContextKeyRoutingSourceGroup, result.SourceGroup)
+	profileMismatchCounts := make(map[string]int, len(result.ProfileMismatchCounts))
+	for status, count := range result.ProfileMismatchCounts {
+		profileMismatchCounts[string(status)] = count
+	}
+	common.SetContextKey(c, constant.ContextKeyRoutingProfileMismatchCounts, profileMismatchCounts)
 }
 
 func clearRoutingDecision(c *gin.Context) {
@@ -793,6 +799,8 @@ func clearRoutingDecision(c *gin.Context) {
 	delete(c.Keys, string(constant.ContextKeyRoutingCostVariant))
 	common.SetContextKey(c, constant.ContextKeyRoutingFacts, modelrouting.Facts{})
 	common.SetContextKey(c, constant.ContextKeyRoutingMismatchCounts, map[modelrouting.MismatchReason]int{})
+	common.SetContextKey(c, constant.ContextKeyRoutingSourceGroup, "")
+	common.SetContextKey(c, constant.ContextKeyRoutingProfileMismatchCounts, map[string]int{})
 }
 
 func publishLegacyRoutingCostVariant(c *gin.Context) {

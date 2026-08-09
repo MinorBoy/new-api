@@ -137,9 +137,6 @@ func ActivateConfigImportBatch(ctx context.Context, batchID int64, adminID int) 
 		if err := publishConfigImportSaleOptions(tx, items, &refresh); err != nil {
 			return err
 		}
-		if err := publishConfigImportGroupRoutingRequirements(tx, items, &refresh); err != nil {
-			return err
-		}
 		if err := publishConfigImportModelMappings(tx, items, &refresh); err != nil {
 			return err
 		}
@@ -206,6 +203,9 @@ func ActivateConfigImportBatch(ctx context.Context, batchID int64, adminID int) 
 		}
 		for _, channelID := range plan.ChannelIDs {
 			refresh.ChannelIDs = appendConfigImportRefreshInt(refresh.ChannelIDs, channelID)
+		}
+		if err := publishConfigImportGroupRoutingRequirements(tx, items, &refresh); err != nil {
+			return err
 		}
 
 		after, err := CaptureConfigImportBaseline(tx, batchID)
@@ -275,7 +275,9 @@ func publishConfigImportGroupRoutingRequirements(tx *gorm.DB, items []model.Conf
 		return err
 	}
 	if err == nil && strings.TrimSpace(option.Value) != "" {
-		if decodeErr := common.UnmarshalJsonStr(option.Value, &requirementsByGroup); decodeErr != nil {
+		var decodeErr error
+		requirementsByGroup, decodeErr = ratio_setting.ParseGroupRoutingRequirementsJSONString(option.Value)
+		if decodeErr != nil {
 			return configImportError("ACTIVATION_GROUP_ROUTING_REQUIREMENT_OPTION", "GroupRoutingRequirements is not a JSON object: %v", decodeErr)
 		}
 	}
@@ -296,7 +298,12 @@ func publishConfigImportGroupRoutingRequirements(tx *gorm.DB, items []model.Conf
 		if _, known := knownGroups[groupName]; !known {
 			return configImportError(configImportIssueGroupRoutingRequirementUnknown, "group routing requirement references unknown group %q", groupName)
 		}
-		requirementsByGroup[groupName] = ratio_setting.GroupRoutingRequirements{RequireRealPerson: imported.Requirements.RequireRealPerson}
+		importedValue, normalizeErr := groupRoutingRequirementsFromImport(groupName, imported.Requirements)
+		if normalizeErr != nil {
+			return configImportError("ACTIVATION_GROUP_ROUTING_REQUIREMENT", "group routing requirement %q is invalid: %v", groupName, normalizeErr)
+		}
+		importedValue.ExcludedTargetKeys = append([]string(nil), requirementsByGroup[groupName].ExcludedTargetKeys...)
+		requirementsByGroup[groupName] = importedValue
 		changed = true
 	}
 	if !changed {
@@ -304,6 +311,9 @@ func publishConfigImportGroupRoutingRequirements(tx *gorm.DB, items []model.Conf
 	}
 	encoded, err := common.Marshal(requirementsByGroup)
 	if err != nil {
+		return err
+	}
+	if err := ValidateActiveGroupRoutingProfilesWithDB(tx, string(encoded)); err != nil {
 		return err
 	}
 	if err := model.UpdateOptionsWithTx(tx, map[string]string{"GroupRoutingRequirements": string(encoded)}); err != nil {

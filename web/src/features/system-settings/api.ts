@@ -21,6 +21,7 @@ import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
+  GroupSettingsUpdateRequest,
   LogCleanupTask,
   ObjectStorageSettingsRequest,
   ObjectStorageSettingsResponse,
@@ -68,6 +69,16 @@ export async function testObjectStorageSettings(
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function updateGroupSettings(
+  request: GroupSettingsUpdateRequest
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/group-settings',
+    request
+  )
   return res.data
 }
 

@@ -456,8 +456,16 @@ func TokenAuth() func(c *gin.Context) {
 		userCache.WriteContext(c)
 
 		userGroup := userCache.Group
+		if !ratio_setting.IsGroupEnabled(userGroup) {
+			abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已停用", userGroup), types.ErrorCodeAccessDenied)
+			return
+		}
 		tokenGroup := token.Group
 		if tokenGroup != "" {
+			if tokenGroup != "auto" && !ratio_setting.IsGroupEnabled(tokenGroup) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已停用", tokenGroup), types.ErrorCodeAccessDenied)
+				return
+			}
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
 				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))

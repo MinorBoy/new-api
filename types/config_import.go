@@ -318,7 +318,11 @@ type ConfigImportGroupRoutingRequirement struct {
 }
 
 type ConfigImportGroupRoutingValues struct {
-	RequireRealPerson *bool `json:"require_real_person,omitempty"`
+	RequireRealPerson *bool    `json:"require_real_person,omitempty"`
+	Status            string   `json:"status,omitempty"`
+	RoutingSource     string   `json:"routing_source,omitempty"`
+	RealPersonMode    string   `json:"real_person_mode,omitempty"`
+	AllowedCostModes  []string `json:"allowed_cost_modes,omitempty"`
 }
 
 type ConfigImportSource struct {

@@ -11,6 +11,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -144,11 +146,13 @@ func TestListModelsCompatibilityFormatsKeepNonSeedanceAndHideInternalSeedance(t 
 
 func TestListModelsTokenLimitCannotExposeInternalSeedance(t *testing.T) {
 	withSelfUseModeEnabled(t)
-	setupModelListControllerTestDB(t)
+	db := setupModelListControllerTestDB(t)
+	seedModelListAbility(t, db, "default", "gpt-4o")
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, map[string]bool{
 		"gpt-4o":              true,
@@ -160,6 +164,67 @@ func TestListModelsTokenLimitCannotExposeInternalSeedance(t *testing.T) {
 	payload := decodeListModelsPayload(t, recorder)
 	require.Len(t, payload.Data, 1)
 	assert.Equal(t, "gpt-4o", payload.Data[0].Id)
+}
+
+func TestListModelsTokenLimitCannotBypassDynamicGroupProfile(t *testing.T) {
+	withSelfUseModeEnabled(t)
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RoutingPolicy{}, &model.RouteTarget{}, &model.ChannelModelCostRule{}))
+	priority := int64(100)
+	weight := uint(10)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 11, Type: constant.ChannelTypeOpenAI, Name: "request-only", Key: "secret",
+		Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &weight,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelrouting.Seedance20, ChannelId: 11, Enabled: true,
+		Priority: &priority, Weight: weight,
+	}).Error)
+	require.NoError(t, db.Create(&model.RoutingPolicy{
+		ID: 1, GroupName: "default", Model: modelrouting.Seedance20, Enabled: true,
+		DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9",
+	}).Error)
+	supportsRealPerson := true
+	constraints, err := common.Marshal(modelrouting.Constraints{
+		OutputResolutions:  []string{"720p"},
+		Durations:          modelrouting.DurationConstraint{Min: common.GetPointer(4), Max: common.GetPointer(15)},
+		AspectRatios:       []string{"16:9"},
+		ReferenceLimits:    modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+		SupportsRealPerson: &supportsRealPerson,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.RouteTarget{
+		PolicyID: 1, ChannelID: 11, Name: "request-upstream", UpstreamModel: "request-upstream",
+		CostVariantKey: string(hosttypes.DefaultCostVariantKey), TargetPriority: 100,
+		Enabled: true, Constraints: string(constraints),
+	}).Error)
+	now := common.GetTimestamp()
+	require.NoError(t, db.Create(&model.ChannelModelCostRule{
+		ChannelID: 11, BillableUpstreamModel: "request-upstream", CostVariantKey: string(hosttypes.DefaultCostVariantKey),
+		Version: 1, Status: string(hosttypes.CostRuleActive), CostMode: string(hosttypes.CostModePerRequest),
+		SchemaVersion: 1, ConfigJSON: `{}`, Source: "manual", EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+	originalProfiles := ratio_setting.GroupRoutingRequirements2JSONString()
+	require.NoError(t, ratio_setting.UpdateGroupRoutingRequirementsByJSONString(`{
+		"按秒客户":{"status":"active","routing_source":"default","allowed_cost_modes":["per_duration"]}
+	}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRoutingRequirementsByJSONString(originalProfiles))
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "按秒客户")
+	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
+	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, map[string]bool{
+		modelrouting.Seedance20: true,
+	})
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	payload := decodeListModelsPayload(t, recorder)
+	assert.Empty(t, payload.Data)
 }
 
 func TestListModelsEmptyAnthropicCatalogDoesNotPanic(t *testing.T) {

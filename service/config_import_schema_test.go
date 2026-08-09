@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,6 +40,45 @@ func TestConfigImportSchemaAcceptsGroupRoutingRequirementsAndRouteGroupName(t *t
 	require.Equal(t, "真人分组", document.Entities.GroupRoutingRequirements[0].GroupName)
 	require.Len(t, document.Entities.RouteBlueprints, 1)
 	require.Equal(t, "真人分组", document.Entities.RouteBlueprints[0].GroupName)
+}
+
+func TestConfigImportSchemaAcceptsDynamicGroupRoutingProfile(t *testing.T) {
+	entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+	entities["group_routing_requirements"] = []any{map[string]any{
+		"business_id": "group-profile-customer-a", "entity_hash": strings.Repeat("0", 64),
+		"source_ref": "source-workbook", "group_name": "客户A",
+		"requirements": map[string]any{
+			"status": "active", "routing_source": "default", "real_person_mode": "required",
+			"allowed_cost_modes": []any{"per_duration"},
+		},
+	}}
+
+	document, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+	require.NoError(t, err)
+	require.Len(t, document.Entities.GroupRoutingRequirements, 1)
+	profile := document.Entities.GroupRoutingRequirements[0].Requirements
+	require.Equal(t, "active", profile.Status)
+	require.Equal(t, "default", profile.RoutingSource)
+	require.Equal(t, "required", profile.RealPersonMode)
+	require.Equal(t, []string{string(types.CostModePerDuration)}, profile.AllowedCostModes)
+}
+
+func TestConfigImportSchemaRejectsReservedDynamicGroupRoutingProfiles(t *testing.T) {
+	for _, groupName := range []string{"default", "auto"} {
+		t.Run(groupName, func(t *testing.T) {
+			entities := configImportReferenceTupleEntities("line-one", "model-one", "line-one", "model-one", nil, nil)
+			entities["group_routing_requirements"] = []any{map[string]any{
+				"business_id": "group-profile-reserved", "entity_hash": strings.Repeat("0", 64),
+				"source_ref": "source-workbook", "group_name": groupName,
+				"requirements": map[string]any{"status": "draft", "routing_source": "default"},
+			}}
+
+			_, err := ParseConfigImportDocument(strings.NewReader(configImportDocumentJSON(t, entities)))
+
+			requireCode(t, err, "SCHEMA_GROUP_ROUTING_REQUIREMENT")
+		})
+	}
 }
 
 func TestConfigImportSchemaRejectsInvalidGroupRoutingRequirements(t *testing.T) {

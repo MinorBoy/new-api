@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ChevronDown,
@@ -29,6 +30,7 @@ import { useTranslation } from 'react-i18next'
 
 import { StaticDataTable } from '@/components/data-table/static/static-data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
 import {
   sideDrawerContentClassName,
@@ -36,6 +38,8 @@ import {
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
 import { StatusBadge } from '@/components/status-badge'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -71,12 +75,23 @@ import { Switch } from '@/components/ui/switch'
 
 import { safeJsonParse } from '../utils/json-parser'
 import {
-  updateGroupRoutingRequirements,
-  type GroupRoutingRequirements,
+  previewGroupRoutingProfileSummaries,
+  type GroupRoutingProfileSummary,
+} from './group-routing-profile-api'
+import { GroupRoutingProfileEditor } from './group-routing-profile-editor'
+import {
+  effectiveRealPersonMode,
+  isDynamicGroupRoutingProfile,
+  parseGroupRoutingProfiles,
+  serializeGroupRoutingProfiles,
+  type GroupCostMode,
+  type GroupRoutingProfiles,
 } from './group-routing-requirements'
+import { GroupRoutingTargetsDialog } from './group-routing-targets-dialog'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
+  groupStatus: string
   topupGroupRatio: string
   userUsableGroups: string
   groupGroupRatio: string
@@ -94,6 +109,7 @@ type GroupPricingRow = {
   topupRatio: string
   selectable: boolean
   description: string
+  enabled: boolean
 }
 
 type RegistryEntry = {
@@ -104,6 +120,8 @@ type RegistryEntry = {
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'
 const sectionHeaderClassName = 'border-b bg-muted/20'
+const emptyRoutingProfileSummaries: Record<string, GroupRoutingProfileSummary> =
+  {}
 
 let groupPricingIdCounter = 0
 function createGroupPricingId() {
@@ -130,6 +148,13 @@ function parseUsableMap(value: string): Record<string, string> {
   })
 }
 
+function parseBooleanMap(value: string): Record<string, boolean> {
+  return safeJsonParse<Record<string, boolean>>(value, {
+    fallback: {},
+    silent: true,
+  })
+}
+
 function parseNestedRatioMap(
   value: string
 ): Record<string, Record<string, number>> {
@@ -142,11 +167,13 @@ function parseNestedRatioMap(
 function buildGroupPricingRows(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupStatus: string
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
   const usableMap = parseUsableMap(userUsableGroups)
   const topupMap = parseRatioMap(topupGroupRatio)
+  const statusMap = parseBooleanMap(groupStatus)
   const names = new Set([
     ...Object.keys(ratioMap),
     ...Object.keys(usableMap),
@@ -160,6 +187,7 @@ function buildGroupPricingRows(
     topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
     selectable: Object.hasOwn(usableMap, name),
     description: String(usableMap[name] ?? ''),
+    enabled: Object.hasOwn(statusMap, name) ? statusMap[name] : true,
   }))
 }
 
@@ -167,11 +195,13 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   const groupRatio: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
   const topupGroupRatio: Record<string, number> = {}
+  const groupStatus: Record<string, boolean> = {}
 
   for (const row of rows) {
     const name = row.name.trim()
     if (!name) continue
     groupRatio[name] = normalizeRatio(row.ratio)
+    groupStatus[name] = row.enabled
     if (row.selectable) {
       userUsableGroups[name] = row.description
     }
@@ -185,6 +215,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
+    GroupStatus: JSON.stringify(groupStatus, null, 2),
   }
 }
 
@@ -194,18 +225,21 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
     groupRatio: parseRatioMap(serialized.GroupRatio),
     userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
+    groupStatus: parseBooleanMap(serialized.GroupStatus),
   })
 }
 
 function sourceGroupPricingSignature(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupStatus: string
 ): string {
   return JSON.stringify({
     groupRatio: parseRatioMap(groupRatio),
     userUsableGroups: parseUsableMap(userUsableGroups),
     topupGroupRatio: parseRatioMap(topupGroupRatio),
+    groupStatus: parseBooleanMap(groupStatus),
   })
 }
 
@@ -260,6 +294,7 @@ function GroupNameSelect(props: GroupNameSelectProps) {
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
+  groupStatus,
   topupGroupRatio,
   userUsableGroups,
   groupGroupRatio,
@@ -271,6 +306,49 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
   const [detailGroup, setDetailGroup] = useState<string | null>(null)
+  const [routingTargetsGroup, setRoutingTargetsGroup] = useState<string | null>(
+    null
+  )
+
+  const routingProfileState = useMemo(() => {
+    let profiles: GroupRoutingProfiles = {}
+    try {
+      profiles = parseGroupRoutingProfiles(groupRoutingRequirements)
+    } catch {
+      return {
+        profiles,
+        dynamicProfiles: profiles,
+        normalizedDynamicProfiles: '{}',
+        hasDynamicProfiles: false,
+      }
+    }
+
+    const dynamicProfiles = Object.fromEntries(
+      Object.entries(profiles).filter(([, profile]) =>
+        isDynamicGroupRoutingProfile(profile)
+      )
+    )
+    const normalizedDynamicProfiles =
+      serializeGroupRoutingProfiles(dynamicProfiles)
+    return {
+      profiles,
+      dynamicProfiles: parseGroupRoutingProfiles(normalizedDynamicProfiles),
+      normalizedDynamicProfiles,
+      hasDynamicProfiles: Object.keys(dynamicProfiles).length > 0,
+    }
+  }, [groupRoutingRequirements])
+
+  const routingProfileSummariesQuery = useQuery({
+    queryKey: [
+      'group-routing-profile-summaries',
+      routingProfileState.normalizedDynamicProfiles,
+    ],
+    queryFn: () =>
+      previewGroupRoutingProfileSummaries(routingProfileState.dynamicProfiles),
+    enabled: routingProfileState.hasDynamicProfiles,
+  })
+  const routingProfileSummaries =
+    routingProfileSummariesQuery.data?.data ?? emptyRoutingProfileSummaries
 
   const registry = useMemo<RegistryEntry[]>(() => {
     const ratioMap = parseRatioMap(groupRatio)
@@ -332,15 +410,83 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     [registryNames, autoGroupsList]
   )
 
+  const handleGroupDeleted = useCallback(
+    (groupName: string) => {
+      const overrideMap = parseNestedRatioMap(groupGroupRatio)
+      delete overrideMap[groupName]
+      for (const ratios of Object.values(overrideMap)) {
+        delete ratios[groupName]
+      }
+      onChange('GroupGroupRatio', JSON.stringify(overrideMap, null, 2))
+
+      onChange(
+        'AutoGroups',
+        JSON.stringify(
+          autoGroupsList.filter((name) => name !== groupName),
+          null,
+          2
+        )
+      )
+
+      const specialMap = safeJsonParse<
+        Record<string, Record<string, string>>
+      >(groupSpecialUsableGroup, { fallback: {}, silent: true })
+      delete specialMap[groupName]
+      for (const rules of Object.values(specialMap)) {
+        delete rules[groupName]
+        delete rules[`+:${groupName}`]
+        delete rules[`-:${groupName}`]
+      }
+      onChange(
+        'GroupSpecialUsableGroup',
+        JSON.stringify(specialMap, null, 2)
+      )
+
+      try {
+        const profiles = parseGroupRoutingProfiles(groupRoutingRequirements)
+        delete profiles[groupName]
+        onChange(
+          'GroupRoutingRequirements',
+          JSON.stringify(profiles, null, 2)
+        )
+      } catch {
+        // Invalid JSON remains visible in JSON mode instead of being overwritten.
+      }
+    },
+    [
+      autoGroupsList,
+      groupGroupRatio,
+      groupRoutingRequirements,
+      groupSpecialUsableGroup,
+      onChange,
+    ]
+  )
+
   return (
     <div className='space-y-4'>
+      {routingProfileSummariesQuery.isError ? (
+        <Alert>
+          <AlertTriangle aria-hidden='true' />
+          <AlertTitle>{t('Routing preview unavailable')}</AlertTitle>
+          <AlertDescription>
+            {t(
+              'Compatible target counts could not be loaded. Group ratio editing remains available.'
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <GroupPricingTable
         groupRatio={groupRatio}
+        groupStatus={groupStatus}
         userUsableGroups={userUsableGroups}
         topupGroupRatio={topupGroupRatio}
+        disabled={disabled}
         onChange={onChange}
+        onDeleteConfirmed={handleGroupDeleted}
         onShowDetail={setDetailGroup}
-        groupRoutingRequirements={groupRoutingRequirements}
+        routingProfiles={routingProfileState.profiles}
+        routingProfileSummaries={routingProfileSummaries}
       />
 
       <GroupOverrideRules
@@ -422,8 +568,22 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         autoGroups={autoGroupsList}
         groupSpecialUsableGroup={groupSpecialUsableGroup}
         groupRoutingRequirements={groupRoutingRequirements}
+        routingProfileSummary={
+          detailGroup ? routingProfileSummaries[detailGroup] : undefined
+        }
         disabled={disabled}
         onChange={onChange}
+        onViewTargets={(groupName) => setRoutingTargetsGroup(groupName)}
+      />
+      <GroupRoutingTargetsDialog
+        open={routingTargetsGroup !== null}
+        groupName={routingTargetsGroup ?? ''}
+        groupRoutingRequirements={groupRoutingRequirements}
+        disabled={disabled}
+        onOpenChange={(open) => {
+          if (!open) setRoutingTargetsGroup(null)
+        }}
+        onChange={(value) => onChange('GroupRoutingRequirements', value)}
       />
     </div>
   )
@@ -431,39 +591,50 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
 type GroupPricingTableProps = {
   groupRatio: string
+  groupStatus: string
   userUsableGroups: string
   topupGroupRatio: string
-  groupRoutingRequirements: string
+  disabled: boolean
+  routingProfiles: GroupRoutingProfiles
+  routingProfileSummaries: Record<string, GroupRoutingProfileSummary>
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
+  onDeleteConfirmed: (name: string) => void
 }
 
 function GroupPricingTable({
   groupRatio,
+  groupStatus,
   userUsableGroups,
   topupGroupRatio,
-  groupRoutingRequirements,
+  disabled,
+  routingProfiles,
+  routingProfileSummaries,
   onChange,
   onShowDetail,
+  onDeleteConfirmed,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
+  const [pendingDelete, setPendingDelete] = useState<GroupPricingRow | null>(
+    null
+  )
+  const [pendingStatus, setPendingStatus] = useState<GroupPricingRow | null>(
+    null
+  )
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+    buildGroupPricingRows(
+      groupRatio,
+      userUsableGroups,
+      topupGroupRatio,
+      groupStatus
+    )
   )
-  const routingRequirements = useMemo(
-    () =>
-      safeJsonParse<Record<string, GroupRoutingRequirements>>(
-        groupRoutingRequirements,
-        { fallback: {}, silent: true }
-      ),
-    [groupRoutingRequirements]
-  )
-
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
       userUsableGroups,
-      topupGroupRatio
+      topupGroupRatio,
+      groupStatus
     )
     setRows((currentRows) => {
       if (groupPricingSignature(currentRows) === incomingSignature) {
@@ -472,10 +643,11 @@ function GroupPricingTable({
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
-        topupGroupRatio
+        topupGroupRatio,
+        groupStatus
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, groupStatus, userUsableGroups, topupGroupRatio])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
@@ -484,6 +656,7 @@ function GroupPricingTable({
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
+      onChange('GroupStatus', serialized.GroupStatus)
     },
     [onChange]
   )
@@ -518,6 +691,7 @@ function GroupPricingTable({
         topupRatio: '',
         selectable: true,
         description: '',
+        enabled: true,
       },
     ])
   }, [emitRows, rows])
@@ -528,6 +702,30 @@ function GroupPricingTable({
     },
     [emitRows, rows]
   )
+
+  const requestStatusChange = useCallback(
+    (row: GroupPricingRow, enabled: boolean) => {
+      if (row.name.trim() === 'default' && !enabled) {
+        setPendingStatus(row)
+        return
+      }
+      updateRow(row._id, 'enabled', enabled)
+    },
+    [updateRow]
+  )
+
+  const confirmStatusChange = useCallback(() => {
+    if (!pendingStatus) return
+    updateRow(pendingStatus._id, 'enabled', false)
+    setPendingStatus(null)
+  }, [pendingStatus, updateRow])
+
+  const confirmDelete = useCallback(() => {
+    if (!pendingDelete) return
+    removeRow(pendingDelete._id)
+    onDeleteConfirmed(pendingDelete.name.trim())
+    setPendingDelete(null)
+  }, [onDeleteConfirmed, pendingDelete, removeRow])
 
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>()
@@ -553,7 +751,12 @@ function GroupPricingTable({
               )}
             </CardDescription>
           </div>
-          <Button onClick={addRow} size='sm' className='sm:self-start'>
+          <Button
+            onClick={addRow}
+            size='sm'
+            className='sm:self-start'
+            disabled={disabled}
+          >
             <Plus className='mr-2 h-4 w-4' />
             {t('Add group')}
           </Button>
@@ -598,6 +801,25 @@ function GroupPricingTable({
                 ),
               },
               {
+                id: 'status',
+                header: t('Status'),
+                className: 'w-24 text-center',
+                cell: (row) => (
+                  <div className='flex justify-center'>
+                    <Switch
+                      checked={row.enabled}
+                      disabled={disabled}
+                      onCheckedChange={(checked) =>
+                        requestStatusChange(row, checked)
+                      }
+                      aria-label={t('Toggle group {{name}}', {
+                        name: row.name,
+                      })}
+                    />
+                  </div>
+                ),
+              },
+              {
                 id: 'topup-ratio',
                 header: t('Top-up ratio'),
                 className: 'w-28',
@@ -633,16 +855,94 @@ function GroupPricingTable({
               {
                 id: 'routing-requirements',
                 header: t('Routing'),
-                className: 'min-w-44',
-                cell: (row) =>
-                  routingRequirements[row.name.trim()]?.require_real_person ===
-                  true ? (
-                    <StatusBadge variant='info' copyable={false}>
-                      {t('Require real person')}
-                    </StatusBadge>
-                  ) : (
-                    <span className='text-muted-foreground'>-</span>
-                  ),
+                className: 'min-w-72',
+                cell: (row) => {
+                  const groupName = row.name.trim()
+                  const profile = routingProfiles[groupName]
+                  if (!profile) {
+                    return <span className='text-muted-foreground'>-</span>
+                  }
+                  if (!isDynamicGroupRoutingProfile(profile)) {
+                    return (
+                      <Badge variant='outline'>
+                        {t('Legacy static routing policy')}
+                      </Badge>
+                    )
+                  }
+
+                  const summary = routingProfileSummaries[groupName]
+                  const realPersonMode = effectiveRealPersonMode(profile)
+                  let realPersonLabel = t('Any real-person capability')
+                  if (realPersonMode === 'required') {
+                    realPersonLabel = t('Must support real person')
+                  } else if (realPersonMode === 'forbidden') {
+                    realPersonLabel = t('Must not support real person')
+                  }
+                  const costModeLabels: Record<GroupCostMode, string> = {
+                    per_request: t('Per request'),
+                    per_duration: t('Per duration'),
+                    per_token: t('Per token'),
+                    free: t('Free'),
+                  }
+
+                  return (
+                    <div className='flex max-w-xl flex-wrap items-center gap-1.5 py-1'>
+                      <Badge
+                        variant={
+                          profile.status === 'active' ? 'default' : 'outline'
+                        }
+                      >
+                        {profile.status === 'active' ? t('Active') : t('Draft')}
+                      </Badge>
+                      <Badge variant='secondary'>{realPersonLabel}</Badge>
+                      {(profile.allowed_cost_modes ?? []).length === 0 ? (
+                        <Badge variant='outline'>{t('All cost modes')}</Badge>
+                      ) : (
+                        profile.allowed_cost_modes?.map((costMode) => (
+                          <Badge key={costMode} variant='outline'>
+                            {costModeLabels[costMode]}
+                          </Badge>
+                        ))
+                      )}
+                      {summary ? (
+                        <>
+                          <Badge variant='outline'>
+                            {t('Matched models: {{matched}}/{{total}}', {
+                              matched: summary.matched_models,
+                              total: summary.models,
+                            })}
+                          </Badge>
+                          <Badge variant='outline'>
+                            {t('Matched targets: {{matched}}/{{total}}', {
+                              matched: summary.matched_targets,
+                              total: summary.targets,
+                            })}
+                          </Badge>
+                          <Badge
+                            variant={
+                              summary.stale_exclusions > 0
+                                ? 'warning'
+                                : 'outline'
+                            }
+                          >
+                            {t('Stale exclusions: {{count}}', {
+                              count: summary.stale_exclusions,
+                            })}
+                          </Badge>
+                          {summary.matched_targets === 0 ? (
+                            <span className='text-warning flex items-center gap-1 text-xs font-medium'>
+                              <AlertTriangle
+                                className='size-3.5'
+                                aria-hidden='true'
+                              />
+                              {t('No compatible targets')}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  )
+                },
               },
               {
                 id: 'description',
@@ -674,7 +974,7 @@ function GroupPricingTable({
                       variant='ghost'
                       size='sm'
                       onClick={() => onShowDetail(row.name.trim())}
-                      disabled={!row.name.trim()}
+                      disabled={disabled || !row.name.trim()}
                       aria-label={t('Details')}
                     >
                       <Info className='h-4 w-4' />
@@ -682,8 +982,11 @@ function GroupPricingTable({
                     <Button
                       variant='ghost'
                       size='sm'
-                      onClick={() => removeRow(row._id)}
-                      aria-label={t('Delete')}
+                      onClick={() => setPendingDelete(row)}
+                      disabled={disabled}
+                      aria-label={t('Delete group {{name}}', {
+                        name: row.name,
+                      })}
                     >
                       <Trash2 className='h-4 w-4' />
                     </Button>
@@ -700,6 +1003,33 @@ function GroupPricingTable({
               })}
             </p>
           )}
+
+          <ConfirmDialog
+            open={pendingStatus !== null}
+            onOpenChange={(open) => {
+              if (!open) setPendingStatus(null)
+            }}
+            title={t('Disable default group?')}
+            desc={t(
+              'Disabling the default group blocks requests from accounts that still use it.'
+            )}
+            handleConfirm={confirmStatusChange}
+          />
+
+          <ConfirmDialog
+            open={pendingDelete !== null}
+            onOpenChange={(open) => {
+              if (!open) setPendingDelete(null)
+            }}
+            title={t('Delete group')}
+            desc={t(
+              'Delete group {{name}} and all of its pricing and routing settings?',
+              { name: pendingDelete?.name.trim() ?? '' }
+            )}
+            confirmText={t('Confirm delete')}
+            destructive
+            handleConfirm={confirmDelete}
+          />
         </div>
       </CardContent>
     </Card>
@@ -1161,8 +1491,10 @@ type GroupDetailSheetProps = {
   autoGroups: string[]
   groupSpecialUsableGroup: string
   groupRoutingRequirements: string
+  routingProfileSummary?: GroupRoutingProfileSummary
   disabled: boolean
   onChange: (field: string, value: string) => void
+  onViewTargets: (groupName: string) => void
 }
 
 type VisibilityRule = {
@@ -1199,10 +1531,6 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
       props.groupSpecialUsableGroup,
       { fallback: {}, silent: true }
     )
-    const routingRequirements = safeJsonParse<
-      Record<string, GroupRoutingRequirements>
-    >(props.groupRoutingRequirements, { fallback: {}, silent: true })
-
     // Overrides that apply when other user groups bill as this group
     const incomingOverrides: { userGroup: string; ratio: number }[] = []
     for (const [userGroup, overrides] of Object.entries(overrideMap)) {
@@ -1234,6 +1562,7 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
     const autoIndex = props.autoGroups.indexOf(name)
 
     return {
+      groupName: name,
       ratio: entry?.ratio,
       topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : null,
       selectable: Object.hasOwn(usableMap, name),
@@ -1242,7 +1571,6 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
       outgoingOverrides,
       visibilityRules,
       autoIndex,
-      requireRealPerson: routingRequirements[name]?.require_real_person === true,
     }
   }, [
     name,
@@ -1252,7 +1580,6 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
     props.groupGroupRatio,
     props.autoGroups,
     props.groupSpecialUsableGroup,
-    props.groupRoutingRequirements,
   ])
 
   return (
@@ -1323,25 +1650,16 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
               <h3 className='text-sm font-semibold'>
                 {t('Group routing requirements')}
               </h3>
-              <div className='flex items-center justify-between gap-4 rounded-md border px-3 py-2.5'>
-                <span className='text-sm'>{t('Require real person')}</span>
-                <Switch
-                  checked={detail.requireRealPerson}
-                  disabled={props.disabled}
-                  onCheckedChange={(checked) => {
-                    if (!name) return
-                    props.onChange(
-                      'GroupRoutingRequirements',
-                      updateGroupRoutingRequirements(
-                        props.groupRoutingRequirements,
-                        name,
-                        checked
-                      )
-                    )
-                  }}
-                  aria-label={t('Require real person')}
-                />
-              </div>
+              <GroupRoutingProfileEditor
+                groupName={detail.groupName}
+                groupRoutingRequirements={props.groupRoutingRequirements}
+                summary={props.routingProfileSummary}
+                disabled={props.disabled}
+                onChange={(value) =>
+                  props.onChange('GroupRoutingRequirements', value)
+                }
+                onViewTargets={() => props.onViewTargets(detail.groupName)}
+              />
             </section>
 
             <section className='space-y-2'>

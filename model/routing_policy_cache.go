@@ -137,7 +137,7 @@ func loadAllRoutingPolicySnapshots() (map[RoutingPolicyKey]modelrouting.PolicySn
 		targetsByPolicy[target.PolicyID] = append(targetsByPolicy[target.PolicyID], target)
 	}
 	for _, policy := range policies {
-		snapshot, err := routingPolicySnapshotFromRows(policy, targetsByPolicy[policy.ID])
+		snapshot, err := RoutingPolicySnapshotFromRows(policy, targetsByPolicy[policy.ID])
 		if err != nil {
 			return nil, err
 		}
@@ -163,14 +163,14 @@ func loadRoutingPolicySnapshot(key RoutingPolicyKey) (modelrouting.PolicySnapsho
 		Find(&targets).Error; err != nil {
 		return modelrouting.PolicySnapshot{}, false, err
 	}
-	snapshot, err := routingPolicySnapshotFromRows(policy, targets)
+	snapshot, err := RoutingPolicySnapshotFromRows(policy, targets)
 	if err != nil {
 		return modelrouting.PolicySnapshot{}, false, err
 	}
 	return snapshot, true, nil
 }
 
-func routingPolicySnapshotFromRows(policy RoutingPolicy, targets []RouteTarget) (modelrouting.PolicySnapshot, error) {
+func RoutingPolicySnapshotFromRows(policy RoutingPolicy, targets []RouteTarget) (modelrouting.PolicySnapshot, error) {
 	snapshot := modelrouting.PolicySnapshot{
 		ID:             policy.ID,
 		GroupName:      policy.GroupName,

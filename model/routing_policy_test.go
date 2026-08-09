@@ -1,6 +1,8 @@
 package model_test
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -195,6 +197,311 @@ func TestListRoutingCandidatesUsesExactAbilityAndOmitsSecrets(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, strings.ToLower(string(encoded)), "secret")
 	assert.NotContains(t, strings.ToLower(string(encoded)), `"key"`)
+}
+
+func TestListEnabledRoutingPoliciesByGroupLoadsAllTargetsInStableOrder(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RoutingPolicy{}, &model.RouteTarget{}))
+	policies := []model.RoutingPolicy{
+		{ID: 30, GroupName: "default", Model: modelrouting.Seedance20Fast, Enabled: true, DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9"},
+		{ID: 10, GroupName: "default", Model: modelrouting.Seedance20, Enabled: true, DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9"},
+		{ID: 20, GroupName: "default", Model: modelrouting.Seedance20Mini, Enabled: false, DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9"},
+		{ID: 40, GroupName: "other", Model: modelrouting.Seedance20, Enabled: true, DefaultResolution: "720p", DefaultDuration: 10, DefaultRatio: "16:9"},
+	}
+	require.NoError(t, db.Create(&policies).Error)
+	targets := []model.RouteTarget{
+		{ID: 4, PolicyID: 10, ChannelID: 12, Name: "later-channel", UpstreamModel: "model-d", CostVariantKey: "default", TargetPriority: 100, Enabled: true, Constraints: "{}"},
+		{ID: 3, PolicyID: 10, ChannelID: 11, Name: "lower-priority", UpstreamModel: "model-c", CostVariantKey: "default", TargetPriority: 50, Enabled: false, Constraints: "{}"},
+		{ID: 2, PolicyID: 10, ChannelID: 11, Name: "id-tie", UpstreamModel: "model-b", CostVariantKey: "default", TargetPriority: 100, Enabled: true, Constraints: "{}"},
+		{ID: 1, PolicyID: 10, ChannelID: 11, Name: "first", UpstreamModel: "model-a", CostVariantKey: "default", TargetPriority: 100, Enabled: true, Constraints: "{}"},
+		{ID: 5, PolicyID: 30, ChannelID: 13, Name: "fast", UpstreamModel: "model-fast", CostVariantKey: "default", TargetPriority: 100, Enabled: true, Constraints: "{}"},
+		{ID: 6, PolicyID: 20, ChannelID: 14, Name: "disabled-policy", UpstreamModel: "model-mini", CostVariantKey: "default", TargetPriority: 100, Enabled: true, Constraints: "{}"},
+	}
+	require.NoError(t, db.Create(&targets).Error)
+	queryCount := 0
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("count_routing_policy_queries", func(*gorm.DB) {
+		queryCount++
+	}))
+
+	loaded, err := model.ListEnabledRoutingPoliciesByGroup("default")
+	require.NoError(t, err)
+	assert.Equal(t, 2, queryCount)
+	require.Len(t, loaded, 2)
+	assert.Equal(t, []string{modelrouting.Seedance20, modelrouting.Seedance20Fast}, []string{loaded[0].Model, loaded[1].Model})
+	require.Len(t, loaded[0].Targets, 4)
+	assert.Equal(t, []int{1, 2, 3, 4}, []int{loaded[0].Targets[0].ID, loaded[0].Targets[1].ID, loaded[0].Targets[2].ID, loaded[0].Targets[3].ID})
+	assert.False(t, loaded[0].Targets[2].Enabled)
+}
+
+func TestGroupRoutingAvailabilityUsesEnabledSourceAbilitiesAndChannels(t *testing.T) {
+	for _, memoryCacheEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory_cache_%t", memoryCacheEnabled), func(t *testing.T) {
+			db := openRoutingTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+			previousMemoryCacheEnabled := common.MemoryCacheEnabled
+			common.MemoryCacheEnabled = memoryCacheEnabled
+			t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+			priority := int64(100)
+			weight := uint(10)
+			channels := []model.Channel{
+				{Id: 11, Name: "enabled", Key: "secret-enabled", Status: common.ChannelStatusEnabled, Group: "default", Models: modelrouting.Seedance20, Priority: &priority, Weight: &weight},
+				{Id: 12, Name: "disabled", Key: "secret-disabled", Status: common.ChannelStatusManuallyDisabled, Group: "default", Models: modelrouting.Seedance20, Priority: &priority, Weight: &weight},
+				{Id: 14, Name: "other-group", Key: "secret-other", Status: common.ChannelStatusEnabled, Group: "other", Models: modelrouting.Seedance20, Priority: &priority, Weight: &weight},
+				{Id: 15, Name: "disabled-ability", Key: "secret-disabled-ability", Status: common.ChannelStatusEnabled, Group: "default", Models: modelrouting.Seedance20, Priority: &priority, Weight: &weight},
+				{Id: 16, Name: "missing-ability", Key: "secret-missing-ability", Status: common.ChannelStatusEnabled, Group: "default", Models: modelrouting.Seedance20, Priority: &priority, Weight: &weight},
+			}
+			require.NoError(t, db.Create(&channels).Error)
+			abilities := []model.Ability{
+				{Group: "default", Model: modelrouting.Seedance20, ChannelId: 11, Enabled: true, Priority: &priority, Weight: weight},
+				{Group: "default", Model: modelrouting.Seedance20, ChannelId: 12, Enabled: false, Priority: &priority, Weight: weight},
+				{Group: "default", Model: modelrouting.Seedance20, ChannelId: 13, Enabled: true, Priority: &priority, Weight: weight},
+				{Group: "other", Model: modelrouting.Seedance20, ChannelId: 14, Enabled: true, Priority: &priority, Weight: weight},
+				{Group: "default", Model: modelrouting.Seedance20, ChannelId: 15, Enabled: false, Priority: &priority, Weight: weight},
+			}
+			require.NoError(t, db.Create(&abilities).Error)
+			if memoryCacheEnabled {
+				model.InitChannelCache()
+			}
+			queryCount := 0
+			require.NoError(t, db.Callback().Query().Before("gorm:query").Register("count_routing_availability_queries", func(*gorm.DB) {
+				queryCount++
+			}))
+
+			available, err := model.ListRoutingAvailability("default", []string{" " + modelrouting.Seedance20 + " ", modelrouting.Seedance20})
+			require.NoError(t, err)
+			if memoryCacheEnabled {
+				assert.Zero(t, queryCount)
+			} else {
+				assert.Equal(t, 2, queryCount)
+			}
+			assert.Equal(t, map[model.RoutingAvailabilityKey]struct{}{
+				{CanonicalModel: modelrouting.Seedance20, ChannelID: 11}: {},
+			}, available)
+		})
+	}
+}
+
+func TestGroupRoutingAvailabilityRecoversImmediatelyAfterChannelReenable(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+	priority := int64(100)
+	weight := uint(10)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 11, Name: "recoverable", Key: "secret", Status: common.ChannelStatusEnabled,
+		Group: "channel-only-group", Models: "channel-only-model", Priority: &priority, Weight: &weight,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelrouting.Seedance20, ChannelId: 11,
+		Enabled: true, Priority: &priority, Weight: weight,
+	}).Error)
+	model.InitChannelCache()
+	expected := map[model.RoutingAvailabilityKey]struct{}{
+		{CanonicalModel: modelrouting.Seedance20, ChannelID: 11}: {},
+	}
+
+	available, err := model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Equal(t, expected, available)
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusAutoDisabled, "test disable"))
+	available, err = model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Empty(t, available)
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	available, err = model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Equal(t, expected, available)
+	var ability model.Ability
+	require.NoError(t, db.First(&ability, "channel_id = ?", 11).Error)
+	assert.True(t, ability.Enabled)
+}
+
+func TestGroupRoutingAvailabilityDoesNotRecoverWhenAbilityEnableFails(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+	priority := int64(100)
+	weight := uint(10)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 11, Name: "ability-failure", Key: "secret", Status: common.ChannelStatusEnabled,
+		Priority: &priority, Weight: &weight,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelrouting.Seedance20, ChannelId: 11,
+		Enabled: true, Priority: &priority, Weight: weight,
+	}).Error)
+	model.InitChannelCache()
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusAutoDisabled, "test disable"))
+
+	forcedErr := errors.New("forced ability enable failure")
+	const callbackName = "test:group-routing-ability-enable-failure"
+	callbackRegistered := true
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "abilities" {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = db.Callback().Update().Remove(callbackName)
+		}
+	})
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	require.NoError(t, db.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+	available, err := model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Empty(t, available)
+	var ability model.Ability
+	require.NoError(t, db.First(&ability, "channel_id = ?", 11).Error)
+	assert.False(t, ability.Enabled)
+}
+
+func TestGroupRoutingAvailabilityRetriesAbilityEnableAfterTransientFailure(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+	priority := int64(100)
+	weight := uint(10)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 11, Name: "ability-retry", Key: "secret", Status: common.ChannelStatusEnabled,
+		Priority: &priority, Weight: &weight,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelrouting.Seedance20, ChannelId: 11,
+		Enabled: true, Priority: &priority, Weight: weight,
+	}).Error)
+	model.InitChannelCache()
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusAutoDisabled, "test disable"))
+
+	forcedErr := errors.New("forced transient ability enable failure")
+	const callbackName = "test:group-routing-ability-enable-retry"
+	callbackRegistered := true
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "abilities" {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = db.Callback().Update().Remove(callbackName)
+		}
+	})
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	require.NoError(t, db.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+
+	available, err := model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Empty(t, available)
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	available, err = model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Equal(t, map[model.RoutingAvailabilityKey]struct{}{
+		{CanonicalModel: modelrouting.Seedance20, ChannelID: 11}: {},
+	}, available)
+}
+
+func TestChannelReenableDoesNotRunFullChannelCacheRefreshPerChannel(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+	priority := int64(100)
+	weight := uint(10)
+	for channelID := 11; channelID <= 12; channelID++ {
+		require.NoError(t, db.Create(&model.Channel{
+			Id: channelID, Name: fmt.Sprintf("cache-refresh-%d", channelID), Key: "secret",
+			Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &weight,
+		}).Error)
+		require.NoError(t, db.Create(&model.Ability{
+			Group: "default", Model: modelrouting.Seedance20, ChannelId: channelID,
+			Enabled: true, Priority: &priority, Weight: weight,
+		}).Error)
+	}
+	model.InitChannelCache()
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusAutoDisabled, "test disable"))
+	require.True(t, model.UpdateChannelStatus(12, "", common.ChannelStatusAutoDisabled, "test disable"))
+
+	channelQueryCount := 0
+	const callbackName = "test:group-routing-channel-refresh-count"
+	callbackRegistered := true
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "channels" {
+			channelQueryCount++
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = db.Callback().Query().Remove(callbackName)
+		}
+	})
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	require.True(t, model.UpdateChannelStatus(12, "", common.ChannelStatusEnabled, ""))
+
+	assert.Equal(t, 2, channelQueryCount)
+}
+
+func TestInitChannelCachePreservesLastValidSnapshotOnLoadFailure(t *testing.T) {
+	for _, failedTable := range []string{"channels", "abilities"} {
+		t.Run(failedTable, func(t *testing.T) {
+			db := openRoutingTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+			previousMemoryCacheEnabled := common.MemoryCacheEnabled
+			common.MemoryCacheEnabled = true
+			t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+			priority := int64(100)
+			weight := uint(10)
+			require.NoError(t, db.Create(&model.Channel{
+				Id: 11, Name: "cached", Key: "secret", Status: common.ChannelStatusEnabled,
+				Priority: &priority, Weight: &weight,
+			}).Error)
+			require.NoError(t, db.Create(&model.Ability{
+				Group: "default", Model: modelrouting.Seedance20, ChannelId: 11,
+				Enabled: true, Priority: &priority, Weight: weight,
+			}).Error)
+			model.InitChannelCache()
+
+			forcedErr := errors.New("forced " + failedTable + " query failure")
+			callbackName := "test:group-routing-cache-refresh-" + failedTable
+			callbackRegistered := true
+			require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+				if tx.Statement.Table == failedTable {
+					tx.AddError(forcedErr)
+				}
+			}))
+			t.Cleanup(func() {
+				if callbackRegistered {
+					_ = db.Callback().Query().Remove(callbackName)
+				}
+			})
+
+			model.InitChannelCache()
+			require.NoError(t, db.Callback().Query().Remove(callbackName))
+			callbackRegistered = false
+			available, err := model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+			require.NoError(t, err)
+			assert.Equal(t, map[model.RoutingAvailabilityKey]struct{}{
+				{CanonicalModel: modelrouting.Seedance20, ChannelID: 11}: {},
+			}, available)
+			cached, err := model.CacheGetChannel(11)
+			require.NoError(t, err)
+			assert.Equal(t, "cached", cached.Name)
+		})
+	}
 }
 
 func TestChannelDeletePathsCleanRoutingTargetsAndAbilities(t *testing.T) {

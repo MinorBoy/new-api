@@ -700,6 +700,12 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	updatedUser.Role = originUser.Role
+	if updatedUser.Group != originUser.Group {
+		if err := validateAssignableGroup(updatedUser.Group); err != nil {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
+	}
 	myRole := c.GetInt("role")
 	if !canManageTargetRole(myRole, originUser.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)

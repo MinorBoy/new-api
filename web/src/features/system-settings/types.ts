@@ -54,6 +54,18 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type GroupSettingsUpdateRequest = {
+  group_ratio: string
+  group_status: string
+  topup_group_ratio: string
+  user_usable_groups: string
+  group_group_ratio: string
+  auto_groups: string
+  default_use_auto_group: boolean
+  group_special_usable_group: string
+  group_routing_requirements: string
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -243,6 +255,7 @@ export type ModelSettings = {
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
+  'group_ratio_setting.group_status': string
   GroupRoutingRequirements: string
   RetryTimes: number
   ChannelDisableThreshold: string
@@ -301,6 +314,7 @@ export type BillingSettings = {
   AutoGroups: string
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
+  'group_ratio_setting.group_status': string
   GroupRoutingRequirements: string
   PayAddress: string
   EpayId: string

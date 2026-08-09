@@ -14,12 +14,12 @@ func TestFactsDoNotMarshalReferenceVideoURLs(t *testing.T) {
 	duration := 10
 	ratio := "16:9"
 	input := modelrouting.FactsInput{
-		CanonicalModel:    modelrouting.Seedance20,
-		OutputResolution:  &resolution,
-		DurationSeconds:   &duration,
-		AspectRatio:       &ratio,
-		ReferenceImages:   1,
-		ReferenceVideos:   1,
+		CanonicalModel:   modelrouting.Seedance20,
+		OutputResolution: &resolution,
+		DurationSeconds:  &duration,
+		AspectRatio:      &ratio,
+		ReferenceImages:  1,
+		ReferenceVideos:  1,
 		ReferenceVideoURLs: []string{
 			"https://assets.example/a.mp4?sig=secret&token=bearer-value",
 			"https://internal.example/b.mov",
@@ -41,10 +41,10 @@ func TestResolveFactsDoesNotCopyReferenceVideoURLs(t *testing.T) {
 	duration := 10
 	ratio := "16:9"
 	input := modelrouting.FactsInput{
-		CanonicalModel:    modelrouting.Seedance20,
-		OutputResolution:  &resolution,
-		DurationSeconds:   &duration,
-		AspectRatio:       &ratio,
+		CanonicalModel:     modelrouting.Seedance20,
+		OutputResolution:   &resolution,
+		DurationSeconds:    &duration,
+		AspectRatio:        &ratio,
 		ReferenceVideoURLs: []string{"https://assets.example/a.mp4?sig=secret"},
 	}
 
@@ -66,10 +66,10 @@ func TestAuditDoesNotMarshalReferenceVideoURLs(t *testing.T) {
 	duration := 10
 	ratio := "16:9"
 	facts, err := modelrouting.ResolveFacts("group", modelrouting.FactsInput{
-		CanonicalModel:    modelrouting.Seedance20,
-		OutputResolution:  &resolution,
-		DurationSeconds:   &duration,
-		AspectRatio:       &ratio,
+		CanonicalModel:     modelrouting.Seedance20,
+		OutputResolution:   &resolution,
+		DurationSeconds:    &duration,
+		AspectRatio:        &ratio,
 		ReferenceVideoURLs: []string{"https://assets.example/secret.mp4?sig=token"},
 	}, modelrouting.Defaults{
 		OutputResolution: "720p",
@@ -93,4 +93,22 @@ func TestAuditDoesNotMarshalReferenceVideoURLs(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(body), "assets.example")
 	assert.NotContains(t, string(body), "sig=token")
+}
+
+func TestAuditMarshalsDynamicProfileDiagnosticsWithoutPrivateFacts(t *testing.T) {
+	audit := modelrouting.Audit{
+		PolicyID:              7,
+		SourceGroup:           "default",
+		ProfileMismatchCounts: map[string]int{"cost_mode_mismatch": 2},
+		Facts: modelrouting.Facts{
+			GroupName:      "客户A",
+			CanonicalModel: modelrouting.Seedance20,
+		},
+	}
+
+	body, err := common.Marshal(audit)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"source_group":"default"`)
+	assert.Contains(t, string(body), `"profile_mismatch_counts":{"cost_mode_mismatch":2}`)
+	assert.NotContains(t, string(body), "reference_video_urls")
 }

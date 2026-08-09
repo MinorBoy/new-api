@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/model"
@@ -14,6 +15,9 @@ import (
 func GetGroups(c *gin.Context) {
 	groupNames := make([]string, 0)
 	for groupName := range ratio_setting.GetGroupRatioCopy() {
+		if !ratio_setting.IsGroupEnabled(groupName) {
+			continue
+		}
 		groupNames = append(groupNames, groupName)
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -21,6 +25,16 @@ func GetGroups(c *gin.Context) {
 		"message": "",
 		"data":    groupNames,
 	})
+}
+
+func validateAssignableGroup(group string) error {
+	if group == "" || group == "auto" {
+		return nil
+	}
+	if !ratio_setting.ContainsGroupRatio(group) || !ratio_setting.IsGroupEnabled(group) {
+		return fmt.Errorf("分组 %s 不可用", group)
+	}
+	return nil
 }
 
 func GetUserGroups(c *gin.Context) {

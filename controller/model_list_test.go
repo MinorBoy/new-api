@@ -64,6 +64,23 @@ func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func seedModelListAbility(t *testing.T, db *gorm.DB, group string, modelNames ...string) {
+	t.Helper()
+	priority := int64(100)
+	weight := uint(10)
+	const channelID = 9001
+	require.NoError(t, db.Create(&model.Channel{
+		Id: channelID, Type: constant.ChannelTypeOpenAI, Name: "model-list", Key: "secret",
+		Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &weight,
+	}).Error)
+	for _, modelName := range modelNames {
+		require.NoError(t, db.Create(&model.Ability{
+			Group: group, Model: modelName, ChannelId: channelID, Enabled: true,
+			Priority: &priority, Weight: weight,
+		}).Error)
+	}
+}
+
 func initModelListColumnNames(t *testing.T) {
 	t.Helper()
 
@@ -551,7 +568,8 @@ func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 		modelrouting.Seedance20:     `tier("base", p * 1 + c * 2)`,
 		modelrouting.Seedance20Fast: "",
 	})
-	setupModelListControllerTestDB(t)
+	db := setupModelListControllerTestDB(t)
+	seedModelListAbility(t, db, "default", modelrouting.Seedance20)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

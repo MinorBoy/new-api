@@ -49,6 +49,128 @@ type RoutingCandidateChannel struct {
 	Weight   uint   `json:"weight"`
 }
 
+type RoutingAvailabilityKey struct {
+	CanonicalModel string
+	ChannelID      int
+}
+
+func ListEnabledRoutingPoliciesByGroup(groupName string) ([]RoutingPolicy, error) {
+	return ListEnabledRoutingPoliciesByGroupWithDB(DB, groupName)
+}
+
+func ListEnabledRoutingPoliciesByGroupWithDB(db *gorm.DB, groupName string) ([]RoutingPolicy, error) {
+	var policies []RoutingPolicy
+	if err := db.Where("group_name = ? AND enabled = ?", groupName, true).
+		Order("model ASC").
+		Order("id ASC").
+		Find(&policies).Error; err != nil {
+		return nil, err
+	}
+	if len(policies) == 0 {
+		return policies, nil
+	}
+
+	policyIDs := make([]int, 0, len(policies))
+	policiesByID := make(map[int]*RoutingPolicy, len(policies))
+	for index := range policies {
+		policyIDs = append(policyIDs, policies[index].ID)
+		policiesByID[policies[index].ID] = &policies[index]
+	}
+	var targets []RouteTarget
+	if err := db.Where("policy_id IN ?", policyIDs).
+		Order("policy_id ASC").
+		Order("channel_id ASC").
+		Order("target_priority DESC").
+		Order("id ASC").
+		Find(&targets).Error; err != nil {
+		return nil, err
+	}
+	for _, target := range targets {
+		policiesByID[target.PolicyID].Targets = append(policiesByID[target.PolicyID].Targets, target)
+	}
+	return policies, nil
+}
+
+func ListRoutingAvailability(groupName string, canonicalModels []string) (map[RoutingAvailabilityKey]struct{}, error) {
+	if common.MemoryCacheEnabled {
+		return listRoutingAvailabilityFromCache(groupName, canonicalModels), nil
+	}
+	return ListRoutingAvailabilityWithDB(DB, groupName, canonicalModels)
+}
+
+func ListRoutingAvailabilityWithDB(db *gorm.DB, groupName string, canonicalModels []string) (map[RoutingAvailabilityKey]struct{}, error) {
+	available := make(map[RoutingAvailabilityKey]struct{})
+	models := make([]string, 0, len(canonicalModels))
+	modelSet := make(map[string]struct{}, len(canonicalModels))
+	for _, modelName := range canonicalModels {
+		normalized := modelrouting.NormalizeCanonicalModel(modelName)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := modelSet[normalized]; exists {
+			continue
+		}
+		modelSet[normalized] = struct{}{}
+		models = append(models, normalized)
+	}
+	if groupName == "" || len(models) == 0 {
+		return available, nil
+	}
+
+	var abilities []Ability
+	if err := db.Select("model", "channel_id").
+		Where(commonGroupCol+" = ? AND model IN ? AND enabled = ?", groupName, models, true).
+		Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	if len(abilities) == 0 {
+		return available, nil
+	}
+	channelIDs := make([]int, 0, len(abilities))
+	channelIDSet := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, exists := channelIDSet[ability.ChannelId]; exists {
+			continue
+		}
+		channelIDSet[ability.ChannelId] = struct{}{}
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+	var enabledChannelIDs []int
+	if err := db.Model(&Channel{}).
+		Where("id IN ? AND status = ?", channelIDs, common.ChannelStatusEnabled).
+		Pluck("id", &enabledChannelIDs).Error; err != nil {
+		return nil, err
+	}
+	enabledChannels := make(map[int]struct{}, len(enabledChannelIDs))
+	for _, channelID := range enabledChannelIDs {
+		enabledChannels[channelID] = struct{}{}
+	}
+	for _, ability := range abilities {
+		if _, enabled := enabledChannels[ability.ChannelId]; !enabled {
+			continue
+		}
+		canonicalModel := modelrouting.NormalizeCanonicalModel(ability.Model)
+		available[RoutingAvailabilityKey{CanonicalModel: canonicalModel, ChannelID: ability.ChannelId}] = struct{}{}
+	}
+	return available, nil
+}
+
+func listRoutingAvailabilityFromCache(groupName string, canonicalModels []string) map[RoutingAvailabilityKey]struct{} {
+	available := make(map[RoutingAvailabilityKey]struct{})
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	for _, modelName := range canonicalModels {
+		canonicalModel := modelrouting.NormalizeCanonicalModel(modelName)
+		if canonicalModel == "" {
+			continue
+		}
+		for _, channelID := range group2model2channels[groupName][canonicalModel] {
+			available[RoutingAvailabilityKey{CanonicalModel: canonicalModel, ChannelID: channelID}] = struct{}{}
+		}
+	}
+	return available
+}
+
 func ListRoutingPolicies(groupName, canonicalModel string, channelID, offset, limit int) ([]RoutingPolicy, int64, error) {
 	query := DB.Model(&RoutingPolicy{})
 	if groupName != "" {

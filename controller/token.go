@@ -256,6 +256,10 @@ func AddToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	if err := validateAssignableGroup(token.Group); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	// 非无限额度时，检查额度值是否超出有效范围
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
@@ -357,6 +361,12 @@ func UpdateToken(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if token.Group != cleanToken.Group {
+		if err := validateAssignableGroup(token.Group); err != nil {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
 	}
 	if token.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {

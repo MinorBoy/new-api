@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +30,10 @@ func InitChannelCache() {
 	newChannelId2channel := make(map[int]*Channel)
 	newChannel2advancedCustomConfig := make(map[int]*dto.AdvancedCustomConfig)
 	var channels []*Channel
-	DB.Find(&channels)
+	if err := DB.Find(&channels).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to load channels for cache: %v", err))
+		return
+	}
 	for _, channel := range channels {
 		newChannelId2channel[channel.Id] = channel
 		if channel.Type == constant.ChannelTypeAdvancedCustom {
@@ -41,29 +43,26 @@ func InitChannelCache() {
 		}
 	}
 	var abilities []*Ability
-	DB.Find(&abilities)
-	groups := make(map[string]bool)
-	for _, ability := range abilities {
-		groups[ability.Group] = true
+	if err := DB.Where("enabled = ?", true).Find(&abilities).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to load abilities for channel cache: %v", err))
+		return
 	}
 	newGroup2model2channels := make(map[string]map[string][]int)
-	for group := range groups {
-		newGroup2model2channels[group] = make(map[string][]int)
-	}
-	for _, channel := range channels {
+	for _, ability := range abilities {
+		channel, exists := newChannelId2channel[ability.ChannelId]
+		if !exists {
+			continue
+		}
 		if channel.Status != common.ChannelStatusEnabled {
 			continue // skip disabled channels
 		}
-		groups := strings.Split(channel.Group, ",")
-		for _, group := range groups {
-			models := strings.Split(channel.Models, ",")
-			for _, model := range models {
-				if _, ok := newGroup2model2channels[group][model]; !ok {
-					newGroup2model2channels[group][model] = make([]int, 0)
-				}
-				newGroup2model2channels[group][model] = append(newGroup2model2channels[group][model], channel.Id)
-			}
+		if _, exists := newGroup2model2channels[ability.Group]; !exists {
+			newGroup2model2channels[ability.Group] = make(map[string][]int)
 		}
+		newGroup2model2channels[ability.Group][ability.Model] = append(
+			newGroup2model2channels[ability.Group][ability.Model],
+			ability.ChannelId,
+		)
 	}
 
 	// sort by priority
@@ -290,6 +289,62 @@ func CacheUpdateChannelStatus(id int, status int) {
 						break
 					}
 				}
+			}
+		}
+	}
+}
+
+// cacheRestoreChannelAbilities re-adds enabled abilities after a channel is
+// re-enabled without rebuilding the complete channel cache.
+func cacheRestoreChannelAbilities(id int) {
+	if !common.MemoryCacheEnabled {
+		return
+	}
+	var abilities []*Ability
+	if err := DB.Where("channel_id = ? AND enabled = ?", id, true).Find(&abilities).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to restore abilities for channel %d: %v", id, err))
+		return
+	}
+
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	channel, exists := channelsIDM[id]
+	if !exists {
+		return
+	}
+	for group, model2channels := range group2model2channels {
+		for model, channels := range model2channels {
+			filtered := channels[:0]
+			for _, channelID := range channels {
+				if channelID != id {
+					filtered = append(filtered, channelID)
+				}
+			}
+			if len(filtered) == 0 {
+				delete(model2channels, model)
+			} else {
+				model2channels[model] = filtered
+			}
+		}
+		if len(model2channels) == 0 {
+			delete(group2model2channels, group)
+		}
+	}
+	if channel.Status == common.ChannelStatusEnabled {
+		for _, ability := range abilities {
+			if _, exists := group2model2channels[ability.Group]; !exists {
+				group2model2channels[ability.Group] = make(map[string][]int)
+			}
+			group2model2channels[ability.Group][ability.Model] = append(
+				group2model2channels[ability.Group][ability.Model], id,
+			)
+		}
+		for group, model2channels := range group2model2channels {
+			for model, channels := range model2channels {
+				sort.SliceStable(channels, func(i, j int) bool {
+					return channelsIDM[channels[i]].GetPriority() > channelsIDM[channels[j]].GetPriority()
+				})
+				group2model2channels[group][model] = channels
 			}
 		}
 	}

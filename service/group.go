@@ -3,7 +3,9 @@ package service
 import (
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
@@ -30,8 +32,13 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 			}
 		}
 		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup
-		if _, ok := groupsCopy[userGroup]; !ok {
+		if _, ok := groupsCopy[userGroup]; !ok && ratio_setting.IsGroupEnabled(userGroup) {
 			groupsCopy[userGroup] = "用户分组"
+		}
+	}
+	for group := range groupsCopy {
+		if !ratio_setting.IsGroupEnabled(group) {
+			delete(groupsCopy, group)
 		}
 	}
 	return groupsCopy
@@ -59,12 +66,56 @@ func GetGroupsEnabledModels(groups []string) []string {
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
 	for _, group := range groups {
-		for _, modelName := range model.GetGroupEnabledModels(group) {
+		for _, modelName := range GetGroupEnabledModelsForRouting(group) {
 			if _, ok := seen[modelName]; !ok {
 				seen[modelName] = struct{}{}
 				models = append(models, modelName)
 			}
 		}
+	}
+	return models
+}
+
+func GetGroupEnabledModelsForRouting(group string) []string {
+	if !ratio_setting.IsGroupEnabled(group) {
+		return []string{}
+	}
+	profile := ratio_setting.GetGroupRoutingRequirements(group)
+	if !profile.IsDynamic() {
+		return model.GetGroupEnabledModels(group)
+	}
+	if profile.Status != ratio_setting.GroupRoutingProfileActive {
+		return []string{}
+	}
+	policies, err := model.ListEnabledRoutingPoliciesByGroup(profile.RoutingSource)
+	if err != nil {
+		common.SysError("list dynamic profile models: " + err.Error())
+		return []string{}
+	}
+	evaluations, err := ResolveGroupRoutingProfilePolicies(profile, policies)
+	if err != nil {
+		common.SysError("evaluate dynamic profile models: " + err.Error())
+		return []string{}
+	}
+	return matchedProfileModels(evaluations)
+}
+
+func matchedProfileModels(evaluations []GroupRoutingProfileEvaluation) []string {
+	models := make([]string, 0, len(evaluations))
+	seen := make(map[string]struct{}, len(evaluations))
+	for _, evaluation := range evaluations {
+		if len(evaluation.Snapshot.TargetsByChannel) == 0 {
+			continue
+		}
+		modelName := modelrouting.NormalizeCanonicalModel(evaluation.Snapshot.CanonicalModel)
+		if modelName == "" {
+			continue
+		}
+		if _, exists := seen[modelName]; exists {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		models = append(models, modelName)
 	}
 	return models
 }

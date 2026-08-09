@@ -217,14 +217,17 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		facts, factsOK := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts)
 		if policyID > 0 && targetID > 0 && routeUpstreamModel != "" && variantErr == nil && factsOK {
 			mismatchCounts, _ := common.GetContextKeyType[map[modelrouting.MismatchReason]int](c, constant.ContextKeyRoutingMismatchCounts)
+			profileMismatchCounts, _ := common.GetContextKeyType[map[string]int](c, constant.ContextKeyRoutingProfileMismatchCounts)
 			routing = &modelrouting.Audit{
-				PolicyID:       policyID,
-				TargetID:       targetID,
-				TargetName:     common.GetContextKeyString(c, constant.ContextKeyRoutingTargetName),
-				UpstreamModel:  routeUpstreamModel,
-				CostVariantKey: routeCostVariant,
-				Facts:          facts,
-				MismatchCounts: mismatchCounts,
+				PolicyID:              policyID,
+				TargetID:              targetID,
+				TargetName:            common.GetContextKeyString(c, constant.ContextKeyRoutingTargetName),
+				UpstreamModel:         routeUpstreamModel,
+				CostVariantKey:        routeCostVariant,
+				Facts:                 facts,
+				MismatchCounts:        mismatchCounts,
+				SourceGroup:           common.GetContextKeyString(c, constant.ContextKeyRoutingSourceGroup),
+				ProfileMismatchCounts: profileMismatchCounts,
 			}
 			upstreamModelName = routeUpstreamModel
 		}

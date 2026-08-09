@@ -18,11 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
+import { filenameFromContentDisposition } from './lib/catalog-export'
 import type {
   CostAccountingApiResponse,
   CostAccountingSettings,
   CostAnomalyPage,
   CostAnomalyParams,
+  CostCatalogDetail,
+  CostCatalogExportResult,
+  CostCatalogPage,
+  CostCatalogParams,
   CostCoverageItem,
   CostCoverageParams,
   CostPreviewRequest,
@@ -59,6 +64,11 @@ export const costAccountingQueryKeys = {
   anomalies: () => [...costAccountingQueryKeys.all, 'anomalies'] as const,
   anomalyList: (params: CostAnomalyParams = {}) =>
     [...costAccountingQueryKeys.anomalies(), params] as const,
+  catalogs: () => [...costAccountingQueryKeys.all, 'catalog'] as const,
+  catalog: (params: CostCatalogParams) =>
+    [...costAccountingQueryKeys.catalogs(), params] as const,
+  catalogDetail: (id: number) =>
+    [...costAccountingQueryKeys.catalogs(), id] as const,
   reports: () => [...costAccountingQueryKeys.all, 'reports'] as const,
   reportSummary: (params: CostReportParams = {}) =>
     [...costAccountingQueryKeys.reports(), 'summary', params] as const,
@@ -229,4 +239,47 @@ export async function getCostReportBreakdown(
     CostAccountingApiResponse<CostProfitBreakdown[]>
   >(`${COST_ACCOUNTING_PATH}/reports/breakdown`, { params })
   return response.data
+}
+
+export async function getSupplierCostCatalog(
+  params: CostCatalogParams
+): Promise<CostAccountingApiResponse<CostCatalogPage>> {
+  const response = await api.get<CostAccountingApiResponse<CostCatalogPage>>(
+    `${COST_ACCOUNTING_PATH}/catalog`,
+    { params }
+  )
+  return response.data
+}
+
+export async function getSupplierCostCatalogDetail(
+  id: number
+): Promise<CostAccountingApiResponse<CostCatalogDetail>> {
+  const response = await api.get<CostAccountingApiResponse<CostCatalogDetail>>(
+    `${COST_ACCOUNTING_PATH}/catalog/${id}`
+  )
+  return response.data
+}
+
+export async function exportSupplierCostCatalog(
+  scope: 'filtered' | 'all',
+  params: Omit<CostCatalogParams, 'page' | 'page_size'>
+): Promise<CostCatalogExportResult> {
+  const response = await api.get<Blob>(
+    `${COST_ACCOUNTING_PATH}/catalog/export`,
+    { params: { ...params, scope }, responseType: 'blob' }
+  )
+  const disposition = response.headers['content-disposition']
+  return {
+    blob: response.data,
+    filename: filenameFromContentDisposition(
+      typeof disposition === 'string' ? disposition : undefined,
+      'supplier-cost-catalog.csv'
+    ),
+    rowCount: validExportRowCount(response.headers['x-exported-row-count']),
+  }
+}
+
+function validExportRowCount(value: unknown): number {
+  const count = Number(value)
+  return Number.isSafeInteger(count) && count >= 0 ? count : 0
 }

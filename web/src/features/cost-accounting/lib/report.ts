@@ -16,10 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { CostCoverageItem, CostReportParams } from '../types'
+import type {
+  CostCatalogSort,
+  CostCoverageItem,
+  CostMode,
+  CostReportParams,
+  CostRuleStatus,
+} from '../types'
 
 export type CostAccountingSearch = {
-  tab?: 'profit' | 'anomalies'
+  tab?: 'profit' | 'catalog' | 'anomalies'
   timeBasis?: 'profit_recognized_at' | 'requested_at'
   startTime?: number
   endTime?: number
@@ -30,6 +36,16 @@ export type CostAccountingSearch = {
   usingGroup?: string
   billingSource?: string
   status?: string
+  catalogChannelId?: number
+  catalogModel?: string
+  catalogCostMode?: CostMode
+  catalogStatus?: CostRuleStatus | 'all'
+  catalogCurrency?: string
+  catalogSource?: string
+  catalogPage?: number
+  catalogPageSize?: 25 | 50 | 100
+  catalogSort?: CostCatalogSort
+  catalogOrder?: 'asc' | 'desc'
 }
 
 function optionalText(value: string | undefined): string | undefined {

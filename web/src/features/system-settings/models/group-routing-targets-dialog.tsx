@@ -221,7 +221,7 @@ export function GroupRoutingTargetsDialog(
             <TableBody>
               {result.items.map((target) => (
                 <TargetTableRow
-                  key={target.target_key}
+                  key={target.row_key}
                   target={target}
                   excluded={excludedTargetKeys.has(target.target_key)}
                   disabled={props.disabled}
@@ -234,7 +234,7 @@ export function GroupRoutingTargetsDialog(
         <div className='divide-y lg:hidden'>
           {result.items.map((target) => (
             <TargetMobileRow
-              key={target.target_key}
+              key={target.row_key}
               target={target}
               excluded={excludedTargetKeys.has(target.target_key)}
               disabled={props.disabled}

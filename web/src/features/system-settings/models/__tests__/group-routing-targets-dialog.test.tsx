@@ -24,6 +24,8 @@ import { Window } from 'happy-dom'
 import { createInstance } from 'i18next'
 import type { Container, Root } from 'react-dom/client'
 
+import type { GroupRoutingProfileTargetPage } from '../group-routing-profile-api'
+
 const browserWindow = new Window({ url: 'http://localhost/' })
 browserWindow.document.write('<!doctype html><html><body></body></html>')
 Object.defineProperty(browserWindow.document, 'compatMode', {
@@ -91,7 +93,7 @@ type RequestBody = {
 
 const requests: RequestBody[] = []
 let cleanupFailure = false
-const targetItems = [
+const targetItems: GroupRoutingProfileTargetPage['items'] = [
   {
     model: 'seedance-2.0',
     channel_id: 23,
@@ -104,6 +106,7 @@ const targetItems = [
     cost_mode: 'per_duration',
     cost_rule_id: 101,
     cost_rule_version: 1,
+    row_key: 'grt_match:1',
     target_key: 'grt_match',
     status: 'matched',
     issues: [],
@@ -120,13 +123,18 @@ const targetItems = [
     cost_mode: 'per_request',
     cost_rule_id: 102,
     cost_rule_version: 1,
+    row_key: 'grt_mismatch:2',
     target_key: 'grt_mismatch',
     status: 'real_person_mismatch',
     issues: ['real_person_mismatch'],
   },
-] as const
+]
+let responseItems = targetItems
 
-function responseData(items = targetItems, staleExclusions = 2) {
+function responseData(
+  items: GroupRoutingProfileTargetPage['items'] = targetItems,
+  staleExclusions = 2
+) {
   return {
     success: true,
     data: {
@@ -161,7 +169,7 @@ api.defaults.adapter = async (config) => {
     throw new Error('cleanup failed')
   }
   return {
-    data: responseData(),
+    data: responseData(responseItems),
     status: 200,
     statusText: 'OK',
     headers: {},
@@ -186,6 +194,7 @@ beforeEach(() => {
   browserWindow.document.body.replaceChildren()
   requests.length = 0
   cleanupFailure = false
+  responseItems = targetItems
 })
 
 function findButton(name: string): HTMLButtonElement {
@@ -366,6 +375,81 @@ test('sends model filters to the preview endpoint', async () => {
     await waitForRequest((request) => request.model === 'seedance-pro')
   } finally {
     await unmountDialog(mounted)
+  }
+})
+
+test('replaces duplicate business-key rows after filtering', async () => {
+  const reactErrors: string[] = []
+  // eslint-disable-next-line no-console
+  const originalConsoleError = console.error
+  // eslint-disable-next-line no-console
+  console.error = (...args: unknown[]) => {
+    reactErrors.push(args.map(String).join(' '))
+  }
+  responseItems = [
+    {
+      ...targetItems[0],
+      channel_name: 'Old disabled channel',
+      row_key: 'grt_shared:old',
+      target_key: 'grt_shared',
+      status: 'target_disabled',
+      issues: ['target_disabled'],
+    },
+    {
+      ...targetItems[0],
+      channel_name: 'Current matched channel',
+      row_key: 'grt_shared:current',
+      target_key: 'grt_shared',
+    },
+  ]
+  let mounted: Awaited<ReturnType<typeof mountDialog>> | undefined
+  try {
+    mounted = await mountDialog()
+    await waitForText('Current matched channel')
+    responseItems = [
+      {
+        ...targetItems[0],
+        channel_name: 'Filtered matched channel',
+        row_key: 'grt_shared:current',
+        target_key: 'grt_shared',
+      },
+    ]
+    const modelInput = browserWindow.document.querySelector(
+      'input[aria-label="Filter by model"]'
+    )
+    assert.ok(modelInput instanceof browserWindow.HTMLInputElement)
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        browserWindow.HTMLInputElement.prototype,
+        'value'
+      )?.set
+      assert.ok(setter)
+      setter.call(modelInput, 'seedance-pro')
+      modelInput.dispatchEvent(
+        new browserWindow.Event('input', { bubbles: true })
+      )
+      modelInput.dispatchEvent(
+        new browserWindow.Event('change', { bubbles: true })
+      )
+    })
+    await waitForText('Filtered matched channel')
+
+    assert.equal(
+      browserWindow.document.querySelectorAll('tbody tr').length,
+      1
+    )
+    assert.doesNotMatch(
+      browserWindow.document.body.textContent ?? '',
+      /Old disabled channel/
+    )
+    assert.equal(
+      reactErrors.some((message) => message.includes('same key')),
+      false
+    )
+  } finally {
+    if (mounted) await unmountDialog(mounted)
+    // eslint-disable-next-line no-console
+    console.error = originalConsoleError
   }
 })
 

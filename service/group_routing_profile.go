@@ -102,6 +102,7 @@ type GroupRoutingProfileTargetView struct {
 	CostMode           types.CostMode             `json:"cost_mode,omitempty"`
 	CostRuleID         int64                      `json:"cost_rule_id,omitempty"`
 	CostRuleVersion    int                        `json:"cost_rule_version,omitempty"`
+	RowKey             string                     `json:"row_key"`
 	TargetKey          string                     `json:"target_key"`
 	Status             GroupRoutingTargetStatus   `json:"status"`
 	Issues             []GroupRoutingTargetStatus `json:"issues"`
@@ -607,9 +608,10 @@ func groupRoutingProfileTargetViews(evaluations []GroupRoutingProfileEvaluation,
 				CostMode:           target.CostMode,
 				CostRuleID:         target.CostRuleID,
 				CostRuleVersion:    target.CostVersion,
+				RowKey:             target.TargetKey + ":" + strconv.Itoa(target.Target.ID),
 				TargetKey:          target.TargetKey,
 				Status:             target.Status,
-				Issues:             append([]GroupRoutingTargetStatus(nil), target.Issues...),
+				Issues:             append([]GroupRoutingTargetStatus{}, target.Issues...),
 			})
 		}
 	}

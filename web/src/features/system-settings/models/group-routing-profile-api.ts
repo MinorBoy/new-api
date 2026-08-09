@@ -46,6 +46,7 @@ const groupRoutingProfileTargetSchema = z.object({
   cost_mode: groupCostModeSchema.optional(),
   cost_rule_id: z.number().int().positive().optional(),
   cost_rule_version: z.number().int().positive().optional(),
+  row_key: z.string(),
   target_key: z.string(),
   status: groupRoutingTargetStatusSchema,
   issues: z.array(groupRoutingTargetStatusSchema),

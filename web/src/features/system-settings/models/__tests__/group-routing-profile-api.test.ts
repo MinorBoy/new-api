@@ -25,6 +25,7 @@ const targetPage = {
       cost_mode: 'per_duration',
       cost_rule_id: 42,
       cost_rule_version: 2,
+      row_key: 'grt_target:42',
       target_key: 'grt_target',
       status: 'matched',
       issues: [],

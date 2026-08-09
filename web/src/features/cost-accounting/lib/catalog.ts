@@ -20,7 +20,7 @@ import Decimal from 'decimal.js'
 
 import dayjs from '@/lib/dayjs'
 
-import type { CostCatalogParams } from '../types'
+import type { CostCatalogItem, CostCatalogParams } from '../types'
 import type { CostAccountingSearch } from './report'
 
 const catalogPageResetFields = new Set<keyof CostAccountingSearch>([
@@ -114,4 +114,75 @@ export function formatCatalogTimestamp(value?: number): string {
     return ''
   }
   return dayjs.unix(value).format('YYYY-MM-DD HH:mm:ss')
+}
+
+type CatalogTranslate = (key: string) => string
+
+export function catalogPriceUnitLabel(
+  unit: string,
+  translate: CatalogTranslate
+): string {
+  const keys: Record<string, string> = {
+    per_request: 'Per request',
+    per_second: 'Per second',
+    per_million_tokens: 'Per 1M tokens',
+    per_million_completion_tokens: 'Per 1M completion tokens',
+    per_million_input_tokens: 'Per 1M input tokens',
+    per_million_output_tokens: 'Per 1M output tokens',
+  }
+  return translate(keys[unit] ?? unit)
+}
+
+export function formatCatalogItemPrices(
+  item: CostCatalogItem,
+  normalizedUSD: boolean,
+  translate: CatalogTranslate
+): string {
+  if (item.price_status !== 'available') {
+    return translate('Unavailable')
+  }
+  return item.prices
+    .map((price) =>
+      formatCatalogPrice(
+        normalizedUSD ? price.normalized_usd_amount : price.native_amount,
+        normalizedUSD ? 'USD' : item.currency,
+        catalogPriceUnitLabel(price.unit, translate)
+      )
+    )
+    .filter(Boolean)
+    .join('; ')
+}
+
+export function catalogCostModeLabel(
+  mode: CostCatalogItem['cost_mode'],
+  translate: CatalogTranslate
+): string {
+  const keys = {
+    free: 'Free',
+    per_request: 'Per request',
+    per_duration: 'Per duration',
+    per_token: 'Per token',
+  } as const
+  return translate(keys[mode])
+}
+
+export function catalogStatusLabel(
+  status: CostCatalogItem['status'],
+  translate: CatalogTranslate
+): string {
+  const keys = { active: 'Active', draft: 'Draft', retired: 'Retired' } as const
+  return translate(keys[status])
+}
+
+export function catalogBillingSemantics(
+  item: CostCatalogItem,
+  translate: CatalogTranslate
+): string {
+  const parts: string[] = []
+  if (item.charge_event) parts.push(item.charge_event)
+  if (item.meter_source) parts.push(item.meter_source)
+  if (item.token_mode) parts.push(item.token_mode)
+  return parts.length > 0
+    ? parts.map((value) => translate(value)).join(' · ')
+    : '—'
 }

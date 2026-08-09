@@ -48,6 +48,21 @@ export type CostAccountingSearch = {
   catalogOrder?: 'asc' | 'desc'
 }
 
+export const COST_ACCOUNTING_TABS = ['profit', 'catalog', 'anomalies'] as const
+
+export type CostAccountingTab = (typeof COST_ACCOUNTING_TABS)[number]
+
+export function isCostCatalogTab(tab: CostAccountingTab): boolean {
+  return tab === 'catalog'
+}
+
+export function updateCostAccountingTab(
+  search: CostAccountingSearch,
+  tab: CostAccountingTab
+): CostAccountingSearch {
+  return { ...search, tab }
+}
+
 function optionalText(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? ''
   return trimmed || undefined

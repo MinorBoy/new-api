@@ -25,6 +25,11 @@ import {
   formatCatalogTimestamp,
   updateCatalogSearch,
 } from '../catalog'
+import {
+  COST_ACCOUNTING_TABS,
+  isCostCatalogTab,
+  updateCostAccountingTab,
+} from '../report'
 
 test('maps catalog URL state to trimmed API parameters', () => {
   assert.deepEqual(
@@ -63,6 +68,25 @@ test('uses stable catalog URL defaults without profit filter leakage', () => {
     page_size: 50,
     sort_by: 'channel_name',
     sort_order: 'asc',
+  })
+})
+
+test('exposes the supplier catalog as the third cost-accounting tab', () => {
+  assert.deepEqual(COST_ACCOUNTING_TABS, ['profit', 'catalog', 'anomalies'])
+  assert.equal(isCostCatalogTab('catalog'), true)
+  assert.equal(isCostCatalogTab('profit'), false)
+})
+
+test('switching tabs preserves profit filters while catalog loading stays tab-scoped', () => {
+  const search = {
+    tab: 'profit' as const,
+    channelId: 91,
+    billableModel: 'vendor-model',
+    startTime: 1_735_689_600,
+  }
+  assert.deepEqual(updateCostAccountingTab(search, 'catalog'), {
+    ...search,
+    tab: 'catalog',
   })
 })
 

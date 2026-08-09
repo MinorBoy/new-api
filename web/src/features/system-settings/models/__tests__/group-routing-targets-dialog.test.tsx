@@ -286,6 +286,21 @@ async function unmountDialog(mounted: Awaited<ReturnType<typeof mountDialog>>) {
   mounted.container.remove()
 }
 
+test('uses half viewport width on desktop and near-full width on mobile', async () => {
+  const mounted = await mountDialog()
+  try {
+    const dialog = browserWindow.document.querySelector('[role="dialog"]')
+    assert.ok(dialog instanceof browserWindow.HTMLElement)
+    const classes = dialog.className.split(/\s+/)
+    assert.ok(classes.includes('w-[96vw]'))
+    assert.ok(classes.includes('max-w-[96vw]'))
+    assert.ok(classes.includes('sm:w-[50vw]'))
+    assert.ok(classes.includes('sm:max-w-[50vw]'))
+  } finally {
+    await unmountDialog(mounted)
+  }
+})
+
 test('excludes matched targets, restores excluded targets, and never force-includes mismatches', async () => {
   const mounted = await mountDialog()
   try {

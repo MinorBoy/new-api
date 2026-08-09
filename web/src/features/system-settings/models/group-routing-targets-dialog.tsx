@@ -291,7 +291,7 @@ export function GroupRoutingTargetsDialog(
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className='flex max-h-[88vh] w-[min(96vw,1400px)] max-w-none flex-col overflow-hidden p-0'>
+      <DialogContent className='flex max-h-[88vh] w-[96vw] max-w-[96vw] flex-col overflow-hidden p-0 sm:w-[50vw] sm:max-w-[50vw]'>
         <DialogHeader className='border-b px-5 py-4 pr-12'>
           <DialogTitle>
             {t('Adapted routing targets: {{group}}', {

@@ -19,7 +19,7 @@ import (
 
 func TestUpdateGroupSettingsRejectsReferencedDeletionWithoutPersistence(t *testing.T) {
 	db := setupGroupSettingsControllerTest(t)
-	require.NoError(t, db.Create(&model.User{Username: "paused-user", Group: "paused"}).Error)
+	require.NoError(t, db.Create(&model.User{Username: "paused-user", Group: "paused", AffCode: "paused-aff"}).Error)
 
 	recorder := performGroupSettingsUpdate(t, validGroupSettingsBody(`{"default":1}`, `{"default":true}`))
 	response := decodeGroupSettingsResponse(t, recorder)
@@ -95,7 +95,7 @@ func setupGroupSettingsControllerTest(t *testing.T) *gorm.DB {
 	model.LOG_DB = db
 	common.RedisEnabled = false
 	common.MemoryCacheEnabled = false
-	require.NoError(t, db.Create(&model.User{Id: 1, Username: "admin", Group: "default"}).Error)
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "admin", Group: "default", AffCode: "admin-aff"}).Error)
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"paused":1}`))
 	require.NoError(t, ratio_setting.UpdateGroupStatusByJSONString(`{"default":true,"paused":true}`))
 	require.NoError(t, model.UpdateOptionsWithTx(db, map[string]string{

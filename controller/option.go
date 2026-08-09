@@ -512,9 +512,9 @@ func groupRoutingRequirementsAuditSummary(
 	}
 	sort.Strings(groupNames)
 
-	changedGroups := make([]string, 0)
-	activatedGroups := make([]string, 0)
-	draftGroups := make([]string, 0)
+	changedGroups := 0
+	activatedGroups := 0
+	draftGroups := 0
 	exclusionsAdded := 0
 	exclusionsRemoved := 0
 	for _, groupName := range groupNames {
@@ -529,15 +529,15 @@ func groupRoutingRequirementsAuditSummary(
 			return nil, err
 		}
 		if hadBefore != hasAfter || string(beforeJSON) != string(afterJSON) {
-			changedGroups = append(changedGroups, groupName)
+			changedGroups++
 		}
 		if hasAfter && afterProfile.IsDynamic() && afterProfile.Status == ratio_setting.GroupRoutingProfileActive &&
 			(!hadBefore || beforeProfile.Status != ratio_setting.GroupRoutingProfileActive) {
-			activatedGroups = append(activatedGroups, groupName)
+			activatedGroups++
 		}
 		if hasAfter && afterProfile.IsDynamic() && afterProfile.Status == ratio_setting.GroupRoutingProfileDraft &&
 			(!hadBefore || beforeProfile.Status != ratio_setting.GroupRoutingProfileDraft) {
-			draftGroups = append(draftGroups, groupName)
+			draftGroups++
 		}
 
 		beforeExclusions := make(map[string]struct{}, len(beforeProfile.ExcludedTargetKeys))

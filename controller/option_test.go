@@ -64,9 +64,9 @@ func TestUpdateOptionAuditsGroupRoutingProfileChangeSummaryWithoutTargetKeys(t *
 	}
 	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
 	assert.Equal(t, "option.update", other.Op.Action)
-	assert.Equal(t, []any{"客户A"}, other.Op.Params["changed_groups"])
-	assert.Equal(t, []any{"客户A"}, other.Op.Params["activated_groups"])
-	assert.Equal(t, []any{}, other.Op.Params["draft_groups"])
+	assert.Equal(t, float64(1), other.Op.Params["changed_groups"])
+	assert.Equal(t, float64(1), other.Op.Params["activated_groups"])
+	assert.Equal(t, float64(0), other.Op.Params["draft_groups"])
 	assert.Equal(t, float64(2), other.Op.Params["exclusions_added"])
 	assert.Equal(t, float64(2), other.Op.Params["exclusions_removed"])
 	assert.NotContains(t, log.Other, "grt_")

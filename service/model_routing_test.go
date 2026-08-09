@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestSelectCapabilityChannelPublishesTargetDecision(t *testing.T) {
@@ -162,6 +164,199 @@ func TestRequiredGroupRealPersonFailsClosedWithoutCapabilityPolicy(t *testing.T)
 	require.ErrorAs(t, err, &selectionErr)
 	assert.Equal(t, relaytypes.ErrorCodeNoCompatibleRoute, selectionErr.Code)
 	assert.Equal(t, http.StatusBadRequest, selectionErr.StatusCode)
+}
+
+func TestSelectCapabilityChannelUsesDefaultPoolForDynamicGroup(t *testing.T) {
+	prepareDynamicGroupRoutingSelectionTest(t)
+	seedRoutingCandidate(t, 11, "per-request", "default", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "per-duration", "default", modelrouting.Seedance20, true)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", 11).Update("priority", 200).Error)
+	request := capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "request-model", "720p")
+	durationTarget := capabilityPolicyRequest("default", modelrouting.Seedance20, 12, "duration-model", "720p").Targets[0]
+	request.Targets = append(request.Targets, durationTarget)
+	_, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	seedActiveCostModeRuleForRouting(t, 11, "request-model", types.CostModePerRequest)
+	seedActiveCostModeRuleForRouting(t, 12, "duration-model", types.CostModePerDuration)
+	setGroupRoutingRequirementsForTest(t, `{
+		"客户A":{"status":"active","routing_source":"default","real_person_mode":"required","allowed_cost_modes":["per_duration"]}
+	}`)
+
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+	channel, group, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "客户A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+	assert.Equal(t, "客户A", group)
+}
+
+func TestDynamicGroupDraftFailsClosed(t *testing.T) {
+	prepareDynamicGroupRoutingSelectionTest(t)
+	seedRoutingCandidate(t, 11, "default", "default", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "provider-default", "720p"))
+	require.NoError(t, err)
+	setGroupRoutingRequirementsForTest(t, `{"客户A":{"status":"draft","routing_source":"default"}}`)
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "客户A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	assert.Nil(t, channel)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, relaytypes.ErrorCodeNoCompatibleRoute, selectionErr.Code)
+}
+
+func TestForbiddenRealPersonGroupRejectsRequiredRequest(t *testing.T) {
+	prepareDynamicGroupRoutingSelectionTest(t)
+	seedRoutingCandidate(t, 11, "default", "default", modelrouting.Seedance20, true)
+	request := capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "provider-default", "720p")
+	request.Targets[0].Constraints.SupportsRealPerson = common.GetPointer(false)
+	_, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	setGroupRoutingRequirementsForTest(t, `{
+		"卡真人":{"status":"active","routing_source":"default","real_person_mode":"forbidden"}
+	}`)
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+	input.RequireRealPerson = true
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "卡真人", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	assert.Nil(t, channel)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, relaytypes.ErrorCodeNoCompatibleRoute, selectionErr.Code)
+}
+
+func TestDynamicGroupKnownChannelCannotBypassManualExclusion(t *testing.T) {
+	prepareDynamicGroupRoutingSelectionTest(t)
+	seedRoutingCandidate(t, 11, "default", "default", modelrouting.Seedance20, true)
+	saved, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "provider-default", "720p"))
+	require.NoError(t, err)
+	require.Len(t, saved.Targets, 1)
+	targetKey := service.GroupRoutingTargetKey("default", modelrouting.Seedance20, modelrouting.Target{
+		ID: saved.Targets[0].ID, PolicyID: saved.ID, ChannelID: saved.Targets[0].ChannelID,
+		Name: saved.Targets[0].Name, UpstreamModel: saved.Targets[0].UpstreamModel,
+		CostVariantKey: saved.Targets[0].CostVariantKey,
+	})
+	setGroupRoutingRequirementsForTest(t, fmt.Sprintf(`{
+		"客户A":{"status":"active","routing_source":"default","excluded_target_keys":[%q]}
+	}`, targetKey))
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+
+	compatible, err := service.ValidateKnownChannelForRouting(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "客户A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}, "客户A", 11)
+
+	assert.False(t, compatible)
+	var selectionErr *service.ChannelSelectionError
+	require.ErrorAs(t, err, &selectionErr)
+	assert.Equal(t, relaytypes.ErrorCodeNoCompatibleRoute, selectionErr.Code)
+	require.Len(t, selectionErr.Diagnostics, 1)
+	assert.Equal(t, "default", selectionErr.Diagnostics[0].SourceGroup)
+	assert.Equal(t, 1, selectionErr.Diagnostics[0].ProfileMismatchCounts["excluded"])
+}
+
+func TestAutoGroupSkipsDynamicProfileWithoutCompatibleTargets(t *testing.T) {
+	prepareDynamicGroupRoutingSelectionTest(t)
+	prepareAutoGroupSelectionTest(t)
+	seedRoutingCandidate(t, 11, "default", "default", modelrouting.Seedance20, true)
+	request := capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "provider-default", "720p")
+	request.Targets[0].Constraints.SupportsRealPerson = common.GetPointer(false)
+	_, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	setGroupRoutingRequirementsForTest(t, `{
+		"分组A":{"status":"active","routing_source":"default","real_person_mode":"required"},
+		"分组B":{"status":"active","routing_source":"default","real_person_mode":"forbidden"}
+	}`)
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+	c := capabilitySelectionContext()
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "分组A")
+
+	channel, group, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: c, TokenGroup: "auto", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 11, channel.Id)
+	assert.Equal(t, "分组B", group)
+}
+
+func TestDynamicGroupRetryKeepsUsingSourceGroupCapabilities(t *testing.T) {
+	prepareDynamicGroupRoutingSelectionTest(t)
+	seedRoutingCandidate(t, 11, "first", "default", modelrouting.Seedance20, true)
+	seedRoutingCandidate(t, 12, "retry", "default", modelrouting.Seedance20, true)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", 11).Update("priority", 200).Error)
+	request := capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "provider-first", "720p")
+	request.Targets = append(request.Targets, capabilityPolicyRequest(
+		"default", modelrouting.Seedance20, 12, "provider-retry", "720p",
+	).Targets[0])
+	_, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	setGroupRoutingRequirementsForTest(t, `{"客户A":{"status":"active","routing_source":"default"}}`)
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+	param := &service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "客户A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	}
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 11, channel.Id)
+
+	param.ExcludeChannel(11)
+	channel, _, err = service.CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 12, channel.Id)
+}
+
+func TestStrictDynamicGroupReusesProfileCostRulesForProfitFilter(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	seedRoutingCandidate(t, 11, "default", "default", modelrouting.Seedance20, true)
+	_, err := service.SaveRoutingPolicy(0, capabilityPolicyRequest("default", modelrouting.Seedance20, 11, "provider-default", "720p"))
+	require.NoError(t, err)
+	seedActiveFreeCostRuleForRouting(t, 11, "provider-default")
+	setGroupRoutingRequirementsForTest(t, `{
+		"客户A":{"status":"active","routing_source":"default","allowed_cost_modes":["free"]}
+	}`)
+
+	costRuleQueryCount := 0
+	const callbackName = "test:dynamic-profile-cost-rule-query-count"
+	callbackRegistered := true
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "channel_model_cost_rules" {
+			costRuleQueryCount++
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = model.DB.Callback().Query().Remove(callbackName)
+		}
+	})
+	input := seedanceFactsInput(modelrouting.Seedance20, "720p", 10, "16:9")
+
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+		Ctx: capabilitySelectionContext(), TokenGroup: "客户A", ModelName: modelrouting.Seedance20,
+		RequestPath: "/v1/video/generations", Retry: common.GetPointer(0), RoutingInput: &input,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 1, costRuleQueryCount)
 }
 
 func TestAutoGroupRoutingAppliesRequirementPerActualGroup(t *testing.T) {
@@ -1029,6 +1224,18 @@ func prepareCapabilitySelectionTest(t *testing.T) {
 	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
 }
 
+func prepareDynamicGroupRoutingSelectionTest(t *testing.T) {
+	t.Helper()
+	prepareCapabilitySelectionTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	service.InvalidateCostCoverage(0, "", "")
+	t.Cleanup(func() {
+		service.InvalidateCostCoverage(0, "", "")
+		require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	})
+}
+
 func prepareStrictCostRoutingServiceTest(t *testing.T) {
 	t.Helper()
 	prepareCapabilitySelectionTest(t)
@@ -1102,6 +1309,17 @@ func seedActiveFreeCostRuleForRouting(t *testing.T, channelID int, modelName str
 		ConfigJSON: string(configJSON), Source: "manual", EffectiveFrom: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}).Error)
+}
+
+func seedActiveCostModeRuleForRouting(t *testing.T, channelID int, modelName string, mode types.CostMode) {
+	t.Helper()
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: channelID, BillableUpstreamModel: modelName, CostVariantKey: string(types.DefaultCostVariantKey), Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(mode), SchemaVersion: 1,
+		ConfigJSON: `{}`, Source: "manual", EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+	service.InvalidateCostCoverage(channelID, modelName, string(types.DefaultCostVariantKey))
 }
 
 func capabilitySelectionContext() *gin.Context {

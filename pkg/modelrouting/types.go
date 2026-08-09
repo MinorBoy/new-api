@@ -139,11 +139,13 @@ type Evaluation struct {
 }
 
 type Audit struct {
-	PolicyID       int                    `json:"policy_id"`
-	TargetID       int                    `json:"target_id"`
-	TargetName     string                 `json:"target_name"`
-	UpstreamModel  string                 `json:"upstream_model"`
-	CostVariantKey string                 `json:"cost_variant_key"`
-	Facts          Facts                  `json:"facts"`
-	MismatchCounts map[MismatchReason]int `json:"mismatch_counts,omitempty"`
+	PolicyID              int                    `json:"policy_id"`
+	TargetID              int                    `json:"target_id"`
+	TargetName            string                 `json:"target_name"`
+	UpstreamModel         string                 `json:"upstream_model"`
+	CostVariantKey        string                 `json:"cost_variant_key"`
+	Facts                 Facts                  `json:"facts"`
+	MismatchCounts        map[MismatchReason]int `json:"mismatch_counts,omitempty"`
+	SourceGroup           string                 `json:"source_group,omitempty"`
+	ProfileMismatchCounts map[string]int         `json:"profile_mismatch_counts,omitempty"`
 }

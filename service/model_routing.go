@@ -34,47 +34,113 @@ func (e *ChannelSelectionError) Error() string {
 }
 
 type groupRoutingResult struct {
-	Capability bool
-	Snapshot   modelrouting.PolicySnapshot
-	Facts      modelrouting.Facts
-	Evaluation modelrouting.Evaluation
+	Capability            bool
+	SourceGroup           string
+	Profile               ratio_setting.GroupRoutingRequirements
+	Snapshot              modelrouting.PolicySnapshot
+	Facts                 modelrouting.Facts
+	Evaluation            modelrouting.Evaluation
+	ProfileMismatchCounts map[GroupRoutingTargetStatus]int
+	CostRules             map[CostRuleCandidate]*model.ChannelModelCostRule
 }
 
 func evaluateGroupRouting(param *RetryParam, group, modelName string) (groupRoutingResult, error) {
-	requirements := ratio_setting.GetGroupRoutingRequirements(group)
-	groupRequiresRealPerson := requirements.RequireRealPerson != nil && *requirements.RequireRealPerson
+	profile := ratio_setting.GetGroupRoutingRequirements(group)
+	sourceGroup := group
+	result := groupRoutingResult{SourceGroup: sourceGroup, Profile: profile}
+	if profile.IsDynamic() {
+		sourceGroup = profile.RoutingSource
+		result.SourceGroup = sourceGroup
+		if profile.Status != ratio_setting.GroupRoutingProfileActive {
+			return result, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+				Err: errors.New("no compatible route supports this request"),
+			}
+		}
+	}
+	groupRequiresRealPerson := profile.EffectiveRealPersonMode() == ratio_setting.GroupRealPersonRequired
 	if param == nil || param.RoutingInput == nil {
-		if groupRequiresRealPerson {
+		if groupRequiresRealPerson && !profile.IsDynamic() {
 			return groupRoutingResult{}, &ChannelSelectionError{
 				Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
 				Err: errors.New("no compatible route supports this request"),
 			}
 		}
-		return groupRoutingResult{}, nil
+		if !profile.IsDynamic() {
+			return result, nil
+		}
 	}
 	canonicalModel := modelrouting.NormalizeCanonicalModel(modelName)
-	snapshot, ok := routingPolicySnapshotLookup(group, canonicalModel)
+	snapshot, ok := routingPolicySnapshotLookup(sourceGroup, canonicalModel)
 	if !ok {
-		if groupRequiresRealPerson {
-			return groupRoutingResult{}, &ChannelSelectionError{
+		if groupRequiresRealPerson || profile.IsDynamic() {
+			return result, &ChannelSelectionError{
 				Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
 				Err: errors.New("no compatible route supports this request"),
 			}
 		}
-		return groupRoutingResult{}, nil
+		return result, nil
 	}
-	if !snapshot.Enabled || snapshot.ID <= 0 || snapshot.GroupName != group || snapshot.CanonicalModel != canonicalModel || snapshot.TargetsByChannel == nil {
-		return groupRoutingResult{}, &ChannelSelectionError{
+	if !snapshot.Enabled || snapshot.ID <= 0 || snapshot.GroupName != sourceGroup || snapshot.CanonicalModel != canonicalModel || snapshot.TargetsByChannel == nil {
+		return result, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError,
 			Err: errors.New("routing policy cache is invalid"),
 		}
 	}
-	routingInput := *param.RoutingInput
+	result.Capability = true
+	result.Snapshot = snapshot
+	if profile.IsDynamic() {
+		candidates := make([]CostRuleCandidate, 0)
+		for _, targets := range snapshot.TargetsByChannel {
+			for _, target := range targets {
+				candidates = append(candidates, CostRuleCandidate{
+					ChannelID:             target.ChannelID,
+					BillableUpstreamModel: target.UpstreamModel,
+					CostVariantKey:        target.CostVariantKey,
+				})
+			}
+		}
+		rules, err := ActiveCostRules(candidates, false)
+		if err != nil {
+			return result, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
+			}
+		}
+		available, err := model.ListRoutingAvailability(sourceGroup, []string{canonicalModel})
+		if err != nil {
+			return result, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
+			}
+		}
+		profileEvaluation := EvaluateGroupRoutingProfile(profile, snapshot, rules, available)
+		result.Snapshot = profileEvaluation.Snapshot
+		result.ProfileMismatchCounts = profileEvaluation.MismatchCounts
+		result.CostRules = profileEvaluation.CostRules
+		snapshot = profileEvaluation.Snapshot
+		if len(snapshot.TargetsByChannel) == 0 {
+			return result, &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+				Err:         errors.New("no compatible route supports this request"),
+				Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
+			}
+		}
+	}
+	routingInput := modelrouting.FactsInput{}
+	if param != nil && param.RoutingInput != nil {
+		routingInput = *param.RoutingInput
+	}
 	routingInput.CanonicalModel = canonicalModel
+	if profile.EffectiveRealPersonMode() == ratio_setting.GroupRealPersonForbidden && routingInput.RequireRealPerson {
+		return result, &ChannelSelectionError{
+			Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
+			Err:         errors.New("no compatible route supports this request"),
+			Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
+		}
+	}
 	routingInput.RequireRealPerson = routingInput.RequireRealPerson || groupRequiresRealPerson
 	facts, err := modelrouting.ResolveFacts(group, routingInput, snapshot.Defaults)
 	if err != nil {
-		return groupRoutingResult{}, &ChannelSelectionError{
+		return result, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
 		}
 	}
@@ -118,7 +184,9 @@ func evaluateGroupRouting(param *RetryParam, group, modelName string) (groupRout
 		}
 	}
 	evaluation := modelrouting.Evaluate(snapshot, facts)
-	result := groupRoutingResult{Capability: true, Snapshot: snapshot, Facts: facts, Evaluation: evaluation}
+	result.Snapshot = snapshot
+	result.Facts = facts
+	result.Evaluation = evaluation
 	if len(evaluation.CompatibleByChannel) == 0 {
 		if metadataUnavailable {
 			return result, &ChannelSelectionError{
@@ -128,13 +196,25 @@ func evaluateGroupRouting(param *RetryParam, group, modelName string) (groupRout
 		}
 		return result, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeNoCompatibleRoute, StatusCode: http.StatusBadRequest,
-			Err: errors.New("no compatible route supports this request"),
-			Diagnostics: []modelrouting.Audit{{
-				PolicyID: snapshot.ID, Facts: facts, MismatchCounts: evaluation.MismatchCounts,
-			}},
+			Err:         errors.New("no compatible route supports this request"),
+			Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
 		}
 	}
 	return result, nil
+}
+
+func routingSelectionAudit(result groupRoutingResult) modelrouting.Audit {
+	profileMismatchCounts := make(map[string]int, len(result.ProfileMismatchCounts))
+	for status, count := range result.ProfileMismatchCounts {
+		profileMismatchCounts[string(status)] = count
+	}
+	return modelrouting.Audit{
+		PolicyID:              result.Snapshot.ID,
+		Facts:                 result.Facts,
+		MismatchCounts:        result.Evaluation.MismatchCounts,
+		SourceGroup:           result.SourceGroup,
+		ProfileMismatchCounts: profileMismatchCounts,
+	}
 }
 
 // applyProfitFilter narrows filter.AllowedChannelIDs (or the legacy candidate pool when
@@ -161,7 +241,7 @@ func applyProfitFilter(param *RetryParam, group string, result groupRoutingResul
 	}
 
 	facts, revenueNanoUSD, hasRevenue, _ := profitFilterFacts(param, group)
-	rules, err := ActiveCostRules(profitCandidateKeys(candidates), false)
+	rules, err := activeCostRulesForProfitCandidates(result.CostRules, candidates)
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit routing active rule batch failed: %s", err.Error()))
 		// Fail-closed: drop every candidate so the caller returns 503 instead of
@@ -194,6 +274,30 @@ func applyProfitFilter(param *RetryParam, group string, result groupRoutingResul
 		AllowedChannelIDs:  filterResult.AllowedChannelIDs,
 		ExcludedChannelIDs: filter.ExcludedChannelIDs,
 	}, nil
+}
+
+func activeCostRulesForProfitCandidates(
+	known map[CostRuleCandidate]*model.ChannelModelCostRule,
+	candidates []ProfitRoutingCandidate,
+) (map[CostRuleCandidate]*model.ChannelModelCostRule, error) {
+	keys := profitCandidateKeys(candidates)
+	rules := make(map[CostRuleCandidate]*model.ChannelModelCostRule, len(keys))
+	missing := make([]CostRuleCandidate, 0, len(keys))
+	for _, key := range keys {
+		if rule, ok := known[key]; ok {
+			rules[key] = rule
+			continue
+		}
+		missing = append(missing, key)
+	}
+	loaded, err := ActiveCostRules(missing, false)
+	if err != nil {
+		return nil, err
+	}
+	for key, rule := range loaded {
+		rules[key] = rule
+	}
+	return rules, nil
 }
 
 // profitCandidates builds the (channelID, predicted model, threshold) list the filter
@@ -422,7 +526,7 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 	candidate := ProfitRoutingCandidate{ChannelID: channelID, PredictedUpstreamModel: predictedModel, CostVariantKey: variant, TargetThresholdBPS: threshold}
 
 	facts, revenueNanoUSD, hasRevenue, _ := profitFilterFacts(param, group)
-	rules, err := ActiveCostRules(profitCandidateKeys([]ProfitRoutingCandidate{candidate}), false)
+	rules, err := activeCostRulesForProfitCandidates(result.CostRules, []ProfitRoutingCandidate{candidate})
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit routing known-channel active rule failed: %s", err.Error()))
 		return false, nil
@@ -470,7 +574,7 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 	if err != nil {
 		return nil, result, err
 	}
-	channel, err := model.GetRandomSatisfiedChannel(group, routingModelName, priorityRetry, param.RequestPath, filter)
+	channel, err := model.GetRandomSatisfiedChannel(result.SourceGroup, routingModelName, priorityRetry, param.RequestPath, filter)
 	if err != nil {
 		return nil, result, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: err,
@@ -482,10 +586,8 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 		}
 		return nil, result, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
-			Err: errors.New("compatible channels are unavailable"),
-			Diagnostics: []modelrouting.Audit{{
-				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
-			}},
+			Err:         errors.New("compatible channels are unavailable"),
+			Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
 		}
 	}
 	if result.Capability {
@@ -519,19 +621,15 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 		}
 		return false, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
-			Err: errors.New("compatible channel is unavailable"),
-			Diagnostics: []modelrouting.Audit{{
-				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
-			}},
+			Err:         errors.New("compatible channel is unavailable"),
+			Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
 		}
 	}
-	if result.Capability && !model.IsChannelEnabledForGroupModel(group, routingModelName, channelID) {
+	if result.Capability && !model.IsChannelEnabledForGroupModel(result.SourceGroup, routingModelName, channelID) {
 		return false, &ChannelSelectionError{
 			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
-			Err: errors.New("compatible channel is unavailable"),
-			Diagnostics: []modelrouting.Audit{{
-				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
-			}},
+			Err:         errors.New("compatible channel is unavailable"),
+			Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
 		}
 	}
 	if result.Capability {
@@ -567,9 +665,7 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 		}
 		if result.Capability {
 			selectionErr.Err = errors.New("compatible channel is unavailable")
-			selectionErr.Diagnostics = []modelrouting.Audit{{
-				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
-			}}
+			selectionErr.Diagnostics = []modelrouting.Audit{routingSelectionAudit(result)}
 		}
 		return false, selectionErr
 	}
@@ -582,9 +678,7 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 		}
 		if result.Capability {
 			selectionErr.Err = errors.New("compatible channel is unavailable")
-			selectionErr.Diagnostics = []modelrouting.Audit{{
-				PolicyID: result.Snapshot.ID, Facts: result.Facts, MismatchCounts: result.Evaluation.MismatchCounts,
-			}}
+			selectionErr.Diagnostics = []modelrouting.Audit{routingSelectionAudit(result)}
 		}
 		return false, selectionErr
 	}

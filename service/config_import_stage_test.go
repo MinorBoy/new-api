@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,12 +158,60 @@ func TestStageConfigImportRejectsUnknownRoutingRequirementGroup(t *testing.T) {
 	assert.Equal(t, string(types.ConfigImportIssueSeverityError), issue.Severity)
 }
 
+func TestStageConfigImportPreservesManualTargetExclusions(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelModelCostRule{}, &model.Option{}))
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"客户A":"客户 A"}`))
+	t.Cleanup(func() { require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups)) })
+	channel := &model.Channel{Type: 1, Name: "supplier", Models: "vendor-video", Key: "key"}
+	require.NoError(t, model.DB.Create(channel).Error)
+	batch := createConfigImportStageBatch(t, channel.Id, "line-a", "vendor-video")
+	require.NoError(t, model.DB.Create(&model.Option{Key: "GroupRoutingRequirements", Value: `{
+		"客户A":{"status":"active","routing_source":"default","allowed_cost_modes":["per_request"],"excluded_target_keys":["grt_keep"]}
+	}`}).Error)
+	require.NoError(t, persistConfigImportGroupProfileItem(t, batch.ID, "req-customer-a", "客户A", types.ConfigImportGroupRoutingValues{
+		Status: "active", RoutingSource: "default", AllowedCostModes: []string{"per_request"},
+	}))
+
+	detail, err := StageConfigImportBatch(context.Background(), 42, batch.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, types.ConfigImportBatchStatusReady, detail.Status)
+	var item model.ConfigImportItem
+	require.NoError(t, model.DB.Where("batch_id = ? AND business_id = ?", batch.ID, "req-customer-a").First(&item).Error)
+	assert.Equal(t, string(types.ConfigImportItemStateUnchanged), item.State)
+}
+
 func persistConfigImportGroupRequirementItem(t *testing.T, batchID int64, businessID, groupName string, requireRealPerson bool) error {
 	t.Helper()
 	value := types.ConfigImportGroupRoutingRequirement{
 		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: businessID},
 		GroupName:                       groupName,
 		Requirements:                    types.ConfigImportGroupRoutingValues{RequireRealPerson: &requireRealPerson},
+	}
+	encoded, err := common.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return model.DB.Create(&model.ConfigImportItem{
+		BatchID: batchID, EntityType: "group_routing_requirements", BusinessID: businessID,
+		CanonicalJSON: string(encoded), State: string(types.ConfigImportItemStateNew),
+	}).Error
+}
+
+func persistConfigImportGroupProfileItem(
+	t *testing.T,
+	batchID int64,
+	businessID string,
+	groupName string,
+	requirements types.ConfigImportGroupRoutingValues,
+) error {
+	t.Helper()
+	value := types.ConfigImportGroupRoutingRequirement{
+		ConfigImportAuthoritativeEntity: types.ConfigImportAuthoritativeEntity{BusinessID: businessID},
+		GroupName:                       groupName,
+		Requirements:                    requirements,
 	}
 	encoded, err := common.Marshal(value)
 	if err != nil {

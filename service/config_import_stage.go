@@ -1860,7 +1860,9 @@ func stageConfigImportGroupRoutingRequirements(db *gorm.DB, items []model.Config
 	}
 	current := make(map[string]ratio_setting.GroupRoutingRequirements)
 	if err == nil && strings.TrimSpace(option.Value) != "" {
-		if decodeErr := common.UnmarshalJsonStr(option.Value, &current); decodeErr != nil {
+		var decodeErr error
+		current, decodeErr = ratio_setting.ParseGroupRoutingRequirementsJSONString(option.Value)
+		if decodeErr != nil {
 			return nil, configImportError("STAGE_GROUP_ROUTING_REQUIREMENT_OPTION", "GroupRoutingRequirements is not a JSON object: %v", decodeErr)
 		}
 	}
@@ -1890,8 +1892,12 @@ func stageConfigImportGroupRoutingRequirements(db *gorm.DB, items []model.Config
 			})
 			continue
 		}
-		importedValue := ratio_setting.GroupRoutingRequirements{RequireRealPerson: imported.Requirements.RequireRealPerson}
+		importedValue, normalizeErr := groupRoutingRequirementsFromImport(imported.GroupName, imported.Requirements)
+		if normalizeErr != nil {
+			return nil, configImportError("STAGE_GROUP_ROUTING_REQUIREMENT", "group routing requirement %q is invalid: %v", imported.GroupName, normalizeErr)
+		}
 		currentValue, exists := current[imported.GroupName]
+		importedValue.ExcludedTargetKeys = append([]string(nil), currentValue.ExcludedTargetKeys...)
 		if !exists {
 			item.State = string(types.ConfigImportItemStateNew)
 		} else {

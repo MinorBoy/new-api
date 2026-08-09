@@ -271,6 +271,14 @@ type CostRuleCandidate struct {
 // The query uses only GORM methods with a status equality filter — no dialect SQL —
 // so it is valid across SQLite, MySQL and PostgreSQL.
 func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[CostRuleCandidate]*model.ChannelModelCostRule, error) {
+	return activeCostRulesWithDB(model.DB, candidates, authoritative, true)
+}
+
+func ActiveCostRulesWithDB(db *gorm.DB, candidates []CostRuleCandidate) (map[CostRuleCandidate]*model.ChannelModelCostRule, error) {
+	return activeCostRulesWithDB(db, candidates, true, false)
+}
+
+func activeCostRulesWithDB(db *gorm.DB, candidates []CostRuleCandidate, authoritative bool, useCache bool) (map[CostRuleCandidate]*model.ChannelModelCostRule, error) {
 	if len(candidates) == 0 {
 		return map[CostRuleCandidate]*model.ChannelModelCostRule{}, nil
 	}
@@ -294,7 +302,7 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 			continue
 		}
 		normalized[key] = CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: modelName, CostVariantKey: variant}
-		if !authoritative {
+		if useCache && !authoritative {
 			if cached, ok := activeCostRuleCache.Load(key); ok {
 				rule := cached.(model.ChannelModelCostRule)
 				cacheHits[key] = &rule
@@ -326,7 +334,7 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 		}
 		variants[key.variant] = append(variants[key.variant], key.model)
 	}
-	query := model.DB.Model(&model.ChannelModelCostRule{})
+	query := db.Model(&model.ChannelModelCostRule{})
 	first := true
 	for channelID, variantModels := range channelModels {
 		for variant, models := range variantModels {
@@ -354,7 +362,9 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 	for _, key := range pending {
 		matches := byKey[key]
 		if len(matches) == 0 {
-			activeCostRuleCache.Delete(key)
+			if useCache {
+				activeCostRuleCache.Delete(key)
+			}
 			continue
 		}
 		// Mirror ActiveCostRule: keep only the highest version; more than one active
@@ -366,10 +376,14 @@ func ActiveCostRules(candidates []CostRuleCandidate, authoritative bool) (map[Co
 			}
 		}
 		if len(matches) > 1 {
-			activeCostRuleCache.Delete(key)
+			if useCache {
+				activeCostRuleCache.Delete(key)
+			}
 			return nil, fmt.Errorf("%w: channel=%d model=%s", model.ErrCostActiveRuleConflict, key.channelID, key.model)
 		}
-		activeCostRuleCache.Store(key, latest)
+		if useCache {
+			activeCostRuleCache.Store(key, latest)
+		}
 		latestCopy := latest
 		results[normalized[key]] = &latestCopy
 	}

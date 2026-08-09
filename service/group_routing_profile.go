@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
+	"gorm.io/gorm"
 )
 
 type GroupRoutingTargetStatus string
@@ -371,6 +372,10 @@ func PreviewGroupRoutingProfile(input GroupRoutingProfilePreviewInput) (GroupRou
 }
 
 func PreviewGroupRoutingProfileSummaries(profiles map[string]ratio_setting.GroupRoutingRequirements) (map[string]GroupRoutingProfileSummary, error) {
+	return previewGroupRoutingProfileSummariesWithDB(model.DB, profiles)
+}
+
+func previewGroupRoutingProfileSummariesWithDB(db *gorm.DB, profiles map[string]ratio_setting.GroupRoutingRequirements) (map[string]GroupRoutingProfileSummary, error) {
 	normalized, err := normalizeGroupRoutingProfiles(profiles)
 	if err != nil {
 		return nil, err
@@ -387,7 +392,7 @@ func PreviewGroupRoutingProfileSummaries(profiles map[string]ratio_setting.Group
 		return result, nil
 	}
 
-	catalog, err := loadGroupRoutingProfileCatalog(ratio_setting.GroupRoutingSourceDefault, false)
+	catalog, err := loadGroupRoutingProfileCatalogWithDB(db, ratio_setting.GroupRoutingSourceDefault, false)
 	if err != nil {
 		return nil, err
 	}
@@ -399,6 +404,13 @@ func PreviewGroupRoutingProfileSummaries(profiles map[string]ratio_setting.Group
 }
 
 func ValidateActiveGroupRoutingProfiles(raw string) error {
+	return ValidateActiveGroupRoutingProfilesWithDB(model.DB, raw)
+}
+
+func ValidateActiveGroupRoutingProfilesWithDB(db *gorm.DB, raw string) error {
+	if db == nil {
+		return newGroupRoutingProfileError(GroupRoutingProfileErrorPreview, errors.New("group routing profile database is required"))
+	}
 	profiles, err := ratio_setting.ParseGroupRoutingRequirementsJSONString(raw)
 	if err != nil {
 		return newGroupRoutingProfileError(GroupRoutingProfileErrorInvalid, err)
@@ -422,7 +434,7 @@ func ValidateActiveGroupRoutingProfiles(raw string) error {
 	if len(activeProfiles) == 0 {
 		return nil
 	}
-	summaries, err := PreviewGroupRoutingProfileSummaries(activeProfiles)
+	summaries, err := previewGroupRoutingProfileSummariesWithDB(db, activeProfiles)
 	if err != nil {
 		return err
 	}
@@ -486,7 +498,11 @@ func normalizeGroupRoutingProfiles(profiles map[string]ratio_setting.GroupRoutin
 }
 
 func loadGroupRoutingProfileCatalog(sourceGroup string, includeChannelNames bool) (groupRoutingProfileCatalog, error) {
-	policies, err := model.ListEnabledRoutingPoliciesByGroup(sourceGroup)
+	return loadGroupRoutingProfileCatalogWithDB(model.DB, sourceGroup, includeChannelNames)
+}
+
+func loadGroupRoutingProfileCatalogWithDB(db *gorm.DB, sourceGroup string, includeChannelNames bool) (groupRoutingProfileCatalog, error) {
+	policies, err := model.ListEnabledRoutingPoliciesByGroupWithDB(db, sourceGroup)
 	if err != nil {
 		return groupRoutingProfileCatalog{}, newGroupRoutingProfileError(GroupRoutingProfileErrorPreview, err)
 	}
@@ -510,19 +526,33 @@ func loadGroupRoutingProfileCatalog(sourceGroup string, includeChannelNames bool
 		}
 		snapshots = append(snapshots, snapshot)
 	}
-	rules, err := ActiveCostRules(candidates, false)
+	rules, err := ActiveCostRulesWithDB(db, candidates)
 	if err != nil {
 		return groupRoutingProfileCatalog{}, newGroupRoutingProfileError(GroupRoutingProfileErrorPreview, err)
 	}
-	available, err := model.ListRoutingAvailability(sourceGroup, models)
+	available, err := model.ListRoutingAvailabilityWithDB(db, sourceGroup, models)
 	if err != nil {
 		return groupRoutingProfileCatalog{}, newGroupRoutingProfileError(GroupRoutingProfileErrorPreview, err)
 	}
 	channelNames := make(map[int]string)
 	if includeChannelNames {
-		channelNames, err = routingPolicyChannelNames(allTargets)
-		if err != nil {
-			return groupRoutingProfileCatalog{}, newGroupRoutingProfileError(GroupRoutingProfileErrorPreview, err)
+		channelIDs := make([]int, 0)
+		seenChannelIDs := make(map[int]struct{})
+		for _, target := range allTargets {
+			if _, exists := seenChannelIDs[target.ChannelID]; exists {
+				continue
+			}
+			seenChannelIDs[target.ChannelID] = struct{}{}
+			channelIDs = append(channelIDs, target.ChannelID)
+		}
+		if len(channelIDs) > 0 {
+			var channels []model.Channel
+			if err := db.Select("id", "name").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+				return groupRoutingProfileCatalog{}, newGroupRoutingProfileError(GroupRoutingProfileErrorPreview, err)
+			}
+			for _, channel := range channels {
+				channelNames[channel.Id] = channel.Name
+			}
 		}
 	}
 	return groupRoutingProfileCatalog{snapshots: snapshots, rules: rules, available: available, channels: channelNames}, nil

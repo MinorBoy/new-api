@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 )
@@ -522,6 +523,11 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		if requirement.GroupName == "" {
 			return configImportError("SCHEMA_GROUP_ROUTING_REQUIREMENT", "group_routing_requirements[%d].group_name is required", index)
 		}
+		normalized, err := groupRoutingRequirementsFromImport(requirement.GroupName, requirement.Requirements)
+		if err != nil {
+			return configImportError("SCHEMA_GROUP_ROUTING_REQUIREMENT", "group_routing_requirements[%d] is invalid: %v", index, err)
+		}
+		requirement.Requirements = configImportGroupRoutingValues(normalized)
 		if _, exists := seenRequirementGroups[requirement.GroupName]; exists {
 			return configImportError("DUPLICATE_GROUP_ROUTING_REQUIREMENT", "group_routing_requirements[%d].group_name %q is duplicated", index, requirement.GroupName)
 		}
@@ -541,6 +547,48 @@ func validateConfigImportEntities(entities *types.ConfigImportEntities) error {
 		return err
 	}
 	return nil
+}
+
+func groupRoutingRequirementsFromImport(
+	groupName string,
+	values types.ConfigImportGroupRoutingValues,
+) (ratio_setting.GroupRoutingRequirements, error) {
+	profile := ratio_setting.GroupRoutingRequirements{
+		RequireRealPerson: values.RequireRealPerson,
+		Status:            ratio_setting.GroupRoutingProfileStatus(values.Status),
+		RoutingSource:     values.RoutingSource,
+		RealPersonMode:    ratio_setting.GroupRealPersonMode(values.RealPersonMode),
+		AllowedCostModes:  make([]types.CostMode, 0, len(values.AllowedCostModes)),
+	}
+	for _, costMode := range values.AllowedCostModes {
+		profile.AllowedCostModes = append(profile.AllowedCostModes, types.CostMode(costMode))
+	}
+	if !profile.IsDynamic() && profile.Status == "" && profile.RealPersonMode == "" && len(profile.AllowedCostModes) == 0 {
+		return profile, nil
+	}
+	encoded, err := common.Marshal(map[string]ratio_setting.GroupRoutingRequirements{groupName: profile})
+	if err != nil {
+		return ratio_setting.GroupRoutingRequirements{}, err
+	}
+	normalized, err := ratio_setting.ParseGroupRoutingRequirementsJSONString(string(encoded))
+	if err != nil {
+		return ratio_setting.GroupRoutingRequirements{}, err
+	}
+	return normalized[groupName], nil
+}
+
+func configImportGroupRoutingValues(profile ratio_setting.GroupRoutingRequirements) types.ConfigImportGroupRoutingValues {
+	costModes := make([]string, 0, len(profile.AllowedCostModes))
+	for _, costMode := range profile.AllowedCostModes {
+		costModes = append(costModes, string(costMode))
+	}
+	return types.ConfigImportGroupRoutingValues{
+		RequireRealPerson: profile.RequireRealPerson,
+		Status:            string(profile.Status),
+		RoutingSource:     profile.RoutingSource,
+		RealPersonMode:    string(profile.RealPersonMode),
+		AllowedCostModes:  costModes,
+	}
 }
 
 func validateConfigImportAuthoritativeEntity(entity *types.ConfigImportAuthoritativeEntity, collection string, index int, businessIDs map[string]string) error {

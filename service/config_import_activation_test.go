@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,6 +123,69 @@ func TestActivateConfigImportPublishesGroupRoutingRequirementsAtomically(t *test
 	require.NoError(t, model.DB.Where("key = ?", "GroupRoutingRequirements").First(&option).Error)
 	assert.JSONEq(t, `{"default":{"require_real_person":true}}`, option.Value)
 	assert.Contains(t, refreshed.OptionKeys, "GroupRoutingRequirements")
+}
+
+func TestActivateConfigImportPreservesManualTargetExclusions(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"客户A":"客户 A"}`))
+	t.Cleanup(func() { require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups)) })
+	require.NoError(t, model.DB.Create(&model.Option{Key: "GroupRoutingRequirements", Value: `{
+		"客户A":{"status":"active","routing_source":"default","allowed_cost_modes":["per_request"],"excluded_target_keys":["grt_keep"]}
+	}`}).Error)
+	require.NoError(t, persistConfigImportGroupProfileItem(t, fixture.BatchID, "req-customer-a", "客户A", types.ConfigImportGroupRoutingValues{
+		Status: "active", RoutingSource: "default", AllowedCostModes: []string{"per_request"},
+	}))
+	persistActivationBaseline(t, fixture.BatchID)
+	previousRefresh := refreshConfigImportActivation
+	refreshConfigImportActivation = func(ConfigImportRefreshKeys) error { return nil }
+	t.Cleanup(func() { refreshConfigImportActivation = previousRefresh })
+
+	_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+	require.NoError(t, err)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "GroupRoutingRequirements").First(&option).Error)
+	assert.JSONEq(t, `{
+		"客户A":{"status":"active","routing_source":"default","allowed_cost_modes":["per_request"],"excluded_target_keys":["grt_keep"]}
+	}`, option.Value)
+	require.NoError(t, ValidateActiveGroupRoutingProfiles(`{
+		"客户A":{"status":"active","routing_source":"default","allowed_cost_modes":["per_request"]}
+	}`))
+}
+
+func TestActivateConfigImportRollsBackWhenActiveGroupProfileHasNoTargets(t *testing.T) {
+	fixture := createActivationApplyFixture(t)
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"客户A":"客户 A"}`))
+	t.Cleanup(func() { require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups)) })
+	require.NoError(t, model.DB.Create(&model.Option{Key: "GroupRoutingRequirements", Value: `{}`}).Error)
+	require.NoError(t, persistConfigImportGroupProfileItem(t, fixture.BatchID, "req-customer-a", "客户A", types.ConfigImportGroupRoutingValues{
+		Status: "active", RoutingSource: "default", AllowedCostModes: []string{"per_token"},
+	}))
+	persistActivationBaseline(t, fixture.BatchID)
+
+	_, err := ActivateConfigImportBatch(context.Background(), fixture.BatchID, 42)
+
+	require.ErrorContains(t, err, "客户A")
+	var currentRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&currentRule, fixture.CurrentCostRuleID).Error)
+	assert.Equal(t, string(types.CostRuleDraft), currentRule.Status)
+	var previousRule model.ChannelModelCostRule
+	require.NoError(t, model.DB.First(&previousRule, fixture.PreviousCostRuleID).Error)
+	assert.Equal(t, string(types.CostRuleActive), previousRule.Status)
+	var candidate model.RouteTarget
+	require.NoError(t, model.DB.First(&candidate, fixture.TargetID).Error)
+	assert.False(t, candidate.Enabled)
+	var previousTarget model.RouteTarget
+	require.NoError(t, model.DB.First(&previousTarget, fixture.RetireTargetID).Error)
+	assert.True(t, previousTarget.Enabled)
+	var option model.Option
+	require.NoError(t, model.DB.Where("key = ?", "GroupRoutingRequirements").First(&option).Error)
+	assert.JSONEq(t, `{}`, option.Value)
+	var auditCount int64
+	require.NoError(t, model.DB.Model(&model.ConfigImportActivationAudit{}).Where("batch_id = ?", fixture.BatchID).Count(&auditCount).Error)
+	assert.Zero(t, auditCount)
 }
 
 func TestActivateConfigImportDoesNotPartiallyWriteGroupRequirements(t *testing.T) {

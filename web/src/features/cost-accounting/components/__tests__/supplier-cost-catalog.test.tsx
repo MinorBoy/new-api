@@ -30,6 +30,18 @@ import type { CostAccountingSearch } from '../../lib/report'
 import type { CostCatalogItem, CostCatalogPage } from '../../types'
 
 const browserWindow = new Window({ url: 'http://localhost/' })
+const mobileViewport = { current: false }
+const matchMedia = (query: string) => ({
+  matches: mobileViewport.current && query.includes('max-width: 640px'),
+  media: query,
+  onchange: null,
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  addListener: () => {},
+  removeListener: () => {},
+  dispatchEvent: () => true,
+})
+Object.defineProperty(browserWindow, 'matchMedia', { value: matchMedia })
 const browserGlobals = {
   window: browserWindow,
   document: browserWindow.document,
@@ -47,6 +59,7 @@ const browserGlobals = {
   requestAnimationFrame:
     browserWindow.requestAnimationFrame.bind(browserWindow),
   cancelAnimationFrame: browserWindow.cancelAnimationFrame.bind(browserWindow),
+  matchMedia,
   IS_REACT_ACT_ENVIRONMENT: true,
 }
 const previousBrowserGlobals = Object.fromEntries(
@@ -69,7 +82,10 @@ after(() => {
   browserWindow.close()
 })
 
-beforeEach(() => browserWindow.document.body.replaceChildren())
+beforeEach(() => {
+  browserWindow.document.body.replaceChildren()
+  mobileViewport.current = false
+})
 
 const { createRoot } = await import('react-dom/client')
 const { TooltipProvider } = await import('@/components/ui/tooltip')
@@ -251,5 +267,28 @@ test('expands mobile metadata independently from opening rule details', async ()
   } finally {
     await act(async () => root.unmount())
     container.remove()
+  }
+})
+
+test('uses page scrolling when stacked mobile catalog controls exceed the viewport', async () => {
+  mobileViewport.current = true
+  const mounted = await mountCatalog({ tab: 'catalog' }, catalogPage)
+  try {
+    const expand = browserWindow.document.querySelector(
+      'button[aria-label="Show supplier cost metadata"]'
+    )
+    assert.ok(expand)
+    let catalogPageRoot = expand.parentElement
+    while (
+      catalogPageRoot &&
+      !catalogPageRoot.className.includes('flex h-full min-h-0 flex-col')
+    ) {
+      catalogPageRoot = catalogPageRoot.parentElement
+    }
+    assert.ok(catalogPageRoot)
+    assert.match(catalogPageRoot.className, /max-sm:block/)
+    assert.match(catalogPageRoot.className, /max-sm:overflow-y-auto/)
+  } finally {
+    await unmountCatalog(mounted)
   }
 })

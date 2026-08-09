@@ -222,6 +222,7 @@ export function SupplierCostCatalog(props: {
       <DataTablePage
         table={table}
         columns={columns}
+        className='max-sm:block max-sm:overflow-y-auto'
         isLoading={catalogQuery.isLoading}
         isFetching={catalogQuery.isFetching}
         toolbar={

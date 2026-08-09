@@ -16,71 +16,128 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Server, ExternalLink } from 'lucide-react'
-import { useMemo } from 'react'
+import { Zap } from 'lucide-react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { useStatus } from '@/hooks/use-status'
-import type { SystemStatus } from '@/features/auth/types'
-
-function extractServerAddress(status: SystemStatus | null): string {
-  const fromStatus =
-    (status?.server_address as string | undefined) ??
-    (status?.serverAddress as string | undefined) ??
-    status?.data?.server_address ??
-    (status?.data as Record<string, unknown> | undefined)?.serverAddress
-
-  if (fromStatus && typeof fromStatus === 'string') {
-    return fromStatus
-  }
-  if (typeof window !== 'undefined') {
-    return window.location.origin
-  }
-  return ''
-}
+import { useApiInfo } from '@/features/dashboard/hooks/use-status-data'
+import {
+  getDefaultPingStatus,
+  getLatencyColorClass,
+  testUrlLatency,
+} from '@/features/dashboard/lib/api-info'
+import type { ApiInfoItem, PingStatusMap } from '@/features/dashboard/types'
+import { getBgColorClass } from '@/lib/colors'
+import { cn } from '@/lib/utils'
 
 export function ApiAddressBar() {
   const { t } = useTranslation()
-  const { status } = useStatus()
-  const address = useMemo(() => extractServerAddress(status), [status])
+  const { items } = useApiInfo()
+  const [pingStatus, setPingStatus] = useState<PingStatusMap>({})
 
-  const trimmed = address.replace(/\/+$/, '')
+  const handleTest = useCallback(async (url: string) => {
+    setPingStatus((prev) => ({
+      ...prev,
+      [url]: { latency: null, testing: true, error: false },
+    }))
+    const result = await testUrlLatency(url)
+    setPingStatus((prev) => ({ ...prev, [url]: result }))
+  }, [])
+
+  if (items.length === 0) return null
 
   return (
-    <div className='bg-muted/30 flex items-center gap-2 rounded-lg border px-3 py-2 sm:gap-3'>
-      <span className='bg-primary/10 text-primary flex size-7 shrink-0 items-center justify-center rounded-md'>
-        <Server className='size-4' />
-      </span>
-      <div className='flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2'>
-        <span className='text-muted-foreground shrink-0 text-xs font-medium'>
-          {t('API Address')}
-        </span>
-        <span className='text-foreground/80 truncate font-mono text-xs sm:text-sm'>
-          {trimmed}
-        </span>
-      </div>
-      <div className='flex shrink-0 items-center gap-0.5'>
-        <CopyButton
-          value={trimmed}
-          variant='ghost'
-          size='sm'
-          className='size-7 p-0'
-          iconClassName='size-3.5'
-          tooltip={t('Copy API Address')}
-          aria-label={t('Copy API Address')}
-        />
-        <Button
-          variant='ghost'
-          size='sm'
-          className='size-7 p-0'
-          title={t('Open in New Tab')}
-          render={<a href={trimmed} target='_blank' rel='noreferrer' />}
-        >
-          <ExternalLink className='size-3.5' />
-        </Button>
-      </div>
+    <div className='bg-muted/30 divide-border/60 overflow-hidden rounded-lg border divide-y'>
+      {items.map((item: ApiInfoItem) => {
+        const status = pingStatus[item.url] || getDefaultPingStatus()
+        return (
+          <div
+            key={item.url}
+            className='group flex items-center justify-between gap-2 px-3 py-2 transition-colors hover:bg-muted/40 sm:gap-3 sm:px-4'
+          >
+            <div className='flex min-w-0 flex-1 items-center gap-2 sm:gap-3'>
+              <span
+                className={cn(
+                  'inline-block size-2 shrink-0 rounded-full',
+                  getBgColorClass(item.color)
+                )}
+              />
+              <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                <div className='flex items-baseline gap-2'>
+                  <span className='text-sm font-semibold font-mono'>
+                    {item.route}
+                  </span>
+                  <span className='text-muted-foreground/60 hidden truncate text-xs md:inline'>
+                    {item.description}
+                  </span>
+                </div>
+                <span className='text-muted-foreground/40 truncate font-mono text-xs'>
+                  {item.url}
+                </span>
+              </div>
+            </div>
+
+            <div className='flex shrink-0 items-center gap-2'>
+              <div className='flex items-center'>
+                {status.testing && (
+                  <StatusBadge
+                    label={t('Testing...')}
+                    variant='warning'
+                    className='animate-pulse'
+                    copyable={false}
+                  />
+                )}
+                {status.latency !== null && !status.testing && (
+                  <StatusBadge
+                    variant='success'
+                    label={`${status.latency}${t('ms')}`}
+                    className={cn(
+                      'font-mono font-medium',
+                      getLatencyColorClass(status.latency)
+                    )}
+                    copyable={false}
+                  />
+                )}
+                {status.error && (
+                  <StatusBadge
+                    label={t('N/A')}
+                    variant='neutral'
+                    copyable={false}
+                  />
+                )}
+              </div>
+
+              <div className='flex items-center gap-0.5'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => handleTest(item.url)}
+                  disabled={status.testing}
+                  className='size-7 p-0'
+                  title={t('Test Latency')}
+                >
+                  <Zap
+                    className={cn('size-3.5', status.testing && 'animate-pulse')}
+                  />
+                </Button>
+
+                <CopyButton
+                  value={item.url}
+                  variant='ghost'
+                  size='sm'
+                  className='size-7 p-0'
+                  iconClassName='size-3.5'
+                  tooltip={t('Copy URL')}
+                  aria-label={t('Copy URL')}
+                />
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -294,6 +294,62 @@ func CacheUpdateChannelStatus(id int, status int) {
 	}
 }
 
+// cacheRestoreChannelAbilities re-adds enabled abilities after a channel is
+// re-enabled without rebuilding the complete channel cache.
+func cacheRestoreChannelAbilities(id int) {
+	if !common.MemoryCacheEnabled {
+		return
+	}
+	var abilities []*Ability
+	if err := DB.Where("channel_id = ? AND enabled = ?", id, true).Find(&abilities).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to restore abilities for channel %d: %v", id, err))
+		return
+	}
+
+	channelSyncLock.Lock()
+	defer channelSyncLock.Unlock()
+	channel, exists := channelsIDM[id]
+	if !exists {
+		return
+	}
+	for group, model2channels := range group2model2channels {
+		for model, channels := range model2channels {
+			filtered := channels[:0]
+			for _, channelID := range channels {
+				if channelID != id {
+					filtered = append(filtered, channelID)
+				}
+			}
+			if len(filtered) == 0 {
+				delete(model2channels, model)
+			} else {
+				model2channels[model] = filtered
+			}
+		}
+		if len(model2channels) == 0 {
+			delete(group2model2channels, group)
+		}
+	}
+	if channel.Status == common.ChannelStatusEnabled {
+		for _, ability := range abilities {
+			if _, exists := group2model2channels[ability.Group]; !exists {
+				group2model2channels[ability.Group] = make(map[string][]int)
+			}
+			group2model2channels[ability.Group][ability.Model] = append(
+				group2model2channels[ability.Group][ability.Model], id,
+			)
+		}
+		for group, model2channels := range group2model2channels {
+			for model, channels := range model2channels {
+				sort.SliceStable(channels, func(i, j int) bool {
+					return channelsIDM[channels[i]].GetPriority() > channelsIDM[channels[j]].GetPriority()
+				})
+				group2model2channels[group][model] = channels
+			}
+		}
+	}
+}
+
 func CacheUpdateChannel(channel *Channel) {
 	if !common.MemoryCacheEnabled {
 		return

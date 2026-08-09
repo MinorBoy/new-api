@@ -772,14 +772,14 @@ func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {
 	memoryCacheEnabled := common.MemoryCacheEnabled
-	refreshChannelCache := false
+	channelStatusLocked := false
 	if memoryCacheEnabled {
 		channelStatusLock.Lock()
+		channelStatusLocked = true
 		defer func() {
-			if refreshChannelCache {
-				InitChannelCache()
+			if channelStatusLocked {
+				channelStatusLock.Unlock()
 			}
-			channelStatusLock.Unlock()
 		}()
 
 		channelCache, _ := CacheGetChannel(channelId)
@@ -801,10 +801,12 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			//return true
 		} else {
 			// 如果缓存渠道存在，且状态已是目标状态，直接返回
-			if channelCache.Status == status {
+			if channelCache.Status == status && status != common.ChannelStatusEnabled {
 				return false
 			}
-			CacheUpdateChannelStatus(channelId, status)
+			if channelCache.Status != status {
+				CacheUpdateChannelStatus(channelId, status)
+			}
 		}
 	}
 
@@ -814,31 +816,31 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		return false
 	} else {
 		if channel.Status == status {
-			return false
-		}
-
-		if channel.ChannelInfo.IsMultiKey {
-			beforeStatus := channel.Status
-			// Protect map writes with the same per-channel lock used by readers
-			pollingLock := GetChannelPollingLock(channelId)
-			pollingLock.Lock()
-			handlerMultiKeyUpdate(channel, usingKey, status, reason)
-			pollingLock.Unlock()
-			if beforeStatus != channel.Status {
+			shouldUpdateAbilities = status == common.ChannelStatusEnabled
+		} else {
+			if channel.ChannelInfo.IsMultiKey {
+				beforeStatus := channel.Status
+				// Protect map writes with the same per-channel lock used by readers
+				pollingLock := GetChannelPollingLock(channelId)
+				pollingLock.Lock()
+				handlerMultiKeyUpdate(channel, usingKey, status, reason)
+				pollingLock.Unlock()
+				if beforeStatus != channel.Status {
+					shouldUpdateAbilities = true
+				}
+			} else {
+				info := channel.GetOtherInfo()
+				info["status_reason"] = reason
+				info["status_time"] = common.GetTimestamp()
+				channel.SetOtherInfo(info)
+				channel.Status = status
 				shouldUpdateAbilities = true
 			}
-		} else {
-			info := channel.GetOtherInfo()
-			info["status_reason"] = reason
-			info["status_time"] = common.GetTimestamp()
-			channel.SetOtherInfo(info)
-			channel.Status = status
-			shouldUpdateAbilities = true
-		}
-		err = channel.SaveWithoutKey()
-		if err != nil {
-			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
-			return false
+			err = channel.SaveWithoutKey()
+			if err != nil {
+				common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
+				return false
+			}
 		}
 	}
 	if shouldUpdateAbilities {
@@ -847,7 +849,11 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
 			return true
 		}
-		refreshChannelCache = memoryCacheEnabled && status == common.ChannelStatusEnabled
+		if memoryCacheEnabled && status == common.ChannelStatusEnabled {
+			channelStatusLock.Unlock()
+			channelStatusLocked = false
+			cacheRestoreChannelAbilities(channelId)
+		}
 	}
 	return true
 }

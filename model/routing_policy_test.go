@@ -364,6 +364,97 @@ func TestGroupRoutingAvailabilityDoesNotRecoverWhenAbilityEnableFails(t *testing
 	assert.False(t, ability.Enabled)
 }
 
+func TestGroupRoutingAvailabilityRetriesAbilityEnableAfterTransientFailure(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+	priority := int64(100)
+	weight := uint(10)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 11, Name: "ability-retry", Key: "secret", Status: common.ChannelStatusEnabled,
+		Priority: &priority, Weight: &weight,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group: "default", Model: modelrouting.Seedance20, ChannelId: 11,
+		Enabled: true, Priority: &priority, Weight: weight,
+	}).Error)
+	model.InitChannelCache()
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusAutoDisabled, "test disable"))
+
+	forcedErr := errors.New("forced transient ability enable failure")
+	const callbackName = "test:group-routing-ability-enable-retry"
+	callbackRegistered := true
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "abilities" {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = db.Callback().Update().Remove(callbackName)
+		}
+	})
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	require.NoError(t, db.Callback().Update().Remove(callbackName))
+	callbackRegistered = false
+
+	available, err := model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Empty(t, available)
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	available, err = model.ListRoutingAvailability("default", []string{modelrouting.Seedance20})
+	require.NoError(t, err)
+	assert.Equal(t, map[model.RoutingAvailabilityKey]struct{}{
+		{CanonicalModel: modelrouting.Seedance20, ChannelID: 11}: {},
+	}, available)
+}
+
+func TestChannelReenableDoesNotRunFullChannelCacheRefreshPerChannel(t *testing.T) {
+	db := openRoutingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCacheEnabled })
+	priority := int64(100)
+	weight := uint(10)
+	for channelID := 11; channelID <= 12; channelID++ {
+		require.NoError(t, db.Create(&model.Channel{
+			Id: channelID, Name: fmt.Sprintf("cache-refresh-%d", channelID), Key: "secret",
+			Status: common.ChannelStatusEnabled, Priority: &priority, Weight: &weight,
+		}).Error)
+		require.NoError(t, db.Create(&model.Ability{
+			Group: "default", Model: modelrouting.Seedance20, ChannelId: channelID,
+			Enabled: true, Priority: &priority, Weight: weight,
+		}).Error)
+	}
+	model.InitChannelCache()
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusAutoDisabled, "test disable"))
+	require.True(t, model.UpdateChannelStatus(12, "", common.ChannelStatusAutoDisabled, "test disable"))
+
+	channelQueryCount := 0
+	const callbackName = "test:group-routing-channel-refresh-count"
+	callbackRegistered := true
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "channels" {
+			channelQueryCount++
+		}
+	}))
+	t.Cleanup(func() {
+		if callbackRegistered {
+			_ = db.Callback().Query().Remove(callbackName)
+		}
+	})
+
+	require.True(t, model.UpdateChannelStatus(11, "", common.ChannelStatusEnabled, ""))
+	require.True(t, model.UpdateChannelStatus(12, "", common.ChannelStatusEnabled, ""))
+
+	assert.Equal(t, 2, channelQueryCount)
+}
+
 func TestInitChannelCachePreservesLastValidSnapshotOnLoadFailure(t *testing.T) {
 	for _, failedTable := range []string{"channels", "abilities"} {
 		t.Run(failedTable, func(t *testing.T) {

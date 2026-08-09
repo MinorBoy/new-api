@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ChevronDown,
@@ -36,6 +37,8 @@ import {
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
 import { StatusBadge } from '@/components/status-badge'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -67,12 +70,20 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { Switch } from '@/components/ui/switch'
 
 import { safeJsonParse } from '../utils/json-parser'
 import {
-  updateGroupRoutingRequirements,
-  type GroupRoutingRequirements,
+  previewGroupRoutingProfileSummaries,
+  type GroupRoutingProfileSummary,
+} from './group-routing-profile-api'
+import { GroupRoutingProfileEditor } from './group-routing-profile-editor'
+import {
+  effectiveRealPersonMode,
+  isDynamicGroupRoutingProfile,
+  parseGroupRoutingProfiles,
+  serializeGroupRoutingProfiles,
+  type GroupCostMode,
+  type GroupRoutingProfiles,
 } from './group-routing-requirements'
 
 type GroupRatioVisualEditorProps = {
@@ -104,6 +115,8 @@ type RegistryEntry = {
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'
 const sectionHeaderClassName = 'border-b bg-muted/20'
+const emptyRoutingProfileSummaries: Record<string, GroupRoutingProfileSummary> =
+  {}
 
 let groupPricingIdCounter = 0
 function createGroupPricingId() {
@@ -271,6 +284,47 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
   const [detailGroup, setDetailGroup] = useState<string | null>(null)
+  const [, setRoutingTargetsGroup] = useState<string | null>(null)
+
+  const routingProfileState = useMemo(() => {
+    let profiles: GroupRoutingProfiles = {}
+    try {
+      profiles = parseGroupRoutingProfiles(groupRoutingRequirements)
+    } catch {
+      return {
+        profiles,
+        dynamicProfiles: profiles,
+        normalizedDynamicProfiles: '{}',
+        hasDynamicProfiles: false,
+      }
+    }
+
+    const dynamicProfiles = Object.fromEntries(
+      Object.entries(profiles).filter(([, profile]) =>
+        isDynamicGroupRoutingProfile(profile)
+      )
+    )
+    const normalizedDynamicProfiles =
+      serializeGroupRoutingProfiles(dynamicProfiles)
+    return {
+      profiles,
+      dynamicProfiles: parseGroupRoutingProfiles(normalizedDynamicProfiles),
+      normalizedDynamicProfiles,
+      hasDynamicProfiles: Object.keys(dynamicProfiles).length > 0,
+    }
+  }, [groupRoutingRequirements])
+
+  const routingProfileSummariesQuery = useQuery({
+    queryKey: [
+      'group-routing-profile-summaries',
+      routingProfileState.normalizedDynamicProfiles,
+    ],
+    queryFn: () =>
+      previewGroupRoutingProfileSummaries(routingProfileState.dynamicProfiles),
+    enabled: routingProfileState.hasDynamicProfiles,
+  })
+  const routingProfileSummaries =
+    routingProfileSummariesQuery.data?.data ?? emptyRoutingProfileSummaries
 
   const registry = useMemo<RegistryEntry[]>(() => {
     const ratioMap = parseRatioMap(groupRatio)
@@ -334,13 +388,26 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
   return (
     <div className='space-y-4'>
+      {routingProfileSummariesQuery.isError ? (
+        <Alert>
+          <AlertTriangle aria-hidden='true' />
+          <AlertTitle>{t('Routing preview unavailable')}</AlertTitle>
+          <AlertDescription>
+            {t(
+              'Compatible target counts could not be loaded. Group ratio editing remains available.'
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <GroupPricingTable
         groupRatio={groupRatio}
         userUsableGroups={userUsableGroups}
         topupGroupRatio={topupGroupRatio}
         onChange={onChange}
         onShowDetail={setDetailGroup}
-        groupRoutingRequirements={groupRoutingRequirements}
+        routingProfiles={routingProfileState.profiles}
+        routingProfileSummaries={routingProfileSummaries}
       />
 
       <GroupOverrideRules
@@ -422,8 +489,12 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         autoGroups={autoGroupsList}
         groupSpecialUsableGroup={groupSpecialUsableGroup}
         groupRoutingRequirements={groupRoutingRequirements}
+        routingProfileSummary={
+          detailGroup ? routingProfileSummaries[detailGroup] : undefined
+        }
         disabled={disabled}
         onChange={onChange}
+        onViewTargets={(groupName) => setRoutingTargetsGroup(groupName)}
       />
     </div>
   )
@@ -433,7 +504,8 @@ type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
   topupGroupRatio: string
-  groupRoutingRequirements: string
+  routingProfiles: GroupRoutingProfiles
+  routingProfileSummaries: Record<string, GroupRoutingProfileSummary>
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
 }
@@ -442,7 +514,8 @@ function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   topupGroupRatio,
-  groupRoutingRequirements,
+  routingProfiles,
+  routingProfileSummaries,
   onChange,
   onShowDetail,
 }: GroupPricingTableProps) {
@@ -450,15 +523,6 @@ function GroupPricingTable({
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
     buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
   )
-  const routingRequirements = useMemo(
-    () =>
-      safeJsonParse<Record<string, GroupRoutingRequirements>>(
-        groupRoutingRequirements,
-        { fallback: {}, silent: true }
-      ),
-    [groupRoutingRequirements]
-  )
-
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
@@ -633,16 +697,94 @@ function GroupPricingTable({
               {
                 id: 'routing-requirements',
                 header: t('Routing'),
-                className: 'min-w-44',
-                cell: (row) =>
-                  routingRequirements[row.name.trim()]?.require_real_person ===
-                  true ? (
-                    <StatusBadge variant='info' copyable={false}>
-                      {t('Require real person')}
-                    </StatusBadge>
-                  ) : (
-                    <span className='text-muted-foreground'>-</span>
-                  ),
+                className: 'min-w-72',
+                cell: (row) => {
+                  const groupName = row.name.trim()
+                  const profile = routingProfiles[groupName]
+                  if (!profile) {
+                    return <span className='text-muted-foreground'>-</span>
+                  }
+                  if (!isDynamicGroupRoutingProfile(profile)) {
+                    return (
+                      <Badge variant='outline'>
+                        {t('Legacy static routing policy')}
+                      </Badge>
+                    )
+                  }
+
+                  const summary = routingProfileSummaries[groupName]
+                  const realPersonMode = effectiveRealPersonMode(profile)
+                  let realPersonLabel = t('Any real-person capability')
+                  if (realPersonMode === 'required') {
+                    realPersonLabel = t('Must support real person')
+                  } else if (realPersonMode === 'forbidden') {
+                    realPersonLabel = t('Must not support real person')
+                  }
+                  const costModeLabels: Record<GroupCostMode, string> = {
+                    per_request: t('Per request'),
+                    per_duration: t('Per duration'),
+                    per_token: t('Per token'),
+                    free: t('Free'),
+                  }
+
+                  return (
+                    <div className='flex max-w-xl flex-wrap items-center gap-1.5 py-1'>
+                      <Badge
+                        variant={
+                          profile.status === 'active' ? 'default' : 'outline'
+                        }
+                      >
+                        {profile.status === 'active' ? t('Active') : t('Draft')}
+                      </Badge>
+                      <Badge variant='secondary'>{realPersonLabel}</Badge>
+                      {(profile.allowed_cost_modes ?? []).length === 0 ? (
+                        <Badge variant='outline'>{t('All cost modes')}</Badge>
+                      ) : (
+                        profile.allowed_cost_modes?.map((costMode) => (
+                          <Badge key={costMode} variant='outline'>
+                            {costModeLabels[costMode]}
+                          </Badge>
+                        ))
+                      )}
+                      {summary ? (
+                        <>
+                          <Badge variant='outline'>
+                            {t('Matched models: {{matched}}/{{total}}', {
+                              matched: summary.matched_models,
+                              total: summary.models,
+                            })}
+                          </Badge>
+                          <Badge variant='outline'>
+                            {t('Matched targets: {{matched}}/{{total}}', {
+                              matched: summary.matched_targets,
+                              total: summary.targets,
+                            })}
+                          </Badge>
+                          <Badge
+                            variant={
+                              summary.stale_exclusions > 0
+                                ? 'warning'
+                                : 'outline'
+                            }
+                          >
+                            {t('Stale exclusions: {{count}}', {
+                              count: summary.stale_exclusions,
+                            })}
+                          </Badge>
+                          {summary.matched_targets === 0 ? (
+                            <span className='text-warning flex items-center gap-1 text-xs font-medium'>
+                              <AlertTriangle
+                                className='size-3.5'
+                                aria-hidden='true'
+                              />
+                              {t('No compatible targets')}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  )
+                },
               },
               {
                 id: 'description',
@@ -1161,8 +1303,10 @@ type GroupDetailSheetProps = {
   autoGroups: string[]
   groupSpecialUsableGroup: string
   groupRoutingRequirements: string
+  routingProfileSummary?: GroupRoutingProfileSummary
   disabled: boolean
   onChange: (field: string, value: string) => void
+  onViewTargets: (groupName: string) => void
 }
 
 type VisibilityRule = {
@@ -1199,10 +1343,6 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
       props.groupSpecialUsableGroup,
       { fallback: {}, silent: true }
     )
-    const routingRequirements = safeJsonParse<
-      Record<string, GroupRoutingRequirements>
-    >(props.groupRoutingRequirements, { fallback: {}, silent: true })
-
     // Overrides that apply when other user groups bill as this group
     const incomingOverrides: { userGroup: string; ratio: number }[] = []
     for (const [userGroup, overrides] of Object.entries(overrideMap)) {
@@ -1234,6 +1374,7 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
     const autoIndex = props.autoGroups.indexOf(name)
 
     return {
+      groupName: name,
       ratio: entry?.ratio,
       topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : null,
       selectable: Object.hasOwn(usableMap, name),
@@ -1242,7 +1383,6 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
       outgoingOverrides,
       visibilityRules,
       autoIndex,
-      requireRealPerson: routingRequirements[name]?.require_real_person === true,
     }
   }, [
     name,
@@ -1252,7 +1392,6 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
     props.groupGroupRatio,
     props.autoGroups,
     props.groupSpecialUsableGroup,
-    props.groupRoutingRequirements,
   ])
 
   return (
@@ -1323,25 +1462,16 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
               <h3 className='text-sm font-semibold'>
                 {t('Group routing requirements')}
               </h3>
-              <div className='flex items-center justify-between gap-4 rounded-md border px-3 py-2.5'>
-                <span className='text-sm'>{t('Require real person')}</span>
-                <Switch
-                  checked={detail.requireRealPerson}
-                  disabled={props.disabled}
-                  onCheckedChange={(checked) => {
-                    if (!name) return
-                    props.onChange(
-                      'GroupRoutingRequirements',
-                      updateGroupRoutingRequirements(
-                        props.groupRoutingRequirements,
-                        name,
-                        checked
-                      )
-                    )
-                  }}
-                  aria-label={t('Require real person')}
-                />
-              </div>
+              <GroupRoutingProfileEditor
+                groupName={detail.groupName}
+                groupRoutingRequirements={props.groupRoutingRequirements}
+                summary={props.routingProfileSummary}
+                disabled={props.disabled}
+                onChange={(value) =>
+                  props.onChange('GroupRoutingRequirements', value)
+                }
+                onViewTargets={() => props.onViewTargets(detail.groupName)}
+              />
             </section>
 
             <section className='space-y-2'>

@@ -105,6 +105,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const watchedGroupRatio = form.watch('GroupRatio')
   const watchedUserUsableGroups = form.watch('UserUsableGroups')
   const watchedTopupGroupRatio = form.watch('TopupGroupRatio')
+  const watchedGroupRoutingRequirements = form.watch('GroupRoutingRequirements')
   const groupNames = useMemo(() => {
     const ratioMap = safeJsonParse<Record<string, number>>(watchedGroupRatio, {
       fallback: {},
@@ -171,7 +172,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               groupGroupRatio={form.watch('GroupGroupRatio')}
               autoGroups={form.watch('AutoGroups')}
               groupSpecialUsableGroup={form.watch('GroupSpecialUsableGroup')}
-              groupRoutingRequirements={form.watch('GroupRoutingRequirements')}
+              groupRoutingRequirements={watchedGroupRoutingRequirements}
               disabled={isSaving}
               onChange={(field, value) =>
                 handleFieldChange(field as keyof GroupFormValues, value)

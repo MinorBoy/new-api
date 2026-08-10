@@ -174,6 +174,62 @@ async function mountRouteMarginCatalog(
   return { root, container: container as unknown as HTMLElement, client }
 }
 
+function waitForRouteMarginQueryFailure(
+  client: QueryClient,
+  expectedRequestCount: number,
+  getRequestCount: () => number
+): Promise<void> {
+  return new Promise((resolve) => {
+    const isSettled = () =>
+      getRequestCount() >= expectedRequestCount &&
+      client
+        .getQueryCache()
+        .getAll()
+        .some(
+          (query) =>
+            query.state.status === 'error' && query.state.fetchStatus === 'idle'
+        )
+    if (isSettled()) {
+      resolve()
+      return
+    }
+    const unsubscribe = client.getQueryCache().subscribe(() => {
+      if (isSettled()) {
+        unsubscribe()
+        resolve()
+      }
+    })
+  })
+}
+
+function waitForButtonText(
+  container: HTMLElement,
+  text: string
+): Promise<unknown> {
+  return new Promise((resolve) => {
+    const findButton = () =>
+      [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes(text)
+      )
+    const current = findButton()
+    if (current) {
+      resolve(current)
+      return
+    }
+    const observer = new browserWindow.MutationObserver(() => {
+      const button = findButton()
+      if (button) {
+        observer.disconnect()
+        resolve(button)
+      }
+    })
+    observer.observe(
+      container as unknown as Parameters<typeof observer.observe>[0],
+      { childList: true, subtree: true }
+    )
+  })
+}
+
 test('shows the default 30 percent route margin matrix', async () => {
   const mounted = await mountRouteMarginCatalog()
   try {
@@ -335,14 +391,23 @@ test('shows a retry action after the route margin query fails', async () => {
     null
   )
   try {
-    await act(async () => undefined)
-    const retryButton = [...mounted.container.querySelectorAll('button')].find(
-      (button) => button.textContent?.includes('Retry')
+    await act(async () =>
+      waitForRouteMarginQueryFailure(mounted.client, 1, () => requestCount)
     )
+    let retryButton: unknown
+    await act(async () => {
+      retryButton = await waitForButtonText(mounted.container, 'Retry')
+    })
     assert.ok(retryButton instanceof browserWindow.HTMLButtonElement)
     assert.match(mounted.container.textContent ?? '', /catalog unavailable/)
-    await act(async () => (retryButton as unknown as { click(): void }).click())
-    await act(async () => undefined)
+    await act(async () => {
+      ;(retryButton as unknown as { click(): void }).click()
+      await waitForRouteMarginQueryFailure(
+        mounted.client,
+        2,
+        () => requestCount
+      )
+    })
     assert.equal(requestCount, 2)
   } finally {
     api.get = originalGet

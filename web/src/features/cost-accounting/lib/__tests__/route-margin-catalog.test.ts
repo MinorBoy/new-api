@@ -22,6 +22,7 @@ import test from 'node:test'
 import {
   formatRouteMarginPercent,
   formatRouteMarginUSD,
+  routeMarginRevenueSourceLabel,
   routeMarginParamsFromSearch,
   updateRouteMarginSearch,
 } from '../route-margin-catalog'
@@ -58,6 +59,18 @@ test('formats route margin amounts and PPM exactly', () => {
   assert.equal(formatRouteMarginPercent(299_999), '29.9999%')
   assert.equal(formatRouteMarginUSD(undefined), '')
   assert.equal(formatRouteMarginPercent(undefined), '')
+})
+
+test('translates the runtime billing source without changing unknown sources', () => {
+  const translate = (key: string) => `translated:${key}`
+  assert.equal(
+    routeMarginRevenueSourceLabel('runtime_billing_settings', translate),
+    'translated:Runtime billing settings'
+  )
+  assert.equal(
+    routeMarginRevenueSourceLabel('future_source', translate),
+    'future_source'
+  )
 })
 
 test('preserves four-decimal percentage precision in PPM', () => {

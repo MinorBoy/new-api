@@ -576,6 +576,19 @@ export const STATIC_I18N_KEYS = [
   'Map client-visible Ark model names to verified Z5API upstream models',
   'Z5API is task-only. Enable it only after real upstream contract acceptance.',
 
+  // Route margin catalog dynamic labels
+  'All results',
+  'All scenarios',
+  'No video',
+  'With video',
+  'Revenue unavailable',
+  'Cost rule missing',
+  'Cost meter unavailable',
+  'Margin below threshold',
+  'Margin calculation failed',
+  'Required metadata unavailable',
+  'Runtime billing settings',
+
   // Misc
   'Cancel',
   'Status',

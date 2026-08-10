@@ -120,3 +120,12 @@ export function routeMarginFailureReasonLabel(
   }
   return reason ? translate(keys[reason] ?? reason) : ''
 }
+
+export function routeMarginRevenueSourceLabel(
+  source: string,
+  translate: (key: string) => string
+): string {
+  return source === 'runtime_billing_settings'
+    ? translate('Runtime billing settings')
+    : source
+}

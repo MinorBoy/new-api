@@ -27,6 +27,7 @@ import {
   formatRouteMarginPercent,
   formatRouteMarginUSD,
   routeMarginFailureReasonLabel,
+  routeMarginRevenueSourceLabel,
   routeMarginScenarioLabel,
 } from '../lib/route-margin-catalog'
 import type { RouteMarginCatalogItem } from '../types'
@@ -191,7 +192,7 @@ export function useRouteMarginCatalogColumns(): ColumnDef<
           <div className='min-w-0 font-mono text-xs leading-tight'>
             <p className='break-all'>{row.original.cost_source || '—'}</p>
             <p className='text-muted-foreground mt-1 break-all'>
-              {row.original.revenue_source}
+              {routeMarginRevenueSourceLabel(row.original.revenue_source, t)}
             </p>
           </div>
         ),

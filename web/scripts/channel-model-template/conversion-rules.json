@@ -12,7 +12,11 @@
     "9": "CH-4STOKEN",
     "10": "CH-OMEGAAI",
     "11": "CH-Z5API",
-    "12": "CH-APIAW"
+    "12": "CH-APIAW",
+    "13": "CH-MIKOTO",
+    "14": "CH-ZZONE",
+    "15": "CH-FFLINK",
+    "16": "CH-AOTIAN"
   },
   "defaults": {
     "currency": "CNY",

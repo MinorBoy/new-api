@@ -69,7 +69,10 @@ test('reads the latest series and unit-price contract and skips series-only grou
   assert.equal(model?.fields.计费, 'second')
   assert.equal(model?.fields['单价 元'], 1.38)
   assert.equal(model?.fields.视频输入, undefined)
-  assert.equal(source.models.some((record) => record.fields.系列 === 2.5), false)
+  assert.equal(
+    source.models.some((record) => record.fields.系列 === 2.5),
+    false
+  )
   assert.equal(official?.fields.系列, 2)
 })
 

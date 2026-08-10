@@ -29,7 +29,7 @@ import { convertWorkbook } from '../../../src/channel-config-converter/conversio
 import { runGenerator } from '../generate'
 
 const sourcePath = fileURLToPath(
-  new URL('../../../../docs/new-channels/sd收录.xlsx', import.meta.url)
+  new URL('../__fixtures__/sd-source-v1.xlsx', import.meta.url)
 )
 const rulesPath = fileURLToPath(
   new URL('../conversion-rules.json', import.meta.url)
@@ -80,9 +80,13 @@ test('writes a workbook and report when warnings are explicitly allowed', async 
     await workbook.xlsx.readFile(sourcePath)
     const sourceSheet = workbook.getWorksheet('sd')
     assert.ok(sourceSheet)
+    for (let row = 4; row <= sourceSheet.rowCount; row += 1) {
+      sourceSheet.getRow(row).getCell(1).value = null
+      sourceSheet.getRow(row).getCell(6).value = null
+    }
     const priceColumn = sourceSheet
       .getRow(2)
-      .values.findIndex((value) => String(value).trim() === '元/秒')
+      .values.findIndex((value) => String(value).trim() === '单价 元')
     assert.ok(priceColumn > 0)
     sourceSheet.getRow(3).getCell(priceColumn).value = 0
     await workbook.xlsx.writeFile(warningSourcePath)
@@ -104,8 +108,7 @@ test('writes a workbook and report when warnings are explicitly allowed', async 
     assert.equal(result.hasFailures, false)
     assert.ok(
       result.report.issues.some(
-        (item) =>
-          item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+        (item) => item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
       )
     )
     const bytes = await fs.readFile(outputPath)

@@ -85,6 +85,7 @@ export type ChannelRow = {
 
 export type SkuRow = {
   businessId: string
+  series: string
   model: string
   version: string
   resolution: string

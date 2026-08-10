@@ -79,11 +79,10 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
           计费倍率: 1,
           付费模式: '余额',
           模型ID: 'seedance 720p-fast',
+          系列: 2,
           版本: 'fast',
           计费: 'second',
-          '元/秒': 1.38,
-          '元/次': null,
-          '元/1M': null,
+          '单价 元': 1.38,
           参考图数: 9,
           参考视频数: 3,
           参考音频数: 3,
@@ -95,7 +94,6 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
           超分: '否',
           时长范围: '4-15',
           比例: '9:16',
-          视频输入: '是',
           过真人脸: '是',
           状态: '正常',
           协议: '自有',
@@ -109,6 +107,7 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
           {
             location: { sheet: 'sd官价', row: 7 },
             fields: {
+              系列: 2,
               模型: 'seedance-2.0',
               版本: '标准',
               分辨率: 720,
@@ -149,6 +148,26 @@ test('maps a second-priced source row to a per-duration USD cost', () => {
   assert.equal(cost.chargeEvent, 'task_succeeded')
 })
 
+test('maps all latest billing modes from one unit price field', () => {
+  const cases = [
+    ['second', 'per_duration', 'nativePerSecond'],
+    ['call', 'per_request', 'nativePerRequest'],
+    ['token', 'per_token', 'nativePerMillion'],
+  ] as const
+
+  for (const [billingMode, expectedMode, priceField] of cases) {
+    const source = sourceWithOfficialPrice()
+    const model = firstSourceModel(source)
+    model.fields.计费 = billingMode
+    model.fields['单价 元'] = 2
+
+    const cost = buildTemplateData(source, rules).costs[0]
+
+    assert.equal(cost?.mode, expectedMode)
+    assert.equal(cost?.[priceField], '2')
+  }
+})
+
 test('keeps a source row without an official SKU as draft', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(false), rules)
   const cost = output.costs[0]
@@ -158,17 +177,32 @@ test('keeps a source row without an official SKU as draft', () => {
   assert.equal(output.issues[0]?.severity, 'WARN')
 })
 
-test('keeps a zero-priced source row as a disabled draft', () => {
+test('keeps every invalid unit price as a disabled draft', () => {
+  for (const value of [null, 0, -1, 'invalid']) {
+    const source = sourceWithOfficialPrice()
+    firstSourceModel(source).fields['单价 元'] = value
+
+    const output = buildTemplateData(source, rules)
+
+    assert.equal(output.costs[0]?.status, 'draft')
+    assert.equal(output.mappings[0]?.enabled, '否')
+    assert.ok(
+      output.issues.some(
+        (item) => item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+      )
+    )
+  }
+})
+
+test('rejects an unsupported latest billing mode', () => {
   const source = sourceWithOfficialPrice()
-  firstSourceModel(source).fields['元/秒'] = 0
+  firstSourceModel(source).fields.计费 = 'minute'
 
   const output = buildTemplateData(source, rules)
 
-  assert.equal(output.costs[0]?.status, 'draft')
-  assert.equal(output.mappings[0]?.enabled, '否')
   assert.ok(
     output.issues.some(
-      (item) => item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+      (item) => item.code === 'COST_MODE_UNKNOWN' && item.severity === 'FAIL'
     )
   )
 })
@@ -229,13 +263,63 @@ test('caps aggregate reference totals by the combined video and audio limit', ()
 test('ignores a reference video duration when the row allows no videos', () => {
   const source = sourceWithOfficialPrice()
   firstSourceModel(source).fields.参考视频数 = 0
-  firstSourceModel(source).fields.视频输入 = '否'
 
   const output = buildTemplateData(source, rules)
   const note = output.mappings[0]?.note ?? ''
 
   assert.equal(output.costs[0]?.status, 'active')
   assert.match(note, /参考视频总时长上限秒=0/)
+})
+
+test('derives video input support from the reference-video count', () => {
+  for (const [count, expected] of [
+    [0, '否'],
+    [3, '是'],
+  ] as const) {
+    const source = sourceWithOfficialPrice()
+    firstSourceModel(source).fields.参考视频数 = count
+
+    const output = buildTemplateData(source, rules)
+
+    assert.equal(output.skus[0]?.supportsVideoInput, expected)
+  }
+})
+
+test('matches official prices within the same Seedance series', () => {
+  const source = sourceWithOfficialPrice()
+  const model = firstSourceModel(source)
+  const seriesTwoPrice = source.officialPrices[0]
+  assert.ok(seriesTwoPrice)
+  model.fields.系列 = 2.5
+  seriesTwoPrice.fields.系列 = 2
+  seriesTwoPrice.fields.模型 = 'seedance-2.5'
+  seriesTwoPrice.fields['不含视频 元/M'] = 11
+  seriesTwoPrice.fields['包含视频 元/M'] = 7
+  const seriesTwoPointFivePrice = structuredClone(seriesTwoPrice)
+  seriesTwoPointFivePrice.location.row = 8
+  seriesTwoPointFivePrice.fields.系列 = 2.5
+  seriesTwoPointFivePrice.fields['不含视频 元/M'] = 55
+  seriesTwoPointFivePrice.fields['包含视频 元/M'] = 33
+  source.officialPrices.push(seriesTwoPointFivePrice)
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      modelRules: {
+        'seedance 720p-fast': {
+          ...rulesInput.modelRules['seedance 720p-fast'],
+          clientModel: 'seedance-2.5',
+        },
+      },
+    })
+  )
+
+  assert.equal(output.skus[0]?.series, '2.5')
+  assert.equal(
+    output.sales.find((sale) => sale.scenario === 'no_video')?.nativePerMillion,
+    '55'
+  )
 })
 
 test('derives Dimensio reference modes and aspect ratios from the verified contract', () => {
@@ -367,10 +451,7 @@ test('applies the Cangyuan sd5 shared media protocol when the source omits the a
     ),
     false
   )
-  assert.match(
-    output.mappings[0]?.note ?? '',
-    /视频音频合计上限=3/
-  )
+  assert.match(output.mappings[0]?.note ?? '', /视频音频合计上限=3/)
 })
 
 test('matches a Seedance source family to an official Seedance SKU', async () => {
@@ -578,9 +659,7 @@ test('accepts MegaByAI 1080p and 4k resolutions from the source contract', () =>
     )
 
     assert.equal(
-      output.issues.some(
-        (item) => item.code === 'CHANNEL_CONTRACT_RESOLUTION'
-      ),
+      output.issues.some((item) => item.code === 'CHANNEL_CONTRACT_RESOLUTION'),
       false,
       resolutionValue
     )
@@ -622,20 +701,21 @@ test('quarantines an explicit draft contract conflict without blocking the workb
   assert.equal(
     output.issues.some(
       (item) =>
-        item.code === 'CHANNEL_CONTRACT_REFERENCES' &&
-        item.severity === 'FAIL'
+        item.code === 'CHANNEL_CONTRACT_REFERENCES' && item.severity === 'FAIL'
     ),
     false
   )
   assert.equal(
     output.issues.some(
       (item) =>
-        item.code === 'CHANNEL_CONTRACT_REFERENCES' &&
-        item.severity === 'WARN'
+        item.code === 'CHANNEL_CONTRACT_REFERENCES' && item.severity === 'WARN'
     ),
     true
   )
-  assert.equal(output.costs.every((cost) => cost.status === 'draft'), true)
+  assert.equal(
+    output.costs.every((cost) => cost.status === 'draft'),
+    true
+  )
   assert.equal(output.mappings[0]?.enabled, '否')
 })
 

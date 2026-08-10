@@ -86,17 +86,21 @@ const source: SourceWorkbook = {
         计费倍率: 1,
         付费模式: '余额',
         模型ID: 'seedance 720p-fast',
+        系列: 2,
         版本: 'fast',
         计费: 'second',
-        '元/秒': 1.38,
-        '元/次': null,
-        '元/1M': null,
-        素材限制: 933,
+        '单价 元': 1.38,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 12,
+        视频音频合计上限: 3,
+        '参考视频总时长上限 秒': 15,
+        最小参考图数: 1,
         清晰度: '720',
         超分: '否',
         时长范围: '4-15',
         比例: '9:16',
-        视频输入: '是',
         过真人脸: '是',
         状态: '正常',
         协议: '自有',
@@ -108,6 +112,7 @@ const source: SourceWorkbook = {
     {
       location: { sheet: 'sd官价', row: 7 },
       fields: {
+        系列: 2,
         模型: 'seedance-2.0',
         版本: '标准',
         分辨率: 720,
@@ -420,7 +425,11 @@ test('unhides every populated cost and mapping row inherited from the base workb
       assert.equal(costSheet.getRow(row).hidden, false, `渠道成本 row ${row}`)
     }
     for (let row = 5; row < data.mappings.length + 5; row += 1) {
-      assert.equal(mappingSheet.getRow(row).hidden, false, `模型映射 row ${row}`)
+      assert.equal(
+        mappingSheet.getRow(row).hidden,
+        false,
+        `模型映射 row ${row}`
+      )
     }
   } finally {
     await fs.rm(directory, { recursive: true, force: true })

@@ -139,13 +139,6 @@ function referenceContract(record: SourceRecord): {
       structured: true,
     }
   }
-  if (field(record, '视频输入') === '否' && videos > 0) {
-    return {
-      contract: null,
-      error: '视频输入为否时参考视频数必须为0',
-      structured: true,
-    }
-  }
   if (totalMax > images + videos + audios) {
     return {
       contract: null,
@@ -252,15 +245,6 @@ function parseDuration(value: string): ParsedDuration {
   return { min: duration, max: duration }
 }
 
-function booleanLabel(
-  value: string,
-  fallback: '是' | '否' | '待确认'
-): '是' | '否' | '待确认' {
-  if (['是', 'yes', 'true', '1'].includes(value.toLowerCase())) return '是'
-  if (['否', 'no', 'false', '0'].includes(value.toLowerCase())) return '否'
-  return fallback
-}
-
 function scenarioCode(scenario: 'no_video' | 'with_video'): string {
   return scenario === 'no_video' ? 'NOV' : 'VID'
 }
@@ -326,7 +310,12 @@ function channelContractIssues(
     }
     if (
       reference &&
-      (!referencesWithin(maximumImages, maximumVideos, maximumAudios, maximumTotal) ||
+      (!referencesWithin(
+        maximumImages,
+        maximumVideos,
+        maximumAudios,
+        maximumTotal
+      ) ||
         (maximumVideoAudio !== null &&
           reference.videoAudioTotalMax !== null &&
           reference.videoAudioTotalMax > maximumVideoAudio))
@@ -387,10 +376,7 @@ function channelContractIssues(
     }
     if (reference && !referencesWithin(9, 3, 3, 15)) {
       return [
-        fail(
-          'CHANNEL_CONTRACT_REFERENCES',
-          'CLMM 素材上限超过已验证协议。'
-        ),
+        fail('CHANNEL_CONTRACT_REFERENCES', 'CLMM 素材上限超过已验证协议。'),
       ]
     }
     const controlsDuration = upstreamModel
@@ -413,10 +399,7 @@ function channelContractIssues(
   ) {
     if (upstreamModel !== 'video-2.0-pro') {
       return [
-        fail(
-          'CHANNEL_CONTRACT_MODEL',
-          'Secure 企业组必须使用 video-2.0-pro。'
-        ),
+        fail('CHANNEL_CONTRACT_MODEL', 'Secure 企业组必须使用 video-2.0-pro。'),
       ]
     }
     if (!durationWithin(5, 15)) {
@@ -428,12 +411,7 @@ function channelContractIssues(
       ]
     }
     if (resolutionValue !== '720p') {
-      return [
-        fail(
-          'CHANNEL_CONTRACT_RESOLUTION',
-          'Secure 企业组仅支持 720p。'
-        ),
-      ]
+      return [fail('CHANNEL_CONTRACT_RESOLUTION', 'Secure 企业组仅支持 720p。')]
     }
     if (
       reference &&
@@ -519,10 +497,22 @@ function buildChannels(source: SourceWorkbook, rules: Rules): ChannelRow[] {
 
 type OfficialIndex = Map<string, SourceRecord[]>
 
+function officialPriceKey(
+  seriesValue: string,
+  model: string,
+  resolutionValue: string
+): string {
+  return `${seriesValue}\u0000${model}\u0000${resolution(resolutionValue)}`
+}
+
 function indexOfficialPrices(source: SourceWorkbook): OfficialIndex {
   const index: OfficialIndex = new Map()
   for (const price of source.officialPrices) {
-    const key = `${field(price, '模型')}\u0000${resolution(field(price, '分辨率'))}`
+    const key = officialPriceKey(
+      field(price, '系列'),
+      field(price, '模型'),
+      field(price, '分辨率')
+    )
     const values = index.get(key) ?? []
     values.push(price)
     index.set(key, values)
@@ -532,10 +522,11 @@ function indexOfficialPrices(source: SourceWorkbook): OfficialIndex {
 
 function findOfficial(
   index: OfficialIndex,
+  seriesValue: string,
   model: string,
   resolutionValue: string
 ): SourceRecord | undefined {
-  return index.get(`${model}\u0000${resolution(resolutionValue)}`)?.[0]
+  return index.get(officialPriceKey(seriesValue, model, resolutionValue))?.[0]
 }
 
 function skuId(
@@ -563,7 +554,11 @@ function buildSkus(
   const rows = new Map<string, SkuRow>()
   for (const modelRecord of source.models) {
     const rawModel = field(modelRecord, '模型ID')
-    const official = source.officialPrices.find(
+    const seriesValue = field(modelRecord, '系列')
+    const seriesOfficialPrices = source.officialPrices.filter(
+      (price) => field(price, '系列') === seriesValue
+    )
+    const official = seriesOfficialPrices.find(
       (price) => field(price, '模型') === rawModel
     )
     const modelRule = modelRuleFor(
@@ -572,12 +567,17 @@ function buildSkus(
       field(official, '模型') ||
         inferClientModel(
           rawModel,
-          source.officialPrices.map((price) => field(price, '模型'))
+          seriesOfficialPrices.map((price) => field(price, '模型'))
         )
     )
     const model = modelRule.clientModel ?? field(official, '模型') ?? rawModel
     const resolutionValue = resolution(field(modelRecord, '清晰度'))
-    const officialPrice = findOfficial(officialIndex, model, resolutionValue)
+    const officialPrice = findOfficial(
+      officialIndex,
+      seriesValue,
+      model,
+      resolutionValue
+    )
     const version =
       field(officialPrice, '版本') || field(modelRecord, '版本') || '标准'
     const duration = parseDuration(field(modelRecord, '时长范围'))
@@ -636,8 +636,12 @@ function buildSkus(
     if (modelRule.supportsSuperResolution !== undefined) {
       supportsSuperResolution = modelRule.supportsSuperResolution ? '是' : '否'
     }
+    const materialContract = referenceContract(modelRecord).contract
+    const supportsVideoInput =
+      materialContract !== null && materialContract.videos > 0 ? '是' : '否'
     rows.set(id, {
       businessId: id,
+      series: seriesValue,
       model,
       version,
       resolution: resolutionValue,
@@ -647,7 +651,7 @@ function buildSkus(
       minDurationSeconds: ruleMin,
       maxDurationSeconds: ruleMax,
       ratio: field(modelRecord, '比例') || '按渠道映射',
-      supportsVideoInput: booleanLabel(field(modelRecord, '视频输入'), '是'),
+      supportsVideoInput,
       supportsRealPerson,
       supportsSuperResolution,
       measurementMethod: 'video_pixel_tokens',
@@ -682,7 +686,12 @@ function buildSales(
 ): SaleRow[] {
   const rows: SaleRow[] = []
   for (const sku of skus) {
-    const official = findOfficial(officialIndex, sku.model, sku.resolution)
+    const official = findOfficial(
+      officialIndex,
+      sku.series,
+      sku.model,
+      sku.resolution
+    )
     if (!official) continue
     const sourceId = `SRC-OFFICIAL-${slug(sku.model)}`
     for (const scenario of ['no_video', 'with_video'] as const) {
@@ -731,10 +740,8 @@ function buildSales(
   )
 }
 
-function priceForMode(record: SourceRecord, mode: CostMode): Decimal | null {
-  if (mode === 'per_duration') return numericField(record, '元/秒')
-  if (mode === 'per_request') return numericField(record, '元/次')
-  return numericField(record, '元/1M')
+function sourcePrice(record: SourceRecord): Decimal | null {
+  return numericField(record, '单价 元')
 }
 
 function overridePrice(
@@ -764,8 +771,11 @@ function buildCostsAndMappings(
   officialIndex: OfficialIndex,
   issues: Issue[]
 ): { costs: CostRow[]; mappings: MappingRow[] } {
-  const skuByModelResolution = new Map(
-    skus.map((sku) => [`${sku.model}\u0000${sku.resolution}`, sku])
+  const skuBySeriesModelResolution = new Map(
+    skus.map((sku) => [
+      officialPriceKey(sku.series, sku.model, sku.resolution),
+      sku,
+    ])
   )
   const costs: CostRow[] = []
   const mappings: MappingRow[] = []
@@ -785,9 +795,10 @@ function buildCostsAndMappings(
     const clientModel = modelRule.clientModel ?? rawModel
     const upstreamModel = modelRule.upstreamModel ?? rawModel
     const resolutionValue = resolution(field(record, '清晰度'))
+    const seriesValue = field(record, '系列')
     const resolutionId = slug(resolutionValue).replace(/P$/u, '')
-    const sku = skuByModelResolution.get(
-      `${clientModel}\u0000${resolutionValue}`
+    const sku = skuBySeriesModelResolution.get(
+      officialPriceKey(seriesValue, clientModel, resolutionValue)
     )
     const skuCode =
       sku?.businessId ??
@@ -819,9 +830,7 @@ function buildCostsAndMappings(
       )
       continue
     }
-    const native =
-      overridePrice(override, effectiveMode) ??
-      priceForMode(record, effectiveMode)
+    const native = overridePrice(override, effectiveMode) ?? sourcePrice(record)
     const hasValidNativePrice = native !== null && native.gt(0)
     if (!hasValidNativePrice) {
       issues.push(
@@ -994,7 +1003,11 @@ function buildCostsAndMappings(
         )
       )
     }
-    if (!officialIndex.has(`${clientModel}\u0000${resolutionValue}`)) {
+    if (
+      !officialIndex.has(
+        officialPriceKey(seriesValue, clientModel, resolutionValue)
+      )
+    ) {
       issues.push(
         issue(
           'SALE_UNRESOLVED',

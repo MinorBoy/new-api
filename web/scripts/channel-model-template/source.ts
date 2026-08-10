@@ -266,13 +266,10 @@ export async function readSourceWorkbook(
     OFFICIAL_PRICE_HEADERS,
     'sd官价'
   )
-  const modelRecords = readRecords(
-    models,
-    SD_HEADERS,
-    modelColumns,
-    2,
-    [modelColumns[0] ?? 0, modelColumns[5] ?? 0]
-  ).map((record) => {
+  const modelRecords = readRecords(models, SD_HEADERS, modelColumns, 2, [
+    modelColumns[0] ?? 0,
+    modelColumns[5] ?? 0,
+  ]).map((record) => {
     const billingMode = record.fields.计费方式 ?? null
     const { 计费方式: _ignored, ...fields } = record.fields
     return normalizeSeries({

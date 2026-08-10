@@ -25,7 +25,6 @@ type cangyuanVideoRequest struct {
 	Resolution         *string      `json:"resolution,omitempty"`
 	Audio              *bool        `json:"audio,omitempty"`
 	GenerateAudio      *bool        `json:"generate_audio,omitempty"`
-	ReferenceMode      *string      `json:"reference_mode,omitempty"`
 	Seed               *json.Number `json:"seed,omitempty"`
 }
 
@@ -137,15 +136,6 @@ func buildCangyuanRequest(request arkRequest, upstreamModel string, profile cang
 	if profile.sd5Dialect {
 		result.GenerateAudio = request.GenerateAudio
 		result.Seed = request.Seed
-		mode := "frame"
-		for _, item := range request.Content {
-			if item.Type == "video_url" || item.Type == "audio_url" ||
-				(item.Type == "image_url" && strings.TrimSpace(item.Role) == "reference_image") {
-				mode = "media"
-				break
-			}
-		}
-		result.ReferenceMode = common.GetPointer(mode)
 	} else {
 		result.Audio = request.GenerateAudio
 	}

@@ -125,7 +125,7 @@ func TestCangyuanBuildsReferenceMediaRequest(t *testing.T) {
 	}`, string(body))
 }
 
-func TestCangyuanSD5UsesItsNativeRequestDialect(t *testing.T) {
+func TestCangyuanSD5OmitsUnsupportedReferenceMode(t *testing.T) {
 	c, info := cangyuanValidationContextForModel("sd5-seedance-2.0-fast", `{
 		"model":"client-model",
 		"content":[
@@ -155,7 +155,6 @@ func TestCangyuanSD5UsesItsNativeRequestDialect(t *testing.T) {
 		"duration":8,
 		"resolution":"720p",
 		"generate_audio":false,
-		"reference_mode":"media",
 		"seed":0
 	}`, string(body))
 }

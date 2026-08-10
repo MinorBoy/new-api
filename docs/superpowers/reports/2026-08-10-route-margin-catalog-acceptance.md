@@ -78,6 +78,7 @@ sort_order=desc
 | 验证 | 结果 |
 | --- | --- |
 | `go test ./model ./service ./controller ./router ./relay/helper -count=1` | 通过 |
+| `go test ./cmd/ark-video-material-seed -count=1` | 通过；刷新后素材矩阵 187 条，分布为 `431=55`、`900=12`、`903=4`、`933=116` |
 | `bun test src/features/cost-accounting` | 67 通过，0 失败 |
 | `bun run typecheck` | 通过 |
 | `bun run build` | 通过 |
@@ -87,10 +88,9 @@ sort_order=desc
 
 ## 全仓测试已知失败
 
-全仓 Go 测试仍有两项与本功能无关的既有失败，本轮未修改旧 fixture 或供应商适配器来掩盖问题：
+全仓 Go 测试仍保留 1 项供应商契约阻塞。本轮已同步素材种子测试与刷新后的 187 条 fixture，并未修改旧 fixture 或供应商适配器来掩盖问题：
 
-1. `cmd/ark-video-material-seed` 的 `TestLoadTargetsPreservesImportedMaterialMatrix` 仍期望 167 条，而当前 fixture 实际为 187 条。
-2. `e2e` 的 `TestSeedanceImportedMaterialMatrixFullFlowE2E` 中，OmegaAI 目标 `MAP-OMEGAAI-R193-720`、`MAP-OMEGAAI-R194-720` 预期 HTTP 200，实际因映射模型不受支持返回 HTTP 400。
+1. `e2e` 的 `TestSeedanceImportedMaterialMatrixFullFlowE2E` 中，OmegaAI 目标 `MAP-OMEGAAI-R193-720`、`MAP-OMEGAAI-R194-720` 预期 HTTP 200，实际因映射模型不受支持返回 HTTP 400。当前 OmegaAI 适配器白名单仅包含供应商文档已确认的 `klsdpro2-720p`、`seedance-v2-720p`、`dola-seedance-2.0`、`lingjing-video-v1`；在没有权威契约证据前不放行新增模型。
 
 ## 清理
 

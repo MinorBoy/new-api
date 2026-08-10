@@ -105,15 +105,15 @@ func TestDisableRemovedSeedChannelsLeavesOnlyCurrentMatrixLinesEnabled(t *testin
 func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
-	require.Len(t, targets, 167)
-	require.Equal(t, map[string]int{"431": 53, "900": 12, "903": 4, "933": 98}, materialDistribution(targets))
+	require.Len(t, targets, 187)
+	require.Equal(t, map[string]int{"431": 55, "900": 12, "903": 4, "933": 116}, materialDistribution(targets))
 	enabledCosts := 0
 	for _, target := range targets {
 		if target.CostEnabled {
 			enabledCosts++
 		}
 	}
-	require.Equal(t, 167, enabledCosts)
+	require.Equal(t, 187, enabledCosts)
 
 	targetsByLine := make(map[string][]matrixTarget)
 	for _, target := range targets {
@@ -190,7 +190,7 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 		accepted++
 	}
 
-	require.Equal(t, 167, accepted)
+	require.Equal(t, 187, accepted)
 	require.Zero(t, blocked)
 	require.Zero(t, disabled)
 }
@@ -587,7 +587,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	document, err := loadDocument(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
 
-	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R148-480")
+	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R166-480")
 	require.True(t, ok)
 	config, err := importedCostRuleConfig(rule)
 	require.NoError(t, err)
@@ -599,7 +599,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, "0.4794520547945205", *config.value.NormalizedUSDPrices.UnitPrice)
 	require.NotEqual(t, "0.20", *config.value.UnitPrice)
 
-	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R158-720")
+	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R176-720")
 	require.True(t, ok)
 	durationConfig, err := importedCostRuleConfig(durationRule)
 	require.NoError(t, err)
@@ -608,7 +608,7 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, types.CostChargeTaskSucceeded, durationConfig.value.ChargeEvent)
 	require.Equal(t, types.CostMeterValidatedRequest, durationConfig.value.MeterSource)
 
-	tokenRule, ok := findImportedCostRule(document, "route-target/MAP-LUCEN-R52-480")
+	tokenRule, ok := findImportedCostRule(document, "route-target/MAP-LUCEN-R62-480")
 	require.True(t, ok)
 	tokenConfig, err := importedCostRuleConfig(tokenRule)
 	require.NoError(t, err)

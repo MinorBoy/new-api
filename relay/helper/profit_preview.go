@@ -23,6 +23,10 @@ func PreviewRoutingRevenue(originModelName, group, requestPath string, relayMode
 // request facts needed to reproduce Seedance's duration pricing. The extra facts
 // stay in request memory and are never included in the public cost-preview DTO.
 func PreviewRoutingRevenueWithSeedanceInput(originModelName, group, requestPath string, relayMode int, durationSeconds *int, userId int, resolution string, hasVideoInput bool, inputDurationMS int64) (int64, string, error) {
+	return PreviewRoutingRevenueWithSeedanceInputAndGroupRatio(originModelName, group, requestPath, relayMode, durationSeconds, userId, resolution, hasVideoInput, inputDurationMS, nil)
+}
+
+func PreviewRoutingRevenueWithSeedanceInputAndGroupRatio(originModelName, group, requestPath string, relayMode int, durationSeconds *int, userId int, resolution string, hasVideoInput bool, inputDurationMS int64, groupRatioOverride *float64) (int64, string, error) {
 	input := dto.CostPreviewRequest{
 		OriginModel:     originModelName,
 		UserGroup:       group,
@@ -30,5 +34,5 @@ func PreviewRoutingRevenueWithSeedanceInput(originModelName, group, requestPath 
 		RelayMode:       relayMode,
 		DurationSeconds: durationSeconds,
 	}
-	return previewUserBillingQuotaForUserWithSeedanceInput(userId, input, resolution, hasVideoInput, inputDurationMS)
+	return previewUserBillingQuotaForUserWithSeedanceInputAndGroupRatio(userId, input, resolution, hasVideoInput, inputDurationMS, groupRatioOverride)
 }

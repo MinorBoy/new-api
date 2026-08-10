@@ -47,6 +47,59 @@ func TestPreviewRoutingRevenueMatchesUserBillingChain(t *testing.T) {
 	assert.Equal(t, "500000", routingSnapshot)
 }
 
+func TestPreviewRoutingRevenueAppliesExplicitGroupRatio(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedGroups := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedGroups))
+	})
+
+	prices, err := common.Marshal(map[string]float64{"routing-fixed": 0.2})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(prices)))
+	groups, err := common.Marshal(map[string]float64{"routing-group": 2})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(groups)))
+
+	override := 1.5
+	quota, snapshot, err := PreviewRoutingRevenueWithSeedanceInputAndGroupRatio(
+		"routing-fixed", "routing-group", "/v1/video/generations",
+		relayconstant.RelayModeVideoSubmit, nil, 42, "", false, 0, &override,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(150000), quota)
+	assert.Equal(t, "500000", snapshot)
+}
+
+func TestPreviewRoutingRevenueRejectsNonPositiveGroupRatioOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedGroups := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedGroups))
+	})
+
+	prices, err := common.Marshal(map[string]float64{"routing-fixed": 0.2})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(prices)))
+	groups, err := common.Marshal(map[string]float64{"routing-group": 2})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(groups)))
+
+	zero := 0.0
+	_, _, err = PreviewRoutingRevenueWithSeedanceInputAndGroupRatio(
+		"routing-fixed", "routing-group", "/v1/video/generations",
+		relayconstant.RelayModeVideoSubmit, nil, 42, "", false, 0, &zero,
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "positive finite number")
+}
+
 func TestPreviewRoutingRevenueUsesOfficialSeedanceTokenFormula(t *testing.T) {
 	common.OptionMapRWMutex.Lock()
 	previousOptionMap := common.OptionMap

@@ -565,7 +565,7 @@ func initResources() error {
 	ratio_setting.InitRatioSettings()
 	service.InitHttpClient()
 	service.SetRoutingRevenuePreview(func(_ context.Context, input service.RoutingRevenuePreviewInput) (int64, string, error) {
-		return relayhelper.PreviewRoutingRevenueWithSeedanceInput(input.OriginModelName, input.Group, input.RequestPath, input.RelayMode, input.DurationSeconds, input.UserId, input.OutputResolution, input.HasReferenceVideo, input.InputVideoDurationMS)
+		return relayhelper.PreviewRoutingRevenueWithSeedanceInputAndGroupRatio(input.OriginModelName, input.Group, input.RequestPath, input.RelayMode, input.DurationSeconds, input.UserId, input.OutputResolution, input.HasReferenceVideo, input.InputVideoDurationMS, input.GroupRatioOverride)
 	})
 	service.InitTokenEncoders()
 	if err := model.InitDB(); err != nil {

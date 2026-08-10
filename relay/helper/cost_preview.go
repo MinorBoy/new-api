@@ -1,6 +1,8 @@
 package helper
 
 import (
+	"fmt"
+	"math"
 	"net/http/httptest"
 	"strings"
 	"time"
@@ -29,6 +31,10 @@ func previewUserBillingQuotaForUser(userId int, input dto.CostPreviewRequest) (f
 }
 
 func previewUserBillingQuotaForUserWithSeedanceInput(userId int, input dto.CostPreviewRequest, resolution string, hasVideoInput bool, inputDurationMS int64) (finalQuota int64, quotaPerUnitSnapshot string, err error) {
+	return previewUserBillingQuotaForUserWithSeedanceInputAndGroupRatio(userId, input, resolution, hasVideoInput, inputDurationMS, nil)
+}
+
+func previewUserBillingQuotaForUserWithSeedanceInputAndGroupRatio(userId int, input dto.CostPreviewRequest, resolution string, hasVideoInput bool, inputDurationMS int64, groupRatioOverride *float64) (finalQuota int64, quotaPerUnitSnapshot string, err error) {
 	previewContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	requestPath := strings.TrimSpace(input.RequestPath)
 	if requestPath == "" {
@@ -80,6 +86,27 @@ func previewUserBillingQuotaForUserWithSeedanceInput(userId int, input dto.CostP
 		}
 		if _, err = ModelPriceHelper(previewContext, info, promptTokens, meta); err != nil {
 			return 0, "", err
+		}
+	}
+	if groupRatioOverride != nil {
+		ratio := *groupRatioOverride
+		if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 {
+			return 0, "", fmt.Errorf("group ratio override must be a positive finite number")
+		}
+		info.PriceData.GroupRatioInfo.GroupRatio = ratio
+		info.PriceData.GroupRatioInfo.GroupSpecialRatio = 0
+		info.PriceData.GroupRatioInfo.HasSpecialRatio = false
+		info.PriceData.FreeModel = false
+		if info.PriceData.DurationPrice == nil && info.PriceData.BillingMode != billing_setting.BillingModeSeedanceTokens {
+			price := info.PriceData.ModelPrice
+			if !info.PriceData.UsePrice {
+				price = info.PriceData.ModelRatio / 2
+			}
+			quota, quotaErr := common.QuotaFromFloatStrict(price * common.QuotaPerUnit * ratio)
+			if quotaErr != nil {
+				return 0, "", quotaErr
+			}
+			info.PriceData.Quota = quota
 		}
 	}
 

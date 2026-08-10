@@ -274,7 +274,7 @@ func normalizeRouteMarginCatalogFilter(filter RouteMarginCatalogFilter) (RouteMa
 }
 ```
 
-未指定分辨率时，对每个目标约束中的分辨率生成行；指定分辨率时只保留支持该值的目标。`scenario=all` 生成两行。`with_video` 设置 `HasReferenceVideo=true`，输入视频时长保持 0，以复现已批准的静态统计口径；真实请求仍会使用实际元数据时长。
+未指定分辨率时，对每个目标约束中的分辨率生成行；指定分辨率时只保留支持该值的目标。`scenario=all` 生成两行。`with_video` 设置 `HasReferenceVideo=true`，静态矩阵使用 4000ms（4 秒）的代表性参考视频时长，以复现已批准的统计口径；真实请求仍会使用实际元数据时长。
 
 - [ ] **Step 4：实现批量规则加载和精确计算**
 

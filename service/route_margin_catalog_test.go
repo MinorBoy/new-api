@@ -83,6 +83,33 @@ func TestListRouteMarginCatalogExpandsBothScenariosAndPerDurationCost(t *testing
 	assert.Equal(t, 1, page.Summary.FullyEligibleTargetCount)
 }
 
+func TestListRouteMarginCatalogUsesRepresentativeReferenceVideoDuration(t *testing.T) {
+	prepareRouteMarginCatalogServiceDB(t)
+	seedRouteMarginPolicyTarget(t, "route-target/reference-video", "reference-video-model", "720p")
+	seedRouteMarginRule(t, 7, "reference-video-model", types.CostModePerRequest, types.CostRuleConfigV1{
+		UnitPrice: stringPointer("0.7"), ChargeEvent: types.CostChargeResponseSucceeded,
+	})
+
+	previousRevenueHook := RevenuePreviewHookForTest()
+	SetRoutingRevenuePreview(func(_ context.Context, input RoutingRevenuePreviewInput) (int64, string, error) {
+		if input.HasReferenceVideo {
+			require.Equal(t, int64(4000), input.InputVideoDurationMS)
+		}
+		return 500_000, "500000", nil
+	})
+	t.Cleanup(func() { SetRoutingRevenuePreview(previousRevenueHook) })
+
+	page, err := ListRouteMarginCatalog(context.Background(), RouteMarginCatalogFilter{
+		MinimumMarginPPM: 300000, DurationSeconds: 4, GroupRatio: 1,
+		Scenario: RouteMarginScenarioAll, Page: 1, PageSize: 50,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2)
+	assert.Equal(t, 2, page.Summary.EligibleScenarioCount)
+	assert.Equal(t, 1, page.Summary.FullyEligibleTargetCount)
+}
+
 func TestListRouteMarginCatalogRejectsMarginJustBelowThreshold(t *testing.T) {
 	prepareRouteMarginCatalogServiceDB(t)
 	seedRouteMarginPolicyTarget(t, "route-target/below", "below-model", "720p")

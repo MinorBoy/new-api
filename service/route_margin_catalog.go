@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	DefaultRouteMarginMinimumPPM      int64 = 300000
-	DefaultRouteMarginDurationSeconds       = 4
-	DefaultRouteMarginGroupRatio            = 1.0
-	maxRouteMarginGroupRatio                = 100.0
+	DefaultRouteMarginMinimumPPM           int64 = 300000
+	DefaultRouteMarginDurationSeconds            = 4
+	DefaultRouteMarginGroupRatio                 = 1.0
+	defaultRouteMarginInputVideoDurationMS int64 = 4000
+	maxRouteMarginGroupRatio                     = 100.0
 )
 
 const (
@@ -235,11 +236,16 @@ func evaluateRouteMarginScenario(ctx context.Context, row model.RouteMarginTarge
 	duration := filter.DurationSeconds
 	hasVideo := scenario == RouteMarginScenarioWithVideo
 	ratio := filter.GroupRatio
+	inputVideoDurationMS := int64(0)
+	if hasVideo {
+		inputVideoDurationMS = defaultRouteMarginInputVideoDurationMS
+	}
 	revenueNanoUSD, revenueErr := PreviewRoutingRevenue(ctx, RoutingRevenuePreviewInput{
 		OriginModelName: row.CanonicalModel, Group: row.GroupName,
 		RequestPath: "/v1/video/generations", RelayMode: relayconstant.RelayModeVideoSubmit,
 		DurationSeconds: &duration, OutputResolution: resolution, HasReferenceVideo: hasVideo,
-		InputVideoDurationMS: 0, UserId: 0, GroupRatioOverride: &ratio,
+		InputVideoDurationMS: inputVideoDurationMS,
+		UserId:               0, GroupRatioOverride: &ratio,
 	})
 	facts := ProfitRoutingFacts{OutputDurationSeconds: duration}
 	if profile, ok := seedancepricing.Profile(resolution); ok {

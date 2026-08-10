@@ -193,9 +193,20 @@ test('writes a V1 workbook recognized by the existing converter', async () => {
     const written = new ExcelJS.Workbook()
     await written.xlsx.readFile(outputPath)
     const saleSheet = written.getWorksheet('官方售价')
+    const costSheet = written.getWorksheet('渠道成本')
     const profitSheet = written.getWorksheet('利润测算')
+    const sourceSheet = written.getWorksheet('来源')
     assert.ok(saleSheet)
+    assert.ok(costSheet)
     assert.ok(profitSheet)
+    assert.ok(sourceSheet)
+    assert.equal(costSheet.getCell('G5').value, null)
+    assert.equal(costSheet.getCell('H5').value, null)
+    assert.equal(costSheet.getCell('I5').value, null)
+    assert.equal(costSheet.getCell('L5').value, null)
+    assert.equal(costSheet.getCell('N5').value, null)
+    assert.equal(sourceSheet.getCell('D5').value, null)
+    assert.equal(sourceSheet.getCell('E5').value, null)
     assert.deepEqual(saleSheet.getCell('K5').value, {
       formula: `IFERROR(H5*I5*J5/'参数'!$B$7,"")`,
       result: 21600,

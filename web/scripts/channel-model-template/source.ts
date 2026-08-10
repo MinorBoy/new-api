@@ -21,81 +21,6 @@ import fs from 'node:fs/promises'
 import ExcelJS from 'exceljs'
 
 export const CHANNEL_HEADERS = ['渠道', '名称', '链接', 'Base Url'] as const
-const SD_LEGACY_HEADERS = [
-  '渠道',
-  '充值汇率',
-  '手续费',
-  '计费倍率',
-  '付费模式',
-  '模型ID',
-  '版本',
-  '计费',
-  '元/秒',
-  '元/次',
-  '元/1M',
-  '素材限制',
-  '清晰度',
-  '超分',
-  '时长范围',
-  '比例',
-  '视频输入',
-  '过真人脸',
-  '素材库',
-  'NSFW',
-  '协议',
-  '状态',
-  '并发数',
-  '折扣 秒 无V',
-  '折扣 秒 含V',
-  '折扣 M 无V',
-  '折扣 M 含V',
-  '接入',
-  '已测',
-  '售价',
-  '利润',
-  '备注',
-] as const
-const SD_RENAMED_STRUCTURED_HEADERS = [
-  '渠道',
-  '充值汇率',
-  '手续费',
-  '计费倍率',
-  '付费模式',
-  '模型ID',
-  '版本',
-  '清晰度',
-  '计费方式',
-  '元/秒',
-  '元/次',
-  '元/1M',
-  '参考图数',
-  '参考视频数',
-  '参考音频数',
-  '最大素材数',
-  '视频音频合计上限',
-  '参考视频总时长上限 秒',
-  '最小参考图数',
-  '超分',
-  '时长范围',
-  '比例',
-  '视频输入',
-  '过真人脸',
-  '素材库',
-  'NSFW',
-  '协议',
-  '状态',
-  '并发数',
-  '折扣 秒 无V',
-  '折扣 秒 含V',
-  '折扣 M 无V',
-  '折扣 M 含V',
-  '接入',
-  '已测',
-  '售价',
-  '利润',
-  '上游模型分组',
-  '备注',
-] as const
 export const SD_HEADERS = [
   '渠道',
   '充值汇率',
@@ -103,11 +28,11 @@ export const SD_HEADERS = [
   '计费倍率',
   '付费模式',
   '模型ID',
+  '系列',
   '版本',
-  '计费',
-  '元/秒',
-  '元/次',
-  '元/1M',
+  '清晰度',
+  '计费方式',
+  '单价 元',
   '参考图数',
   '参考视频数',
   '参考音频数',
@@ -115,17 +40,16 @@ export const SD_HEADERS = [
   '视频音频合计上限',
   '参考视频总时长上限 秒',
   '最小参考图数',
-  '清晰度',
   '超分',
   '时长范围',
   '比例',
-  '视频输入',
   '过真人脸',
   '素材库',
   'NSFW',
   '协议',
   '状态',
   '并发数',
+  '按次 15s 折扣 比较',
   '折扣 秒 无V',
   '折扣 秒 含V',
   '折扣 M 无V',
@@ -138,6 +62,7 @@ export const SD_HEADERS = [
   '备注',
 ] as const
 export const OFFICIAL_PRICE_HEADERS = [
+  '系列',
   '模型',
   '版本',
   '分辨率',
@@ -150,6 +75,7 @@ export const OFFICIAL_PRICE_HEADERS = [
   '包含视频 元/秒',
   '备注',
 ] as const
+const FORBIDDEN_SD_HEADERS = ['元/秒', '元/次', '元/1M', '视频输入'] as const
 
 export type SourceValue = boolean | Date | number | string | null
 
@@ -266,17 +192,15 @@ function readRecords(
   return records
 }
 
-function canonicalizeRenamedStructuredRecords(
-  records: SourceRecord[]
-): SourceRecord[] {
-  return records.map((record) => {
-    const billingMode = record.fields.计费方式 ?? null
-    const { 计费方式: _ignored, ...fields } = record.fields
-    return {
-      ...record,
-      fields: { ...fields, 计费: billingMode },
-    }
-  })
+function normalizeSeries(record: SourceRecord): SourceRecord {
+  const text = cellText(record.fields.系列 ?? null)
+  const value = Number(text)
+  if (text === '' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(
+      `${record.location.sheet} series invalid at row ${record.location.row}`
+    )
+  }
+  return { ...record, fields: { ...record.fields, 系列: value } }
 }
 
 function validateWorkbookShape(workbook: ExcelJS.Workbook): void {
@@ -327,16 +251,15 @@ export async function readSourceWorkbook(
     (_, index) => cellText(cellValue(models.getRow(2).getCell(index + 1).value))
   )
   const modelHeaderSet = new Set(modelHeaderTexts)
-  const structuredSource = modelHeaderSet.has('参考图数')
-  const renamedStructuredSource =
-    structuredSource && modelHeaderSet.has('计费方式')
-  let modelHeaders: readonly string[] = SD_LEGACY_HEADERS
-  if (renamedStructuredSource) {
-    modelHeaders = SD_RENAMED_STRUCTURED_HEADERS
-  } else if (structuredSource) {
-    modelHeaders = SD_HEADERS
+  const forbiddenHeaders = FORBIDDEN_SD_HEADERS.filter((header) =>
+    modelHeaderSet.has(header)
+  )
+  if (forbiddenHeaders.length > 0) {
+    throw new Error(
+      `sd header mismatch; forbidden=${forbiddenHeaders.join(',')}`
+    )
   }
-  const modelColumns = readHeaders(models, 2, modelHeaders, 'sd')
+  const modelColumns = readHeaders(models, 2, SD_HEADERS, 'sd')
   const officialPriceColumns = readHeaders(
     officialPrices,
     6,
@@ -345,22 +268,27 @@ export async function readSourceWorkbook(
   )
   const modelRecords = readRecords(
     models,
-    modelHeaders,
+    SD_HEADERS,
     modelColumns,
     2,
-    modelColumns.slice(0, 11)
-  )
+    [modelColumns[0] ?? 0, modelColumns[5] ?? 0]
+  ).map((record) => {
+    const billingMode = record.fields.计费方式 ?? null
+    const { 计费方式: _ignored, ...fields } = record.fields
+    return normalizeSeries({
+      ...record,
+      fields: { ...fields, 计费: billingMode },
+    })
+  })
   return {
     channels: readRecords(channel, CHANNEL_HEADERS, channelColumns, 2),
-    models: renamedStructuredSource
-      ? canonicalizeRenamedStructuredRecords(modelRecords)
-      : modelRecords,
+    models: modelRecords,
     officialPrices: readRecords(
       officialPrices,
       OFFICIAL_PRICE_HEADERS,
       officialPriceColumns,
       6
-    ),
+    ).map(normalizeSeries),
   }
 }
 

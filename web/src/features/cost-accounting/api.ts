@@ -43,6 +43,8 @@ import type {
   CostRuleWriteRequest,
   ReconcileCostAttemptRequest,
   ReconcileCostRevenueRequest,
+  RouteMarginCatalogPage,
+  RouteMarginCatalogParams,
   UpdateCostAccountingSettingsRequest,
 } from './types'
 
@@ -69,6 +71,10 @@ export const costAccountingQueryKeys = {
     [...costAccountingQueryKeys.catalogs(), params] as const,
   catalogDetail: (id: number) =>
     [...costAccountingQueryKeys.catalogs(), id] as const,
+  routeMarginCatalogs: () =>
+    [...costAccountingQueryKeys.all, 'route-margin-catalog'] as const,
+  routeMarginCatalog: (params: RouteMarginCatalogParams) =>
+    [...costAccountingQueryKeys.routeMarginCatalogs(), params] as const,
   reports: () => [...costAccountingQueryKeys.all, 'reports'] as const,
   reportSummary: (params: CostReportParams = {}) =>
     [...costAccountingQueryKeys.reports(), 'summary', params] as const,
@@ -274,6 +280,33 @@ export async function exportSupplierCostCatalog(
     filename: filenameFromContentDisposition(
       typeof disposition === 'string' ? disposition : undefined,
       'supplier-cost-catalog.csv'
+    ),
+    rowCount: validExportRowCount(response.headers['x-exported-row-count']),
+  }
+}
+
+export async function getRouteMarginCatalog(
+  params: RouteMarginCatalogParams
+): Promise<CostAccountingApiResponse<RouteMarginCatalogPage>> {
+  const response = await api.get<
+    CostAccountingApiResponse<RouteMarginCatalogPage>
+  >(`${COST_ACCOUNTING_PATH}/route-margin-catalog`, { params })
+  return response.data
+}
+
+export async function exportRouteMarginCatalog(
+  params: Omit<RouteMarginCatalogParams, 'page' | 'page_size'>
+): Promise<CostCatalogExportResult> {
+  const response = await api.get<Blob>(
+    `${COST_ACCOUNTING_PATH}/route-margin-catalog/export`,
+    { params, responseType: 'blob' }
+  )
+  const disposition = response.headers['content-disposition']
+  return {
+    blob: response.data,
+    filename: filenameFromContentDisposition(
+      typeof disposition === 'string' ? disposition : undefined,
+      'route-margin-catalog.csv'
     ),
     rowCount: validExportRowCount(response.headers['x-exported-row-count']),
   }

@@ -22,10 +22,13 @@ import type {
   CostMode,
   CostReportParams,
   CostRuleStatus,
+  RouteMarginCatalogSort,
+  RouteMarginScenario,
+  RouteMarginStatus,
 } from '../types'
 
 export type CostAccountingSearch = {
-  tab?: 'profit' | 'catalog' | 'anomalies'
+  tab?: 'profit' | 'catalog' | 'route-margin' | 'anomalies'
   timeBasis?: 'profit_recognized_at' | 'requested_at'
   startTime?: number
   endTime?: number
@@ -46,9 +49,28 @@ export type CostAccountingSearch = {
   catalogPageSize?: 25 | 50 | 100
   catalogSort?: CostCatalogSort
   catalogOrder?: 'asc' | 'desc'
+  marginMinimumPercent?: number
+  marginDurationSeconds?: number
+  marginGroupRatio?: number
+  marginScenario?: RouteMarginScenario
+  marginChannelId?: number
+  marginModel?: string
+  marginUpstreamModel?: string
+  marginRouteTarget?: string
+  marginResolution?: string
+  marginStatus?: RouteMarginStatus
+  marginPage?: number
+  marginPageSize?: 25 | 50 | 100
+  marginSort?: RouteMarginCatalogSort
+  marginOrder?: 'asc' | 'desc'
 }
 
-export const COST_ACCOUNTING_TABS = ['profit', 'catalog', 'anomalies'] as const
+export const COST_ACCOUNTING_TABS = [
+  'profit',
+  'catalog',
+  'route-margin',
+  'anomalies',
+] as const
 
 export type CostAccountingTab = (typeof COST_ACCOUNTING_TABS)[number]
 

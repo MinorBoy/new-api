@@ -28,7 +28,10 @@ import {
 import { useAuthStore } from '@/stores/auth-store'
 
 const costAccountingSearchSchema = z.object({
-  tab: z.enum(['profit', 'catalog', 'anomalies']).optional().catch('profit'),
+  tab: z
+    .enum(['profit', 'catalog', 'route-margin', 'anomalies'])
+    .optional()
+    .catch('profit'),
   timeBasis: z
     .enum(['profit_recognized_at', 'requested_at'])
     .optional()
@@ -74,6 +77,38 @@ const costAccountingSearchSchema = z.object({
     .optional()
     .catch('channel_name'),
   catalogOrder: z.enum(['asc', 'desc']).optional().catch('asc'),
+  marginMinimumPercent: z.number().min(-100).max(100).optional().catch(30),
+  marginDurationSeconds: z.number().int().min(1).max(3600).optional().catch(4),
+  marginGroupRatio: z.number().positive().max(100).optional().catch(1),
+  marginScenario: z
+    .enum(['all', 'no_video', 'with_video'])
+    .optional()
+    .catch('all'),
+  marginChannelId: z.number().int().positive().optional().catch(undefined),
+  marginModel: z.string().max(191).optional().catch(''),
+  marginUpstreamModel: z.string().max(191).optional().catch(''),
+  marginRouteTarget: z.string().max(191).optional().catch(''),
+  marginResolution: z.string().max(191).optional().catch(''),
+  marginStatus: z
+    .enum(['all', 'eligible', 'ineligible'])
+    .optional()
+    .catch('all'),
+  marginPage: z.number().int().positive().optional().catch(1),
+  marginPageSize: z
+    .union([z.literal(25), z.literal(50), z.literal(100)])
+    .optional()
+    .catch(50),
+  marginSort: z
+    .enum([
+      'target_name',
+      'channel_name',
+      'upstream_model',
+      'gross_margin_ppm',
+      'estimated_profit_nano_usd',
+    ])
+    .optional()
+    .catch('gross_margin_ppm'),
+  marginOrder: z.enum(['asc', 'desc']).optional().catch('desc'),
 })
 
 export function requireCostAccountingRead() {

@@ -71,8 +71,13 @@ test('uses stable catalog URL defaults without profit filter leakage', () => {
   })
 })
 
-test('exposes the supplier catalog as the third cost-accounting tab', () => {
-  assert.deepEqual(COST_ACCOUNTING_TABS, ['profit', 'catalog', 'anomalies'])
+test('keeps the supplier catalog in the cost-accounting tabs', () => {
+  assert.deepEqual(COST_ACCOUNTING_TABS, [
+    'profit',
+    'catalog',
+    'route-margin',
+    'anomalies',
+  ])
   assert.equal(isCostCatalogTab('catalog'), true)
   assert.equal(isCostCatalogTab('profit'), false)
 })

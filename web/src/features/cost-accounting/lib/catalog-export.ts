@@ -70,16 +70,14 @@ export function filenameFromContentDisposition(
 }
 
 export function downloadCostCatalogExport(
-  result: CostCatalogExportResult
+  result: CostCatalogExportResult,
+  fallback = 'supplier-cost-catalog.csv'
 ): void {
   const objectURL = URL.createObjectURL(result.blob)
   const anchor = document.createElement('a')
   try {
     anchor.href = objectURL
-    anchor.download = safeCatalogFilename(
-      result.filename,
-      'supplier-cost-catalog.csv'
-    )
+    anchor.download = safeCatalogFilename(result.filename, fallback)
     document.body.append(anchor)
     anchor.click()
   } finally {

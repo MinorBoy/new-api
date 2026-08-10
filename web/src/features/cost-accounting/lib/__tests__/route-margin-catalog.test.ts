@@ -20,6 +20,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  formatRouteMarginPercent,
+  formatRouteMarginUSD,
   routeMarginParamsFromSearch,
   updateRouteMarginSearch,
 } from '../route-margin-catalog'
@@ -49,6 +51,13 @@ test('maps route margin URL state to API parameters', () => {
       sort_order: 'desc',
     }
   )
+})
+
+test('formats route margin amounts and PPM exactly', () => {
+  assert.equal(formatRouteMarginUSD(1_234_500_000), 'USD 1.2345')
+  assert.equal(formatRouteMarginPercent(299_999), '29.9999%')
+  assert.equal(formatRouteMarginUSD(undefined), '')
+  assert.equal(formatRouteMarginPercent(undefined), '')
 })
 
 test('preserves four-decimal percentage precision in PPM', () => {

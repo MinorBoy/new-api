@@ -88,3 +88,35 @@ export function updateRouteMarginSearch(
     marginPage: resetsPage ? 1 : (patch.marginPage ?? search.marginPage),
   }
 }
+
+export function formatRouteMarginUSD(value?: number): string {
+  if (value === undefined || !Number.isSafeInteger(value)) return ''
+  return `USD ${new Decimal(value).div(1_000_000_000).toString()}`
+}
+
+export function formatRouteMarginPercent(value?: number): string {
+  if (value === undefined || !Number.isSafeInteger(value)) return ''
+  return `${new Decimal(value).div(10_000).toString()}%`
+}
+
+export function routeMarginScenarioLabel(
+  scenario: 'no_video' | 'with_video',
+  translate: (key: string) => string
+): string {
+  return translate(scenario === 'with_video' ? 'With video' : 'No video')
+}
+
+export function routeMarginFailureReasonLabel(
+  reason: string | undefined,
+  translate: (key: string) => string
+): string {
+  const keys: Record<string, string> = {
+    revenue_unknown: 'Revenue unavailable',
+    cost_rule_missing: 'Cost rule missing',
+    meter_unknown: 'Cost meter unavailable',
+    margin_below_threshold: 'Margin below threshold',
+    calculation_error: 'Margin calculation failed',
+    metadata_unavailable: 'Required metadata unavailable',
+  }
+  return reason ? translate(keys[reason] ?? reason) : ''
+}

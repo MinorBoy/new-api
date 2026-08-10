@@ -82,7 +82,7 @@ test('writes a workbook and report when warnings are explicitly allowed', async 
     assert.ok(sourceSheet)
     const priceColumn = sourceSheet
       .getRow(2)
-      .values.findIndex((value) => String(value).trim() === '元/秒')
+      .values.findIndex((value) => String(value).trim() === '单价 元')
     assert.ok(priceColumn > 0)
     sourceSheet.getRow(3).getCell(priceColumn).value = 0
     await workbook.xlsx.writeFile(warningSourcePath)

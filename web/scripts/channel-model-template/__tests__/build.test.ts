@@ -18,17 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
 
 import Decimal from 'decimal.js'
 
 import { buildTemplateData } from '../build'
 import { parseRules } from '../rules'
-import { readSourceWorkbook, type SourceWorkbook } from '../source'
-
-const sourceFixturePath = fileURLToPath(
-  new URL('../__fixtures__/sd-source-v1.xlsx', import.meta.url)
-)
+import type { SourceWorkbook } from '../source'
 
 const rulesInput = {
   version: '1',
@@ -81,9 +76,7 @@ function sourceWithOfficialPrice(includePrice = true): SourceWorkbook {
           模型ID: 'seedance 720p-fast',
           版本: 'fast',
           计费: 'second',
-          '元/秒': 1.38,
-          '元/次': null,
-          '元/1M': null,
+          '单价 元': 1.38,
           参考图数: 9,
           参考视频数: 3,
           参考音频数: 3,
@@ -149,6 +142,24 @@ test('maps a second-priced source row to a per-duration USD cost', () => {
   assert.equal(cost.chargeEvent, 'task_succeeded')
 })
 
+test('maps all latest billing modes from one unit price field', () => {
+  for (const [billingMode, expectedMode, expectedField] of [
+    ['second', 'per_duration', 'nativePerSecond'],
+    ['call', 'per_request', 'nativePerRequest'],
+    ['token', 'per_token', 'nativePerMillion'],
+  ] as const) {
+    const source = sourceWithOfficialPrice()
+    const model = firstSourceModel(source)
+    model.fields.计费 = billingMode
+    model.fields['单价 元'] = 2
+    const cost = buildTemplateData(source, rules).costs.find(
+      (item) => item.scenario === 'no_video'
+    )
+    assert.equal(cost?.mode, expectedMode)
+    assert.equal(cost?.[expectedField], '2')
+  }
+})
+
 test('keeps a source row without an official SKU as draft', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(false), rules)
   const cost = output.costs[0]
@@ -160,7 +171,7 @@ test('keeps a source row without an official SKU as draft', () => {
 
 test('keeps a zero-priced source row as a disabled draft', () => {
   const source = sourceWithOfficialPrice()
-  firstSourceModel(source).fields['元/秒'] = 0
+  firstSourceModel(source).fields['单价 元'] = 0
 
   const output = buildTemplateData(source, rules)
 
@@ -169,6 +180,38 @@ test('keeps a zero-priced source row as a disabled draft', () => {
   assert.ok(
     output.issues.some(
       (item) => item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+    )
+  )
+})
+
+test('keeps every invalid unified unit price as a disabled draft', () => {
+  for (const value of [null, -1, 'invalid']) {
+    const source = sourceWithOfficialPrice()
+    firstSourceModel(source).fields['单价 元'] = value
+
+    const output = buildTemplateData(source, rules)
+
+    assert.equal(output.costs[0]?.status, 'draft')
+    assert.equal(output.mappings[0]?.enabled, '否')
+    assert.ok(
+      output.issues.some(
+        (item) =>
+          item.code === 'COST_PRICE_INVALID' && item.severity === 'WARN'
+      )
+    )
+  }
+})
+
+test('rejects an unknown latest billing mode', () => {
+  const source = sourceWithOfficialPrice()
+  firstSourceModel(source).fields.计费 = 'minute'
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs.length, 0)
+  assert.ok(
+    output.issues.some(
+      (item) => item.code === 'COST_MODE_UNKNOWN' && item.severity === 'FAIL'
     )
   )
 })
@@ -373,8 +416,8 @@ test('applies the Cangyuan sd5 shared media protocol when the source omits the a
   )
 })
 
-test('matches a Seedance source family to an official Seedance SKU', async () => {
-  const source = await readSourceWorkbook(sourceFixturePath)
+test('matches a Seedance source family to an official Seedance SKU', () => {
+  const source = sourceWithOfficialPrice()
   const output = buildTemplateData(source, rules)
 
   assert.ok(output.skus.some((sku) => sku.model === 'seedance-2.0'))

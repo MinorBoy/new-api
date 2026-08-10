@@ -731,10 +731,8 @@ function buildSales(
   )
 }
 
-function priceForMode(record: SourceRecord, mode: CostMode): Decimal | null {
-  if (mode === 'per_duration') return numericField(record, '元/秒')
-  if (mode === 'per_request') return numericField(record, '元/次')
-  return numericField(record, '元/1M')
+function sourcePrice(record: SourceRecord): Decimal | null {
+  return numericField(record, '单价 元')
 }
 
 function overridePrice(
@@ -821,7 +819,7 @@ function buildCostsAndMappings(
     }
     const native =
       overridePrice(override, effectiveMode) ??
-      priceForMode(record, effectiveMode)
+      sourcePrice(record)
     const hasValidNativePrice = native !== null && native.gt(0)
     if (!hasValidNativePrice) {
       issues.push(

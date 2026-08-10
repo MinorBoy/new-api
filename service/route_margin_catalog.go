@@ -32,6 +32,8 @@ const (
 	RouteMarginScenarioWithVideo = "with_video"
 )
 
+var ErrRouteMarginCatalogUnavailable = errors.New("route margin catalog unavailable")
+
 type RouteMarginCatalogFilter struct {
 	ChannelID        int
 	CanonicalModel   string
@@ -50,16 +52,20 @@ type RouteMarginCatalogFilter struct {
 }
 
 func ListRouteMarginCatalog(ctx context.Context, filter RouteMarginCatalogFilter) (dto.RouteMarginCatalogPage, error) {
-	filter, err := normalizeRouteMarginCatalogFilter(filter)
+	filter, err := NormalizeRouteMarginCatalogFilter(filter)
 	if err != nil {
 		return dto.RouteMarginCatalogPage{}, err
 	}
+	return listRouteMarginCatalog(ctx, filter)
+}
+
+func listRouteMarginCatalog(ctx context.Context, filter RouteMarginCatalogFilter) (dto.RouteMarginCatalogPage, error) {
 	rows, err := model.ListActiveImportedRouteMarginTargets(model.RouteMarginTargetQuery{
 		ChannelID: filter.ChannelID, CanonicalModel: filter.CanonicalModel,
 		UpstreamModel: filter.UpstreamModel, TargetName: filter.TargetName,
 	})
 	if err != nil {
-		return dto.RouteMarginCatalogPage{}, fmt.Errorf("route margin catalog unavailable: %w", err)
+		return dto.RouteMarginCatalogPage{}, fmt.Errorf("%w: list route targets: %v", ErrRouteMarginCatalogUnavailable, err)
 	}
 
 	candidates := make([]CostRuleCandidate, 0, len(rows))
@@ -71,7 +77,7 @@ func ListRouteMarginCatalog(ctx context.Context, filter RouteMarginCatalogFilter
 	}
 	rules, err := ActiveCostRules(candidates, true)
 	if err != nil {
-		return dto.RouteMarginCatalogPage{}, fmt.Errorf("route margin catalog cost rules unavailable: %w", err)
+		return dto.RouteMarginCatalogPage{}, fmt.Errorf("%w: list active cost rules: %v", ErrRouteMarginCatalogUnavailable, err)
 	}
 
 	allItems := make([]dto.RouteMarginCatalogItem, 0, len(rows)*2)
@@ -112,7 +118,7 @@ func ListRouteMarginCatalog(ctx context.Context, filter RouteMarginCatalogFilter
 	return page, nil
 }
 
-func normalizeRouteMarginCatalogFilter(filter RouteMarginCatalogFilter) (RouteMarginCatalogFilter, error) {
+func NormalizeRouteMarginCatalogFilter(filter RouteMarginCatalogFilter) (RouteMarginCatalogFilter, error) {
 	filter.CanonicalModel = strings.TrimSpace(filter.CanonicalModel)
 	filter.UpstreamModel = strings.TrimSpace(filter.UpstreamModel)
 	filter.TargetName = strings.TrimSpace(filter.TargetName)

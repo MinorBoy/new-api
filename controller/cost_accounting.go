@@ -721,9 +721,15 @@ func writeCostAccountingError(c *gin.Context, err error) {
 	} else if errors.Is(err, service.ErrCostCatalogExportTooLarge) {
 		status = http.StatusRequestEntityTooLarge
 		code = "cost_catalog_export_too_large"
+	} else if errors.Is(err, service.ErrRouteMarginCatalogExportTooLarge) {
+		status = http.StatusRequestEntityTooLarge
+		code = "route_margin_catalog_export_too_large"
 	} else if errors.Is(err, service.ErrCostCatalogUnavailable) {
 		status = http.StatusInternalServerError
 		code = "cost_catalog_unavailable"
+	} else if errors.Is(err, service.ErrRouteMarginCatalogUnavailable) {
+		status = http.StatusInternalServerError
+		code = "route_margin_catalog_unavailable"
 	}
 	message := strings.TrimSpace(err.Error())
 	if status >= http.StatusInternalServerError {

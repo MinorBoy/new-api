@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestCostAccountingRoutesUseDedicatedPermissions(t *testing.T) {
+func TestCostAccountingPermissionRoutesUseDedicatedPermissions(t *testing.T) {
 	assertCostRoute(t, http.MethodGet, "/settings", authz.CostAccountingRead, controller.GetCostAccountingSettings)
 	assertCostRoute(t, http.MethodPut, "/settings", authz.CostAccountingWrite, controller.UpdateCostAccountingSettings)
 	assertCostRoute(t, http.MethodGet, "/rules", authz.CostAccountingRead, controller.ListCostRules)
@@ -31,6 +31,8 @@ func TestCostAccountingRoutesUseDedicatedPermissions(t *testing.T) {
 	assertCostRoute(t, http.MethodGet, "/catalog", authz.CostAccountingRead, controller.ListSupplierCostCatalog)
 	assertCostRoute(t, http.MethodGet, "/catalog/export", authz.CostAccountingRead, controller.ExportSupplierCostCatalog)
 	assertCostRoute(t, http.MethodGet, "/catalog/:rule_id", authz.CostAccountingRead, controller.GetSupplierCostCatalogDetail)
+	assertCostRoute(t, http.MethodGet, "/route-margin-catalog", authz.CostAccountingRead, controller.ListRouteMarginCatalog)
+	assertCostRoute(t, http.MethodGet, "/route-margin-catalog/export", authz.CostAccountingRead, controller.ExportRouteMarginCatalog)
 }
 
 func assertCostRoute(t *testing.T, method string, path string, permission authz.Permission, handler any) {

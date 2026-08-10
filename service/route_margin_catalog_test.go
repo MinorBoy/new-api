@@ -150,9 +150,34 @@ func TestNormalizeRouteMarginCatalogFilterRejectsUnsafeValues(t *testing.T) {
 		{MinimumMarginPPM: 300000, DurationSeconds: 4, GroupRatio: 1, Scenario: "unknown"},
 	}
 	for _, filter := range tests {
-		_, err := normalizeRouteMarginCatalogFilter(filter)
+		_, err := NormalizeRouteMarginCatalogFilter(filter)
 		require.Error(t, err)
 	}
+}
+
+func TestRouteMarginCatalogWrapsTargetQueryErrors(t *testing.T) {
+	prepareRouteMarginCatalogServiceDB(t)
+	require.NoError(t, model.DB.Migrator().DropTable(&model.RouteTarget{}))
+
+	_, err := ListRouteMarginCatalog(context.Background(), RouteMarginCatalogFilter{
+		MinimumMarginPPM: 300000, DurationSeconds: 4, GroupRatio: 1,
+		Scenario: RouteMarginScenarioAll, Page: 1, PageSize: 50,
+	})
+
+	require.ErrorIs(t, err, ErrRouteMarginCatalogUnavailable)
+}
+
+func TestRouteMarginCatalogWrapsActiveCostRuleErrors(t *testing.T) {
+	prepareRouteMarginCatalogServiceDB(t)
+	seedRouteMarginPolicyTarget(t, "route-target/rule-error", "error-model", "720p")
+	require.NoError(t, model.DB.Migrator().DropTable(&model.ChannelModelCostRule{}))
+
+	_, err := ListRouteMarginCatalog(context.Background(), RouteMarginCatalogFilter{
+		MinimumMarginPPM: 300000, DurationSeconds: 4, GroupRatio: 1,
+		Scenario: RouteMarginScenarioAll, Page: 1, PageSize: 50,
+	})
+
+	require.ErrorIs(t, err, ErrRouteMarginCatalogUnavailable)
 }
 
 func prepareRouteMarginCatalogServiceDB(t *testing.T) {

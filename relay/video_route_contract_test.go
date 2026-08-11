@@ -56,6 +56,36 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_resolution",
 		},
 		{
+			name: "omegaai accepts imported db image model", channelType: constant.ChannelTypeOmegaAI,
+			target: func() modelrouting.Target {
+				target := videoContractTargetWithMinimums("db-ai-video-v1", []string{"720p"}, 5, 10,
+					[]modelrouting.InputMode{modelrouting.InputModeFirstFrame, modelrouting.InputModeOmniReference},
+					modelrouting.ReferenceLimits{Images: 9}, modelrouting.ReferenceLimits{Images: 1})
+				target.Constraints.ReferenceTotalMax = common.GetPointer(9)
+				return target
+			}(),
+		},
+		{
+			name: "omegaai rejects unknown mapped model", channelType: constant.ChannelTypeOmegaAI,
+			target:   videoContractTarget("unknown-omega-model", []string{"720p"}, 5, 10, nil, modelrouting.ReferenceLimits{Images: 9}),
+			wantCode: "route_contract_model",
+		},
+		{
+			name: "omegaai rejects unsupported resolution", channelType: constant.ChannelTypeOmegaAI,
+			target:   videoContractTarget("db-ai-video-v1", []string{"1080p"}, 5, 10, nil, modelrouting.ReferenceLimits{Images: 9}),
+			wantCode: "route_contract_resolution",
+		},
+		{
+			name: "omegaai rejects imported image model video capability", channelType: constant.ChannelTypeOmegaAI,
+			target:   videoContractTarget("db-ai-video-v1", []string{"720p"}, 5, 10, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 1}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "omegaai rejects duration above task limit", channelType: constant.ChannelTypeOmegaAI,
+			target:   videoContractTarget("db-ai-video-v1", []string{"720p"}, 5, relaycommon.MaxTaskDurationSeconds+1, nil, modelrouting.ReferenceLimits{Images: 9}),
+			wantCode: "route_contract_duration",
+		},
+		{
 			name: "cangyuan accepts documented media limits", channelType: constant.ChannelTypeCangyuan,
 			target: videoContractTargetWithCangyuanLimits("seedance-2.0", []string{"480p", "720p"}, 4, 15,
 				[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeFirstFrame, modelrouting.InputModeFirstLastFrames, modelrouting.InputModeOmniReference},

@@ -92,6 +92,7 @@ async function mount(
   options: {
     canPublish?: boolean
     currentBatch?: ConfigImportBatchDetail
+    onBack?: () => void
     onPublish?: () => Promise<void>
   } = {}
 ) {
@@ -105,6 +106,7 @@ async function mount(
         <PublishReviewStep
           batch={options.currentBatch ?? batch()}
           canPublish={options.canPublish ?? true}
+          onBack={options.onBack}
           onPublish={async () => {
             published.push(options.currentBatch?.id ?? 10)
             await options.onPublish?.()
@@ -179,6 +181,20 @@ test('keeps publishing disabled when a warning is unresolved', async () => {
     const publish = button(mounted.container, 'Publish import')
     assert.equal(publish.disabled, true)
     assert.match(mounted.container.textContent ?? '', /MARGIN_WARNING/)
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
+test('returns to review when the administrator uses the back action', async () => {
+  let returned = false
+  const mounted = await mount({ onBack: () => (returned = true) })
+  try {
+    const publish = button(mounted.container, 'Publish import')
+    assert.equal(publish.disabled, true)
+
+    await act(async () => button(mounted.container, 'Back').click())
+    assert.equal(returned, true)
   } finally {
     await act(async () => mounted.root.unmount())
   }

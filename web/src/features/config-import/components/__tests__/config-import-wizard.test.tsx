@@ -314,6 +314,25 @@ test('returns to routing diffs when publish reports a stale baseline', async () 
   }
 })
 
+test('returns from publish review to pricing review', async () => {
+  const mounted = await mount({
+    currentBatch: batch('ready', ['publish']),
+  })
+  try {
+    assert.match(mounted.container.textContent ?? '', /Publish review/)
+
+    await act(async () => button(mounted.container, 'Back').click())
+
+    assert.match(mounted.container.textContent ?? '', /Pricing review/)
+    assert.equal(
+      mounted.container.querySelector('#config-import-publish-review-title'),
+      null
+    )
+  } finally {
+    await act(async () => mounted.root.unmount())
+  }
+})
+
 test('shows the publish result after a successful publish', async () => {
   const mounted = await mount({
     currentBatch: batch('staged', ['validate']),

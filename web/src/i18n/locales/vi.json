@@ -4827,6 +4827,7 @@
     "Select the API endpoint region": "Chọn khu vực điểm cuối API",
     "Select the fields you want to overwrite with upstream data. Unselected fields keep their local values.": "Chọn các trường bạn muốn ghi đè bằng dữ liệu thượng nguồn. Các trường không được chọn sẽ giữ nguyên giá trị cục bộ của chúng.",
     "Select the four documented OmegaAI Seedance video models": "Chọn bốn mô hình video Seedance được OmegaAI ghi trong tài liệu",
+    "Select the verified OmegaAI Seedance video models": "Chọn các mô hình video OmegaAI Seedance đã xác minh",
     "Select theme preference": "Chọn chủ đề ưu tiên",
     "Select theme preset": "Chọn tùy chỉnh chủ đề",
     "Select time granularity": "Chọn độ chi tiết thời gian",

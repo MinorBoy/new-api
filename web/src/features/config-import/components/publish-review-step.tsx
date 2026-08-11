@@ -8,6 +8,7 @@ License, or (at your option) any later version.
 */
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ArrowLeft } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 
@@ -18,6 +19,7 @@ export interface PublishReviewStepProps {
   batch: ConfigImportBatchDetail
   canPublish: boolean
   isPublishing?: boolean
+  onBack?: () => void
   onPublish: () => Promise<void>
 }
 
@@ -82,12 +84,24 @@ export function PublishReviewStep(props: PublishReviewStepProps) {
             {t('Review the publish order and affected configuration.')}
           </p>
         </div>
-        <Button
-          onClick={publish}
-          disabled={blocked || !confirmed || props.isPublishing}
-        >
-          {t('Publish import')}
-        </Button>
+        <div className='flex items-center gap-2'>
+          {props.onBack && (
+            <Button
+              variant='outline'
+              onClick={props.onBack}
+              disabled={props.isPublishing}
+            >
+              <ArrowLeft className='size-4' aria-hidden='true' />
+              {t('Back')}
+            </Button>
+          )}
+          <Button
+            onClick={publish}
+            disabled={blocked || !confirmed || props.isPublishing}
+          >
+            {t('Publish import')}
+          </Button>
+        </div>
       </div>
 
       {error && (

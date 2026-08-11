@@ -455,13 +455,14 @@ describe('OmegaAI channel configuration', () => {
         'seedance-v2-720p',
         'dola-seedance-2.0',
         'lingjing-video-v1',
+        'db-ai-video-v1',
       ],
     })
     expect(getDefaultBaseUrl(208)).toBe('https://omegaai.xin')
     expect(getChannelTypeHints(208)).toEqual({
       baseUrl: 'Default: https://omegaai.xin',
       key: 'Enter the raw API key issued by OmegaAI',
-      models: 'Select the four documented OmegaAI Seedance video models',
+      models: 'Select the verified OmegaAI Seedance video models',
     })
     expect(TYPE_TO_KEY_PROMPT[208]).toBe(
       'Enter the raw API key issued by OmegaAI'
@@ -471,12 +472,13 @@ describe('OmegaAI channel configuration', () => {
     )
   })
 
-  test('exposes the four models and preserves custom proxy URLs', () => {
+  test('exposes verified models and preserves custom proxy URLs', () => {
     expect(getChannelModelOptions(208, [], [])).toEqual([
       'klsdpro2-720p',
       'seedance-v2-720p',
       'dola-seedance-2.0',
       'lingjing-video-v1',
+      'db-ai-video-v1',
     ])
     expect(
       getBaseUrlOnChannelTypeChange(
@@ -574,14 +576,17 @@ describe('Z5API channel configuration', () => {
     })
     expect(getDefaultBaseUrl(211)).toBe('https://z5api.com')
     expect(getChannelModelOptions(211, [], [])).toEqual([])
-    expect(getBaseUrlOnChannelTypeChange(211, '', false)).toBe('https://z5api.com')
-    expect(getBaseUrlOnChannelTypeChange(211, 'https://proxy.example.com', false)).toBe(
-      'https://proxy.example.com'
+    expect(getBaseUrlOnChannelTypeChange(211, '', false)).toBe(
+      'https://z5api.com'
     )
+    expect(
+      getBaseUrlOnChannelTypeChange(211, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
     expect(getChannelTypeHints(211)).toEqual({
       baseUrl: 'Default: https://z5api.com',
       key: 'Enter the raw API key issued by Z5API',
-      models: 'Map client-visible Ark model names to verified Z5API upstream models',
+      models:
+        'Map client-visible Ark model names to verified Z5API upstream models',
     })
     expect(CHANNEL_TYPE_WARNINGS[211]).toBe(
       'Z5API is task-only. Enable it only after real upstream contract acceptance.'

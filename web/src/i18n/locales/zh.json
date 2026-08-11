@@ -4827,6 +4827,7 @@
     "Select the API endpoint region": "选择 API 终端节点区域",
     "Select the fields you want to overwrite with upstream data. Unselected fields keep their local values.": "选择要使用上游数据覆盖的字段。未选择的字段将保留其本地值。",
     "Select the four documented OmegaAI Seedance video models": "选择文档列出的四个 OmegaAI Seedance 视频模型",
+    "Select the verified OmegaAI Seedance video models": "选择已验证的 OmegaAI Seedance 视频模型",
     "Select theme preference": "选择主题偏好",
     "Select theme preset": "选择主题预设",
     "Select time granularity": "选择时间粒度",

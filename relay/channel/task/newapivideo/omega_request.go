@@ -54,20 +54,25 @@ func validateOmegaAIRequest(request arkRequest, profile omegaRequestProfile, ups
 		return nil
 	}
 
-	knownModel := false
-	for _, modelName := range omegaAIProtocolProfile().modelList {
-		if upstreamModel == modelName {
-			knownModel = true
-			break
-		}
-	}
+	_, maxVideos, maxAudios, knownModel := OmegaAIModelMediaLimits(upstreamModel)
 	if !knownModel {
 		return &arkRequestError{Code: "InvalidParameter.model", Message: "mapped model is not supported by OmegaAI"}
 	}
-	if upstreamModel != "klsdpro2-720p" && (videoCount > 0 || audioCount > 0) {
+	if videoCount > maxVideos || audioCount > maxAudios {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "mapped OmegaAI model supports only text and reference images"}
 	}
 	return nil
+}
+
+func OmegaAIModelMediaLimits(upstreamModel string) (images, videos, audios int, ok bool) {
+	switch strings.TrimSpace(upstreamModel) {
+	case "klsdpro2-720p":
+		return 9, 3, 3, true
+	case "seedance-v2-720p", "dola-seedance-2.0", "lingjing-video-v1", "db-ai-video-v1":
+		return 9, 0, 0, true
+	default:
+		return 0, 0, 0, false
+	}
 }
 
 func buildOmegaAIRequest(request arkRequest, upstreamModel string, profile omegaRequestProfile) ([]byte, error) {

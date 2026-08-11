@@ -257,6 +257,7 @@ func omegaAIProtocolProfile() protocolProfile {
 			"seedance-v2-720p",
 			"dola-seedance-2.0",
 			"lingjing-video-v1",
+			"db-ai-video-v1",
 		},
 		submitPath:             "/v1/media/generate",
 		pollPath:               "/v1/tasks/{task_id}",

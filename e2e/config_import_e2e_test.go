@@ -82,7 +82,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	require.True(t, created)
 	assert.Equal(t, types.ConfigImportEntityCounts{
 		Channels: 11, ChannelLines: 13, ModelSKUs: 8, SaleProposals: 16,
-		CostRuleDrafts: 167, ModelMappings: 167, RouteBlueprints: 167,
+		CostRuleDrafts: 186, ModelMappings: 186, RouteBlueprints: 186,
 		Sources: 14, UnresolvedVariants: 0,
 	}, first.ItemCounts)
 	assert.Equal(t, types.ConfigImportBatchStatusBinding, first.Status)
@@ -167,14 +167,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	}
 	var materializedRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ?", "config_import").Count(&materializedRuleCount).Error)
-	assert.EqualValues(t, 167, materializedRuleCount)
+	assert.EqualValues(t, 186, materializedRuleCount)
 	var stagedRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&stagedRuleCount).Error)
-	assert.EqualValues(t, 167, stagedRuleCount)
+	assert.EqualValues(t, 186, stagedRuleCount)
 
 	var distinctRouteCosts []model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND business_id IN ?", first.ID, []string{
-		"COST-MEGABYAI-R122-480-REQ", "COST-MEGABYAI-R123-720-REQ",
+		"COST-MEGABYAI-R132-480-REQ", "COST-MEGABYAI-R133-720-REQ",
 	}).Order("business_id ASC").Find(&distinctRouteCosts).Error)
 	require.Len(t, distinctRouteCosts, 2)
 	require.NotNil(t, distinctRouteCosts[0].MaterializedID)
@@ -190,14 +190,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	assert.Zero(t, activeRuleCount)
 	var remainingDraftCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
-	assert.EqualValues(t, 167, remainingDraftCount)
+	assert.EqualValues(t, 186, remainingDraftCount)
 	preview, err := service.PreviewConfigImportBatchActivation(context.Background(), first.ID)
 	require.NoError(t, err)
 	require.Truef(t, preview.Ready, "activation blockers: %+v", preview.Blockers)
 	_, err = service.ActivateConfigImportBatch(context.Background(), first.ID, 1)
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleActive).Count(&activeRuleCount).Error)
-	assert.EqualValues(t, 167, activeRuleCount)
+	assert.EqualValues(t, 186, activeRuleCount)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
 	assert.Zero(t, remainingDraftCount)
 	var dimensioChannel model.Channel

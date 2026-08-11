@@ -292,11 +292,12 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       'seedance-v2-720p',
       'dola-seedance-2.0',
       'lingjing-video-v1',
+      'db-ai-video-v1',
     ],
     hints: {
       baseUrl: 'Default: https://omegaai.xin',
       key: 'Enter the raw API key issued by OmegaAI',
-      models: 'Select the four documented OmegaAI Seedance video models',
+      models: 'Select the verified OmegaAI Seedance video models',
     },
   },
   209: {

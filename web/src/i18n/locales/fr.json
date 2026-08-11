@@ -4827,6 +4827,7 @@
     "Select the API endpoint region": "Sélectionner la région du point de terminaison API",
     "Select the fields you want to overwrite with upstream data. Unselected fields keep their local values.": "Sélectionnez les champs que vous souhaitez écraser avec les données en amont. Les champs non sélectionnés conservent leurs valeurs locales.",
     "Select the four documented OmegaAI Seedance video models": "Sélectionnez les quatre modèles vidéo Seedance documentés par OmegaAI",
+    "Select the verified OmegaAI Seedance video models": "Sélectionnez les modèles vidéo OmegaAI Seedance validés",
     "Select theme preference": "Sélectionner la préférence de thème",
     "Select theme preset": "Sélectionner un préréglage de thème",
     "Select time granularity": "Sélectionner la granularité temporelle",

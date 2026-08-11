@@ -4827,6 +4827,7 @@
     "Select the API endpoint region": "APIエンドポイントのリージョンを選択",
     "Select the fields you want to overwrite with upstream data. Unselected fields keep their local values.": "アップストリームデータで上書きしたいフィールドを選択してください。選択されていないフィールドはローカル値を保持します。",
     "Select the four documented OmegaAI Seedance video models": "OmegaAI のドキュメントに記載された4つの Seedance 動画モデルを選択してください",
+    "Select the verified OmegaAI Seedance video models": "検証済みの OmegaAI Seedance 動画モデルを選択",
     "Select theme preference": "テーマの好みを選択",
     "Select theme preset": "テーマプリセットを選択",
     "Select time granularity": "時間の粒度を選択",

@@ -419,6 +419,9 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           batch={batch}
           canPublish={state.canPublish}
           isPublishing={isBusy}
+          onBack={
+            state.canGoBack ? () => setReviewStep('pricing') : undefined
+          }
           onPublish={async () => {
             const mutation =
               props.onPublish ??

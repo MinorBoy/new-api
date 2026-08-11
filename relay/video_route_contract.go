@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	taskclmmmall "github.com/QuantumNous/new-api/relay/channel/task/clmmmall"
+	tasknewapivideo "github.com/QuantumNous/new-api/relay/channel/task/newapivideo"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
@@ -39,6 +40,8 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 			return newVideoRouteContractError("route_contract_resolution", "MegaByAI routes support 480p, 720p, 1080p, and 4k")
 		}
 		return nil
+	case constant.ChannelTypeOmegaAI:
+		return validateOmegaAIVideoRoute(target)
 	case constant.ChannelTypePaipu:
 		return validatePaipuVideoRoute(target)
 	case constant.ChannelTypeZ5API:
@@ -52,6 +55,27 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	default:
 		return nil
 	}
+}
+
+func validateOmegaAIVideoRoute(target modelrouting.Target) error {
+	maxImages, maxVideos, maxAudios, ok := tasknewapivideo.OmegaAIModelMediaLimits(target.UpstreamModel)
+	if !ok {
+		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for OmegaAI")
+	}
+	if !allRouteResolutions(target.Constraints.OutputResolutions, "720p") {
+		return newVideoRouteContractError("route_contract_resolution", "OmegaAI routes require 720p")
+	}
+	if routeDurationDeclared(target.Constraints.Durations) && !routeDurationWithin(target.Constraints.Durations, 1, relaycommon.MaxTaskDurationSeconds) {
+		return newVideoRouteContractError("route_contract_duration", "OmegaAI route duration exceeds the task protocol limit")
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios ||
+		routeReferenceTotalMax(target.Constraints) > maxImages+maxVideos+maxAudios {
+		return newVideoRouteContractError("route_contract_references", "OmegaAI route reference limits exceed the verified model capability")
+	}
+	return nil
 }
 
 func validateCangyuanVideoRoute(target modelrouting.Target) error {
@@ -258,6 +282,10 @@ func routeDurationWithin(constraint modelrouting.DurationConstraint, minimum, ma
 		return true
 	}
 	return constraint.Min != nil && constraint.Max != nil && *constraint.Min >= minimum && *constraint.Max <= maximum && *constraint.Min <= *constraint.Max
+}
+
+func routeDurationDeclared(constraint modelrouting.DurationConstraint) bool {
+	return len(constraint.Values) > 0 || constraint.Min != nil || constraint.Max != nil
 }
 
 func routeResolutionsWithin(values []string, allowed ...string) bool {

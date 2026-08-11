@@ -23,6 +23,7 @@ func TestOmegaAIProfile(t *testing.T) {
 		"seedance-v2-720p",
 		"dola-seedance-2.0",
 		"lingjing-video-v1",
+		"db-ai-video-v1",
 	}, adaptor.GetModelList())
 	assert.Equal(t, "/v1/media/generate", adaptor.activeProfile().submitPath)
 	assert.Equal(t, "/v1/tasks/{task_id}", adaptor.activeProfile().pollPath)
@@ -83,6 +84,29 @@ func TestBuildOmegaAIRequestPreservesLingjingPromptReferences(t *testing.T) {
 	}`, string(body))
 }
 
+func TestBuildOmegaAIRequestSupportsImportedDBModel(t *testing.T) {
+	request, err := parseARKRequest([]byte(`{
+		"model":"client-model",
+		"content":[
+			{"type":"text","text":"slow camera move"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}}
+		],
+		"duration":5,
+		"ratio":"auto"
+	}`), omegaAIProtocolProfile())
+	require.NoError(t, err)
+
+	body, err := buildOmegaAIRequest(request, "db-ai-video-v1", *omegaAIProtocolProfile().omegaRequest)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"model":"db-ai-video-v1",
+		"prompt":"slow camera move",
+		"duration":5,
+		"aspect_ratio":"auto",
+		"images":["https://8.8.8.8/ref.jpg"]
+	}`, string(body))
+}
+
 func TestBuildOmegaAIRequestOmitsAbsentOptionalFields(t *testing.T) {
 	request, err := parseARKRequest([]byte(`{
 		"model":"client-model",
@@ -111,6 +135,7 @@ func TestOmegaAIRequestValidation(t *testing.T) {
 		wantErr       bool
 	}{
 		{name: "nine images", body: `{"model":"m","content":[{"type":"text","text":"text"}` + images9 + `]}`, upstreamModel: "lingjing-video-v1"},
+		{name: "video on imported db image only model", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}}]}`, upstreamModel: "db-ai-video-v1", code: "InvalidParameter.content", wantErr: true},
 		{name: "ten images", body: `{"model":"m","content":[{"type":"text","text":"text"}` + images10 + `]}`, upstreamModel: "lingjing-video-v1", code: "InvalidParameter.content", wantErr: true},
 		{name: "video on image only model", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"video_url","role":"reference_video","video_url":{"url":"https://8.8.8.8/ref.mp4"}}]}`, upstreamModel: "seedance-v2-720p", code: "InvalidParameter.content", wantErr: true},
 		{name: "audio on image only model", body: `{"model":"m","content":[{"type":"text","text":"text"},{"type":"image_url","role":"reference_image","image_url":{"url":"https://8.8.8.8/ref.jpg"}},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://8.8.8.8/ref.mp3"}}]}`, upstreamModel: "dola-seedance-2.0", code: "InvalidParameter.content", wantErr: true},

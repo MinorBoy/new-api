@@ -4827,6 +4827,7 @@
     "Select the API endpoint region": "Выбрать регион конечной точки API",
     "Select the fields you want to overwrite with upstream data. Unselected fields keep their local values.": "Выберите поля, которые вы хотите перезаписать данными из вышестоящего источника. Невыбранные поля сохранят свои локальные значения.",
     "Select the four documented OmegaAI Seedance video models": "Выберите четыре документированные видеомодели Seedance от OmegaAI",
+    "Select the verified OmegaAI Seedance video models": "Выберите проверенные видеомодели OmegaAI Seedance",
     "Select theme preference": "Выбрать предпочтение темы",
     "Select theme preset": "Выберите пресет темы",
     "Select time granularity": "Выбрать детализацию времени",

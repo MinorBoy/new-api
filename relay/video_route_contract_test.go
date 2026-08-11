@@ -326,6 +326,48 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 	}
 }
 
+func TestValidateFFLinkVideoRouteTargetContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		res      []string
+		min      int
+		max      int
+		limits   modelrouting.ReferenceLimits
+		total    *int
+		videoDur *int
+		wantCode string
+	}{
+		{name: "standard all resolutions", model: "seedance-2.0", res: []string{"480p", "720p", "1080p"}, min: 4, max: 12, limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}},
+		{name: "fast omits 1080p", model: "seedance-2.0-fast", res: []string{"480p", "720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}},
+		{name: "mini requires 720p", model: "seedance-2.0-mini", res: []string{"720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}},
+		{name: "missing model", res: []string{"720p"}, min: 4, max: 15, wantCode: "route_contract_model"},
+		{name: "missing resolution", model: "seedance-2.0", min: 4, max: 15, wantCode: "route_contract_resolution"},
+		{name: "fast 1080p", model: "seedance-2.0-fast", res: []string{"1080p"}, min: 4, max: 15, wantCode: "route_contract_resolution"},
+		{name: "standard 1080p fifteen seconds", model: "seedance-2.0", res: []string{"1080p"}, min: 4, max: 15, wantCode: "route_contract_duration"},
+		{name: "five images", model: "seedance-2.0", res: []string{"720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Images: 5}, wantCode: "route_contract_references"},
+		{name: "four videos", model: "seedance-2.0", res: []string{"720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Videos: 4}, wantCode: "route_contract_references"},
+		{name: "two audios", model: "seedance-2.0", res: []string{"720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Audios: 2}, wantCode: "route_contract_references"},
+		{name: "nine total", model: "seedance-2.0", res: []string{"720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, total: common.GetPointer(9), wantCode: "route_contract_references"},
+		{name: "sixteen second references", model: "seedance-2.0", res: []string{"720p"}, min: 4, max: 15, limits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, videoDur: common.GetPointer(16), wantCode: "route_contract_references"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := videoContractTarget(tt.model, tt.res, tt.min, tt.max, nil, tt.limits)
+			target.Constraints.ReferenceTotalMax = tt.total
+			target.Constraints.ReferenceVideoTotalDurationSeconds = tt.videoDur
+			err := ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeFFLink}, target)
+			if tt.wantCode == "" {
+				require.NoError(t, err)
+				return
+			}
+			var contractErr *VideoRouteContractError
+			require.ErrorAs(t, err, &contractErr)
+			assert.Equal(t, tt.wantCode, contractErr.Code)
+		})
+	}
+}
+
 func videoContractTarget(modelName string, resolutions []string, minDuration, maxDuration int, inputModes []modelrouting.InputMode, limits modelrouting.ReferenceLimits) modelrouting.Target {
 	return videoContractTargetWithMinimums(modelName, resolutions, minDuration, maxDuration, inputModes, limits, modelrouting.ReferenceLimits{})
 }

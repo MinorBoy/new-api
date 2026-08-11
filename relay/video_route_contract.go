@@ -52,9 +52,50 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 		return validateDimensioVideoRoute(target)
 	case constant.ChannelTypeSecure:
 		return validateSecureVideoRoute(channel.GetOtherSettings().SecureVideoGroup, target)
+	case constant.ChannelTypeFFLink:
+		return validateFFLinkVideoRoute(target)
 	default:
 		return nil
 	}
+}
+
+func validateFFLinkVideoRoute(target modelrouting.Target) error {
+	modelName := strings.TrimSpace(strings.ToLower(target.UpstreamModel))
+	if modelName != "seedance-2.0" && modelName != "seedance-2.0-fast" && modelName != "seedance-2.0-mini" {
+		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for FYLink")
+	}
+
+	switch modelName {
+	case "seedance-2.0":
+		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p", "1080p") {
+			return newVideoRouteContractError("route_contract_resolution", "FYLink seedance-2.0 routes support 480p, 720p, and 1080p")
+		}
+	case "seedance-2.0-fast":
+		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
+			return newVideoRouteContractError("route_contract_resolution", "FYLink seedance-2.0-fast routes support 480p and 720p")
+		}
+	case "seedance-2.0-mini":
+		if !allRouteResolutions(target.Constraints.OutputResolutions, "720p") {
+			return newVideoRouteContractError("route_contract_resolution", "FYLink seedance-2.0-mini routes require 720p")
+		}
+	}
+
+	if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
+		return newVideoRouteContractError("route_contract_duration", "FYLink routes require durations from 4 to 15 seconds")
+	}
+	if modelName == "seedance-2.0" && containsRouteResolution(target.Constraints.OutputResolutions, "1080p") && !routeDurationWithin(target.Constraints.Durations, 4, 12) {
+		return newVideoRouteContractError("route_contract_duration", "FYLink seedance-2.0 1080p routes support durations up to 12 seconds")
+	}
+
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > 4 || limits.Videos > 3 || limits.Audios > 1 ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios ||
+		routeReferenceTotalMax(target.Constraints) > 8 ||
+		(target.Constraints.ReferenceVideoTotalDurationSeconds != nil && *target.Constraints.ReferenceVideoTotalDurationSeconds > 15) {
+		return newVideoRouteContractError("route_contract_references", "FYLink route reference limits exceed the verified protocol")
+	}
+	return nil
 }
 
 func validateOmegaAIVideoRoute(target modelrouting.Target) error {

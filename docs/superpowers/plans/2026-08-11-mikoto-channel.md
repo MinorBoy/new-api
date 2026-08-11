@@ -62,7 +62,7 @@
 - Create: `relay/channel/task/newapivideo/mikoto_request_test.go`
 - Modify: `relay/channel/task/newapivideo/adaptor.go`
 
-- [ ] **Step 1: 写 profile 和模型分流失败测试**
+- [x] **Step 1: 写 profile 和模型分流失败测试**
 
 在 `mikoto_request_test.go` 添加 `TestMikotoProfileUsesDocumentedTaskContract`，断言：
 
@@ -79,13 +79,13 @@ assert.Equal(t, mikotoDialectSeedance, mikotoRequestDialect("seedance-fast-720p"
 assert.Equal(t, mikotoDialectUnknown, mikotoRequestDialect("unverified-model"))
 ```
 
-- [ ] **Step 2: 运行测试并确认因符号不存在而失败**
+- [x] **Step 2: 运行测试并确认因符号不存在而失败**
 
 Run: `go test ./relay/channel/task/newapivideo -run 'TestMikotoProfile' -count=1`
 
 Expected: FAIL，错误包含 `undefined: NewMikotoTaskAdaptor`。
 
-- [ ] **Step 3: 添加 profile 的最小实现**
+- [x] **Step 3: 添加 profile 的最小实现**
 
 在 `profile.go` 增加：
 
@@ -111,7 +111,7 @@ func NewMikotoTaskAdaptor() *TaskAdaptor {
 }
 ```
 
-- [ ] **Step 4: 写 Sora 精确请求和边界失败测试**
+- [x] **Step 4: 写 Sora 精确请求和边界失败测试**
 
 添加表测试 `TestBuildMikotoSoraRequest`，使用 Ark 请求覆盖：纯文本、单首帧、首尾帧、9 图片、3 视频、3 音频，并精确断言以下上游结构：
 
@@ -124,21 +124,21 @@ func NewMikotoTaskAdaptor() *TaskAdaptor {
   "resolution": "720p",
   "image_url": "https://8.8.8.8/first.png",
   "reference_image_urls": ["https://8.8.4.4/last.png"],
-  "reference_videos": ["https://1.1.1.1/ref.mp4"],
-  "audio_url": "https://9.9.9.9/ref.mp3",
   "video_config": {"reference_mode": "start_end"}
 }
 ```
 
+参考视频和参考音频使用独立的 `reference_mode=auto` 用例；`start_end` 不得与参考视频混用。
+
 添加 `TestBuildMikotoSoraRequestRejectsDocumentedInvalidInputs`，逐项断言 `duration=3/16`、非 `720p`、比例 `2:1`、10 图片、4 视频、4 音频、总素材超过 12、音频无图片、`start_end` 混用视频、data URI、私网 URL、`seed`、`watermark` 和 `draft` 返回对应 `InvalidParameter.*`。
 
-- [ ] **Step 5: 运行 Sora 测试并确认因编码器不存在而失败**
+- [x] **Step 5: 运行 Sora 测试并确认因编码器不存在而失败**
 
 Run: `go test ./relay/channel/task/newapivideo -run 'TestBuildMikotoSora' -count=1`
 
 Expected: FAIL，错误包含 `undefined: buildMikotoRequest`。
 
-- [ ] **Step 6: 写 Seedance 精确请求和边界失败测试**
+- [x] **Step 6: 写 Seedance 精确请求和边界失败测试**
 
 添加 `TestBuildMikotoSeedanceRequest`，断言字段名保持大小写，显式 `generate_audio: false` 不被省略：
 
@@ -158,13 +158,13 @@ Expected: FAIL，错误包含 `undefined: buildMikotoRequest`。
 
 同一测试断言缺省 `generate_audio`、媒体和比例时这些字段完全省略，且不发送 `resolution`。添加 `TestBuildMikotoSeedanceRequestRejectsDocumentedInvalidInputs`，覆盖时长边界、比例、数量、错误角色、错误 data URI、单个 data URI 解码后超过 50 MB、未知模型和 Sora/Seedance 字段混用。
 
-- [ ] **Step 7: 运行 Seedance 测试并确认失败原因正确**
+- [x] **Step 7: 运行 Seedance 测试并确认失败原因正确**
 
 Run: `go test ./relay/channel/task/newapivideo -run 'TestBuildMikotoSeedance' -count=1`
 
 Expected: FAIL，原因是 Mikoto 请求编码尚未实现，而不是测试 JSON 或 fixture 错误。
 
-- [ ] **Step 8: 实现两个请求 DTO、验证和编码**
+- [x] **Step 8: 实现两个请求 DTO、验证和编码**
 
 在 `mikoto_request.go` 定义以下稳定接口；可选标量全部使用指针和 `omitempty`，JSON 通过 `common.Marshal`：
 
@@ -184,7 +184,7 @@ func buildMikotoRequest(request arkRequest, upstreamModel string) ([]byte, error
 
 Sora DTO 使用 `Seconds *string`、`ImageURL *string`、`ReferenceImageURLs []string`、`ReferenceVideos []string`、`AudioURL any` 和 `VideoConfig *mikotoSoraVideoConfig`；Seedance DTO 使用 `Duration *int`、`Images []string`、`ReferenceVideos []string` 的 `json:"referenceVideos,omitempty"`、`ReferenceAudios []string` 的 `json:"referenceAudios,omitempty"` 与 `GenerateAudio *bool`。使用 `relaycommon.ParseTaskMediaURL` 区分 HTTP 与 data URI；Sora 仅接受公开 HTTPS，Seedance 接受公开 HTTPS 和媒体类型匹配的 data URI。data URI 大小由 Base64 解码长度计算，超过 50 MB 返回 `InvalidParameter.content`。
 
-- [ ] **Step 9: 把 Mikoto 接入验证与请求构建分支**
+- [x] **Step 9: 把 Mikoto 接入验证与请求构建分支**
 
 在 `TaskAdaptor.ValidateRequestAndSetAction` 的 provider 分支中调用 `validateMikotoRequest` 并将 `ProviderValidationComplete` 设为 true；在 `BuildRequestBody` 的 Ark switch 中加入：
 
@@ -200,7 +200,7 @@ case videoRequestDialectMikoto:
 	body, err = buildMikotoRequest(*state.ARK, modelName)
 ```
 
-- [ ] **Step 10: 格式化并运行请求测试**
+- [x] **Step 10: 格式化并运行请求测试**
 
 Run:
 
@@ -211,7 +211,7 @@ go test ./relay/channel/task/newapivideo -run 'TestMikoto|TestBuildMikoto|TestZ5
 
 Expected: PASS。
 
-- [ ] **Step 11: 提交请求方言**
+- [x] **Step 11: 提交请求方言**
 
 ```powershell
 git add relay/channel/task/newapivideo/profile.go relay/channel/task/newapivideo/adaptor.go relay/channel/task/newapivideo/mikoto_request.go relay/channel/task/newapivideo/mikoto_request_test.go

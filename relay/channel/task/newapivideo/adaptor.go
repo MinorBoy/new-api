@@ -54,6 +54,7 @@ type upstreamSubmitResponse struct {
 	ID          string `json:"id"`
 	TaskID      string `json:"task_id"`
 	TaskIDCamel string `json:"taskId"`
+	JobID       string `json:"job_id"`
 	Object      string `json:"object"`
 	Model       string `json:"model"`
 	Status      string `json:"status"`
@@ -837,7 +838,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	if err := common.Unmarshal(body, &response); err != nil {
 		return "", body, service.TaskErrorWrapperLocal(fmt.Errorf("invalid upstream submit response: %w", err), "invalid_response", http.StatusBadGateway)
 	}
-	ids := []string{response.TaskID, response.TaskIDCamel, response.ID}
+	ids := []string{response.TaskID, response.TaskIDCamel, response.ID, response.JobID}
 	for _, candidate := range ids {
 		if candidate == "" {
 			continue

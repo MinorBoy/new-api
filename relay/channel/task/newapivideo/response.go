@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
@@ -34,7 +36,8 @@ type parsedTask struct {
 }
 
 func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
-	allowMissingSuccessURL := a.activeProfile().requestDialect == videoRequestDialectEightYes
+	requestDialect := a.activeProfile().requestDialect
+	allowMissingSuccessURL := requestDialect == videoRequestDialectEightYes || requestDialect == videoRequestDialectFFLink
 	parsed, err := parseTaskProjection(body, allowMissingSuccessURL)
 	if err != nil {
 		return nil, err
@@ -427,7 +430,7 @@ func mapUpstreamTaskStatus(status string) (model.TaskStatus, error) {
 		return model.TaskStatusSubmitted, nil
 	case "QUEUED", "PENDING":
 		return model.TaskStatusQueued, nil
-	case "IN_PROGRESS", "RUNNING", "PROCESSING":
+	case "IN_PROGRESS", "RUNNING", "PROCESSING", "SETTLING":
 		return model.TaskStatusInProgress, nil
 	case "SUCCESS", "SUCCEEDED", "COMPLETED":
 		return model.TaskStatusSuccess, nil
@@ -579,6 +582,9 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if (response.Content == nil || response.Content.VideoURL == "") && task.PrivateData.ResultURL != "" {
 		response.Content = &arkVideoContent{VideoURL: task.PrivateData.ResultURL}
 	}
+	if (response.Content == nil || response.Content.VideoURL == "") && task.Status == model.TaskStatusSuccess && a.activeProfile().requestDialect == videoRequestDialectFFLink {
+		response.Content = &arkVideoContent{VideoURL: taskcommon.BuildProxyURL(task.TaskID)}
+	}
 	if task.Status == model.TaskStatusFailure {
 		if response.Error != nil {
 			response.Error = &upstreamError{
@@ -628,7 +634,7 @@ func z5APIRequestedDuration(task *model.Task) *json.Number {
 }
 
 func parsePublicTaskProjection(task *model.Task) (*parsedTask, error) {
-	allowMissingSuccessURL := task.Status == model.TaskStatusSuccess && strings.TrimSpace(task.PrivateData.ResultURL) != ""
+	allowMissingSuccessURL := task.Status == model.TaskStatusSuccess && (strings.TrimSpace(task.PrivateData.ResultURL) != "" || task.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFFLink)))
 	parsed, err := parseTaskProjection(task.Data, allowMissingSuccessURL)
 	if err == nil || task.Status != model.TaskStatusFailure {
 		return parsed, err

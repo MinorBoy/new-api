@@ -300,7 +300,8 @@ func isConfigImportTaskChannelType(channelType int) bool {
 		constant.ChannelTypeOmegaAI,
 		constant.ChannelTypeFourSToken,
 		constant.ChannelTypeEightYes,
-		constant.ChannelTypeZ5API:
+		constant.ChannelTypeZ5API,
+		constant.ChannelTypeMikoto:
 		return true
 	default:
 		return false

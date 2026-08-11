@@ -305,7 +305,7 @@ git commit -m "feat(mikoto): normalize video task responses"
 - Modify: `controller/channel_test_internal_test.go`
 - Modify: `service/config_import_stage.go`
 
-- [ ] **Step 1: 写渠道注册失败测试**
+- [x] **Step 1: 写渠道注册失败测试**
 
 先添加以下可观察契约：
 
@@ -323,13 +323,13 @@ assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform("212")))
 
 在 `controller/channel_test_internal_test.go` 断言 generic channel test 不支持 Mikoto；在 controller 增加测试，断言新增 Mikoto 渠道被强制设为手动禁用。
 
-- [ ] **Step 2: 运行注册测试并确认失败**
+- [x] **Step 2: 运行注册测试并确认失败**
 
 Run: `go test ./constant ./relay ./controller -run 'TestMikoto|TestSupportsGenericChannelTest' -count=1`
 
 Expected: FAIL，原因是 `ChannelTypeMikoto` 尚未定义。
 
-- [ ] **Step 3: 添加常量、默认 URL、名称和 TaskAdaptor**
+- [x] **Step 3: 添加常量、默认 URL、名称和 TaskAdaptor**
 
 在 `constant/channel.go` 分配：
 
@@ -340,7 +340,7 @@ ChannelTypeDummy  = 213 // this one is only for count, do not add any channel af
 
 设置 `ChannelBaseURLs[ChannelTypeMikoto] = "https://api.mikoto.vip"` 和名称 `Mikoto`。在 `relay/relay_adaptor.go` 返回 `newapivideo.NewMikotoTaskAdaptor()`；不要加入 `common.ChannelType2APIType`。
 
-- [ ] **Step 4: 注册任务生命周期、计费能力和默认禁用行为**
+- [x] **Step 4: 注册任务生命周期、计费能力和默认禁用行为**
 
 把 Mikoto 加入：
 
@@ -356,7 +356,7 @@ service.supportsImportedTaskChannelType
 
 在 `relay/cost_accounting_adaptor_test.go` 断言支持 `ValidatedRequest`、`UpstreamActual`、`UpstreamUsage`，保持现有任务账务实现不变。
 
-- [ ] **Step 5: 写并实现模型能力路由契约**
+- [x] **Step 5: 写并实现模型能力路由契约**
 
 先在 `relay/video_route_contract_test.go` 添加表测试：Sora 只允许 `720p`、4 至 15 秒、最多 9/3/3 且总数 12；四个 Seedance 模型按名称要求 480p、720p 或 1080p，允许 4 至 15 秒和最多 9/3/3；未知模型返回 `route_contract_model`。
 
@@ -369,7 +369,7 @@ case constant.ChannelTypeMikoto:
 
 `validateMikotoVideoRoute` 必须复用 `routeDurationWithin`、`allRouteResolutions` 和 `routeReferenceTotalMax`，不读取 HTML，不写价格。
 
-- [ ] **Step 6: 格式化并运行后端注册测试**
+- [x] **Step 6: 格式化并运行后端注册测试**
 
 Run:
 
@@ -380,7 +380,7 @@ go test ./constant ./relay ./controller ./service -run 'TestMikoto|TestSeedanceT
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交后端注册**
+- [x] **Step 7: 提交后端注册**
 
 ```powershell
 git add constant/channel.go constant/channel_test.go relay/relay_adaptor.go relay/seedance_task.go service/seedance_task_response.go relay/relay_task.go relay/relay_task_seedance_test.go relay/video_route_contract.go relay/video_route_contract_test.go relay/cost_accounting_adaptor_test.go controller/channel.go controller/channel-test.go controller/channel_test_internal_test.go service/config_import_stage.go

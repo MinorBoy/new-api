@@ -27,6 +27,10 @@ type configImportBindingLineFixture struct {
 	supportsRealPerson *bool
 }
 
+func TestSupportsImportedTaskChannelTypeIncludesMikoto(t *testing.T) {
+	assert.True(t, isConfigImportTaskChannelType(constant.ChannelTypeMikoto))
+}
+
 func TestConfigImportBindingBindsExistingMatchingChannel(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

@@ -27,15 +27,35 @@ var mikotoSeedanceModels = map[string]struct{}{
 	"seedance-fast-720p": {},
 }
 
-func mikotoRequestDialect(modelName string) mikotoDialect {
+type MikotoModelContract struct {
+	Dialect             string
+	OutputResolution    string
+	ReferenceTotalLimit int
+}
+
+func AnalyzeMikotoModel(modelName string) (MikotoModelContract, bool) {
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
 	if modelName == "sora-v3-pro" {
-		return mikotoDialectSora
+		return MikotoModelContract{Dialect: string(mikotoDialectSora), OutputResolution: "720p", ReferenceTotalLimit: 12}, true
 	}
-	if _, ok := mikotoSeedanceModels[modelName]; ok {
-		return mikotoDialectSeedance
+	if _, ok := mikotoSeedanceModels[modelName]; !ok {
+		return MikotoModelContract{}, false
 	}
-	return mikotoDialectUnknown
+	resolution := "720p"
+	if strings.HasSuffix(modelName, "-1080p") {
+		resolution = "1080p"
+	} else if strings.HasSuffix(modelName, "-480p") {
+		resolution = "480p"
+	}
+	return MikotoModelContract{Dialect: string(mikotoDialectSeedance), OutputResolution: resolution}, true
+}
+
+func mikotoRequestDialect(modelName string) mikotoDialect {
+	contract, ok := AnalyzeMikotoModel(modelName)
+	if !ok {
+		return mikotoDialectUnknown
+	}
+	return mikotoDialect(contract.Dialect)
 }
 
 type mikotoSoraRequest struct {

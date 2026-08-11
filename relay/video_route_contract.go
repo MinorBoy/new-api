@@ -46,6 +46,8 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 		return validatePaipuVideoRoute(target)
 	case constant.ChannelTypeZ5API:
 		return validateZ5APIVideoRoute(target)
+	case constant.ChannelTypeMikoto:
+		return validateMikotoVideoRoute(target)
 	case constant.ChannelTypeClmmMall:
 		return validateClmmVideoRoute(target)
 	case constant.ChannelTypeDimensio:
@@ -55,6 +57,27 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	default:
 		return nil
 	}
+}
+
+func validateMikotoVideoRoute(target modelrouting.Target) error {
+	contract, ok := tasknewapivideo.AnalyzeMikotoModel(target.UpstreamModel)
+	if !ok {
+		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for Mikoto")
+	}
+	if !allRouteResolutions(target.Constraints.OutputResolutions, contract.OutputResolution) {
+		return newVideoRouteContractError("route_contract_resolution", fmt.Sprintf("Mikoto model requires %s", contract.OutputResolution))
+	}
+	if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
+		return newVideoRouteContractError("route_contract_duration", "Mikoto routes require durations from 4 to 15 seconds")
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios ||
+		(contract.ReferenceTotalLimit > 0 && routeReferenceTotalMax(target.Constraints) > contract.ReferenceTotalLimit) {
+		return newVideoRouteContractError("route_contract_references", "Mikoto route reference limits exceed the verified protocol")
+	}
+	return nil
 }
 
 func validateOmegaAIVideoRoute(target modelrouting.Target) error {

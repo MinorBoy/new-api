@@ -84,3 +84,15 @@ func TestVideoRouterSkipsJimengPostQueryAction(t *testing.T) {
 	assert.NotEqual(t, http.StatusBadRequest, recorder.Code)
 	assert.NotContains(t, recorder.Body.String(), "video_base64_input_disabled")
 }
+
+func TestVideoRouterRegistersSeedanceTaskDelete(t *testing.T) {
+	router := gin.New()
+	SetVideoRouter(router)
+	found := false
+	for _, route := range router.Routes() {
+		if route.Method == http.MethodDelete && route.Path == "/api/v3/contents/generations/tasks/:task_id" {
+			found = true
+		}
+	}
+	assert.True(t, found)
+}

@@ -242,7 +242,7 @@ func TestFFLinkArkLifecycleAndContentProxyE2E(t *testing.T) {
 	var task model.Task
 	require.NoError(t, model.DB.Where("task_id = ?", submitted.ID).First(&task).Error)
 	require.Positive(t, task.Quota)
-	assert.Equal(t, constant.TaskPlatform("212"), task.Platform)
+	assert.Equal(t, constant.TaskPlatform("214"), task.Platform)
 	assert.Equal(t, "job_1", task.PrivateData.UpstreamTaskID)
 	assert.Equal(t, ffLinkE2EKey, task.PrivateData.Key)
 

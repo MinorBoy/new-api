@@ -339,9 +339,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Map client-visible Ark model names to verified Z5API upstream models',
     },
   },
-  212: {
-    id: 212,
-    name: CHANNEL_TYPES[212],
+  214: {
+    id: 214,
+    name: CHANNEL_TYPES[214],
     icon: 'NewAPI',
     defaultBaseUrl: 'https://api.fflink.top',
     supportedModels: [],
@@ -355,7 +355,7 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
 }
 
 const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([
-  200, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212,
+  200, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 214,
 ])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

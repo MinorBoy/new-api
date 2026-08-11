@@ -63,7 +63,7 @@ func TestFFLinkStatusProjectionSupportsSettlingAndMissingContentURL(t *testing.T
 func TestFFLinkConvertToArkVideoTaskUsesPublicProxyWhenContentURLIsAbsent(t *testing.T) {
 	task := &model.Task{
 		TaskID:      "task_public",
-		Platform:    "212",
+		Platform:    "214",
 		Status:      model.TaskStatusSuccess,
 		Properties:  model.Properties{OriginModelName: "client-model"},
 		PrivateData: model.TaskPrivateData{UpstreamTaskID: "job_private"},

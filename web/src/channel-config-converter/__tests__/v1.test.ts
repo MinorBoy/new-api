@@ -597,7 +597,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-4STOKEN'), 209)
   assert.equal(typesByChannel.get('CH-8YES'), 210)
   assert.equal(typesByChannel.get('CH-Z5API'), 211)
-  assert.equal(typesByChannel.get('CH-FFLINK'), 212)
+  assert.equal(typesByChannel.get('CH-FFLINK'), 214)
 })
 
 test('v1 adapter treats line and SKU price differences as distinct variants and removes Secure unsupported 480p rows', async () => {

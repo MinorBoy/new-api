@@ -186,7 +186,7 @@ func TestPersistSubmittedTaskStoresSelectedFYLinkKeyPrivately(t *testing.T) {
 	result := &relay.TaskSubmitResult{
 		UpstreamTaskID: "job-private",
 		TaskData:       []byte(`{"job_id":"job-private","status":"pending"}`),
-		Platform:       constant.TaskPlatform("212"),
+		Platform:       constant.TaskPlatform("214"),
 		Quota:          100,
 	}
 

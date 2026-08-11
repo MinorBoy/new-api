@@ -70,8 +70,8 @@ const (
 	ChannelTypeFourSToken     = 209 // 4stoken Seedance task protocol
 	ChannelTypeEightYes       = 210 // 8yes Seedance task protocol
 	ChannelTypeZ5API          = 211 // Z5API Seedance task protocol
-	ChannelTypeFFLink         = 212 // FYLink Seedance task protocol
-	ChannelTypeDummy          = 213 // this one is only for count, do not add any channel after this
+	ChannelTypeFFLink         = 214 // FYLink Seedance task protocol
+	ChannelTypeDummy          = 215 // this one is only for count, do not add any channel after this
 
 )
 

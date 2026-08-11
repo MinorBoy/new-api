@@ -130,7 +130,7 @@ describe('pre-acceptance channel defaults', () => {
 
   test('selecting FYLink defaults a new channel to manually disabled', () => {
     assert.equal(
-      getStatusOnChannelTypeChange(1, 212, CHANNEL_FORM_DEFAULT_VALUES.status),
+      getStatusOnChannelTypeChange(1, 214, CHANNEL_FORM_DEFAULT_VALUES.status),
       2
     )
   })

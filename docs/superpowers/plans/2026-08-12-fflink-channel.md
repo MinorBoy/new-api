@@ -64,16 +64,16 @@ FYLink 协议专属文件：
 
 文件：constant/channel.go、constant/channel_test.go、relay/channel/task/newapivideo/profile.go、relay/relay_adaptor.go、relay/seedance_task.go、service/seedance_task_response.go、relay/relay_task.go、relay/video_route_contract.go、controller/channel.go、controller/channel-test.go、controller/channel_test_internal_test.go。
 
-- [ ] 步骤 1：写失败测试。断言 ChannelTypeFFLink=212、ChannelTypeDummy=213、默认 URL 为 https://api.fflink.top、名称为 FYLink、common.ChannelType2APIType 不映射；GetTaskAdaptor("212") 非空且实现 ArkVideoTaskConverter；IsSeedanceTaskPlatform("212") 为 true；supportsGenericChannelTest(212) 为 false；新增或切换 FYLink 渠道时状态强制为 ChannelStatusManuallyDisabled。
+- [ ] 步骤 1：写失败测试。断言 ChannelTypeFFLink=214、ChannelTypeDummy=215、默认 URL 为 https://api.fflink.top、名称为 FYLink、common.ChannelType2APIType 不映射；GetTaskAdaptor("214") 非空且实现 ArkVideoTaskConverter；IsSeedanceTaskPlatform("214") 为 true；supportsGenericChannelTest(214) 为 false；新增或切换 FYLink 渠道时状态强制为 ChannelStatusManuallyDisabled。
 - [ ] 步骤 2：运行失败测试。
 
 ~~~powershell
 go test ./constant ./relay ./service ./controller -run 'FFLink|ChannelTypeDummy|SeedanceTaskPlatform|PreAcceptance|GenericChannelTest' -count=1
 ~~~
 
-预期：失败于 ChannelTypeFFLink、默认 URL、名称和注册分支不存在，且 ChannelTypeDummy 仍为 212。
+预期：失败于 ChannelTypeFFLink、默认 URL、名称和注册分支不存在，且 ChannelTypeDummy 仍为 213。
 
-- [ ] 步骤 3：实现最小注册。在 constant/channel.go 保持已有 Z5API=211，追加 ChannelTypeFFLink=212、ChannelTypeDummy=213；在 ChannelBaseURLs 和 ChannelTypeNames 加入 FYLink；在 profile.go 增加 ChannelNameFYLink、videoRequestDialectFFLink 和 profile：
+- [ ] 步骤 3：实现最小注册。在 constant/channel.go 保持已有 Z5API=211，为已占用的 212、213 保留编号，追加 ChannelTypeFFLink=214、ChannelTypeDummy=215；在 ChannelBaseURLs 和 ChannelTypeNames 加入 FYLink；在 profile.go 增加 ChannelNameFYLink、videoRequestDialectFFLink 和 profile：
 
 ~~~go
 const ChannelNameFYLink = "FYLink"
@@ -93,7 +93,7 @@ func fflinkProtocolProfile() protocolProfile {
 }
 ~~~
 
-新增 FYLinkTaskAdaptor 包装类型，并让 relay/relay_adaptor.go 只为 212 返回 NewFYLinkTaskAdaptor。把 212 加入 Seedance 平台值、Ark converter 分支、路由合同分支、普通渠道测试排除集合和 pre-acceptance disabled 集合；不要加入 OpenAI API 类型映射或流式列表。
+新增 FYLinkTaskAdaptor 包装类型，并让 relay/relay_adaptor.go 只为 214 返回 NewFYLinkTaskAdaptor。把 214 加入 Seedance 平台值、Ark converter 分支、路由合同分支、普通渠道测试排除集合和 pre-acceptance disabled 集合；不要加入 OpenAI API 类型映射或流式列表。
 
 - [ ] 步骤 4：运行通过测试并提交。
 
@@ -151,7 +151,7 @@ go test ./relay/channel/task/newapivideo -run 'TestFFLinkResponse|TestFFLinkStat
 预期：因 job_id 未加入提交 DTO、settling 未加入状态映射、FYLink 成功缺 URL 未放行而失败。
 
 - [ ] 步骤 3：在 upstreamSubmitResponse 增加 JobID 字段，并把它加入 DoResponse 的 ID 一致性检查；FYLink 提交路径为 /v1/videos/generations，轮询路径为 /v1/videos/jobs/{url.PathEscape(job_id)}。在 mapUpstreamTaskStatus 增加 SETTLING 和 CANCELED 映射；ParseTaskResult 对 FYLink 放行成功无 URL；保持 common.Unmarshal/common.Marshal 和 checked quota helper。
-- [ ] 步骤 4：在 relay/relay_task.go 的完成分支保持无 URL 时写入 taskcommon.BuildProxyURL(task.TaskID)，在 seedanceTaskPayload 中加入 212。失败/取消终态清理上游任务 ID、Key 和渠道私有信息的公开路径，但保留管理员审计数据。运行并提交。
+- [ ] 步骤 4：在 relay/relay_task.go 的完成分支保持无 URL 时写入 taskcommon.BuildProxyURL(task.TaskID)，在 seedanceTaskPayload 中加入 214。失败/取消终态清理上游任务 ID、Key 和渠道私有信息的公开路径，但保留管理员审计数据。运行并提交。
 
 ~~~powershell
 gofmt -w relay/channel/task/newapivideo/adaptor.go relay/channel/task/newapivideo/response.go relay/channel/task/newapivideo/fflink_response_test.go relay/relay_task.go relay/seedance_task.go
@@ -168,7 +168,7 @@ git commit -m "feat(fflink): normalize job lifecycle for Ark tasks"
 
 文件：relay/channel/adapter.go、relay/channel/task/newapivideo/fflink_cancel.go、fflink_cancel_test.go、model/task.go、model/task_cas_test.go、controller/relay.go、relay/seedance_task_cancel.go、relay/seedance_task_cancel_test.go、controller/seedance_cancel.go、controller/seedance_cancel_test.go、router/video-router.go、router/video_router_test.go。
 
-- [ ] 步骤 1：写失败测试。取消 adaptor 断言 DELETE /v1/videos/jobs/job%2Fprivate、Bearer 正确、路径经过 url.PathEscape；多状态 CAS 断言只有一个调用者成功；跨用户任务 404，已完成/已失败/重复取消返回 task_not_cancellable，不支持取消的 provider 返回 405 task_cancellation_not_supported；FYLink pending 取消后为 FAILURE/100%/task canceled，退款只产生一笔；退款失败时 quota 保留；提交持久化测试断言仅 212 写入 task.PrivateData.Key=relayInfo.ApiKey，公开响应和普通日志没有 Key。
+- [ ] 步骤 1：写失败测试。取消 adaptor 断言 DELETE /v1/videos/jobs/job%2Fprivate、Bearer 正确、路径经过 url.PathEscape；多状态 CAS 断言只有一个调用者成功；跨用户任务 404，已完成/已失败/重复取消返回 task_not_cancellable，不支持取消的 provider 返回 405 task_cancellation_not_supported；FYLink pending 取消后为 FAILURE/100%/task canceled，退款只产生一笔；退款失败时 quota 保留；提交持久化测试断言仅 214 写入 task.PrivateData.Key=relayInfo.ApiKey，公开响应和普通日志没有 Key。
 - [ ] 步骤 2：运行失败测试。
 
 ~~~powershell
@@ -186,7 +186,7 @@ type TaskCancellationAdaptor interface {
 ~~~
 
 在 model.Task 增加 UpdateWithStatuses(fromStatuses []TaskStatus)，实现必须使用 GORM Model(t).Where("status IN ?", fromStatuses).Select("*").Updates(t)，空 task、空 ID 或空来源列表返回 false,nil。FYLinkTaskAdaptor 嵌入 TaskAdaptor 并单独实现 CancelTask，使用 http.NewRequestWithContext、url.PathEscape、service.GetHttpClientWithProxy 和 Bearer header。
-- [ ] 步骤 4：在 controller/relay.go 的 persistSubmittedTask 中只为 212 保存 relayInfo.ApiKey。实现 relay.SeedanceTaskCancel：按当前用户查询公开 task ID；仅接受 NOT_START/SUBMITTED/QUEUED；类型断言 TaskCancellationAdaptor；优先 task.PrivateData.Key，空值回退 channel.Key；上游 DELETE 2xx 后使用 UpdateWithStatuses([NOT_START,SUBMITTED,QUEUED,IN_PROGRESS]) 写 FAILURE、100%、task canceled、FinishTime；只有 CAS 胜者调用 service.RefundTaskQuota；CAS 失败重新读取并返回 task_state_changed。新增 controller wrapper 和 DELETE 路由。
+- [ ] 步骤 4：在 controller/relay.go 的 persistSubmittedTask 中只为 214 保存 relayInfo.ApiKey。实现 relay.SeedanceTaskCancel：按当前用户查询公开 task ID；仅接受 NOT_START/SUBMITTED/QUEUED；类型断言 TaskCancellationAdaptor；优先 task.PrivateData.Key，空值回退 channel.Key；上游 DELETE 2xx 后使用 UpdateWithStatuses([NOT_START,SUBMITTED,QUEUED,IN_PROGRESS]) 写 FAILURE、100%、task canceled、FinishTime；只有 CAS 胜者调用 service.RefundTaskQuota；CAS 失败重新读取并返回 task_state_changed。新增 controller wrapper 和 DELETE 路由。
 - [ ] 步骤 5：运行并提交。
 
 ~~~powershell
@@ -237,8 +237,8 @@ git commit -m "fix(video): proxy FYLink ranges without leaking bearer keys"
 go test ./relay ./service -run 'FFLink|VideoRouteContract|TaskBilling|QuotaClamp|Seedance' -count=1
 ~~~
 
-预期：FYLink 路由合同没有分支，cost/billing matrix 没有 212，1080p 13 秒未被拒绝。
-- [ ] 步骤 3：实现 validateFFLinkVideoRoute，并将 212 加入 IsSeedanceTaskPlatform 和 SeedanceTaskPlatformValues。能力只读取导入后的 modelrouting.Target，不从空 modelList 推断。FYLink adaptor 不写价格；实际 duration 通过现有 CostMeter/AdjustBillingOnComplete 结算，quota 使用 checked helper，clamp 写入 relayInfo.QuotaClamp 并进入管理员审计。失败、取消和超时只由终态 CAS 胜者退款。
+预期：FYLink 路由合同没有分支，cost/billing matrix 没有 214，1080p 13 秒未被拒绝。
+- [ ] 步骤 3：实现 validateFFLinkVideoRoute，并将 214 加入 IsSeedanceTaskPlatform 和 SeedanceTaskPlatformValues。能力只读取导入后的 modelrouting.Target，不从空 modelList 推断。FYLink adaptor 不写价格；实际 duration 通过现有 CostMeter/AdjustBillingOnComplete 结算，quota 使用 checked helper，clamp 写入 relayInfo.QuotaClamp 并进入管理员审计。失败、取消和超时只由终态 CAS 胜者退款。
 - [ ] 步骤 4：运行并提交。
 
 ~~~powershell
@@ -252,7 +252,7 @@ git commit -m "feat(fflink): enforce route and billing contracts"
 
 ## Task 7：最新 sd收录 模板、1080p 12 秒覆盖与配置导入
 
-目标：以 2026-08-11 最新 Google 表格下载物为事实来源，生成 FYLink 六条模型/分辨率映射和按秒成本，并把 CH-FFLINK 绑定到代码类型 212；不把表格业务 ID 15 写成代码类型。
+目标：以 2026-08-11 最新 Google 表格下载物为事实来源，生成 FYLink 六条模型/分辨率映射和按秒成本，并把 CH-FFLINK 绑定到代码类型 214；不把表格业务 ID 15 写成代码类型。
 
 文件：web/scripts/channel-model-template/types.ts、build.ts、conversion-rules.json、__tests__/build.test.ts、web/src/channel-config-converter/document.ts、web/src/channel-config-converter/__tests__/v1.test.ts、service/config_import_stage.go、service/config_import_stage_test.go。
 
@@ -265,8 +265,8 @@ bun test --parallel=1 scripts/channel-model-template/__tests__/build.test.ts src
 Set-Location ..
 ~~~
 
-预期：RowOverride 没有时长字段、FYLink 合同没有分支、V1 映射没有 212，1080p 行仍显示 15 秒。
-- [ ] 步骤 3：扩展 RowOverride，加入 minDurationSeconds/maxDurationSeconds；build.ts 使用有效时长执行合同、mapping 和成本/利润计算，缩短上限时发出 WARN。channelContractIssues 增加 FYLink 模型/分辨率、4-15 秒、1080p 12 秒和 4/3/1/8/15 合同。conversion-rules.json 保留 "15": "CH-FFLINK"，新增 "15/R223": {"maxDurationSeconds": 12}。document.ts 增加 "CH-FFLINK": 212；config import 把 212 视为 task-only，导入不自动启用渠道。
+预期：RowOverride 没有时长字段、FYLink 合同没有分支、V1 映射没有 214，1080p 行仍显示 15 秒。
+- [ ] 步骤 3：扩展 RowOverride，加入 minDurationSeconds/maxDurationSeconds；build.ts 使用有效时长执行合同、mapping 和成本/利润计算，缩短上限时发出 WARN。channelContractIssues 增加 FYLink 模型/分辨率、4-15 秒、1080p 12 秒和 4/3/1/8/15 合同。conversion-rules.json 保留 "15": "CH-FFLINK"，新增 "15/R223": {"maxDurationSeconds": 12}。document.ts 增加 "CH-FFLINK": 214；config import 把 214 视为 task-only，导入不自动启用渠道。
 - [ ] 步骤 4：从 C:\Users\880pro\Downloads\sd收录 (11).xlsx 复制到 outputs/2026-08-12-fflink-channel/sd收录.xlsx，记录 SHA-256、修改时间和有效行；生成模板：
 
 ~~~powershell
@@ -296,7 +296,7 @@ git commit -m "feat(config): import FYLink model and cost contracts"
 
 文件：web/src/features/channels/constants.ts、channel-type-config.ts、channel-utils.ts、channel-form.ts、web/tests/channel-type-config.test.ts、web/src/features/channels/lib/__tests__/new-api-channel.test.ts、web/src/i18n/static-keys.ts、web/src/i18n/locales/{en,zh,zh-TW,fr,ja,ru,vi}.json。
 
-- [ ] 步骤 1：写失败前端测试。断言 CHANNEL_TYPES[212] 为 FYLink、显示顺序在 211 后、icon 为 NewAPI；defaultBaseUrl 为 https://api.fflink.top、supportedModels 为空；212 不在 MODEL_FETCHABLE_TYPES、在 TASK_ONLY_CHANNEL_TYPES 和 GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES；key prompt/model hint 为 FYLink；切换到 212 返回 MANUAL_DISABLED。
+- [ ] 步骤 1：写失败前端测试。断言 CHANNEL_TYPES[214] 为 FYLink、显示顺序在 211 后、icon 为 NewAPI；defaultBaseUrl 为 https://api.fflink.top、supportedModels 为空；214 不在 MODEL_FETCHABLE_TYPES、在 TASK_ONLY_CHANNEL_TYPES 和 GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES；key prompt/model hint 为 FYLink；切换到 214 返回 MANUAL_DISABLED。
 - [ ] 步骤 2：运行失败测试。
 
 ~~~powershell
@@ -305,8 +305,8 @@ bun test --parallel=1 tests/channel-type-config.test.ts src/features/channels/li
 Set-Location ..
 ~~~
 
-预期：类型 212、默认 URL、task-only 集合和强制禁用逻辑尚不存在。
-- [ ] 步骤 3：按 8yes/Z5API 模式加入 212，保持空静态模型和不可拉取；通过 i18n 脚本写入七种 locale，禁止直接编辑 JSON。新增 source keys 为 FYLink、Default: https://api.fflink.top、Enter the raw API key issued by FYLink、Map client-visible Ark model names to verified FYLink upstream models、FYLink is task-only. Enable it only after real upstream contract acceptance.；登记 static-keys.ts。脚本使用下列精确值填充，不覆盖已有翻译：
+预期：类型 214、默认 URL、task-only 集合和强制禁用逻辑尚不存在。
+- [ ] 步骤 3：按 8yes/Z5API 模式加入 214，保持空静态模型和不可拉取；通过 i18n 脚本写入七种 locale，禁止直接编辑 JSON。新增 source keys 为 FYLink、Default: https://api.fflink.top、Enter the raw API key issued by FYLink、Map client-visible Ark model names to verified FYLink upstream models、FYLink is task-only. Enable it only after real upstream contract acceptance.；登记 static-keys.ts。脚本使用下列精确值填充，不覆盖已有翻译：
 
 | key | en | zh | zh-TW | fr | ja | ru | vi |
 |---|---|---|---|---|---|---|---|
@@ -327,7 +327,7 @@ git commit -m "feat(web): add FYLink task channel configuration"
 
 ## Task 9：Mock Ark E2E、真实 FYLink 验收和发布门禁
 
-目标：在没有供应商 Key 时完成可审计的 mock/contract 验收；有真实 Key 时再执行供应商 canary。无真实验收通过前，212 永远保持 disabled。
+目标：在没有供应商 Key 时完成可审计的 mock/contract 验收；有真实 Key 时再执行供应商 canary。无真实验收通过前，214 永远保持 disabled。
 
 文件：e2e/fflink_upstream_e2e_test.go、e2e/seedance_material_matrix_test.go、docs/superpowers/reports/2026-08-12-fflink-channel-acceptance.md（真实验收后创建）。
 
@@ -339,7 +339,7 @@ go test ./e2e -run 'TestFFLink|TestSeedanceImportedMaterialMatrixFullFlowE2E' -c
 ~~~
 
 预期：FYLink 不在 mock 平台、导入 fixture、Ark 生命周期和 content proxy 白名单中。
-- [ ] 步骤 3：实现 mock E2E 和账务断言。测试数据库显式初始化用户、token、channel quota、billing config 和导入 batch；任务实例使用 212 但状态保持 MANUAL_DISABLED，测试中显式构造路由目标。断言预扣、success settle、failed/canceled refund、重复轮询/重复 DELETE 不产生第二笔退款，quota_saturation 只出现在管理员 other.admin_info。无 Key 时只能报告 mock 协议通过，不能报告真实供应商通过。
+- [ ] 步骤 3：实现 mock E2E 和账务断言。测试数据库显式初始化用户、token、channel quota、billing config 和导入 batch；任务实例使用 214 但状态保持 MANUAL_DISABLED，测试中显式构造路由目标。断言预扣、success settle、failed/canceled refund、重复轮询/重复 DELETE 不产生第二笔退款，quota_saturation 只出现在管理员 other.admin_info。无 Key 时只能报告 mock 协议通过，不能报告真实供应商通过。
 - [ ] 步骤 4：运行完整本地验证。
 
 ~~~powershell
@@ -361,7 +361,7 @@ git diff --check
 ~~~
 
 预期：所有命令退出码为 0；没有真实 Key 时，只能在报告中标注真实 FYLink canary 未运行，不能启用渠道。
-- [ ] 步骤 5：有凭据时执行受控真实验收。只从当前进程环境读取 FFLINK_BASE_URL、FFLINK_API_KEY，不把值写入 shell 历史、日志、fixture 或报告。至少执行一次文生、一次带公网参考素材、完整 pending -> running -> settling -> completed 轮询、视频 Range 下载、一次 pending 取消和账务核对。若供应商拒绝公网 URL、状态或 content 行为，先更新设计/失败契约测试，不启用 212。报告记录协议版本、Base URL（不含 Key）、场景、状态时间线、代理 Range、计费/退款、失败项、源表/模板/导入 JSON SHA-256、未覆盖项和 disabled 原因。
+- [ ] 步骤 5：有凭据时执行受控真实验收。只从当前进程环境读取 FFLINK_BASE_URL、FFLINK_API_KEY，不把值写入 shell 历史、日志、fixture 或报告。至少执行一次文生、一次带公网参考素材、完整 pending -> running -> settling -> completed 轮询、视频 Range 下载、一次 pending 取消和账务核对。若供应商拒绝公网 URL、状态或 content 行为，先更新设计/失败契约测试，不启用 214。报告记录协议版本、Base URL（不含 Key）、场景、状态时间线、代理 Range、计费/退款、失败项、源表/模板/导入 JSON SHA-256、未覆盖项和 disabled 原因。
 - [ ] 步骤 6：真实验收通过后提交报告和 E2E。
 
 ~~~powershell
@@ -373,9 +373,9 @@ git commit -m "test(fflink): verify Ark lifecycle and acceptance gates"
 
 ## 完成前自检
 
-- [ ] 对照 docs/superpowers/specs/2026-08-11-fflink-channel-design.md：Ark POST/GET/DELETE、job_id、Prefer、settling、无 URL success、content proxy、Range/206、重定向脱敏、公网 URL、媒体角色、4/3/1/8/15 限制、1080p 12 秒、Key 持久化、一次性退款、模板六行、类型 212、Dummy 213、默认 disabled、七语言 i18n 均有对应任务。
+- [ ] 对照 docs/superpowers/specs/2026-08-11-fflink-channel-design.md：Ark POST/GET/DELETE、job_id、Prefer、settling、无 URL success、content proxy、Range/206、重定向脱敏、公网 URL、媒体角色、4/3/1/8/15 限制、1080p 12 秒、Key 持久化、一次性退款、模板六行、类型 214、Dummy 215、默认 disabled、七语言 i18n 均有对应任务。
 - [ ] 使用约定的占位词扫描表达式审阅计划；每个步骤都包含具体文件、命令、预期结果或提交命令。
-- [ ] 检查类型一致性：ChannelTypeFFLink=212、ChannelTypeDummy=213、ChannelNameFYLink、videoRequestDialectFFLink、NewFYLinkTaskAdaptor、TaskCancellationAdaptor.CancelTask(ctx, baseURL, key, taskID, proxy)、UpdateWithStatuses([]TaskStatus) 在所有任务中名称一致。
+- [ ] 检查类型一致性：ChannelTypeFFLink=214、ChannelTypeDummy=215、ChannelNameFYLink、videoRequestDialectFFLink、NewFYLinkTaskAdaptor、TaskCancellationAdaptor.CancelTask(ctx, baseURL, key, taskID, proxy)、UpdateWithStatuses([]TaskStatus) 在所有任务中名称一致。
 - [ ] 检查隐私、数据库和计费边界：公开响应不含上游 job ID/Key；UpdateWithStatuses 只使用 GORM status IN；duration 和素材数量有上限；quota 转换使用 checked helper；退款由 CAS 胜者单次执行，失败时保留 quota 供 reconciliation。
 
 ## 执行选择

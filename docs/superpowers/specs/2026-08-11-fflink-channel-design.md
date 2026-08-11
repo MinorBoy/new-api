@@ -12,7 +12,7 @@
 1. 协议事实以 `C:\Users\880pro\Documents\new-api\docs\new-channels\cn-fflink.html` 和 FYLink 在线文档为准。
 2. 模型、分辨率、成本和素材能力以 2026-08-11 在线 Google 表格 `sd收录` 为准。表内业务渠道编号为 `15`，名称为 `fflink`，Base URL 为 `https://api.fflink.top`。
 3. 用户已明确要求：下游只能提交可公开访问的 HTTP(S) 素材 URL，new-api 不调用 FYLink `/v1/videos/uploads`，也不接收需要代上传的本地文件、Base64 或 data URL。
-4. 表内业务渠道编号 `15` 与 new-api 的代码渠道类型编号相互独立。代码分配 `ChannelTypeFFLink = 212`，并把计数哨兵 `ChannelTypeDummy` 顺延到 `213`。
+4. 表内业务渠道编号 `15` 与 new-api 的代码渠道类型编号相互独立。因 `212`、`213` 已被其他渠道占用，代码分配 `ChannelTypeFFLink = 214`，并把计数哨兵 `ChannelTypeDummy` 顺延到 `215`。
 
 若文档示例模型与在线表格冲突，生产模型目录和计费使用在线表格；协议字段和状态使用 FYLink 文档。真实响应与两者都不一致时，停止启用并先更新设计和契约测试。
 
@@ -49,7 +49,7 @@ FYLink 查询文档没有承诺在 `completed` JSON 中返回成品 URL，成功
 
 每行均为按秒计费，素材上限为 4 张参考图、3 个参考视频、1 个参考音频、总素材数 8，参考视频总时长上限 15 秒，生成时长为 4 至 15 秒。比例按具体模型和分辨率的导入能力合同约束；不能把某一行的 `auto` 扩大解释为所有模型支持任意比例。
 
-FYLink protocol profile 的 `modelList` 保持空数组，不把上述模型硬编码为静态目录。模型映射、分辨率能力、成本规则和销售定价继续由渠道模板及配置导入流程维护。配置导入映射增加 `CH-FFLINK -> 212`，导入的渠道默认禁用。
+FYLink protocol profile 的 `modelList` 保持空数组，不把上述模型硬编码为静态目录。模型映射、分辨率能力、成本规则和销售定价继续由渠道模板及配置导入流程维护。配置导入映射增加 `CH-FFLINK -> 214`，导入的渠道默认禁用。
 
 ## Ark 请求映射
 
@@ -109,7 +109,7 @@ Ark 中 FYLink 未声明支持的显式字段，例如 `watermark`、`seed`、`c
 
 ## 注册与管理端
 
-- 新增 `ChannelTypeFFLink = 212`、名称 `FYLink`、默认 Base URL `https://api.fflink.top`，`ChannelTypeDummy` 顺延到 213。
+- 新增 `ChannelTypeFFLink = 214`、名称 `FYLink`、默认 Base URL `https://api.fflink.top`，`ChannelTypeDummy` 顺延到 215。
 - 注册 task-only adaptor、Ark converter、Seedance 平台白名单、视频路由合同、成本能力和渠道测试排除项。
 - 管理端增加 FYLink 类型、默认地址、task-only 标记和配置导入映射；不加入聊天模型拉取或流式能力列表。
 - 渠道 profile 不提供静态模型列表，管理员通过最新版模板/配置导入创建模型映射和成本规则。

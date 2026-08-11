@@ -7,12 +7,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/service"
@@ -106,6 +110,7 @@ type ffLinkE2EEnvironment struct {
 
 func setupFFLinkE2E(t *testing.T, jobID string, pollResponses ...string) *ffLinkE2EEnvironment {
 	t.Helper()
+	require.NoError(t, i18n.Init())
 	setupSeedanceE2EDB(t)
 	setupSeedanceE2EVideoMetadata(t)
 	mock := &ffLinkE2EMock{jobID: jobID, pollResponses: pollResponses}
@@ -142,7 +147,46 @@ func setupFFLinkE2E(t *testing.T, jobID string, pollResponses ...string) *ffLink
 		return relay.GetTaskAdaptor(platform)
 	}
 	t.Cleanup(func() { service.GetTaskAdaptorFunc = previousFactory })
-	return &ffLinkE2EEnvironment{engine: seedanceE2ERouter(), mock: mock, server: server}
+	return &ffLinkE2EEnvironment{engine: ffLinkE2ERouter(), mock: mock, server: server}
+}
+
+// ffLinkE2ERouter preserves the production auth, request conversion, task
+// handlers, and content proxy while injecting the selected pre-acceptance
+// channel through the test fixture's enabled ability. The real distributor is
+// intentionally omitted here because it must reject manually disabled FYLink.
+func ffLinkE2ERouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	seedance := engine.Group("/api/v3/contents/generations")
+	seedance.Use(middleware.RouteTag("relay"), middleware.SeedanceRequestConvert(), middleware.VideoRequestPolicy(), middleware.TokenAuth())
+	{
+		seedance.POST("/tasks", ffLinkSelectChannel, controller.RelayTask)
+		seedance.GET("/tasks", controller.RelaySeedanceTaskFetch)
+		seedance.GET("/tasks/:task_id", controller.RelaySeedanceTaskFetch)
+		seedance.DELETE("/tasks/:task_id", controller.RelaySeedanceTaskCancel)
+	}
+	video := engine.Group("/v1")
+	video.Use(middleware.RouteTag("relay"), middleware.TokenOrUserAuth())
+	video.GET("/videos/:task_id/content", controller.VideoProxy)
+	return engine
+}
+
+func ffLinkSelectChannel(c *gin.Context) {
+	channel, err := model.GetChannelById(e2eChannelID, true)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	modelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+	if modelName == "" {
+		modelName = ffLinkE2EClientModel
+	}
+	if setupErr := middleware.SetupContextForSelectedChannel(c, channel, modelName); setupErr != nil {
+		c.AbortWithStatusJSON(setupErr.StatusCode, gin.H{"error": setupErr.Error()})
+		return
+	}
+	c.Set("platform", strconv.Itoa(constant.ChannelTypeFFLink))
+	c.Next()
 }
 
 func TestFFLinkArkLifecycleAndContentProxyE2E(t *testing.T) {
@@ -151,6 +195,7 @@ func TestFFLinkArkLifecycleAndContentProxyE2E(t *testing.T) {
 		`{"job_id":"job_1","status":"settling","progress":80}`,
 		`{"job_id":"job_1","status":"completed","duration":8,"resolution":"720p","provider_body":"private-terminal"}`,
 	)
+	beforeBilling := ffLinkBillingSnapshot(t)
 	requestBody := `{
 		"model":"doubao-seedance-2-0-260128",
 		"content":[
@@ -208,6 +253,20 @@ func TestFFLinkArkLifecycleAndContentProxyE2E(t *testing.T) {
 	task = pollNewAPIVideoTask(t, submitted.ID)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 	assert.Contains(t, task.PrivateData.ResultURL, "/v1/videos/"+submitted.ID+"/content")
+	afterBilling := ffLinkBillingSnapshot(t, submitted.ID)
+	assert.Equal(t, beforeBilling.UserQuota+beforeBilling.UserUsedQuota, afterBilling.UserQuota+afterBilling.UserUsedQuota)
+	assert.Equal(t, int64(task.Quota), afterBilling.ChannelUsedQuota-beforeBilling.ChannelUsedQuota)
+	assert.Equal(t, task.Quota, afterBilling.TokenUsedQuota-beforeBilling.TokenUsedQuota)
+	assert.Equal(t, task.Quota, afterBilling.QuotaDataQuota-beforeBilling.QuotaDataQuota)
+	assert.Equal(t, 0, afterBilling.RefundLogCount-beforeBilling.RefundLogCount)
+	assert.GreaterOrEqual(t, afterBilling.ConsumeLogCount-beforeBilling.ConsumeLogCount, 1)
+	assert.GreaterOrEqual(t, afterBilling.LogCount-beforeBilling.LogCount, int64(1))
+
+	// Terminal polling is idempotent: it must not settle or consume a second time.
+	service.RunTaskPollingOnce(context.Background(), nil)
+	service.RunTaskPollingOnce(context.Background(), nil)
+	repeatedBilling := ffLinkBillingSnapshot(t, submitted.ID)
+	assert.Equal(t, afterBilling, repeatedBilling)
 
 	status, single := performJSONRequest(t, env.engine, http.MethodGet, "/api/v3/contents/generations/tasks/"+submitted.ID, "Bearer e2e-1", "")
 	require.Equal(t, http.StatusOK, status, string(single))
@@ -249,6 +308,16 @@ func TestFFLinkArkLifecycleAndContentProxyE2E(t *testing.T) {
 	assert.Equal(t, "Bearer "+ffLinkE2EKey, contentUpstream.Authorization)
 	assert.Equal(t, "bytes=10-19", contentUpstream.Range)
 	assertFFLinkPublicBody(t, contentRecorder.Body.Bytes())
+}
+
+func TestFFLinkManualDisableBlocksNormalDistributorE2E(t *testing.T) {
+	env := setupFFLinkE2E(t, "job_disabled")
+	status, response := performJSONRequest(t, seedanceE2ERouter(), http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", `{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"disabled"}],"duration":8,"resolution":"720p"}`)
+	assert.Equal(t, http.StatusForbidden, status, string(response))
+	assert.Empty(t, env.mock.snapshot())
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, e2eChannelID).Error)
+	assert.Equal(t, common.ChannelStatusManuallyDisabled, channel.Status)
 }
 
 func TestFFLinkCancelRefundsExactlyOnceE2E(t *testing.T) {
@@ -374,4 +443,13 @@ func assertFFLinkPublicBody(t *testing.T, body []byte) {
 	} {
 		assert.NotContains(t, string(body), privateValue)
 	}
+}
+
+func ffLinkBillingSnapshot(t *testing.T, taskIDs ...string) seedanceBillingDomainSnapshot {
+	t.Helper()
+	return seedanceBillingDomainSnapshotFor(t, &seedanceBillingE2EEnv{
+		User:    &model.User{Id: e2eUserID},
+		Token:   &model.Token{Id: 1},
+		Channel: &model.Channel{Id: e2eChannelID},
+	}, taskIDs...)
 }

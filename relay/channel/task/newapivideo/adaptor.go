@@ -189,6 +189,29 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			}
 			return nil
 		}
+		if profile.requestDialect == videoRequestDialectFFLink {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			if err := validateFFLinkRequest(*state.ARK, ""); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+			}
+			if err := validateFFLinkReferenceDurations(c.Request.Context(), *state.ARK); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+			}
+			state.ProviderValidationComplete = true
+			c.Set(requestStateContextKey, state)
+			return nil
+		}
 		if profile.secureRequest != nil {
 			state, err := getRequestState(c)
 			if err != nil || state.ARK == nil {
@@ -353,6 +376,29 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 			}
 		}
 		if err := validateOmegaAIRequest(*state.ARK, *profile.omegaRequest, upstreamModel); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+		state.ProviderValidationComplete = true
+		c.Set(requestStateContextKey, state)
+		return nil
+	}
+	if profile.requestDialect == videoRequestDialectFFLink {
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+			if upstreamModel == "" {
+				upstreamModel = info.OriginModelName
+			}
+		}
+		if err := validateFFLinkRequest(*state.ARK, upstreamModel); err != nil {
 			var requestErr *arkRequestError
 			if errors.As(err, &requestErr) {
 				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
@@ -600,6 +646,9 @@ func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *r
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	if a.activeProfile().preferRespondAsync {
+		req.Header.Set("Prefer", "respond-async")
+	}
 	return nil
 }
 
@@ -735,6 +784,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, fmt.Errorf("Z5API provider validation is incomplete")
 			}
 			body, err = buildZ5APIRequest(*state.ARK, modelName)
+		case videoRequestDialectFFLink:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if !state.ProviderValidationComplete {
+				return nil, fmt.Errorf("FYLink provider validation is incomplete")
+			}
+			body, err = buildFFLinkRequest(*state.ARK, modelName)
 		default:
 			body, err = buildARKRequestBody(c, info, profile)
 		}

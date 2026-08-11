@@ -325,6 +325,7 @@ func fflinkProtocolProfile() protocolProfile {
 		requestDialect:         videoRequestDialectFFLink,
 		requirePublicHTTPMedia: true,
 		preferRespondAsync:     true,
+		defaultDurationSeconds: 5,
 	}
 }
 

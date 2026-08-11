@@ -25,6 +25,8 @@ const ChannelNameEightYes = "8yes"
 
 const ChannelNameZ5API = "Z5API"
 
+const ChannelNameZZone = "ZZone"
+
 type videoRequestDialect string
 
 const (
@@ -40,6 +42,7 @@ const (
 	videoRequestDialectEightYes            videoRequestDialect = "eightyes"
 	videoRequestDialectPaipuMediaArrays    videoRequestDialect = "paipu_media_arrays"
 	videoRequestDialectZ5APIMedia          videoRequestDialect = "z5api_media"
+	videoRequestDialectZZone               videoRequestDialect = "zzone"
 )
 
 type omegaRequestProfile struct {
@@ -311,6 +314,21 @@ func z5apiProtocolProfile() protocolProfile {
 	}
 }
 
+func zzoneProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:                   ChannelNameZZone,
+		modelList:                     []string{},
+		submitPath:                    "/v1/videos",
+		pollPath:                      "/v1/videos/{task_id}",
+		contentType:                   "application/json",
+		requestDialect:                videoRequestDialectZZone,
+		requirePublicHTTPMedia:        true,
+		untypedImagesAreReferences:    true,
+		allowEmptyReferenceMediaRoles: true,
+		allowAudioWithoutVisual:       true,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -364,6 +382,10 @@ func NewEightYesTaskAdaptor() *TaskAdaptor {
 
 func NewZ5APITaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: z5apiProtocolProfile()}
+}
+
+func NewZZoneTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: zzoneProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

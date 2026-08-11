@@ -787,6 +787,18 @@ func TestNewAPIVideoTaskAdaptorIsTaskOnly(t *testing.T) {
 	require.False(t, success)
 }
 
+func TestZZoneTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "ZZone", adaptor.GetChannelName())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeZZone))
+}
+
 func TestMegaByAITaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
 	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMegaByAI)))
 	require.NotNil(t, adaptor)

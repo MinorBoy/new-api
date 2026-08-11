@@ -91,3 +91,9 @@ func TestNormalizeSeedanceTaskResponseUsesFrozenPublicModel(t *testing.T) {
 	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
 	assert.NotContains(t, response, "error")
 }
+
+func TestZZoneIsSeedanceTaskPlatform(t *testing.T) {
+	platform := constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone))
+	assert.True(t, IsSeedanceTaskPlatform(platform))
+	assert.Contains(t, SeedanceTaskPlatformValues(), string(platform))
+}

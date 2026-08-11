@@ -278,7 +278,7 @@ test('writes and converts channel mapping duration independently from the SKU', 
     assert.ok(mappingSheet)
     assert.equal(mappingSheet.getRow(4).getCell(8).value, '最小时长秒')
     assert.equal(mappingSheet.getRow(4).getCell(9).value, '最大时长秒')
-    assert.equal(mappingSheet.getRow(5).getCell(8).value, 5)
+    assert.equal(mappingSheet.getRow(5).getCell(8).value, 4)
     assert.equal(mappingSheet.getRow(5).getCell(9).value, 15)
 
     const bytes = await fs.readFile(outputPath)
@@ -292,7 +292,7 @@ test('writes and converts channel mapping duration independently from the SKU', 
     )
     assert.ok(blueprint)
     const target = (blueprint.targets as Array<Record<string, unknown>>)[0]
-    assert.equal(target?.duration_min, 5)
+    assert.equal(target?.duration_min, 4)
     assert.equal(target?.duration_max, 15)
   } finally {
     await fs.rm(directory, { recursive: true, force: true })

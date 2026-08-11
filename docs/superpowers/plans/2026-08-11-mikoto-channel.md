@@ -528,7 +528,7 @@ go test ./relay -run 'TestMikoto|TestTaskBilling|TestVideoRouteContract' -count=
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交生命周期覆盖**
+- [x] **Step 6: 提交生命周期覆盖**
 
 ```powershell
 git add e2e/mikoto_upstream_e2e_test.go relay/relay_task_billing_test.go
@@ -541,11 +541,11 @@ git commit -m "test(mikoto): cover Ark lifecycle and billing"
 
 - Modify: `docs/superpowers/plans/2026-08-11-mikoto-channel.md`，仅更新已执行步骤的复选框
 
-- [ ] **Step 1: 加载完成前验证 skill**
+- [x] **Step 1: 加载完成前验证 skill**
 
 完整读取 `superpowers:verification-before-completion`，所有完成声明必须引用本轮实际命令输出。
 
-- [ ] **Step 2: 运行后端目标测试**
+- [x] **Step 2: 运行后端目标测试**
 
 Run:
 
@@ -557,7 +557,7 @@ go build ./...
 
 Expected: 全部退出码为 0。
 
-- [ ] **Step 3: 运行前端验证**
+- [x] **Step 3: 运行前端验证**
 
 Run:
 
@@ -572,7 +572,7 @@ Working directory: `web`
 
 Expected: 全部退出码为 0。
 
-- [ ] **Step 4: 检查变更范围和秘密**
+- [x] **Step 4: 检查变更范围和秘密**
 
 Run:
 
@@ -585,7 +585,7 @@ rg -n "api\.mikoto\.vip.*token=|YOUR_API_KEY|Bearer [A-Za-z0-9_-]{20,}" --glob '
 
 Expected: 无空白错误、无本地数据库/日志/构建产物、无新增真实 key；只保留 HTML 原始资料中既有的保存来源 URL。
 
-- [ ] **Step 5: 记录真实验收边界**
+- [x] **Step 5: 记录真实验收边界**
 
 没有 Mikoto 凭据时，交付说明必须明确“mock 契约与本地生命周期通过，真实上游未验收，渠道保持 disabled”。只有从本机安全环境取得凭据并实际完成文本与多模态提交、轮询、结果下载、失败退款后，才创建脱敏的中文验收报告并允许管理员手动启用渠道。
 

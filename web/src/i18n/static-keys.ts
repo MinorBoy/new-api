@@ -576,6 +576,13 @@ export const STATIC_I18N_KEYS = [
   'Map client-visible Ark model names to verified Z5API upstream models',
   'Z5API is task-only. Enable it only after real upstream contract acceptance.',
 
+  // ZZone channel configuration
+  'ZZone',
+  'Default: https://zzone.cc.cd',
+  'Enter the raw API key issued by ZZone',
+  'Map client-visible Ark model names to verified ZZone upstream models',
+  'ZZone is task-only. Enable it only after real upstream contract acceptance.',
+
   // Misc
   'Cancel',
   'Status',

@@ -93,13 +93,14 @@ export const CHANNEL_TYPES = {
   209: '4stoken',
   210: '8yes',
   211: 'Z5API',
+  212: 'ZZone',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
   1, 14, 33, 24, 43, 3, 41, 48, 60, 58, 42, 34, 20, 4, 40, 27, 25, 17, 26, 15,
   46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22, 21, 44, 2,
   5, 36, 50, 51, 52, 53, 54, 55, 56, 200, 201, 202, 203, 204, 205, 206, 207,
-  208, 209, 210, 211,
+  208, 209, 210, 211, 212,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
@@ -402,11 +403,11 @@ export const MODEL_FETCHABLE_TYPES = new Set([
 
 export const GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES = new Set([
   2, 5, 36, 50, 51, 52, 54, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
-  210, 211,
+  210, 211, 212,
 ])
 
 export const TASK_ONLY_CHANNEL_TYPES = new Set([
-  200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211,
+  200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212,
 ])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
@@ -432,6 +433,7 @@ export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   209: 'Enter the raw API key issued by 4stoken',
   210: 'Enter the raw API key issued by 8yes',
   211: 'Enter the raw API key issued by Z5API',
+  212: 'Enter the raw API key issued by ZZone',
 }
 
 export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
@@ -450,4 +452,5 @@ export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
   209: '4stoken is task-only. Enable it only after real upstream contract acceptance.',
   210: '8yes is task-only. Enable it only after real upstream contract acceptance.',
   211: 'Z5API is task-only. Enable it only after real upstream contract acceptance.',
+  212: 'ZZone is task-only. Enable it only after real upstream contract acceptance.',
 }

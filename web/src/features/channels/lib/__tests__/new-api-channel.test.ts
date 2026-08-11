@@ -20,16 +20,25 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  CHANNEL_TYPES,
   CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_OPTIONS,
+  CHANNEL_TYPE_WARNINGS,
+  GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES,
   MODEL_FETCHABLE_TYPES,
+  TASK_ONLY_CHANNEL_TYPES,
 } from '../../constants'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   channelFormSchema,
   getStatusOnChannelTypeChange,
 } from '../channel-form'
-import { getChannelTypeConfig } from '../channel-type-config'
+import {
+  getBaseUrlOnChannelTypeChange,
+  getChannelModelOptions,
+  getChannelTypeConfig,
+  getChannelTypeHints,
+} from '../channel-type-config'
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
 function newAPIForm(baseUrl: string) {
@@ -125,6 +134,59 @@ describe('pre-acceptance channel defaults', () => {
     assert.equal(
       getStatusOnChannelTypeChange(1, 210, CHANNEL_FORM_DEFAULT_VALUES.status),
       2
+    )
+  })
+
+  test('selecting ZZone defaults a new channel to manually disabled', () => {
+    assert.equal(
+      getStatusOnChannelTypeChange(1, 212, CHANNEL_FORM_DEFAULT_VALUES.status),
+      2
+    )
+  })
+})
+
+describe('ZZone channel configuration', () => {
+  test('registers task-only type 212 without inventing a model catalog', () => {
+    assert.equal(CHANNEL_TYPES[212], 'ZZone')
+    assert.deepEqual(
+      CHANNEL_TYPE_OPTIONS.find((item) => item.value === 212),
+      { value: 212, label: 'ZZone' }
+    )
+    assert.equal(getChannelTypeIcon(212), 'NewAPI')
+    assert.equal(TASK_ONLY_CHANNEL_TYPES.has(212), true)
+    assert.equal(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(212), true)
+    assert.equal(MODEL_FETCHABLE_TYPES.has(212), false)
+    assert.deepEqual(getChannelTypeConfig(212), {
+      id: 212,
+      name: 'ZZone',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://zzone.cc.cd',
+      supportedModels: [],
+      hints: {
+        baseUrl: 'Default: https://zzone.cc.cd',
+        key: 'Enter the raw API key issued by ZZone',
+        models:
+          'Map client-visible Ark model names to verified ZZone upstream models',
+      },
+    })
+    assert.deepEqual(getChannelModelOptions(212, [], []), [])
+    assert.equal(
+      getBaseUrlOnChannelTypeChange(212, '', false),
+      'https://zzone.cc.cd'
+    )
+    assert.equal(
+      getBaseUrlOnChannelTypeChange(212, 'https://proxy.example.com', false),
+      'https://proxy.example.com'
+    )
+    assert.deepEqual(getChannelTypeHints(212), {
+      baseUrl: 'Default: https://zzone.cc.cd',
+      key: 'Enter the raw API key issued by ZZone',
+      models:
+        'Map client-visible Ark model names to verified ZZone upstream models',
+    })
+    assert.equal(
+      CHANNEL_TYPE_WARNINGS[212],
+      'ZZone is task-only. Enable it only after real upstream contract acceptance.'
     )
   })
 })

@@ -1484,6 +1484,7 @@
     "Default: https://newapi.megabyai.cc": "Par défaut : https://newapi.megabyai.cc",
     "Default: https://omegaai.xin": "Par défaut : https://omegaai.xin",
     "Default: https://z5api.com": "Default: https://z5api.com",
+    "Default: https://zzone.cc.cd": "Par défaut : https://zzone.cc.cd",
     "Defaults": "Valeurs par défaut",
     "Defaults to the wallet page when empty": "Si vide, la page portefeuille est utilisée par défaut",
     "Defaults to us-east-1 when left blank.": "Valeur par défaut : us-east-1 si ce champ est vide.",
@@ -1985,6 +1986,7 @@
     "Enter the raw API key issued by OmegaAI": "Saisissez la clé API brute fournie par OmegaAI",
     "Enter the raw API key issued by Paipu": "Saisissez la clé API brute fournie par Paipu",
     "Enter the raw API key issued by Z5API": "Enter the raw API key issued by Z5API",
+    "Enter the raw API key issued by ZZone": "Saisissez la clé API brute émise par ZZone",
     "Enter the upstream NewAPI base URL": "Saisissez l'URL de base du NewAPI en amont",
     "Enter the upstream NewAPI video API key": "Saisissez la clé API vidéo du NewAPI en amont",
     "Enter the verification code": "Saisir le code de vérification",
@@ -2986,6 +2988,7 @@
     "Map client-visible Ark model names to verified 4stoken upstream models": "Associez les noms de modèles Ark visibles aux modèles 4stoken amont vérifiés",
     "Map client-visible Ark model names to verified 8yes upstream models": "Associez les noms de modèles Ark visibles par le client aux modèles amont 8yes vérifiés",
     "Map client-visible Ark model names to verified Z5API upstream models": "Map client-visible Ark model names to verified Z5API upstream models",
+    "Map client-visible Ark model names to verified ZZone upstream models": "Associez les noms de modèles Ark visibles par le client aux modèles en amont ZZone vérifiés",
     "Map fields from the user info response to local user attributes. Supports nested paths (e.g. ocs.data.id).": "Mapper les champs de la réponse des informations utilisateur vers les attributs utilisateur locaux. Supporte les chemins imbriqués (par exemple ocs.data.id).",
     "Map model identifiers to Gemini API versions. A `default` entry applies when no specific match is found.": "Mapper les identifiants de modèle aux versions de l'API Gemini. Une entrée `default` s'applique lorsqu'aucune correspondance spécifique n'est trouvée.",
     "Map request model names to actual provider model names (JSON format)": "Mapper les noms de modèles de requête aux noms réels de modèles du fournisseur (format JSON)",
@@ -6118,6 +6121,8 @@
     "Z5API is task-only. Enable it only after real upstream contract acceptance.": "Z5API is task-only. Enable it only after real upstream contract acceptance.",
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
-    "Zhipu V4": "Zhipu V4"
+    "Zhipu V4": "Zhipu V4",
+    "ZZone": "ZZone",
+    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone prend uniquement en charge les tâches. Activez-le seulement après validation du contrat réel en amont."
   }
 }

@@ -116,6 +116,14 @@ func VideoProxy(c *gin.Context) {
 		case constant.ChannelTypeEightYes:
 			videoURL = fmt.Sprintf("%s/v1/videos/%s/content", strings.TrimRight(baseURL, "/"), url.PathEscape(task.GetUpstreamTaskID()))
 			req.Header.Set("Authorization", "Bearer "+channel.Key)
+		case constant.ChannelTypeFFLink:
+			key := strings.TrimSpace(task.PrivateData.Key)
+			if key == "" {
+				key = channel.Key
+			}
+			videoURL = fmt.Sprintf("%s/v1/videos/jobs/%s/content", strings.TrimRight(baseURL, "/"), url.PathEscape(task.GetUpstreamTaskID()))
+			req.Header.Set("Authorization", "Bearer "+key)
+			client = publicMediaHTTPClient("Authorization")
 		default:
 			// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 			videoURL = task.GetResultURL()
@@ -153,6 +161,9 @@ func VideoProxy(c *gin.Context) {
 	if geminiAuthenticatedMedia {
 		client = publicMediaHTTPClient("x-goog-api-key")
 	}
+	if rangeHeader := strings.TrimSpace(c.GetHeader("Range")); rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -162,7 +173,7 @@ func VideoProxy(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for task %s", resp.StatusCode, taskID))
 		videoProxyError(c, http.StatusBadGateway, "server_error",
 			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))

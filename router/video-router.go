@@ -44,9 +44,9 @@ func SetVideoRouter(router *gin.Engine) {
 
 	seedanceVideoRouter := router.Group("/api/v3/contents/generations")
 	seedanceVideoRouter.Use(middleware.RouteTag("relay"))
-	seedanceVideoRouter.Use(middleware.SeedanceRequestConvert(), middleware.VideoRequestPolicy(), middleware.TokenAuth())
+	seedanceVideoRouter.Use(middleware.SeedanceRequestConvert(), middleware.DeferVideoBase64Policy(), middleware.VideoRequestPolicy(), middleware.TokenAuth())
 	{
-		seedanceVideoRouter.POST("/tasks", middleware.Distribute(), controller.RelayTask)
+		seedanceVideoRouter.POST("/tasks", middleware.Distribute(), middleware.SelectedChannelVideoBase64Policy(), controller.RelayTask)
 		seedanceVideoRouter.GET("/tasks", controller.RelaySeedanceTaskFetch)
 		seedanceVideoRouter.GET("/tasks/:task_id", controller.RelaySeedanceTaskFetch)
 	}

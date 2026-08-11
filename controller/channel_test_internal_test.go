@@ -299,6 +299,7 @@ func TestSupportsGenericChannelTestRejectsDimensio(t *testing.T) {
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeEightYes))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeZ5API))
 	require.False(t, supportsGenericChannelTest(constant.ChannelTypeZZone))
+	require.False(t, supportsGenericChannelTest(constant.ChannelTypeMikoto))
 	require.True(t, supportsGenericChannelTest(constant.ChannelTypeOpenAI))
 }
 
@@ -431,7 +432,7 @@ func TestAddChannelReturnsCreatedIDs(t *testing.T) {
 }
 
 func TestAddChannelDisablesUnacceptedVideoChannels(t *testing.T) {
-	for _, channelType := range []int{constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken, constant.ChannelTypeEightYes, constant.ChannelTypeZZone} {
+	for _, channelType := range []int{constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken, constant.ChannelTypeEightYes, constant.ChannelTypeZZone, constant.ChannelTypeMikoto} {
 		t.Run(constant.GetChannelTypeName(channelType), func(t *testing.T) {
 			db := setupModelListControllerTestDB(t)
 			require.NoError(t, db.AutoMigrate(&model.Log{}))
@@ -461,7 +462,7 @@ func TestAddChannelDisablesUnacceptedVideoChannels(t *testing.T) {
 }
 
 func TestUpdateChannelDisablesTransitionToUnacceptedVideoChannel(t *testing.T) {
-	for _, channelType := range []int{constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken, constant.ChannelTypeEightYes, constant.ChannelTypeZZone} {
+	for _, channelType := range []int{constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken, constant.ChannelTypeEightYes, constant.ChannelTypeZZone, constant.ChannelTypeMikoto} {
 		t.Run(constant.GetChannelTypeName(channelType), func(t *testing.T) {
 			db := setupModelListControllerTestDB(t)
 			require.NoError(t, db.AutoMigrate(&model.Log{}, &model.RoutingPolicy{}, &model.RouteTarget{}))

@@ -120,6 +120,7 @@ func IsSeedanceTaskPlatform(platform constant.TaskPlatform) bool {
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMikoto)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
 		return true
 	default:
@@ -169,6 +170,7 @@ func SeedanceTaskPlatformValues() []string {
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMikoto)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)),
 	}
 	values := make([]string, 0, len(candidates))

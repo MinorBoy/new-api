@@ -26,6 +26,7 @@ const ChannelNameEightYes = "8yes"
 const ChannelNameZ5API = "Z5API"
 
 const ChannelNameZZone = "ZZone"
+const ChannelNameMikoto = "Mikoto"
 
 type videoRequestDialect string
 
@@ -43,6 +44,7 @@ const (
 	videoRequestDialectPaipuMediaArrays    videoRequestDialect = "paipu_media_arrays"
 	videoRequestDialectZ5APIMedia          videoRequestDialect = "z5api_media"
 	videoRequestDialectZZone               videoRequestDialect = "zzone"
+	videoRequestDialectMikoto              videoRequestDialect = "mikoto"
 )
 
 type omegaRequestProfile struct {
@@ -329,6 +331,18 @@ func zzoneProtocolProfile() protocolProfile {
 	}
 }
 
+func mikotoProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:        ChannelNameMikoto,
+		modelList:          []string{},
+		submitPath:         "/v1/videos",
+		pollPath:           "/v1/videos/{task_id}",
+		contentType:        "application/json",
+		requestDialect:     videoRequestDialectMikoto,
+		allowEmbeddedMedia: true,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -386,6 +400,10 @@ func NewZ5APITaskAdaptor() *TaskAdaptor {
 
 func NewZZoneTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: zzoneProtocolProfile()}
+}
+
+func NewMikotoTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: mikotoProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

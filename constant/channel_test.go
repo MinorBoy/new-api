@@ -13,7 +13,7 @@ func TestDimensioChannelConstants(t *testing.T) {
 	require.Equal(t, 201, constant.ChannelTypeNewAPIVideo)
 	require.Equal(t, 202, constant.ChannelTypeClmmMall)
 	require.Equal(t, 203, constant.ChannelTypeLucen)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeSecure)
 	require.Equal(t, "https://jimeng.dimensio.cn", constant.ChannelBaseURLs[constant.ChannelTypeDimensio])
 	require.Equal(t, "Dimensio", constant.GetChannelTypeName(constant.ChannelTypeDimensio))
@@ -32,7 +32,7 @@ func TestNewAPIVideoChannelConstants(t *testing.T) {
 func TestClmmMallChannelConstants(t *testing.T) {
 	require.Equal(t, 202, constant.ChannelTypeClmmMall)
 	require.Equal(t, 203, constant.ChannelTypeLucen)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Equal(t, "https://clmm-mall.top", constant.ChannelBaseURLs[constant.ChannelTypeClmmMall])
 	require.Equal(t, "CLMM Mall", constant.GetChannelTypeName(constant.ChannelTypeClmmMall))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeClmmMall)
@@ -49,7 +49,7 @@ func TestLucenChannelConstants(t *testing.T) {
 
 func TestMegaByAIChannelConstants(t *testing.T) {
 	require.Equal(t, 204, constant.ChannelTypeMegaByAI)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Equal(t, "https://newapi.megabyai.cc", constant.ChannelBaseURLs[constant.ChannelTypeMegaByAI])
 	require.Equal(t, "MegaByAI", constant.GetChannelTypeName(constant.ChannelTypeMegaByAI))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeMegaByAI)
@@ -58,7 +58,7 @@ func TestMegaByAIChannelConstants(t *testing.T) {
 
 func TestCangyuanChannelConstants(t *testing.T) {
 	require.Equal(t, 205, constant.ChannelTypeCangyuan)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Equal(t, "https://ai.cangyuansuanli.cn", constant.ChannelBaseURLs[constant.ChannelTypeCangyuan])
 	require.Equal(t, "Cangyuan", constant.GetChannelTypeName(constant.ChannelTypeCangyuan))
 	_, success := common.ChannelType2APIType(constant.ChannelTypeCangyuan)
@@ -67,7 +67,7 @@ func TestCangyuanChannelConstants(t *testing.T) {
 
 func TestPaipuChannelConstants(t *testing.T) {
 	require.Equal(t, 206, constant.ChannelTypePaipu)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Equal(t, "https://api.paipu.net", constant.ChannelBaseURLs[constant.ChannelTypePaipu])
 	require.Equal(t, "Paipu", constant.GetChannelTypeName(constant.ChannelTypePaipu))
 	_, success := common.ChannelType2APIType(constant.ChannelTypePaipu)
@@ -76,7 +76,7 @@ func TestPaipuChannelConstants(t *testing.T) {
 
 func TestSecureChannelConstants(t *testing.T) {
 	require.Equal(t, 207, constant.ChannelTypeSecure)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Equal(t, "https://token.secure-skill.com", constant.ChannelBaseURLs[constant.ChannelTypeSecure])
 	require.Equal(t, "Secure", constant.GetChannelTypeName(constant.ChannelTypeSecure))
 }
@@ -84,7 +84,7 @@ func TestSecureChannelConstants(t *testing.T) {
 func TestOmegaAIAndFourSTokenChannelConstants(t *testing.T) {
 	require.Equal(t, 208, constant.ChannelTypeOmegaAI)
 	require.Equal(t, 209, constant.ChannelTypeFourSToken)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeFourSToken)
 	require.Equal(t, "https://omegaai.xin", constant.ChannelBaseURLs[constant.ChannelTypeOmegaAI])
 	require.Equal(t, "https://api.4stoken.cn", constant.ChannelBaseURLs[constant.ChannelTypeFourSToken])
@@ -98,7 +98,7 @@ func TestOmegaAIAndFourSTokenChannelConstants(t *testing.T) {
 
 func TestEightYesChannelConstants(t *testing.T) {
 	require.Equal(t, 210, constant.ChannelTypeEightYes)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeEightYes)
 	require.Equal(t, "https://8yes.cc", constant.ChannelBaseURLs[constant.ChannelTypeEightYes])
 	require.Equal(t, "8yes", constant.GetChannelTypeName(constant.ChannelTypeEightYes))
@@ -108,7 +108,7 @@ func TestEightYesChannelConstants(t *testing.T) {
 
 func TestZ5APIChannelConstants(t *testing.T) {
 	require.Equal(t, 211, constant.ChannelTypeZ5API)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeZ5API)
 	require.Equal(t, "https://z5api.com", constant.ChannelBaseURLs[constant.ChannelTypeZ5API])
 	require.Equal(t, "Z5API", constant.GetChannelTypeName(constant.ChannelTypeZ5API))
@@ -118,10 +118,20 @@ func TestZ5APIChannelConstants(t *testing.T) {
 
 func TestZZoneChannelConstants(t *testing.T) {
 	require.Equal(t, 212, constant.ChannelTypeZZone)
-	require.Equal(t, 213, constant.ChannelTypeDummy)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
 	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeZZone)
 	require.Equal(t, "https://zzone.cc.cd", constant.ChannelBaseURLs[constant.ChannelTypeZZone])
 	require.Equal(t, "ZZone", constant.GetChannelTypeName(constant.ChannelTypeZZone))
 	_, mapped := common.ChannelType2APIType(constant.ChannelTypeZZone)
+	require.False(t, mapped)
+}
+
+func TestMikotoChannelConstants(t *testing.T) {
+	require.Equal(t, 213, constant.ChannelTypeMikoto)
+	require.Equal(t, 214, constant.ChannelTypeDummy)
+	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeMikoto)
+	require.Equal(t, "https://api.mikoto.vip", constant.ChannelBaseURLs[constant.ChannelTypeMikoto])
+	require.Equal(t, "Mikoto", constant.GetChannelTypeName(constant.ChannelTypeMikoto))
+	_, mapped := common.ChannelType2APIType(constant.ChannelTypeMikoto)
 	require.False(t, mapped)
 }

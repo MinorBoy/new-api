@@ -6122,6 +6122,11 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Mikoto": "Mikoto",
+    "Default: https://api.mikoto.vip": "Mặc định: https://api.mikoto.vip",
+    "Enter the raw API key issued by Mikoto": "Nhập khóa API gốc do Mikoto cấp",
+    "Map client-visible Ark model names to verified Mikoto upstream models": "Ánh xạ tên mô hình Ark hiển thị cho máy khách tới các mô hình thượng nguồn Mikoto đã được xác minh",
+    "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto chỉ hỗ trợ tác vụ. Chỉ bật kênh sau khi đã nghiệm thu hợp đồng thực tế với thượng nguồn.",
     "ZZone": "ZZone",
     "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone chỉ hỗ trợ tác vụ. Chỉ bật sau khi nghiệm thu hợp đồng API thực tế của hệ thống thượng nguồn."
   }

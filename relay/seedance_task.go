@@ -314,7 +314,8 @@ func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[str
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFourSToken)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeEightYes)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone)):
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMikoto)):
 		return nil, fmt.Errorf("new-api video task adaptor must implement ARK conversion")
 	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
 		return nil, errClmmMallArkTaskConverterUnavailable

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/video_setting"
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,8 @@ const (
 	videoBodyTooLargeCode   = "video_request_body_too_large"
 
 	minRawBase64MediaLength = 64
+
+	deferVideoBase64PolicyKey = "video_policy_defer_base64"
 )
 
 type videoBase64Hit struct {
@@ -81,12 +84,59 @@ func VideoRequestPolicy() gin.HandlerFunc {
 		}
 
 		if hit, ok := findVideoBase64Media(payload); ok {
+			if c.GetBool(deferVideoBase64PolicyKey) && hasBearerCredential(c.GetHeader("Authorization")) {
+				c.Next()
+				return
+			}
 			logVideoPolicyReject(c, hit.Param, int64(len(body)), snapshot.JSONRequestBodyMaxMB, "base64_disabled")
 			abortVideoBase64Disabled(c, hit.Param)
 			return
 		}
 
 		c.Next()
+	}
+}
+
+func hasBearerCredential(value string) bool {
+	parts := strings.Fields(value)
+	return len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && parts[1] != ""
+}
+
+func DeferVideoBase64Policy() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(deferVideoBase64PolicyKey, true)
+		c.Next()
+	}
+}
+
+func SelectedChannelVideoBase64Policy() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !c.GetBool(deferVideoBase64PolicyKey) || video_setting.Runtime().Base64InputEnabled {
+			c.Next()
+			return
+		}
+		body, ok := c.Get(common.KeyRequestBody)
+		if !ok {
+			c.Next()
+			return
+		}
+		bodyBytes, ok := body.([]byte)
+		if !ok {
+			c.Next()
+			return
+		}
+		var payload any
+		if common.Unmarshal(bodyBytes, &payload) != nil {
+			c.Next()
+			return
+		}
+		hit, found := findVideoBase64Media(payload)
+		if !found || common.GetContextKeyInt(c, constant.ContextKeyChannelType) == constant.ChannelTypeMikoto {
+			c.Next()
+			return
+		}
+		logVideoPolicyReject(c, hit.Param, int64(len(bodyBytes)), video_setting.Runtime().JSONRequestBodyMaxMB, "base64_disabled")
+		abortVideoBase64Disabled(c, hit.Param)
 	}
 }
 

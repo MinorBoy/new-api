@@ -6122,6 +6122,11 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
+    "Mikoto": "Mikoto",
+    "Default: https://api.mikoto.vip": "デフォルト: https://api.mikoto.vip",
+    "Enter the raw API key issued by Mikoto": "Mikoto が発行した未加工の API キーを入力してください",
+    "Map client-visible Ark model names to verified Mikoto upstream models": "クライアントに表示する Ark モデル名を検証済みの Mikoto 上流モデルにマッピングします",
+    "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto はタスク専用です。実際の上流 API 契約を検証した後にのみ有効化してください。",
     "ZZone": "ZZone",
     "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone はタスク専用です。実際の上流契約の受け入れ確認後にのみ有効化してください。"
   }

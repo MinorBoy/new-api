@@ -352,10 +352,23 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Map client-visible Ark model names to verified ZZone upstream models',
     },
   },
+  213: {
+    id: 213,
+    name: CHANNEL_TYPES[213],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://api.mikoto.vip',
+    supportedModels: [],
+    hints: {
+      baseUrl: 'Default: https://api.mikoto.vip',
+      key: 'Enter the raw API key issued by Mikoto',
+      models:
+        'Map client-visible Ark model names to verified Mikoto upstream models',
+    },
+  },
 }
 
 const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([
-  200, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212,
+  200, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213,
 ])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

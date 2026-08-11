@@ -117,6 +117,7 @@ export function getChannelTypeIcon(type: number): string {
     210: 'NewAPI', // 8yes
     211: 'NewAPI', // Z5API
     212: 'NewAPI', // ZZone
+    213: 'NewAPI', // Mikoto
 
     // Tools & Platforms
     37: 'Dify', // Dify

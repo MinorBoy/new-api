@@ -71,7 +71,8 @@ const (
 	ChannelTypeEightYes       = 210 // 8yes Seedance task protocol
 	ChannelTypeZ5API          = 211 // Z5API Seedance task protocol
 	ChannelTypeZZone          = 212 // ZZone Seedance task protocol
-	ChannelTypeDummy          = 213 // this one is only for count, do not add any channel after this
+	ChannelTypeMikoto         = 213 // Mikoto Sora and Seedance task protocol
+	ChannelTypeDummy          = 214 // this one is only for count, do not add any channel after this
 
 )
 
@@ -152,6 +153,7 @@ var ChannelBaseURLs = func() []string {
 	baseURLs[ChannelTypeEightYes] = "https://8yes.cc"
 	baseURLs[ChannelTypeZ5API] = "https://z5api.com"
 	baseURLs[ChannelTypeZZone] = "https://zzone.cc.cd"
+	baseURLs[ChannelTypeMikoto] = "https://api.mikoto.vip"
 	return baseURLs
 }()
 
@@ -226,6 +228,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeEightYes:       "8yes",
 	ChannelTypeZ5API:          "Z5API",
 	ChannelTypeZZone:          "ZZone",
+	ChannelTypeMikoto:         "Mikoto",
 }
 
 func GetChannelTypeName(channelType int) string {

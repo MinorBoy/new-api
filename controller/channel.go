@@ -609,7 +609,7 @@ type AddChannelResponse struct {
 
 func isPreAcceptanceVideoChannel(channelType int) bool {
 	switch channelType {
-	case constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken, constant.ChannelTypeEightYes, constant.ChannelTypeZ5API, constant.ChannelTypeZZone:
+	case constant.ChannelTypeOmegaAI, constant.ChannelTypeFourSToken, constant.ChannelTypeEightYes, constant.ChannelTypeZ5API, constant.ChannelTypeZZone, constant.ChannelTypeMikoto:
 		return true
 	default:
 		return false

@@ -6122,6 +6122,11 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Mikoto": "Mikoto",
+    "Default: https://api.mikoto.vip": "По умолчанию: https://api.mikoto.vip",
+    "Enter the raw API key issued by Mikoto": "Введите исходный API-ключ, выданный Mikoto",
+    "Map client-visible Ark model names to verified Mikoto upstream models": "Сопоставьте видимые клиенту названия моделей Ark с проверенными вышестоящими моделями Mikoto",
+    "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto поддерживает только задачи. Включайте канал только после проверки реального контракта с вышестоящим API.",
     "ZZone": "ZZone",
     "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone поддерживает только задачи. Включайте его только после приемки реального контракта вышестоящего API."
   }

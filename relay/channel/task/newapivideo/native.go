@@ -303,7 +303,8 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if firstCount > 1 || lastCount > 1 || (lastCount > 0 && (firstCount != 1 || lastIndex < firstIndex)) {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "first/last frames require one first frame before at most one last frame"}
 	}
-	if audioCount > 0 && request.GenerateAudio != nil && !*request.GenerateAudio && profile.requestDialect != videoRequestDialectCangyuanMedia {
+	if audioCount > 0 && request.GenerateAudio != nil && !*request.GenerateAudio &&
+		profile.requestDialect != videoRequestDialectCangyuanMedia && profile.requestDialect != videoRequestDialectMikoto {
 		return &arkRequestError{Code: "InvalidParameter.generate_audio", Message: "reference audio conflicts with generate_audio=false"}
 	}
 	if request.Seed != nil && supportsSeed {

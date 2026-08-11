@@ -279,6 +279,43 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_references",
 		},
 		{
+			name: "Mikoto accepts documented Sora limits", channelType: constant.ChannelTypeMikoto,
+			target: videoContractTargetWithTotal("sora-v3-pro", []string{"720p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeFirstFrame, modelrouting.InputModeFirstLastFrames, modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, 12),
+		},
+		{
+			name: "Mikoto rejects Sora 1080p", channelType: constant.ChannelTypeMikoto,
+			target:   videoContractTarget("sora-v3-pro", []string{"1080p"}, 4, 15, nil, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_resolution",
+		},
+		{
+			name: "Mikoto accepts documented Seedance 1080p model", channelType: constant.ChannelTypeMikoto,
+			target: videoContractTarget("seedance-2.0-1080p", []string{"1080p"}, 4, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeFirstFrame, modelrouting.InputModeFirstLastFrames, modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}),
+		},
+		{
+			name: "Mikoto rejects Seedance model resolution mismatch", channelType: constant.ChannelTypeMikoto,
+			target:   videoContractTarget("seedance-fast-480p", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_resolution",
+		},
+		{
+			name: "Mikoto rejects unknown model", channelType: constant.ChannelTypeMikoto,
+			target:   videoContractTarget("unverified-model", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_model",
+		},
+		{
+			name: "Mikoto rejects duration below four", channelType: constant.ChannelTypeMikoto,
+			target:   videoContractTarget("seedance-2.0-720p", []string{"720p"}, 3, 15, nil, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_duration",
+		},
+		{
+			name: "Mikoto rejects ten images", channelType: constant.ChannelTypeMikoto,
+			target:   videoContractTarget("seedance-2.0-720p", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 10}),
+			wantCode: "route_contract_references",
+		},
+		{
 			name: "clmm accepts imported audio capability", channelType: constant.ChannelTypeClmmMall,
 			target: videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
 		},

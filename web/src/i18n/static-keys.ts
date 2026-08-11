@@ -583,6 +583,13 @@ export const STATIC_I18N_KEYS = [
   'Map client-visible Ark model names to verified ZZone upstream models',
   'ZZone is task-only. Enable it only after real upstream contract acceptance.',
 
+  // Mikoto channel configuration
+  'Mikoto',
+  'Default: https://api.mikoto.vip',
+  'Enter the raw API key issued by Mikoto',
+  'Map client-visible Ark model names to verified Mikoto upstream models',
+  'Mikoto is task-only. Enable it only after real upstream contract acceptance.',
+
   // Misc
   'Cancel',
   'Status',

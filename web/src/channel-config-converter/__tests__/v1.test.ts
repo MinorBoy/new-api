@@ -87,7 +87,6 @@ test('v1 snapshot preserves the ten fixed sheets and row-four headers', async ()
       expectedHeaders
     )
   }
-
 })
 
 test('v1 adapter extracts the corrected fixture baseline and stable line contracts', async () => {
@@ -568,6 +567,17 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
       },
     ],
   })
+  extracted.channels.push({
+    ...sourceChannel,
+    businessId: 'CH-FFLINK',
+    sourceLocations: [
+      {
+        ...sourceLocation,
+        businessId: 'CH-FFLINK',
+        row: 1001,
+      },
+    ],
+  })
   const result = await buildImportDocument({
     extracted,
     sourceBytes,
@@ -587,6 +597,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-4STOKEN'), 209)
   assert.equal(typesByChannel.get('CH-8YES'), 210)
   assert.equal(typesByChannel.get('CH-Z5API'), 211)
+  assert.equal(typesByChannel.get('CH-FFLINK'), 212)
 })
 
 test('v1 adapter treats line and SKU price differences as distinct variants and removes Secure unsupported 480p rows', async () => {
@@ -700,7 +711,10 @@ test('v1 adapter rejects Secure costs without a recognized upstream group', asyn
     requiredCell(secureCost, noteColumn).value = '真人脸=是'
   }
 
-  expectContractError(() => extractWorkbook(snapshot), 'SECURE_GROUP_UNRESOLVED')
+  expectContractError(
+    () => extractWorkbook(snapshot),
+    'SECURE_GROUP_UNRESOLVED'
+  )
 })
 
 test('v1 document keeps the cost variant stable when supplier price changes', async () => {

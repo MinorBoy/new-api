@@ -134,6 +134,88 @@ function firstSourceModel(
   return model
 }
 
+function ffLinkSource(): SourceWorkbook {
+  const source = sourceWithOfficialPrice()
+  const sourceModel = firstSourceModel(source)
+  source.channels[0] = {
+    location: { sheet: 'channel', row: 17 },
+    fields: {
+      渠道: 15,
+      名称: 'fflink',
+      链接: 'https://api.fflink.top',
+      'Base Url': 'https://api.fflink.top',
+    },
+  }
+  const rows = [
+    { model: 'seedance-2.0', version: '标准', resolution: '480p', price: 0.12 },
+    { model: 'seedance-2.0', version: '标准', resolution: '720p', price: 0.25 },
+    { model: 'seedance-2.0', version: '标准', resolution: '1080p', price: 0.6 },
+    {
+      model: 'seedance-2.0-fast',
+      version: 'fast',
+      resolution: '480p',
+      price: 0.1,
+    },
+    {
+      model: 'seedance-2.0-fast',
+      version: 'fast',
+      resolution: '720p',
+      price: 0.2,
+    },
+    {
+      model: 'seedance-2.0-mini',
+      version: 'mini',
+      resolution: '720p',
+      price: 0.17,
+    },
+  ]
+  const dimensions: Record<string, [number, number]> = {
+    '480p': [864, 496],
+    '720p': [1280, 720],
+    '1080p': [1920, 1080],
+  }
+  source.models = rows.map((row, index) => ({
+    location: { sheet: 'sd', row: 221 + index },
+    fields: {
+      ...sourceModel.fields,
+      渠道: 15,
+      模型ID: row.model,
+      版本: row.version,
+      清晰度: row.resolution,
+      '单价 元': row.price,
+      参考图数: 4,
+      参考视频数: 3,
+      参考音频数: 1,
+      最大素材数: 8,
+      视频音频合计上限: null,
+      '参考视频总时长上限 秒': 15,
+      最小参考图数: 0,
+      时长范围: '4-15',
+      比例: 'auto',
+      过真人脸: '否',
+      上游模型分组: '默认',
+    },
+  }))
+  source.officialPrices = rows.map((row, index) => ({
+    location: { sheet: 'sd官价', row: 7 + index },
+    fields: {
+      系列: 2,
+      模型: row.model,
+      版本: row.version,
+      分辨率: row.resolution,
+      '不含视频 元/M': 46,
+      '包含视频 元/M': 28,
+      帧率: 24,
+      长边: dimensions[row.resolution]?.[0],
+      短边: dimensions[row.resolution]?.[1],
+      '不含视频 元/秒': 1,
+      '包含视频 元/秒': 1,
+      备注: null,
+    },
+  }))
+  return source
+}
+
 test('maps a second-priced source row to a per-duration USD cost', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(), rules)
   const cost = output.costs.find(
@@ -562,6 +644,7 @@ test('blocks verified channel contract conflicts before workbook generation', ()
       '5': 'CH-SECURE',
       '6': 'CH-CANGYUANSUANLI',
       '8': 'CH-MEGABYAI',
+      '15': 'CH-FFLINK',
     },
     modelRules: {},
   })
@@ -611,6 +694,62 @@ test('blocks verified channel contract conflicts before workbook generation', ()
       },
       code: 'CHANNEL_CONTRACT_DURATION',
     },
+    {
+      name: 'FYLink unknown model',
+      channel: 15,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'seedance-unknown'
+        model.fields.清晰度 = '720p'
+        model.fields.参考图数 = 4
+        model.fields.参考视频数 = 3
+        model.fields.参考音频数 = 1
+        model.fields.最大素材数 = 8
+        model.fields.最小参考图数 = 0
+      },
+      code: 'CHANNEL_CONTRACT_MODEL',
+    },
+    {
+      name: 'FYLink fast 1080p',
+      channel: 15,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'seedance-2.0-fast'
+        model.fields.清晰度 = '1080p'
+        model.fields.参考图数 = 4
+        model.fields.参考视频数 = 3
+        model.fields.参考音频数 = 1
+        model.fields.最大素材数 = 8
+        model.fields.最小参考图数 = 0
+      },
+      code: 'CHANNEL_CONTRACT_RESOLUTION',
+    },
+    {
+      name: 'FYLink reference overflow',
+      channel: 15,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'seedance-2.0'
+        model.fields.清晰度 = '720p'
+        model.fields.参考图数 = 5
+        model.fields.参考视频数 = 3
+        model.fields.参考音频数 = 1
+        model.fields.最大素材数 = 9
+        model.fields.最小参考图数 = 0
+      },
+      code: 'CHANNEL_CONTRACT_REFERENCES',
+    },
+    {
+      name: 'FYLink 1080p fifteen second duration',
+      channel: 15,
+      mutate: (model: SourceWorkbook['models'][number]) => {
+        model.fields.模型ID = 'seedance-2.0'
+        model.fields.清晰度 = '1080p'
+        model.fields.参考图数 = 4
+        model.fields.参考视频数 = 3
+        model.fields.参考音频数 = 1
+        model.fields.最大素材数 = 8
+        model.fields.最小参考图数 = 0
+      },
+      code: 'CHANNEL_CONTRACT_DURATION',
+    },
   ]
 
   for (const testCase of tests) {
@@ -632,6 +771,51 @@ test('blocks verified channel contract conflicts before workbook generation', ()
       testCase.name
     )
   }
+})
+
+test('generates FYLink mappings and applies the R223 duration override', () => {
+  const output = buildTemplateData(
+    ffLinkSource(),
+    parseRules({
+      ...rulesInput,
+      channelCodes: { '15': 'CH-FFLINK' },
+      modelRules: {},
+      overrides: { '15/R223': { maxDurationSeconds: 12 } },
+    })
+  )
+  const mappings = output.mappings.filter(
+    (mapping) => mapping.channelCode === 'CH-FFLINK'
+  )
+  const costs = output.costs.filter((cost) => cost.channelCode === 'CH-FFLINK')
+
+  assert.equal(mappings.length, 6)
+  assert.equal(costs.length, 12)
+  assert.equal(
+    costs.every((cost) => cost.mode === 'per_duration'),
+    true
+  )
+  assert.deepEqual(
+    [...new Set(costs.map((cost) => cost.nativePerSecond))].sort(),
+    ['0.1', '0.12', '0.17', '0.2', '0.25', '0.6']
+  )
+  const standard1080p = mappings.find((mapping) => mapping.sourceRow === 223)
+  assert.ok(standard1080p)
+  assert.equal(standard1080p.sourceSheet, 'sd')
+  assert.equal(standard1080p.minDurationSeconds, 4)
+  assert.equal(standard1080p.maxDurationSeconds, 12)
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.code === 'ROW_DURATION_OVERRIDE' &&
+        item.row === 223 &&
+        item.severity === 'WARN'
+    ),
+    true
+  )
+  assert.equal(
+    output.issues.some((item) => item.severity === 'FAIL'),
+    false
+  )
 })
 
 test('accepts MegaByAI 1080p and 4k resolutions from the source contract', () => {

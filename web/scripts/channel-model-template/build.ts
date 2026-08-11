@@ -245,6 +245,44 @@ function parseDuration(value: string): ParsedDuration {
   return { min: duration, max: duration }
 }
 
+function rowOverrideFor(
+  record: SourceRecord,
+  rules: Rules
+): RowOverride | undefined {
+  const sourceChannel = field(record, '渠道')
+  const baseId = `R${record.location.row}`
+  return (
+    rules.overrides[`${sourceChannel}/${baseId}`] ??
+    rules.overrides[baseId] ??
+    rules.overrides[String(record.location.row)]
+  )
+}
+
+function effectiveDuration(
+  record: SourceRecord,
+  rules: Rules,
+  modelRule: ModelRule
+): ParsedDuration {
+  const sourceDuration = parseDuration(field(record, '时长范围'))
+  const override = rowOverrideFor(record, rules)
+  const min =
+    override?.minDurationSeconds ??
+    modelRule.minDurationSeconds ??
+    sourceDuration.min
+  const max =
+    override?.maxDurationSeconds ??
+    modelRule.maxDurationSeconds ??
+    sourceDuration.max
+  if (!sourceDuration.values) return { min, max }
+  return {
+    min,
+    max,
+    values: sourceDuration.values.filter(
+      (value) => value >= min && value <= max
+    ),
+  }
+}
+
 function scenarioCode(scenario: 'no_video' | 'with_video'): string {
   return scenario === 'no_video' ? 'NOV' : 'VID'
 }
@@ -426,6 +464,72 @@ function channelContractIssues(
     }
   }
 
+  if (channelCode === 'CH-FFLINK') {
+    const model = upstreamModel.trim().toLowerCase()
+    if (
+      !['seedance-2.0', 'seedance-2.0-fast', 'seedance-2.0-mini'].includes(
+        model
+      )
+    ) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_MODEL',
+          `FYLink 未验证上游模型 ${upstreamModel}。`
+        ),
+      ]
+    }
+    let allowedResolutions = ['720p']
+    if (model === 'seedance-2.0') {
+      allowedResolutions = ['480p', '720p', '1080p']
+    } else if (model === 'seedance-2.0-fast') {
+      allowedResolutions = ['480p', '720p']
+    }
+    if (!allowedResolutions.includes(resolutionValue)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_RESOLUTION',
+          `FYLink ${model} 不支持分辨率 ${resolutionValue}。`
+        ),
+      ]
+    }
+    if (!durationWithin(4, 15)) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_DURATION',
+          'FYLink 视频时长必须位于 4 至 15 秒。'
+        ),
+      ]
+    }
+    if (
+      model === 'seedance-2.0' &&
+      resolutionValue === '1080p' &&
+      !durationWithin(4, 12)
+    ) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_DURATION',
+          'FYLink seedance-2.0 的 1080p 视频时长最多为 12 秒。'
+        ),
+      ]
+    }
+    if (
+      reference &&
+      (reference.images > 4 ||
+        reference.videos > 3 ||
+        reference.audios > 1 ||
+        reference.totalMax > 8 ||
+        reference.minimumImages > 4 ||
+        reference.videoDurationSeconds > 15)
+    ) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_REFERENCES',
+          'FYLink 素材上限为参考图 4、参考视频 3、参考音频 1，全部素材最多 8 个，参考视频总时长最多 15 秒。'
+        ),
+      ]
+    }
+  }
+
   return []
 }
 
@@ -580,11 +684,9 @@ function buildSkus(
     )
     const version =
       field(officialPrice, '版本') || field(modelRecord, '版本') || '标准'
-    const duration = parseDuration(field(modelRecord, '时长范围'))
-    const [ruleMin, ruleMax] = [
-      modelRule.minDurationSeconds ?? duration.min,
-      modelRule.maxDurationSeconds ?? duration.max,
-    ]
+    const duration = effectiveDuration(modelRecord, rules, modelRule)
+    const ruleMin = duration.min
+    const ruleMax = duration.max
     const id = skuId(model, version, resolutionValue)
     const existing = rows.get(id)
     if (existing) {
@@ -815,9 +917,7 @@ function buildCostsAndMappings(
     const reference = referenceContract(record)
     const hasReferenceContract = reference.contract !== null
     const referenceBusinessValid = hasReferenceContract
-    const override =
-      rules.overrides[`${sourceChannel}/${baseId}`] ??
-      rules.overrides[String(record.location.row)]
+    const override = rowOverrideFor(record, rules)
     const effectiveMode = mode
     if (!effectiveMode) {
       issues.push(
@@ -868,7 +968,24 @@ function buildCostsAndMappings(
         issue(code, reference.error ? 'FAIL' : 'WARN', message, record)
       )
     }
-    const duration = parseDuration(field(record, '时长范围'))
+    const sourceDuration = parseDuration(field(record, '时长范围'))
+    const duration = effectiveDuration(record, rules, modelRule)
+    if (
+      override &&
+      (override.minDurationSeconds !== undefined ||
+        override.maxDurationSeconds !== undefined) &&
+      (override.minDurationSeconds !== sourceDuration.min ||
+        override.maxDurationSeconds !== sourceDuration.max)
+    ) {
+      issues.push(
+        issue(
+          'ROW_DURATION_OVERRIDE',
+          'WARN',
+          `规则将源行时长 ${sourceDuration.min}-${sourceDuration.max} 秒覆盖为 ${duration.min}-${duration.max} 秒。`,
+          record
+        )
+      )
+    }
     const contractIssues = channelContractIssues(
       record,
       channelCode,

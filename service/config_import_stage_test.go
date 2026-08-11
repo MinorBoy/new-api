@@ -504,6 +504,24 @@ func TestConfigImportBindingBindsImportedZ5APIModelOutsideStaticCatalog(t *testi
 	require.NoError(t, err)
 }
 
+func TestConfigImportBindingAcceptsFFLinkTaskChannel(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "channel-fflink", channelRef: "CH-FFLINK", channelType: constant.ChannelTypeFFLink,
+		models: []string{"seedance-2.0"}, protocol: "task", providerHint: "fflink",
+	})
+	channel := &model.Channel{
+		Type: constant.ChannelTypeFFLink, Name: "FYLink", Models: "seedance-2.0",
+		Group: "default", Key: "key", Status: common.ChannelStatusManuallyDisabled,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-fflink", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+	require.NoError(t, err)
+}
+
 func TestConfigImportBindingCreateRequiresDisabledChannelAndRecordsConfirmation(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

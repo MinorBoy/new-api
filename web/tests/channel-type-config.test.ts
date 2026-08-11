@@ -22,11 +22,13 @@ import {
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_WARNINGS,
   CHANNEL_TYPES,
+  CHANNEL_STATUS,
   GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES,
   MODEL_FETCHABLE_TYPES,
   TASK_ONLY_CHANNEL_TYPES,
   TYPE_TO_KEY_PROMPT,
 } from '../src/features/channels/constants'
+import { getStatusOnChannelTypeChange } from '../src/features/channels/lib/channel-form'
 import {
   getBaseUrlOnChannelTypeChange,
   getChannelModelOptions,
@@ -387,7 +389,10 @@ describe('Paipu channel configuration', () => {
 describe('Secure channel configuration', () => {
   test('registers task-only type 207', () => {
     expect(CHANNEL_TYPES[207]).toBe('Secure')
-    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 207, label: 'Secure' })
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 207,
+      label: 'Secure',
+    })
     expect(getChannelTypeIcon(207)).toBe('NewAPI')
     expect(TASK_ONLY_CHANNEL_TYPES.has(207)).toBe(true)
     expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(207)).toBe(true)
@@ -590,6 +595,56 @@ describe('Z5API channel configuration', () => {
     })
     expect(CHANNEL_TYPE_WARNINGS[211]).toBe(
       'Z5API is task-only. Enable it only after real upstream contract acceptance.'
+    )
+  })
+})
+
+describe('Mikoto channel configuration', () => {
+  test('registers task-only type 212 without inventing a model catalog', () => {
+    expect(CHANNEL_TYPES[212]).toBe('Mikoto')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({
+      value: 212,
+      label: 'Mikoto',
+    })
+    expect(getChannelTypeIcon(212)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(212)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(212)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(212)).toBe(false)
+    expect(getChannelTypeConfig(212)).toMatchObject({
+      id: 212,
+      name: 'Mikoto',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://api.mikoto.vip',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(212)).toBe('https://api.mikoto.vip')
+    expect(getChannelModelOptions(212, [], [])).toEqual([])
+  })
+
+  test('uses the managed default while preserving custom proxy URLs', () => {
+    expect(getBaseUrlOnChannelTypeChange(212, '', false)).toBe(
+      'https://api.mikoto.vip'
+    )
+    expect(
+      getBaseUrlOnChannelTypeChange(212, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+
+  test('provides guidance and defaults new channels to manually disabled', () => {
+    expect(getChannelTypeHints(212)).toEqual({
+      baseUrl: 'Default: https://api.mikoto.vip',
+      key: 'Enter the raw API key issued by Mikoto',
+      models:
+        'Map client-visible Ark model names to verified Mikoto upstream models',
+    })
+    expect(TYPE_TO_KEY_PROMPT[212]).toBe(
+      'Enter the raw API key issued by Mikoto'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[212]).toBe(
+      'Mikoto is task-only. Enable it only after real upstream contract acceptance.'
+    )
+    expect(getStatusOnChannelTypeChange(1, 212, CHANNEL_STATUS.ENABLED)).toBe(
+      CHANNEL_STATUS.MANUAL_DISABLED
     )
   })
 })

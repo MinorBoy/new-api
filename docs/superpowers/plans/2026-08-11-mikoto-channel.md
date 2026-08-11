@@ -399,11 +399,11 @@ git commit -m "feat(mikoto): register task-only channel"
 - Modify: `web/src/i18n/static-keys.ts`
 - Modify: `web/src/i18n/locales/{en,zh,zh-TW,fr,ru,ja,vi}.json`
 
-- [ ] **Step 1: 加载 `i18n-translate` skill**
+- [x] **Step 1: 加载 `i18n-translate` skill**
 
 在编辑 locale 前完整读取 `.agents/skills/i18n-translate/SKILL.md`，按其流程同步所有语言，不只修改英文和中文。
 
-- [ ] **Step 2: 写渠道配置失败测试**
+- [x] **Step 2: 写渠道配置失败测试**
 
 在 `web/tests/channel-type-config.test.ts` 增加：
 
@@ -424,7 +424,7 @@ expect(getChannelTypeConfig(212)).toMatchObject({
 
 并断言新建 Mikoto 渠道的初始状态是手动禁用，手工代理 URL不被默认 URL 覆盖。
 
-- [ ] **Step 3: 运行前端测试并确认失败**
+- [x] **Step 3: 运行前端测试并确认失败**
 
 Run: `bun test tests/channel-type-config.test.ts`
 
@@ -432,7 +432,7 @@ Working directory: `web`
 
 Expected: FAIL，原因是 type 212 尚未注册。
 
-- [ ] **Step 4: 注册管理端渠道配置**
+- [x] **Step 4: 注册管理端渠道配置**
 
 在 `constants.ts`、`channel-type-config.ts`、`channel-form.ts` 和 `channel-utils.ts` 中增加 type 212，配置如下：
 
@@ -453,11 +453,11 @@ Expected: FAIL，原因是 type 212 尚未注册。
 
 将 212 加入 task-only、generic-test unsupported、managed default URL 和 pre-acceptance disabled 集合，不加入 model-fetchable 集合。
 
-- [ ] **Step 5: 添加静态 i18n key 和七种翻译**
+- [x] **Step 5: 添加静态 i18n key 和七种翻译**
 
 登记以下英文源 key：`Mikoto`、`Default: https://api.mikoto.vip`、`Enter the raw API key issued by Mikoto`、`Map client-visible Ark model names to verified Mikoto upstream models`、`Mikoto is task-only. Enable it only after real upstream contract acceptance.`。七个 locale 都必须有对应值；品牌和 URL 保留原文，其余使用自然的目标语言表达。
 
-- [ ] **Step 6: 同步并验证前端**
+- [x] **Step 6: 同步并验证前端**
 
 Run:
 
@@ -473,7 +473,9 @@ Working directory: `web`
 
 Expected: 全部退出码为 0；非英文 locale 中不保留新增英文提示的回退值。
 
-- [ ] **Step 7: 提交管理端配置**
+验证记录：相关测试、typecheck、Mikoto 改动文件的作用域 lint、格式检查和生产构建通过。仓库全量 lint 仍受与本任务无关的既有错误阻断。
+
+- [x] **Step 7: 提交管理端配置**
 
 ```powershell
 git add web/src/features/channels/constants.ts web/src/features/channels/lib/channel-type-config.ts web/src/features/channels/lib/channel-form.ts web/src/features/channels/lib/channel-utils.ts web/tests/channel-type-config.test.ts web/src/i18n/static-keys.ts web/src/i18n/locales

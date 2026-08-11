@@ -6119,5 +6119,10 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4"
-  }
+  },
+  "Mikoto": "Mikoto",
+  "Default: https://api.mikoto.vip": "Default: https://api.mikoto.vip",
+  "Enter the raw API key issued by Mikoto": "Enter the raw API key issued by Mikoto",
+  "Map client-visible Ark model names to verified Mikoto upstream models": "Map client-visible Ark model names to verified Mikoto upstream models",
+  "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto is task-only. Enable it only after real upstream contract acceptance."
 }

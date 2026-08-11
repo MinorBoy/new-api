@@ -6119,5 +6119,10 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4"
-  }
+  },
+  "Mikoto": "Mikoto",
+  "Default: https://api.mikoto.vip": "預設：https://api.mikoto.vip",
+  "Enter the raw API key issued by Mikoto": "請輸入 Mikoto 核發的原始 API 金鑰",
+  "Map client-visible Ark model names to verified Mikoto upstream models": "將用戶端可見的 Ark 模型名稱對應到已驗證的 Mikoto 上游模型",
+  "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto 僅支援任務 API。請僅在完成真實上游協定驗收後啟用。"
 }

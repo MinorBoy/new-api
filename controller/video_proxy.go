@@ -116,6 +116,10 @@ func VideoProxy(c *gin.Context) {
 		case constant.ChannelTypeEightYes:
 			videoURL = fmt.Sprintf("%s/v1/videos/%s/content", strings.TrimRight(baseURL, "/"), url.PathEscape(task.GetUpstreamTaskID()))
 			req.Header.Set("Authorization", "Bearer "+channel.Key)
+		case constant.ChannelTypeZZone:
+			videoURL = fmt.Sprintf("%s/v1/videos/%s/content", strings.TrimRight(baseURL, "/"), url.PathEscape(task.GetUpstreamTaskID()))
+			req.Header.Set("Authorization", "Bearer "+channel.Key)
+			client = publicMediaHTTPClient("Authorization")
 		default:
 			// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 			videoURL = task.GetResultURL()

@@ -34,7 +34,8 @@ type parsedTask struct {
 }
 
 func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
-	allowMissingSuccessURL := a.activeProfile().requestDialect == videoRequestDialectEightYes
+	dialect := a.activeProfile().requestDialect
+	allowMissingSuccessURL := dialect == videoRequestDialectEightYes || dialect == videoRequestDialectZZone
 	parsed, err := parseTaskProjection(body, allowMissingSuccessURL)
 	if err != nil {
 		return nil, err

@@ -42,11 +42,15 @@ func TestMikotoSoraRejectsReferenceVideoOutsideDocumentedDuration(t *testing.T) 
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set(common.KeySeedanceOfficialAPI, true)
 	info := &relaycommon.RelayInfo{
-		ChannelMeta:   &relaycommon.ChannelMeta{UpstreamModelName: "sora-v3-pro"},
-		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		OriginModelName: "client",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
 	}
+	adaptor := NewMikotoTaskAdaptor()
 
-	taskErr := NewMikotoTaskAdaptor().ValidateRequestAndSetAction(c, info)
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	info.UpstreamModelName = "sora-v3-pro"
+	taskErr := adaptor.ValidateBillingRequest(c, info)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "InvalidParameter.content", taskErr.Code)
 }
@@ -69,12 +73,15 @@ func TestMikotoAdaptorUsesProviderRequestDialect(t *testing.T) {
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set(common.KeySeedanceOfficialAPI, true)
 	info := &relaycommon.RelayInfo{
-		ChannelMeta:   &relaycommon.ChannelMeta{UpstreamModelName: "seedance-2.0-720p"},
-		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		OriginModelName: "client",
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{},
 	}
 	adaptor := NewMikotoTaskAdaptor()
 
 	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	info.UpstreamModelName = "seedance-2.0-720p"
+	require.Nil(t, adaptor.ValidateBillingRequest(c, info))
 	reader, err := adaptor.BuildRequestBody(c, info)
 	require.NoError(t, err)
 	body, err := io.ReadAll(reader)

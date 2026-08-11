@@ -484,6 +484,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 		upstreamModel    string
 		durationSeconds  int
 		arkOfficialRoute bool
+		seedanceSale     bool
 		settings         dto.ChannelOtherSettings
 	}{
 		{name: "NewAPIVideo", channelType: constant.ChannelTypeNewAPIVideo, body: `{"model":"client-video","prompt":"text","seconds":"5"}`, upstreamModel: "seedance-720p-token", durationSeconds: 5},
@@ -496,13 +497,28 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 		{name: "OmegaAI", channelType: constant.ChannelTypeOmegaAI, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "klsdpro2-720p", durationSeconds: 8, arkOfficialRoute: true},
 		{name: "4stoken", channelType: constant.ChannelTypeFourSToken, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "4sdance_v2.0_900", durationSeconds: 8, arkOfficialRoute: true},
 		{name: "8yes", channelType: constant.ChannelTypeEightYes, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "videos-4-mini-480p", durationSeconds: 8, arkOfficialRoute: true},
+		{name: "Mikoto Sora", channelType: constant.ChannelTypeMikoto, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`, upstreamModel: "sora-v3-pro", durationSeconds: 8, arkOfficialRoute: true},
+		{name: "Mikoto Seedance", channelType: constant.ChannelTypeMikoto, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"resolution":"720p"}`, upstreamModel: "seedance-2.0-720p", durationSeconds: 8, arkOfficialRoute: true, seedanceSale: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			service.InitHttpClient()
 			withCostAccountingMode(t, types.CostAccountingStrict)
-			configureNewAPIVideoFixedPricing(t, "client-video")
+			if tt.seedanceSale {
+				configureSeedanceTokenPricing(t, map[string]types.SeedanceTokenPrice{
+					"client-video": {
+						Scenarios: map[string]types.SeedanceTokenPriceScenario{
+							"720p:no_video": {
+								PricePerMillion: "1", Width: 1280, Height: 720, FrameRate: 24,
+								PricingVersion: "official-token-v1", Source: "test-fixture",
+							},
+						},
+					},
+				})
+			} else {
+				configureNewAPIVideoFixedPricing(t, "client-video")
+			}
 			setupTaskCostSubmitDB(t)
 
 			const channelID = 700010
@@ -552,6 +568,49 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 			assert.Equal(t, int64(tt.durationSeconds)*100_000_000, *attempt.CostNanoUSD)
 		})
 	}
+}
+
+func TestMikotoCostTaskSubmitSettlesPerRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	withCostAccountingMode(t, types.CostAccountingStrict)
+	configureNewAPIVideoFixedPricing(t, "client-video")
+	setupTaskCostSubmitDB(t)
+
+	const (
+		channelID = 700013
+		modelName = "sora-v3-pro"
+	)
+	unitPrice := "0.2"
+	seedTaskCostSubmitRuleForChannel(t, channelID, constant.ChannelTypeMikoto, modelName, types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &unitPrice, ChargeEvent: types.CostChargeSubmitAccepted,
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"task_id":"mikoto-cost-task","status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	c, info := newNewAPIVideoRelayContext(`{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8,"ratio":"16:9","resolution":"720p"}`, server.URL)
+	c.Set(string(constant.ContextKeyChannelType), constant.ChannelTypeMikoto)
+	c.Set(string(constant.ContextKeyChannelId), channelID)
+	c.Set(string(constant.ContextKeyChannelName), "Mikoto")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	c.Set("model_mapping", `{"client-video":"sora-v3-pro"}`)
+	info.RequestId = "mikoto-cost-per-request"
+	info.RequestURLPath = "/api/v3/contents/generations/tasks"
+
+	result, taskErr := RelayTaskSubmit(c, info, nil)
+
+	require.Nil(t, taskErr)
+	require.NotNil(t, result)
+	require.NotNil(t, info.CostAttempt)
+	attempt := loadRelayCostAttempt(t, info.CostAttempt.AttemptID)
+	assert.Equal(t, string(types.CostAttemptSettled), attempt.Status)
+	require.NotNil(t, attempt.CostNanoUSD)
+	assert.Equal(t, int64(200_000_000), *attempt.CostNanoUSD)
 }
 
 func seedTaskCostSubmitRule(t *testing.T, channelID int, modelName string, mode types.CostMode, config types.CostRuleConfigV1) {

@@ -489,7 +489,7 @@ git commit -m "feat(web): add Mikoto channel configuration"
 - Create: `e2e/mikoto_upstream_e2e_test.go`
 - Modify: `relay/relay_task_billing_test.go`
 
-- [ ] **Step 1: 写双方言 mock upstream 生命周期失败测试**
+- [x] **Step 1: 写双方言 mock upstream 生命周期失败测试**
 
 创建 `httptest.Server`，记录 method、path、Authorization 和 body。Sora fixture 必须收到 `seconds/resolution/video_config`，Seedance fixture 必须收到 `duration/images/referenceVideos/referenceAudios/generate_audio`。两条链路均通过：
 
@@ -502,21 +502,21 @@ GET /api/v3/contents/generations/tasks
 
 断言上游只见映射后的模型，用户只见公共任务 ID和客户端模型；上游 key、私有任务 ID和 Mikoto 原始错误不出现在 Ark 单查和列表。
 
-- [ ] **Step 2: 运行 E2E 并确认渠道尚未完整注册而失败**
+- [x] **Step 2: 运行 E2E 并确认渠道尚未完整注册而失败**
 
 Run: `go test ./e2e -run 'TestMikoto' -count=1 -v`
 
 Expected: FAIL，失败点是 Mikoto 渠道注册或请求契约，不允许测试绕过真实 relay 链路直接调用编码器。
 
-- [ ] **Step 3: 增加成功、失败和本地拒绝场景**
+- [x] **Step 3: 增加成功、失败和本地拒绝场景**
 
 E2E 必须覆盖 `queued -> processing -> completed`，Sora 的 `video_url`、Seedance 的 `content_url`，以及 `failed` 只退款一次。非法 duration、10 图片、Sora data URI 和未知上游模型应在本地返回 400，mock POST 计数保持 0；上游 401、429 和 500 使用现有错误结构且不泄露 key。
 
-- [ ] **Step 4: 加入计费矩阵**
+- [x] **Step 4: 加入计费矩阵**
 
 在 `relay/relay_task_billing_test.go` 添加 Mikoto 的按请求、按时长、终态成功结算和失败退款用例。duration/seconds 均通过现有 `MaxTaskDurationSeconds` 与 checked quota 路径；测试只通过正式 `PriceData.AddOtherRatio` 或既有 fixture 配置倍率，不直接写 `OtherRatios`。
 
-- [ ] **Step 5: 运行 E2E 与计费回归**
+- [x] **Step 5: 运行 E2E 与计费回归**
 
 Run:
 

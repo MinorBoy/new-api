@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/video_setting"
 	"github.com/gin-gonic/gin"
@@ -245,4 +246,37 @@ func TestVideoRequestPolicyUsesSeedanceErrorEnvelope(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"code":"InvalidParameter.content"`)
 	assert.NotContains(t, recorder.Body.String(), "video_base64_input_disabled")
+}
+
+func TestDeferredVideoBase64PolicyAllowsOnlySelectedMikotoChannel(t *testing.T) {
+	withVideoPolicySettings(t, false, 1)
+	tests := []struct {
+		name        string
+		channelType int
+		wantStatus  int
+	}{
+		{name: "Mikoto", channelType: constant.ChannelTypeMikoto, wantStatus: http.StatusNoContent},
+		{name: "other channel", channelType: constant.ChannelTypeOpenAI, wantStatus: http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(common.KeySeedanceOfficialAPI, true)
+				c.Request.Header.Set("Authorization", "Bearer test-token")
+				c.Next()
+			})
+			router.Use(DeferVideoBase64Policy(), VideoRequestPolicy())
+			router.POST("/v1/video/generations", func(c *gin.Context) {
+				common.SetContextKey(c, constant.ContextKeyChannelType, test.channelType)
+				SelectedChannelVideoBase64Policy()(c)
+			}, func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+
+			recorder := performPolicyRequest(router, http.MethodPost, "/v1/video/generations", `{"model":"m","video_url":{"url":"`+testVideoDataURI+`"}}`, "application/json")
+
+			assert.Equal(t, test.wantStatus, recorder.Code)
+		})
+	}
 }

@@ -120,32 +120,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			return taskErr
 		}
 		if profile.requestDialect == videoRequestDialectMikoto {
-			state, err := getRequestState(c)
-			if err != nil || state.ARK == nil {
-				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
-			}
-			upstreamModel := ""
-			if info != nil {
-				upstreamModel = info.UpstreamModelName
-				if upstreamModel == "" {
-					upstreamModel = info.OriginModelName
-				}
-			}
-			if upstreamModel == "" {
-				return nil
-			}
-			if err := validateMikotoRequest(*state.ARK, upstreamModel); err != nil {
-				var requestErr *arkRequestError
-				if errors.As(err, &requestErr) {
-					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
-				}
-				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
-			}
-			if taskErr := validateMikotoReferenceMedia(c.Request.Context(), *state.ARK, upstreamModel); taskErr != nil {
-				return taskErr
-			}
-			state.ProviderValidationComplete = true
-			c.Set(requestStateContextKey, state)
+			// Mikoto validation depends on the mapped upstream model. It runs in
+			// ValidateBillingRequest after ModelMappedHelper has resolved aliases.
 			return nil
 		}
 		if profile.omegaRequest != nil {

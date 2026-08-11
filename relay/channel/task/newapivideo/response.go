@@ -126,8 +126,17 @@ func sanitizeUpstreamFailure(message string) string {
 }
 
 func sanitizePublicTaskFailure(message string, upstreamTaskID string) string {
+	return sanitizePublicTaskFailureWithSecrets(message, upstreamTaskID)
+}
+
+func sanitizePublicTaskFailureWithSecrets(message string, upstreamTaskID string, secrets ...string) string {
 	if upstreamTaskID != "" {
 		message = strings.ReplaceAll(message, upstreamTaskID, "[redacted]")
+	}
+	for _, secret := range secrets {
+		if secret != "" {
+			message = strings.ReplaceAll(message, secret, "[redacted]")
+		}
 	}
 	return sanitizeUpstreamFailure(message)
 }
@@ -521,7 +530,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 		if code == "" {
 			code = "task_failed"
 		}
-		video.Error = &dto.OpenAIVideoError{Code: code, Message: sanitizePublicTaskFailure(message, task.GetUpstreamTaskID())}
+		video.Error = &dto.OpenAIVideoError{Code: code, Message: sanitizePublicTaskFailureWithSecrets(message, task.GetUpstreamTaskID(), task.PrivateData.Key)}
 	}
 	return common.Marshal(video)
 }
@@ -589,7 +598,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		if response.Error != nil {
 			response.Error = &upstreamError{
 				Code:    response.Error.Code,
-				Message: sanitizePublicTaskFailure(response.Error.Message, task.GetUpstreamTaskID()),
+				Message: sanitizePublicTaskFailureWithSecrets(response.Error.Message, task.GetUpstreamTaskID(), task.PrivateData.Key),
 			}
 		}
 		if response.Error == nil || response.Error.Message == "" {
@@ -602,7 +611,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 			}
 			response.Error = &upstreamError{
 				Code:    parsed.ErrorCode,
-				Message: sanitizePublicTaskFailure(message, task.GetUpstreamTaskID()),
+				Message: sanitizePublicTaskFailureWithSecrets(message, task.GetUpstreamTaskID(), task.PrivateData.Key),
 			}
 		}
 	}

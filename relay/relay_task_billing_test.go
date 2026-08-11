@@ -496,6 +496,7 @@ func TestCostTaskSubmitUsesValidatedDurationOutsideUserDurationBilling(t *testin
 		{name: "OmegaAI", channelType: constant.ChannelTypeOmegaAI, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "klsdpro2-720p", durationSeconds: 8, arkOfficialRoute: true},
 		{name: "4stoken", channelType: constant.ChannelTypeFourSToken, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "4sdance_v2.0_900", durationSeconds: 8, arkOfficialRoute: true},
 		{name: "8yes", channelType: constant.ChannelTypeEightYes, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":8}`, upstreamModel: "videos-4-mini-480p", durationSeconds: 8, arkOfficialRoute: true},
+		{name: "ZZone", channelType: constant.ChannelTypeZZone, body: `{"model":"client-video","content":[{"type":"text","text":"text"}],"duration":15}`, upstreamModel: "zzone-imported-model", durationSeconds: 15, arkOfficialRoute: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

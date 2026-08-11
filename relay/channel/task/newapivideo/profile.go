@@ -25,6 +25,8 @@ const ChannelNameEightYes = "8yes"
 
 const ChannelNameZ5API = "Z5API"
 
+const ChannelNameFYLink = "FYLink"
+
 type videoRequestDialect string
 
 const (
@@ -40,6 +42,7 @@ const (
 	videoRequestDialectEightYes            videoRequestDialect = "eightyes"
 	videoRequestDialectPaipuMediaArrays    videoRequestDialect = "paipu_media_arrays"
 	videoRequestDialectZ5APIMedia          videoRequestDialect = "z5api_media"
+	videoRequestDialectFFLink              videoRequestDialect = "fflink"
 )
 
 type omegaRequestProfile struct {
@@ -96,6 +99,7 @@ type protocolProfile struct {
 	untypedImagesAreReferences         bool
 	allowEmptyReferenceMediaRoles      bool
 	allowAudioWithoutVisual            bool
+	preferRespondAsync                 bool
 }
 
 func genericProtocolProfile() protocolProfile {
@@ -311,6 +315,19 @@ func z5apiProtocolProfile() protocolProfile {
 	}
 }
 
+func fflinkProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:            ChannelNameFYLink,
+		modelList:              []string{},
+		submitPath:             "/v1/videos/generations",
+		pollPath:               "/v1/videos/jobs/{task_id}",
+		contentType:            "application/json",
+		requestDialect:         videoRequestDialectFFLink,
+		requirePublicHTTPMedia: true,
+		preferRespondAsync:     true,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -364,6 +381,14 @@ func NewEightYesTaskAdaptor() *TaskAdaptor {
 
 func NewZ5APITaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: z5apiProtocolProfile()}
+}
+
+type FYLinkTaskAdaptor struct {
+	*TaskAdaptor
+}
+
+func NewFYLinkTaskAdaptor() *FYLinkTaskAdaptor {
+	return &FYLinkTaskAdaptor{TaskAdaptor: &TaskAdaptor{profile: fflinkProtocolProfile()}}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

@@ -907,6 +907,19 @@ func TestZ5APITaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
 	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeZ5API))
 }
 
+func TestFFLinkTaskAdaptorIsRegisteredForArkTasks(t *testing.T) {
+	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFFLink)))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "FYLink", adaptor.GetChannelName())
+	assert.Empty(t, adaptor.GetModelList())
+	_, supportsArkConversion := adaptor.(channel.ArkVideoTaskConverter)
+	assert.True(t, supportsArkConversion)
+	_, supportsCostAccounting := adaptor.(channel.TaskCostAccountingAdaptor)
+	assert.True(t, supportsCostAccounting)
+	assert.True(t, isSeedanceTaskPlatform(constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFFLink))))
+	assert.Contains(t, seedanceTaskPlatformValues(), strconv.Itoa(constant.ChannelTypeFFLink))
+}
+
 const newAPIVideoDetailedZeroUsage = `{
 	"code":"success",
 	"message":"",

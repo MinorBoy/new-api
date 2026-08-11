@@ -143,6 +143,13 @@ describe('pre-acceptance channel defaults', () => {
       2
     )
   })
+
+  test('selecting FYLink defaults a new channel to manually disabled', () => {
+    assert.equal(
+      getStatusOnChannelTypeChange(1, 214, CHANNEL_FORM_DEFAULT_VALUES.status),
+      2
+    )
+  })
 })
 
 describe('ZZone channel configuration', () => {
@@ -189,4 +196,5 @@ describe('ZZone channel configuration', () => {
       'ZZone is task-only. Enable it only after real upstream contract acceptance.'
     )
   })
+
 })

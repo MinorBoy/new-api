@@ -44,6 +44,8 @@ export type ModelRule = {
 
 export type RowOverride = {
   clientModel?: string
+  minDurationSeconds?: number
+  maxDurationSeconds?: number
   nativePerMillion?: string
   nativePerRequest?: string
   nativePerSecond?: string

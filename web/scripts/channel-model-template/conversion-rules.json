@@ -28,6 +28,9 @@
   },
   "modelRules": {},
   "overrides": {
+    "15/R223": {
+      "maxDurationSeconds": 12
+    },
     "6/R100": {
       "status": "draft"
     }

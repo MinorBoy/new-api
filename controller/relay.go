@@ -779,6 +779,9 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		}
 	}
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	if relayInfo.ChannelMeta != nil && relayInfo.ChannelType == constant.ChannelTypeFFLink {
+		task.PrivateData.Key = relayInfo.ApiKey
+	}
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId

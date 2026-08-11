@@ -578,6 +578,17 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
       },
     ],
   })
+  extracted.channels.push({
+    ...sourceChannel,
+    businessId: 'CH-FFLINK',
+    sourceLocations: [
+      {
+        ...sourceLocation,
+        businessId: 'CH-FFLINK',
+        row: 1002,
+      },
+    ],
+  })
   const result = await buildImportDocument({
     extracted,
     sourceBytes,
@@ -598,6 +609,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-8YES'), 210)
   assert.equal(typesByChannel.get('CH-Z5API'), 211)
   assert.equal(typesByChannel.get('CH-ZZONE'), 212)
+  assert.equal(typesByChannel.get('CH-FFLINK'), 214)
 })
 
 test('v1 adapter treats line and SKU price differences as distinct variants and removes Secure unsupported 480p rows', async () => {

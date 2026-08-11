@@ -93,6 +93,7 @@ const V1_CHANNEL_TYPES: Record<string, number> = {
   'CH-SECURE': 207,
   'CH-Z5API': 211,
   'CH-ZZONE': 212,
+  'CH-FFLINK': 214,
 }
 
 function cellText(cell: CellSnapshot | undefined): string {

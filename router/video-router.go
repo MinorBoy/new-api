@@ -49,6 +49,7 @@ func SetVideoRouter(router *gin.Engine) {
 		seedanceVideoRouter.POST("/tasks", middleware.Distribute(), middleware.SelectedChannelVideoBase64Policy(), controller.RelayTask)
 		seedanceVideoRouter.GET("/tasks", controller.RelaySeedanceTaskFetch)
 		seedanceVideoRouter.GET("/tasks/:task_id", controller.RelaySeedanceTaskFetch)
+		seedanceVideoRouter.DELETE("/tasks/:task_id", controller.RelaySeedanceTaskCancel)
 	}
 
 	// Jimeng official API routes - direct mapping to official API format

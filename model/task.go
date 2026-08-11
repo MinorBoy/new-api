@@ -628,6 +628,17 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 	return result.RowsAffected > 0, nil
 }
 
+func (t *Task) UpdateWithStatuses(fromStatuses []TaskStatus) (bool, error) {
+	if t == nil || t.ID == 0 || len(fromStatuses) == 0 {
+		return false, nil
+	}
+	result := DB.Model(t).Where("status IN ?", fromStatuses).Select("*").Updates(t)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.
 // WARNING: This function has NO CAS (Compare-And-Swap) guard — it will overwrite
 // any concurrent status changes. DO NOT use in billing/quota lifecycle flows

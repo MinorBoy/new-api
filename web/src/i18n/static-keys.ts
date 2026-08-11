@@ -590,6 +590,13 @@ export const STATIC_I18N_KEYS = [
   'Map client-visible Ark model names to verified Mikoto upstream models',
   'Mikoto is task-only. Enable it only after real upstream contract acceptance.',
 
+  // FYLink channel configuration
+  'FYLink',
+  'Default: https://api.fflink.top',
+  'Enter the raw API key issued by FYLink',
+  'Map client-visible Ark model names to verified FYLink upstream models',
+  'FYLink is task-only. Enable it only after real upstream contract acceptance.',
+
   // Misc
   'Cancel',
   'Status',

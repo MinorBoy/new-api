@@ -96,6 +96,7 @@ func supportsGenericChannelTest(channelType int) bool {
 		constant.ChannelTypeZ5API,
 		constant.ChannelTypeZZone,
 		constant.ChannelTypeMikoto,
+		constant.ChannelTypeFFLink,
 	}
 	return !lo.Contains(unsupportedChannelTypes, channelType)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -165,6 +166,37 @@ func TestPersistSubmittedTaskStoresAdminAuditPayloads(t *testing.T) {
 	require.NotNil(t, task.PrivateData.BillingContext)
 	assert.Equal(t, int64(2500), task.PrivateData.BillingContext.InputVideoDurationMS)
 	assert.Equal(t, string(types.CostModePerDuration), task.PrivateData.BillingContext.UpstreamCostMode)
+}
+
+func TestPersistSubmittedTaskStoresSelectedFYLinkKeyPrivately(t *testing.T) {
+	setupControllerTaskCostDB(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client-video","content":[{"type":"text","text":"t"}]}`))
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          12,
+		OriginModelName: "client-video",
+		PriceData:       types.PriceData{Quota: 100},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   73,
+			ChannelType: constant.ChannelTypeFFLink,
+			ApiKey:      "selected-fflink-key",
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task-fflink-key"},
+	}
+	result := &relay.TaskSubmitResult{
+		UpstreamTaskID: "job-private",
+		TaskData:       []byte(`{"job_id":"job-private","status":"pending"}`),
+		Platform:       constant.TaskPlatform("214"),
+		Quota:          100,
+	}
+
+	require.NoError(t, persistSubmittedTask(c, relayInfo, result))
+	var task model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task-fflink-key").First(&task).Error)
+	assert.Equal(t, "selected-fflink-key", task.PrivateData.Key)
+	public, err := common.Marshal(task)
+	require.NoError(t, err)
+	assert.NotContains(t, string(public), "selected-fflink-key")
 }
 
 func TestPersistSubmittedSeedanceTaskFreezesOfficialTokenBilling(t *testing.T) {

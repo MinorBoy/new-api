@@ -648,3 +648,50 @@ describe('Mikoto channel configuration', () => {
     )
   })
 })
+
+describe('FYLink channel configuration', () => {
+  test('registers task-only type 214 after the reserved channel types', () => {
+    expect(CHANNEL_TYPES[214]).toBe('FYLink')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 214, label: 'FYLink' })
+    expect(
+      CHANNEL_TYPE_OPTIONS.findIndex((option) => option.value === 214)
+    ).toBe(CHANNEL_TYPE_OPTIONS.findIndex((option) => option.value === 213) + 1)
+    expect(getChannelTypeIcon(214)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(214)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(214)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(214)).toBe(false)
+  })
+
+  test('provides the FYLink defaults and pre-acceptance guidance', () => {
+    expect(getChannelTypeConfig(214)).toMatchObject({
+      id: 214,
+      name: 'FYLink',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://api.fflink.top',
+      supportedModels: [],
+    })
+    expect(getDefaultBaseUrl(214)).toBe('https://api.fflink.top')
+    expect(getChannelModelOptions(214, [], [])).toEqual([])
+    expect(getChannelTypeHints(214)).toEqual({
+      baseUrl: 'Default: https://api.fflink.top',
+      key: 'Enter the raw API key issued by FYLink',
+      models:
+        'Map client-visible Ark model names to verified FYLink upstream models',
+    })
+    expect(TYPE_TO_KEY_PROMPT[214]).toBe(
+      'Enter the raw API key issued by FYLink'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[214]).toBe(
+      'FYLink is task-only. Enable it only after real upstream contract acceptance.'
+    )
+  })
+
+  test('applies the managed FYLink default without replacing custom URLs', () => {
+    expect(getBaseUrlOnChannelTypeChange(214, '', false)).toBe(
+      'https://api.fflink.top'
+    )
+    expect(
+      getBaseUrlOnChannelTypeChange(214, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+  })
+})

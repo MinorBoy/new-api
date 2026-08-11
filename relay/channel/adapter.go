@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"io"
 	"net/http"
 
@@ -91,6 +92,10 @@ type TaskAdaptor interface {
 
 	FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error)
 	ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error)
+}
+
+type TaskCancellationAdaptor interface {
+	CancelTask(ctx context.Context, baseURL string, key string, taskID string, proxy string) (*http.Response, error)
 }
 
 // TaskBillingRequestValidator allows a task adaptor to validate pricing

@@ -27,6 +27,7 @@ const ChannelNameZ5API = "Z5API"
 
 const ChannelNameZZone = "ZZone"
 const ChannelNameMikoto = "Mikoto"
+const ChannelNameFYLink = "FYLink"
 
 type videoRequestDialect string
 
@@ -45,6 +46,7 @@ const (
 	videoRequestDialectZ5APIMedia          videoRequestDialect = "z5api_media"
 	videoRequestDialectZZone               videoRequestDialect = "zzone"
 	videoRequestDialectMikoto              videoRequestDialect = "mikoto"
+	videoRequestDialectFFLink              videoRequestDialect = "fflink"
 )
 
 type omegaRequestProfile struct {
@@ -101,6 +103,7 @@ type protocolProfile struct {
 	untypedImagesAreReferences         bool
 	allowEmptyReferenceMediaRoles      bool
 	allowAudioWithoutVisual            bool
+	preferRespondAsync                 bool
 }
 
 func genericProtocolProfile() protocolProfile {
@@ -343,6 +346,20 @@ func mikotoProtocolProfile() protocolProfile {
 	}
 }
 
+func fflinkProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:            ChannelNameFYLink,
+		modelList:              []string{},
+		submitPath:             "/v1/videos/generations",
+		pollPath:               "/v1/videos/jobs/{task_id}",
+		contentType:            "application/json",
+		requestDialect:         videoRequestDialectFFLink,
+		requirePublicHTTPMedia: true,
+		preferRespondAsync:     true,
+		defaultDurationSeconds: 5,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -404,6 +421,14 @@ func NewZZoneTaskAdaptor() *TaskAdaptor {
 
 func NewMikotoTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: mikotoProtocolProfile()}
+}
+
+type FYLinkTaskAdaptor struct {
+	*TaskAdaptor
+}
+
+func NewFYLinkTaskAdaptor() *FYLinkTaskAdaptor {
+	return &FYLinkTaskAdaptor{TaskAdaptor: &TaskAdaptor{profile: fflinkProtocolProfile()}}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

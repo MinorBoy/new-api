@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
@@ -35,7 +37,7 @@ type parsedTask struct {
 
 func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error) {
 	dialect := a.activeProfile().requestDialect
-	allowMissingSuccessURL := dialect == videoRequestDialectEightYes || dialect == videoRequestDialectZZone
+	allowMissingSuccessURL := dialect == videoRequestDialectEightYes || dialect == videoRequestDialectZZone || dialect == videoRequestDialectFFLink
 	parsed, err := parseTaskProjection(body, allowMissingSuccessURL)
 	if err != nil {
 		return nil, err
@@ -124,8 +126,17 @@ func sanitizeUpstreamFailure(message string) string {
 }
 
 func sanitizePublicTaskFailure(message string, upstreamTaskID string) string {
+	return sanitizePublicTaskFailureWithSecrets(message, upstreamTaskID)
+}
+
+func sanitizePublicTaskFailureWithSecrets(message string, upstreamTaskID string, secrets ...string) string {
 	if upstreamTaskID != "" {
 		message = strings.ReplaceAll(message, upstreamTaskID, "[redacted]")
+	}
+	for _, secret := range secrets {
+		if secret != "" {
+			message = strings.ReplaceAll(message, secret, "[redacted]")
+		}
 	}
 	return sanitizeUpstreamFailure(message)
 }
@@ -429,7 +440,7 @@ func mapUpstreamTaskStatus(status string) (model.TaskStatus, error) {
 		return model.TaskStatusSubmitted, nil
 	case "QUEUED", "PENDING":
 		return model.TaskStatusQueued, nil
-	case "IN_PROGRESS", "RUNNING", "PROCESSING":
+	case "IN_PROGRESS", "RUNNING", "PROCESSING", "SETTLING":
 		return model.TaskStatusInProgress, nil
 	case "SUCCESS", "SUCCEEDED", "COMPLETED":
 		return model.TaskStatusSuccess, nil
@@ -520,7 +531,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 		if code == "" {
 			code = "task_failed"
 		}
-		video.Error = &dto.OpenAIVideoError{Code: code, Message: sanitizePublicTaskFailure(message, task.GetUpstreamTaskID())}
+		video.Error = &dto.OpenAIVideoError{Code: code, Message: sanitizePublicTaskFailureWithSecrets(message, task.GetUpstreamTaskID(), task.PrivateData.Key)}
 	}
 	return common.Marshal(video)
 }
@@ -581,11 +592,14 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if (response.Content == nil || response.Content.VideoURL == "") && task.PrivateData.ResultURL != "" {
 		response.Content = &arkVideoContent{VideoURL: task.PrivateData.ResultURL}
 	}
+	if (response.Content == nil || response.Content.VideoURL == "") && task.Status == model.TaskStatusSuccess && a.activeProfile().requestDialect == videoRequestDialectFFLink {
+		response.Content = &arkVideoContent{VideoURL: taskcommon.BuildProxyURL(task.TaskID)}
+	}
 	if task.Status == model.TaskStatusFailure {
 		if response.Error != nil {
 			response.Error = &upstreamError{
 				Code:    response.Error.Code,
-				Message: sanitizePublicTaskFailure(response.Error.Message, task.GetUpstreamTaskID()),
+				Message: sanitizePublicTaskFailureWithSecrets(response.Error.Message, task.GetUpstreamTaskID(), task.PrivateData.Key),
 			}
 		}
 		if response.Error == nil || response.Error.Message == "" {
@@ -598,7 +612,7 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 			}
 			response.Error = &upstreamError{
 				Code:    parsed.ErrorCode,
-				Message: sanitizePublicTaskFailure(message, task.GetUpstreamTaskID()),
+				Message: sanitizePublicTaskFailureWithSecrets(message, task.GetUpstreamTaskID(), task.PrivateData.Key),
 			}
 		}
 	}
@@ -630,7 +644,7 @@ func z5APIRequestedDuration(task *model.Task) *json.Number {
 }
 
 func parsePublicTaskProjection(task *model.Task) (*parsedTask, error) {
-	allowMissingSuccessURL := task.Status == model.TaskStatusSuccess && strings.TrimSpace(task.PrivateData.ResultURL) != ""
+	allowMissingSuccessURL := task.Status == model.TaskStatusSuccess && (strings.TrimSpace(task.PrivateData.ResultURL) != "" || task.Platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFFLink)))
 	parsed, err := parseTaskProjection(task.Data, allowMissingSuccessURL)
 	if err == nil || task.Status != model.TaskStatusFailure {
 		return parsed, err

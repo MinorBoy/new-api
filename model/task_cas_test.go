@@ -210,6 +210,26 @@ func TestUpdateWithStatus_Lose(t *testing.T) {
 	assert.EqualValues(t, TaskStatusFailure, reloaded.Status) // unchanged
 }
 
+func TestTaskUpdateWithStatusesTransitionsFromAnyAllowedStateOnce(t *testing.T) {
+	truncateTables(t)
+
+	task := &Task{TaskID: "task_multi_status_cas", Status: TaskStatusQueued, Data: json.RawMessage(`{}`)}
+	insertTask(t, task)
+
+	cancelled := *task
+	cancelled.Status = TaskStatusFailure
+	cancelled.Progress = "100%"
+	won, err := cancelled.UpdateWithStatuses([]TaskStatus{TaskStatusNotStart, TaskStatusSubmitted, TaskStatusQueued})
+	require.NoError(t, err)
+	assert.True(t, won)
+
+	second := *task
+	second.Status = TaskStatusSuccess
+	won, err = second.UpdateWithStatuses([]TaskStatus{TaskStatusNotStart, TaskStatusSubmitted, TaskStatusQueued})
+	require.NoError(t, err)
+	assert.False(t, won)
+}
+
 func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 	truncateTables(t)
 

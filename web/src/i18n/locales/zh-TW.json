@@ -6123,6 +6123,6 @@
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
     "ZZone": "ZZone",
-    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone 僅支援任務介面。僅在完成真實上游契約驗收後啟用。"
+    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone 僅支援任務介面，請僅在真實上游契約驗收通過後啟用。"
   }
 }

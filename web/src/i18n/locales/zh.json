@@ -6123,6 +6123,6 @@
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
     "ZZone": "ZZone",
-    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone 仅支持任务接口。仅在完成真实上游契约验收后启用。"
+    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone 仅支持任务接口，请仅在真实上游契约验收通过后启用。"
   }
 }

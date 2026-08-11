@@ -31,7 +31,7 @@ ZZone 已按独立 task-only 渠道类型接入，渠道类型为 `212`，复用
 go test ./e2e -run 'TestZZone' -count=1
 ```
 
-结果：通过，覆盖 Ark 多模态提交、精确上游 JSON、Bearer 鉴权、无 URL 完成态、公开列表和详情、内容下载、私有字段隔离、失败退款、上游错误不重试、无副作用校验和未知状态保护。
+结果：退出码 `0`。覆盖 Ark 多模态提交、精确上游 JSON、Bearer 鉴权、无 URL 完成态、公开列表和详情、内容下载、私有字段隔离、失败退款、上游错误不重试、无副作用校验和未知状态保护。
 
 执行命令：
 
@@ -39,7 +39,7 @@ go test ./e2e -run 'TestZZone' -count=1
 go test ./e2e ./relay ./service -run 'TestZZone|TestCostAccounting|Test.*Billing|Test.*Polling' -count=1
 ```
 
-结果：通过。`e2e`、`relay`、`service` 三个包均返回 `ok`。
+结果：退出码 `0`。`e2e`、`relay`、`service` 三个包均返回 `ok`。
 
 执行命令：
 
@@ -47,7 +47,7 @@ go test ./e2e ./relay ./service -run 'TestZZone|TestCostAccounting|Test.*Billing
 go test ./constant ./relay/channel/task/newapivideo ./controller ./service -run 'TestZZone|TestSupportsGenericChannelTestRejectsDimensio|TestValidateVideoRouteTargetContract' -count=1
 ```
 
-结果：通过。渠道身份、请求转换、内容代理和配置路由契约均返回 `ok`。
+结果：退出码 `0`。渠道身份、请求转换、内容代理和配置路由契约均返回 `ok`。
 
 执行命令：
 
@@ -55,7 +55,7 @@ go test ./constant ./relay/channel/task/newapivideo ./controller ./service -run 
 go test ./e2e ./relay ./router ./service -run 'TestZZone|Test.*Seedance|Test.*Billing|Test.*Polling|TestVideo' -count=1
 ```
 
-结果：通过。`e2e`、`relay`、`router`、`service` 四个包均返回 `ok`。
+结果：退出码 `0`。`e2e`、`relay`、`router`、`service` 四个包均返回 `ok`。
 
 ## 前端和全仓验证
 
@@ -69,7 +69,7 @@ bun run typecheck
 bun run build
 ```
 
-结果：渠道测试 `9` 项通过，配置转换测试 `21` 项通过；七个 locale 的 `missingCount` 和 `extrasCount` 均为 `0`；TypeScript 检查和 Rsbuild 生产构建通过。
+结果：每条命令退出码均为 `0`。渠道测试 `9` 项通过，配置转换测试 `21` 项通过；七个 locale 的 `missingCount` 和 `extrasCount` 均为 `0`；TypeScript 检查和 Rsbuild 生产构建通过。
 
 执行命令：
 
@@ -78,17 +78,47 @@ go test ./...
 git diff --check
 ```
 
-结果：全仓 Go 测试通过，`git diff --check` 无输出。初始基线因 worktree 尚无 `web/dist` 不能编译根包；执行前端生产构建后，最终全仓测试已通过。
+结果：两条命令退出码均为 `0`。全仓 Go 测试通过，`git diff --check` 无输出。初始基线因 worktree 尚无 `web/dist` 不能编译根包；执行前端生产构建后，最终全仓测试已通过。
 
 ## 模型与敏感信息检查
 
-生产代码中没有写入文档 HTML 示例模型 `video-ds-2.0`、`video-ds-2.0-fast` 或 `as-sd2.0-fast`。ZZone 的前后端静态模型目录均为空，运行模型必须来自 `sd收录.xlsx`、配置导入或已发布快照。
+执行命令：
+
+```powershell
+rg -n 'video-ds-2\.0|video-ds-2\.0-fast|as-sd2\.0-fast' constant relay controller service web/src
+```
+
+结果：退出码 `1`，无匹配；这是负向检查的期望结果。生产代码中没有写入文档 HTML 示例模型，ZZone 的前后端静态模型目录均为空，运行模型必须来自 `sd收录.xlsx`、配置导入或已发布快照。
+
+执行命令：
+
+```powershell
+rg -n 'mock-zzone-key|Authorization: Bearer' --glob '!**/*_test.go' --glob '!docs/new-channels/cn-zzone.html'
+```
+
+结果：退出码 `0`。宽泛的 `Authorization: Bearer` 条件命中仓库既有 API 文档、示例和实现计划；`mock-zzone-key` 只命中本任务实现计划。随后对生产目录执行专项检查：
+
+```powershell
+rg -n 'mock-zzone-key' constant relay controller service web/src --glob '!**/*_test.go' --glob '!**/*.test.ts'
+```
+
+结果：退出码 `1`，无匹配；这是负向检查的期望结果。Mock Key 未进入生产文件。
+
+执行检查：
+
+```powershell
+Select-String -Path web/scripts/channel-model-template/conversion-rules.json -Pattern '"14": "CH-ZZONE"'
+```
+
+结果：退出码 `0`，在第 `17` 行找到 `"14": "CH-ZZONE"`。
 
 Mock Key `mock-zzone-key` 只存在于测试和实现计划中，未进入 `constant`、`relay`、`controller`、`service` 或 `web/src` 的生产文件。渠道 Key 不写日志、不进入公开任务响应；跨域内容重定向会移除 `Authorization`。
 
-## 未完成的真实上游验收
+## 真实上游验收
 
-由于没有真实 API Key，本次未验证以下外部事实：
+未执行。当前未提供 ZZone API Key，因此没有验证真实提交、状态枚举、内容下载、鉴权错误或限流行为。Mock 契约通过不能替代真实上游 Canary；渠道继续保持 disabled。
+
+本次未验证以下外部事实：
 
 - ZZone 生产环境的真实鉴权、限流和错误体。
 - 上游实际状态枚举及状态转换时序。

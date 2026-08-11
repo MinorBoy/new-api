@@ -327,6 +327,7 @@ func directTaskVideoURL(task directTask) string {
 		return object
 	}
 	for _, value := range []string{
+		task.ContentURL,
 		task.VideoURL,
 		task.URL,
 		task.ResultURL,

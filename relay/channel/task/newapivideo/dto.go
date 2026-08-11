@@ -125,6 +125,7 @@ type directTask struct {
 	Object      string          `json:"object"`
 	Seconds     json.RawMessage `json:"seconds"`
 	URL         string          `json:"url"`
+	ContentURL  string          `json:"content_url"`
 	VideoURL    string          `json:"video_url"`
 	ResultURL   string          `json:"result_url"`
 	Output      []struct {

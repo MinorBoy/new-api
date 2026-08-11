@@ -226,7 +226,7 @@ git commit -m "feat(mikoto): add video request dialects"
 - Modify: `relay/channel/task/newapivideo/response.go`
 - Create: `relay/channel/task/newapivideo/mikoto_response_test.go`
 
-- [ ] **Step 1: 写顶层 `content_url` 失败测试**
+- [x] **Step 1: 写顶层 `content_url` 失败测试**
 
 添加 `TestMikotoDirectTaskResponseProjection`，覆盖：
 
@@ -241,13 +241,13 @@ tests := []struct{ body, wantStatus, wantURL string }{
 
 另断言失败响应中的 Mikoto 私有任务 ID 和 API key 被替换，成功响应缺少 URL 时返回错误。
 
-- [ ] **Step 2: 运行测试并确认 `content_url` 用例失败**
+- [x] **Step 2: 运行测试并确认 `content_url` 用例失败**
 
 Run: `go test ./relay/channel/task/newapivideo -run 'TestMikotoDirectTaskResponseProjection' -count=1`
 
 Expected: FAIL，成功任务因没有识别顶层 `content_url` 而报 `has no result URL`。
 
-- [ ] **Step 3: 添加最小响应字段和 URL 优先级**
+- [x] **Step 3: 添加最小响应字段和 URL 优先级**
 
 在 `directTask` 增加：
 
@@ -268,7 +268,7 @@ for _, value := range []string{
 
 保持现有 `object`、`output`、`metadata`、`content` 和 `data` 兼容分支不变。
 
-- [ ] **Step 4: 格式化并运行响应回归测试**
+- [x] **Step 4: 格式化并运行响应回归测试**
 
 Run:
 
@@ -279,7 +279,7 @@ go test ./relay/channel/task/newapivideo -run 'TestMikoto|TestParse.*Task|TestCo
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交响应投影**
+- [x] **Step 5: 提交响应投影**
 
 ```powershell
 git add relay/channel/task/newapivideo/dto.go relay/channel/task/newapivideo/response.go relay/channel/task/newapivideo/mikoto_response_test.go

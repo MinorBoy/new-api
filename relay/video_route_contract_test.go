@@ -220,6 +220,65 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_references",
 		},
 		{
+			name: "zzone accepts documented references", channelType: constant.ChannelTypeZZone,
+			target: func() modelrouting.Target {
+				target := videoContractTargetWithMinimums("imported-zzone-model", []string{"720p"}, 1, 15,
+					[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeOmniReference},
+					modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, modelrouting.ReferenceLimits{})
+				target.Constraints.AspectRatios = []string{"16:9", "9:16", "1:1"}
+				return target
+			}(),
+		},
+		{
+			name: "zzone accepts imported text-only route", channelType: constant.ChannelTypeZZone,
+			target: videoContractTarget("imported-zzone-model", []string{"720p"}, 1, 15,
+				[]modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{}),
+		},
+		{
+			name: "zzone rejects five images", channelType: constant.ChannelTypeZZone,
+			target: videoContractTarget("imported-zzone-model", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 5, Videos: 3, Audios: 1}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "zzone rejects four videos", channelType: constant.ChannelTypeZZone,
+			target: videoContractTarget("imported-zzone-model", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 4, Videos: 4, Audios: 1}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "zzone rejects two audios", channelType: constant.ChannelTypeZZone,
+			target: videoContractTarget("imported-zzone-model", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 2}),
+			wantCode: "route_contract_references",
+		},
+		{
+			name: "zzone rejects empty upstream model", channelType: constant.ChannelTypeZZone,
+			target:   videoContractTarget("  ", []string{"720p"}, 1, 15, nil, modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_model",
+		},
+		{
+			name: "zzone rejects oversized duration", channelType: constant.ChannelTypeZZone,
+			target: videoContractTarget("imported-zzone-model", []string{"720p"}, 1, relaycommon.MaxTaskDurationSeconds+1, nil,
+				modelrouting.ReferenceLimits{}),
+			wantCode: "route_contract_duration",
+		},
+		{
+			name: "zzone rejects undocumented aspect ratio", channelType: constant.ChannelTypeZZone,
+			target: func() modelrouting.Target {
+				target := videoContractTarget("imported-zzone-model", []string{"720p"}, 1, 15, nil, modelrouting.ReferenceLimits{})
+				target.Constraints.AspectRatios = []string{"16:9", "21:9"}
+				return target
+			}(),
+			wantCode: "route_contract_ratio",
+		},
+		{
+			name: "zzone rejects minimums above limits", channelType: constant.ChannelTypeZZone,
+			target: videoContractTargetWithMinimums("imported-zzone-model", []string{"720p"}, 1, 15, nil,
+				modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}, modelrouting.ReferenceLimits{Images: 5}),
+			wantCode: "route_contract_references",
+		},
+		{
 			name: "clmm accepts imported audio capability", channelType: constant.ChannelTypeClmmMall,
 			target: videoContractTarget("op-video-720p", []string{"720p"}, 5, 15, nil, modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1}),
 		},

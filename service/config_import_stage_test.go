@@ -467,6 +467,34 @@ func TestConfigImportBindingNormalizesLegacyEightYesType(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestConfigImportBindingNormalizesLegacyZZoneType(t *testing.T) {
+	prepareConfigImportBindingDB(t)
+	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{
+		lineRef: "channel-zzone", channelRef: "CH-ZZONE", channelType: constant.ChannelTypeOpenAI,
+		models: []string{"imported-zzone-model"}, protocol: "task", providerHint: "zzone",
+	})
+	wrongChannel := &model.Channel{
+		Type: constant.ChannelTypeOpenAI, Name: "OpenAI", Models: "imported-zzone-model",
+		Group: "default", Key: "key",
+	}
+	require.NoError(t, model.DB.Create(wrongChannel).Error)
+
+	_, err := UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-zzone", Action: types.ConfigImportBindingActionBind, ChannelID: &wrongChannel.Id,
+	}})
+	require.ErrorContains(t, err, "BINDING_CHANNEL_PROTOCOL")
+
+	channel := &model.Channel{
+		Type: constant.ChannelTypeZZone, Name: "ZZone", Models: "imported-zzone-model",
+		Group: "default", Key: "key",
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+	_, err = UpdateConfigImportBindings(context.Background(), 42, batch.ID, []dto.ConfigImportBindingInput{{
+		LineRef: "channel-zzone", Action: types.ConfigImportBindingActionBind, ChannelID: &channel.Id,
+	}})
+	require.NoError(t, err)
+}
+
 func TestConfigImportBindingBindsImportedPaipuModelOutsideStaticCatalog(t *testing.T) {
 	prepareConfigImportBindingDB(t)
 	batch := createConfigImportBindingBatch(t, configImportBindingLineFixture{

@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -377,6 +378,32 @@ func TestCheckAuthoritativeCostCoverageIgnoresAbilitiesForDisabledChannels(t *te
 
 	require.NoError(t, err)
 	assert.Empty(t, results)
+}
+
+func TestCheckAuthoritativeCostCoverageIgnoresRequiredGroupWithoutRoutingPolicy(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+	require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	previousRequirements := ratio_setting.GroupRoutingRequirements2JSONString()
+	require.NoError(t, ratio_setting.UpdateGroupRoutingRequirementsByJSONString(`{"required":{"require_real_person":true}}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRoutingRequirementsByJSONString(previousRequirements))
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM routing_policies").Error)
+	})
+	require.NoError(t, model.DB.Create(&[]model.Ability{
+		{Group: "required", Model: "blocked-model", ChannelId: 7, Enabled: true},
+		{Group: "legacy", Model: "legacy-model", ChannelId: 7, Enabled: true},
+	}).Error)
+
+	results, err := CheckAuthoritativeCostCoverage()
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "legacy-model", results[0].OriginModel)
 }
 
 func TestTaskOnlyChannelCostRuleLifecycleUsesTaskAdaptorCapabilities(t *testing.T) {

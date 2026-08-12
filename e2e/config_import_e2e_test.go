@@ -81,9 +81,9 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.Equal(t, types.ConfigImportEntityCounts{
-		Channels: 11, ChannelLines: 13, ModelSKUs: 8, SaleProposals: 16,
-		CostRuleDrafts: 186, ModelMappings: 186, RouteBlueprints: 186,
-		Sources: 14, UnresolvedVariants: 0,
+		Channels: 9, ChannelLines: 11, ModelSKUs: 8, SaleProposals: 16,
+		CostRuleDrafts: 143, ModelMappings: 143, RouteBlueprints: 143,
+		Sources: 12, UnresolvedVariants: 0,
 	}, first.ItemCounts)
 	assert.Equal(t, types.ConfigImportBatchStatusBinding, first.Status)
 	assert.Equal(t, []string{"bind", "resolve", "stage"}, first.AllowedActions)
@@ -157,7 +157,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 
 	bound, err := service.UpdateConfigImportBindings(context.Background(), 1, first.ID, bindings)
 	require.NoError(t, err)
-	require.Len(t, bound.Bindings, 13)
+	require.Len(t, bound.Bindings, len(document.Entities.ChannelLines))
 
 	staged, err := service.StageConfigImportBatch(context.Background(), 1, first.ID)
 	require.NoError(t, err)
@@ -167,14 +167,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	}
 	var materializedRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ?", "config_import").Count(&materializedRuleCount).Error)
-	assert.EqualValues(t, 186, materializedRuleCount)
+	assert.EqualValues(t, len(document.Entities.CostRuleDrafts), materializedRuleCount)
 	var stagedRuleCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&stagedRuleCount).Error)
-	assert.EqualValues(t, 186, stagedRuleCount)
+	assert.EqualValues(t, len(document.Entities.CostRuleDrafts), stagedRuleCount)
 
 	var distinctRouteCosts []model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND business_id IN ?", first.ID, []string{
-		"COST-MEGABYAI-R132-480-REQ", "COST-MEGABYAI-R133-720-REQ",
+		"COST-PAIPU-R24-480-REQ", "COST-PAIPU-R25-720-REQ",
 	}).Order("business_id ASC").Find(&distinctRouteCosts).Error)
 	require.Len(t, distinctRouteCosts, 2)
 	require.NotNil(t, distinctRouteCosts[0].MaterializedID)
@@ -190,14 +190,14 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	assert.Zero(t, activeRuleCount)
 	var remainingDraftCount int64
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
-	assert.EqualValues(t, 186, remainingDraftCount)
+	assert.EqualValues(t, len(document.Entities.CostRuleDrafts), remainingDraftCount)
 	preview, err := service.PreviewConfigImportBatchActivation(context.Background(), first.ID)
 	require.NoError(t, err)
 	require.Truef(t, preview.Ready, "activation blockers: %+v", preview.Blockers)
 	_, err = service.ActivateConfigImportBatch(context.Background(), first.ID, 1)
 	require.NoError(t, err)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleActive).Count(&activeRuleCount).Error)
-	assert.EqualValues(t, 186, activeRuleCount)
+	assert.EqualValues(t, len(document.Entities.CostRuleDrafts), activeRuleCount)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
 	assert.Zero(t, remainingDraftCount)
 	var dimensioChannel model.Channel

@@ -277,11 +277,15 @@ func recordPostActivationCostCoverage(ctx context.Context, batchID int64, refres
 			affectedChannels[channelID] = struct{}{}
 		}
 	}
-	uncovered := 0
+	uncoveredByChannel := make(map[int]int)
 	for _, item := range coverage {
-		if _, affected := affectedChannels[item.ChannelID]; affected && !item.Covered {
-			uncovered++
+		if !item.Covered {
+			uncoveredByChannel[item.ChannelID]++
 		}
+	}
+	uncovered := 0
+	for channelID := range affectedChannels {
+		uncovered += uncoveredByChannel[channelID]
 	}
 	now := common.GetTimestamp()
 	var issue model.ConfigImportIssue
@@ -289,30 +293,66 @@ func recordPostActivationCostCoverage(ctx context.Context, batchID int64, refres
 		Where("batch_id = ? AND code = ?", batchID, "COST_COVERAGE_INCOMPLETE").
 		First(&issue).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if uncovered == 0 {
-			return nil
+		if uncovered > 0 {
+			if err := model.DB.WithContext(ctx).Create(&model.ConfigImportIssue{
+				BatchID: batchID, Severity: string(types.ConfigImportIssueSeverityWarning),
+				Code: "COST_COVERAGE_INCOMPLETE", EntityType: "cost_accounting",
+				Message:          fmt.Sprintf("Published configuration has %d uncovered enabled channel model mappings.", uncovered),
+				Suggestion:       "Add an active compatible cost rule or disable the corresponding channel/model mapping.",
+				ResolutionStatus: "open", CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				return err
+			}
 		}
-		return model.DB.WithContext(ctx).Create(&model.ConfigImportIssue{
-			BatchID: batchID, Severity: string(types.ConfigImportIssueSeverityWarning),
-			Code: "COST_COVERAGE_INCOMPLETE", EntityType: "cost_accounting",
-			Message:          fmt.Sprintf("Published configuration has %d uncovered enabled channel model mappings.", uncovered),
-			Suggestion:       "Add an active compatible cost rule or disable the corresponding channel/model mapping.",
-			ResolutionStatus: "open", CreatedAt: now, UpdatedAt: now,
-		}).Error
+	} else if err != nil {
+		return err
+	} else {
+		message := "Authoritative cost coverage is complete after publish."
+		status := "resolved"
+		if uncovered > 0 {
+			message = fmt.Sprintf("Published configuration has %d uncovered enabled channel model mappings.", uncovered)
+			status = "open"
+		}
+		if err := model.DB.WithContext(ctx).Model(&issue).Updates(map[string]any{
+			"severity": string(types.ConfigImportIssueSeverityWarning),
+			"message":  message, "resolution_status": status, "updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
 	}
-	if err != nil {
+
+	var historicalIssues []model.ConfigImportIssue
+	if err := model.DB.WithContext(ctx).
+		Where("batch_id <> ? AND code = ? AND resolution_status = ?", batchID, "COST_COVERAGE_INCOMPLETE", "open").
+		Order("id ASC").Find(&historicalIssues).Error; err != nil {
 		return err
 	}
-	message := "Authoritative cost coverage is complete after publish."
-	status := "resolved"
-	if uncovered > 0 {
-		message = fmt.Sprintf("Published configuration has %d uncovered enabled channel model mappings.", uncovered)
-		status = "open"
+	for _, historical := range historicalIssues {
+		var bindings []model.ConfigImportBinding
+		if err := model.DB.WithContext(ctx).
+			Where("batch_id = ? AND channel_id IS NOT NULL AND action <> ?", historical.BatchID, types.ConfigImportBindingActionSkip).
+			Order("channel_id ASC").Find(&bindings).Error; err != nil {
+			return err
+		}
+		if len(bindings) == 0 {
+			continue
+		}
+		historicalUncovered := 0
+		for _, binding := range bindings {
+			if binding.ChannelID != nil {
+				historicalUncovered += uncoveredByChannel[*binding.ChannelID]
+			}
+		}
+		if historicalUncovered != 0 {
+			continue
+		}
+		if err := model.DB.WithContext(ctx).Model(&historical).Updates(map[string]any{
+			"message": "Authoritative cost coverage is complete after publish.", "resolution_status": "resolved", "updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
 	}
-	return model.DB.WithContext(ctx).Model(&issue).Updates(map[string]any{
-		"severity": string(types.ConfigImportIssueSeverityWarning),
-		"message":  message, "resolution_status": status, "updated_at": now,
-	}).Error
+	return nil
 }
 
 func markConfigImportPublishFailed(ctx context.Context, batchID int64, publishErr error) error {

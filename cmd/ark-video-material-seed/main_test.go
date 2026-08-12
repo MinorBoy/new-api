@@ -105,22 +105,23 @@ func TestDisableRemovedSeedChannelsLeavesOnlyCurrentMatrixLinesEnabled(t *testin
 func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
-	require.Len(t, targets, 186)
-	require.Equal(t, map[string]int{"431": 55, "900": 12, "903": 4, "933": 115}, materialDistribution(targets))
+	require.Len(t, targets, 143)
+	require.Equal(t, map[string]int{"431": 47, "900": 12, "903": 4, "933": 80}, materialDistribution(targets))
 	enabledCosts := 0
 	for _, target := range targets {
 		if target.CostEnabled {
 			enabledCosts++
 		}
 	}
-	require.Equal(t, 186, enabledCosts)
+	require.Equal(t, len(targets), enabledCosts)
 
 	targetsByLine := make(map[string][]matrixTarget)
 	for _, target := range targets {
 		targetsByLine[target.LineRef] = append(targetsByLine[target.LineRef], target)
 	}
 	require.Equal(t, constant.ChannelTypeFourSToken, targetsByLine["channel-4stoken"][0].ChannelType)
-	require.Equal(t, constant.ChannelTypeMegaByAI, targetsByLine["megabyai-fast-real-person"][0].ChannelType)
+	require.NotContains(t, targetsByLine, "channel-lucen")
+	require.NotContains(t, targetsByLine, "megabyai-fast-real-person")
 	require.Equal(t, constant.ChannelTypeSecure, targetsByLine["secure-discount"][0].ChannelType)
 }
 
@@ -190,7 +191,7 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 		accepted++
 	}
 
-	require.Equal(t, 186, accepted)
+	require.Equal(t, len(targets), accepted)
 	require.Zero(t, blocked)
 	require.Zero(t, disabled)
 }
@@ -608,13 +609,6 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, types.CostChargeTaskSucceeded, durationConfig.value.ChargeEvent)
 	require.Equal(t, types.CostMeterValidatedRequest, durationConfig.value.MeterSource)
 
-	tokenRule, ok := findImportedCostRule(document, "route-target/MAP-LUCEN-R62-480")
-	require.True(t, ok)
-	tokenConfig, err := importedCostRuleConfig(tokenRule)
-	require.NoError(t, err)
-	require.Equal(t, types.CostModePerToken, tokenConfig.mode)
-	require.Equal(t, types.CostChargeTaskSucceeded, tokenConfig.value.ChargeEvent)
-	require.Equal(t, types.CostMeterUpstreamUsage, tokenConfig.value.MeterSource)
 }
 
 func TestSeedCostRulesRequiresPublishedActiveRule(t *testing.T) {

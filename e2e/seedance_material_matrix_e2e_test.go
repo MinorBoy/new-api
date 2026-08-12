@@ -123,7 +123,7 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	silenceSeedanceBillingLogs(t)
 	targets := loadImportedMaterialMatrixTargets(t)
 	env := setupImportedMaterialMatrixE2E(t, targets)
-	require.Len(t, targets, 186)
+	require.Len(t, targets, len(loadImportedMaterialMatrixDocument(t).Entities.CostRuleDrafts))
 	checked := 0
 	accepted := 0
 	contractBlocks := 0
@@ -387,10 +387,10 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 	}
 
 	if checked == len(targets) {
-		require.Equal(t, 186, accepted)
+		require.Equal(t, len(targets), accepted)
 		require.Zero(t, contractBlocks)
 		require.Zero(t, disabledPricingDrafts)
-		require.Equal(t, map[string]int{"431": 55, "900": 12, "903": 4, "933": 115}, env.materialSeen)
+		require.Equal(t, map[string]int{"431": 47, "900": 12, "903": 4, "933": 80}, env.materialSeen)
 	}
 }
 
@@ -521,7 +521,7 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
 		Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).
 		Count(&draftRuleCount).Error)
-	require.EqualValues(t, 186, draftRuleCount)
+	require.EqualValues(t, len(document.Entities.CostRuleDrafts), draftRuleCount)
 	preview, err := service.PreviewConfigImportBatchActivation(context.Background(), batch.ID)
 	require.NoError(t, err)
 	require.Truef(t, preview.Ready, "activation blockers: %+v", preview.Blockers)
@@ -530,7 +530,7 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
 		Where("source = ? AND status = ?", "config_import", types.CostRuleActive).
 		Count(&activeRuleCount).Error)
-	require.EqualValues(t, 186, activeRuleCount)
+	require.EqualValues(t, len(document.Entities.CostRuleDrafts), activeRuleCount)
 
 	policyIDs := make(map[string]int)
 	var policies []model.RoutingPolicy

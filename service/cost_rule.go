@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -569,7 +570,13 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 	results := make([]CostCoverageResult, 0, len(abilities)+len(activeRules))
 	seen := make(map[costCoverageKey]struct{}, len(abilities))
 	for _, ability := range abilities {
-		if _, ok := capabilityPolicies[capabilityPolicyKey{groupName: ability.Group, model: ability.Model}]; ok {
+		policyKey := capabilityPolicyKey{groupName: ability.Group, model: ability.Model}
+		_, hasCapabilityPolicy := capabilityPolicies[policyKey]
+		profile := ratio_setting.GetGroupRoutingRequirements(ability.Group)
+		if profile.IsDynamic() || profile.EffectiveRealPersonMode() == ratio_setting.GroupRealPersonRequired && !hasCapabilityPolicy {
+			continue
+		}
+		if hasCapabilityPolicy {
 			continue
 		}
 		channel, err := model.GetChannelById(ability.ChannelId, false)

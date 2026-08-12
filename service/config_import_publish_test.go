@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
@@ -160,6 +161,76 @@ func TestPublishConfigImportBatchDoesNotRecordPostActivationCostCoverage(t *test
 	require.NoError(t, model.DB.Model(&model.ConfigImportIssue{}).
 		Where("batch_id = ? AND code = ?", batch.ID, "COST_COVERAGE_INCOMPLETE").Count(&issueCount).Error)
 	assert.Zero(t, issueCount)
+}
+
+func TestRecordPostActivationCostCoverageResolvesHistoricalIssuesWhoseBoundChannelsAreCovered(t *testing.T) {
+	prepareConfigImportServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelModelCostRule{}))
+	coveredChannel := &model.Channel{
+		Type: 1, Name: "covered", Group: "default", Status: common.ChannelStatusEnabled,
+		Models: "covered-model", Key: "covered-key",
+	}
+	uncoveredChannel := &model.Channel{
+		Type: 1, Name: "uncovered", Group: "default", Status: common.ChannelStatusEnabled,
+		Models: "uncovered-model", Key: "uncovered-key",
+	}
+	require.NoError(t, model.DB.Create(coveredChannel).Error)
+	require.NoError(t, model.DB.Create(uncoveredChannel).Error)
+	require.NoError(t, coveredChannel.UpdateAbilities(model.DB))
+	require.NoError(t, uncoveredChannel.UpdateAbilities(model.DB))
+	createHistoricalCoverageIssue := func(channelID int, batchPayload string) model.ConfigImportIssue {
+		batch := model.ConfigImportBatch{
+			SchemaVersion: 1, TemplateVersion: "v1", SourceSHA256: strings.Repeat("a", 64),
+			PayloadSHA256: batchPayload, Status: string(types.ConfigImportBatchStatusPublished),
+			CreatedBy: 42, SummaryJSON: "{}", BaselineJSON: "{}",
+		}
+		require.NoError(t, model.DB.Create(&batch).Error)
+		confirmedAt := int64(1)
+		require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+			BatchID: batch.ID, LineRef: fmt.Sprintf("line-%d", channelID), Action: string(types.ConfigImportBindingActionBind),
+			ChannelID: &channelID, CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+		}).Error)
+		issue := model.ConfigImportIssue{
+			BatchID: batch.ID, Severity: string(types.ConfigImportIssueSeverityWarning), Code: "COST_COVERAGE_INCOMPLETE",
+			Message: "Published configuration has uncovered enabled channel model mappings.", ResolutionStatus: "open",
+		}
+		require.NoError(t, model.DB.Create(&issue).Error)
+		return issue
+	}
+	coveredIssue := createHistoricalCoverageIssue(coveredChannel.Id, strings.Repeat("b", 64))
+	uncoveredIssue := createHistoricalCoverageIssue(uncoveredChannel.Id, strings.Repeat("c", 64))
+	currentBatch := model.ConfigImportBatch{
+		SchemaVersion: 1, TemplateVersion: "v1", SourceSHA256: strings.Repeat("d", 64),
+		PayloadSHA256: strings.Repeat("e", 64), Status: string(types.ConfigImportBatchStatusPublished),
+		CreatedBy: 42, SummaryJSON: "{}", BaselineJSON: "{}",
+	}
+	require.NoError(t, model.DB.Create(&currentBatch).Error)
+	confirmedAt := int64(1)
+	require.NoError(t, model.DB.Create(&model.ConfigImportBinding{
+		BatchID: currentBatch.ID, LineRef: "line-current", Action: string(types.ConfigImportBindingActionBind),
+		ChannelID: &coveredChannel.Id, CredentialsConfirmedBy: 42, CredentialsConfirmedAt: &confirmedAt,
+	}).Error)
+	config, err := NormalizeCostRuleConfig(types.CostModePerRequest, validPerRequestCostConfig())
+	require.NoError(t, err)
+	configJSON, err := common.Marshal(config)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: coveredChannel.Id, BillableUpstreamModel: "covered-model", CostVariantKey: "default", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
+		ConfigJSON: string(configJSON),
+	}).Error)
+	InvalidateCostCoverage(0, "", "")
+	previousLookup := CostCapabilityLookup
+	CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities { return completeCostCapabilities() }
+	t.Cleanup(func() { CostCapabilityLookup = previousLookup })
+
+	require.NoError(t, recordPostActivationCostCoverage(context.Background(), currentBatch.ID, ConfigImportRefreshKeys{ChannelIDs: []int{coveredChannel.Id}}))
+
+	require.NoError(t, model.DB.First(&coveredIssue, coveredIssue.ID).Error)
+	assert.Equal(t, "resolved", coveredIssue.ResolutionStatus)
+	assert.Equal(t, "Authoritative cost coverage is complete after publish.", coveredIssue.Message)
+	require.NoError(t, model.DB.First(&uncoveredIssue, uncoveredIssue.ID).Error)
+	assert.Equal(t, "open", uncoveredIssue.ResolutionStatus)
 }
 
 func TestPublishConfigImportBatchDoesNotReplaceBoundChannelModelSnapshot(t *testing.T) {

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { Check, ChevronsUpDown, X } from 'lucide-react'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -40,6 +40,7 @@ interface ComboboxInputProps {
   ariaLabel?: string
   allowCustomValue?: boolean
   openOnFocus?: boolean
+  showClear?: boolean
   onCompositionStart?: React.CompositionEventHandler<HTMLInputElement>
   onCompositionEnd?: React.CompositionEventHandler<HTMLInputElement>
 }
@@ -57,6 +58,7 @@ export function ComboboxInput({
   openOnFocus = true,
   onCompositionStart,
   onCompositionEnd,
+  showClear = false,
 }: ComboboxInputProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -163,6 +165,9 @@ export function ComboboxInput({
   const showDropdown =
     open &&
     (filteredOptions.length > 0 || (allowCustomValue && searchValue.trim()))
+  const clearLabel = ariaLabel
+    ? `${t('Clear selection')}: ${ariaLabel}`
+    : t('Clear selection')
 
   return (
     <div ref={containerRef} className='relative'>
@@ -202,9 +207,26 @@ export function ComboboxInput({
         onKeyDown={handleKeyDown}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
-        className={cn('pr-9', className)}
+        className={cn(showClear && value ? 'pr-16' : 'pr-9', className)}
       />
       <ChevronsUpDown className='pointer-events-none absolute top-1/2 right-3 size-4 shrink-0 -translate-y-1/2 opacity-50' />
+      {showClear && value && (
+        <button
+          type='button'
+          aria-label={clearLabel}
+          title={clearLabel}
+          className='text-muted-foreground hover:text-foreground absolute top-1/2 right-8 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm'
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            onValueChange('')
+            setSearchValue('')
+            setOpen(false)
+            inputRef.current?.focus()
+          }}
+        >
+          <X className='size-3.5' aria-hidden='true' />
+        </button>
+      )}
 
       {showDropdown && (
         <div className='bg-popover text-popover-foreground absolute top-full z-100 mt-1 w-full rounded-md border shadow-md'>

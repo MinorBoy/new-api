@@ -108,15 +108,15 @@ go test ./service ./controller ./router -run 'CostReport|CostAccounting'
 - Create: `web/src/features/cost-accounting/hooks/use-profit-filter-options.ts`
 - Create: `web/src/features/cost-accounting/hooks/__tests__/use-profit-filter-options.test.ts`
 
-- [ ] **Step 1: 添加候选类型和 API 测试**
+- [x] **Step 1: 添加候选类型和 API 测试**
 
 定义 `CostReportFilterOptions`、`CostReportFilterChannel` 和 `getCostReportFilterOptions(params)`，测试 API 使用 `/api/cost-accounting/reports/filter-options` 并将 `CostReportParams` 原样作为 query 参数传递。由于现有前端测试通过直接替换 `api.get` 验证请求，本任务使用同一方式，不引入新的 mock 框架。
 
-- [ ] **Step 2: 编写 hook 候选映射测试**
+- [x] **Step 2: 编写 hook 候选映射测试**
 
 使用最小 QueryClient fixture，mock API 返回重复、空值和无序候选，断言 hook 输出：渠道选项为 `{ value: '7', label: '7 - Primary' }`，其它选项 value/label 相同，空值被过滤，结果稳定排序。
 
-- [ ] **Step 3: 运行前端测试确认失败**
+- [x] **Step 3: 运行前端测试确认失败**
 
 运行：
 
@@ -134,15 +134,15 @@ bun test src/features/cost-accounting/hooks/__tests__/use-profit-filter-options.
 - Modify: `web/src/features/cost-accounting/api.ts`
 - Create: `web/src/features/cost-accounting/hooks/use-profit-filter-options.ts`
 
-- [ ] **Step 1: 增加 API 类型和查询函数**
+- [x] **Step 1: 增加 API 类型和查询函数**
 
 实现候选接口类型、`costAccountingQueryKeys.reportFilterOptions(params)` 和 `getCostReportFilterOptions`，沿用成本核算 API 的 `CostAccountingApiResponse<T>` 包装。
 
-- [ ] **Step 2: 实现 hook**
+- [x] **Step 2: 实现 hook**
 
 `useProfitFilterOptions(search)` 将 `costReportParamsFromSearch(search)` 作为查询参数和 query key；使用 `useQuery`、30 秒 stale time；将返回数据转换为五组 `LogFilterOption` 兼容的 `{value,label}`，并对当前已提交值追加一个缺失的选项以保持显示。
 
-- [ ] **Step 3: 运行 hook 测试确认通过**
+- [x] **Step 3: 运行 hook 测试确认通过**
 
 运行 Task 3 命令，预期 PASS。
 
@@ -152,11 +152,11 @@ bun test src/features/cost-accounting/hooks/__tests__/use-profit-filter-options.
 - Modify: `web/src/features/cost-accounting/components/profit-filters.tsx`
 - Create: `web/src/features/cost-accounting/components/__tests__/profit-filters.test.tsx`
 
-- [ ] **Step 1: 编写交互回归测试**
+- [x] **Step 1: 编写交互回归测试**
 
 挂载 `ProfitFilters` 并传入候选选项，断言五个字段具备对应 label、`aria-expanded` 和可输入行为；选择渠道标签后 draft 值为 ID；自由输入候选外模型；清除字段；点击应用前 `onChange` 未调用，点击后一次性提交所有值。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 运行：
 
@@ -167,11 +167,11 @@ bun test src/features/cost-accounting/components/__tests__/profit-filters.test.t
 
 预期：当前 `Input` 不满足组合框行为，测试失败。
 
-- [ ] **Step 3: 实现统一可编辑筛选字段**
+- [x] **Step 3: 实现统一可编辑筛选字段**
 
 引入 `Combobox` 和 `CompositionEvent`，新增 `ComboboxFilter` 组件。五个字段设置 `allowCustomValue`、`openOnFocus`、`showClear`、候选 options 与受控 draft value；IME 期间只更新 draft，不触发应用。保留日期和两个普通 `Select`。
 
-- [ ] **Step 4: 运行组件测试确认通过**
+- [x] **Step 4: 运行组件测试确认通过**
 
 运行 Task 5 命令，预期 PASS。
 
@@ -182,15 +182,15 @@ bun test src/features/cost-accounting/components/__tests__/profit-filters.test.t
 - Modify: `web/src/features/cost-accounting/components/profit-filters.tsx`
 - Modify: `web/src/features/cost-accounting/components/__tests__/profit-report.test.tsx`
 
-- [ ] **Step 1: 在利润页面加载候选 hook**
+- [x] **Step 1: 在利润页面加载候选 hook**
 
 仅在 `tab === 'profit'` 时启用 `useProfitFilterOptions(search)`，将五组 options 传入 `ProfitFilters`；候选请求失败时保持空 options，报表查询不受影响。
 
-- [ ] **Step 2: 增加页面查询参数回归断言**
+- [x] **Step 2: 增加页面查询参数回归断言**
 
 扩展利润页面测试，断言候选请求包含已提交时间范围和其它筛选，且草稿输入不会立即改变报表 query 参数。
 
-- [ ] **Step 3: 运行前端检查**
+- [x] **Step 3: 运行前端检查**
 
 ```powershell
 cd web
@@ -202,7 +202,7 @@ bun run build
 
 预期：测试、类型检查、相关 lint 和生产构建均通过。
 
-- [ ] **Step 4: 检查工作树并提交实现**
+- [x] **Step 4: 检查工作树并提交实现**
 
 运行 `git diff --check` 和 `git status --short`，确认只包含本功能相关文件后提交：
 

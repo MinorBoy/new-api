@@ -19,6 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import test, { after, beforeEach } from 'node:test'
 
+// @ts-expect-error Bun supplies mock.module at test runtime, but the frontend
+// typecheck intentionally only includes Node's test declarations.
+import { mock } from 'bun:test'
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Window } from 'happy-dom'
 import { createInstance } from 'i18next'
 import { act } from 'react'
@@ -34,6 +39,7 @@ import {
   formatMarginBPSPercent,
   marginPercentInputToBPS,
 } from '@/lib/margin-bps'
+import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -73,6 +79,38 @@ const previousBrowserGlobals = Object.fromEntries(
 )
 Object.assign(globalThis as Record<string, unknown>, browserGlobals)
 
+const pageSearch = {
+  current: {
+    tab: 'profit' as const,
+    timeBasis: 'requested_at' as const,
+    startTime: 100,
+    endTime: 200,
+    channelId: 7,
+    billableModel: 'vendor-model',
+    originModel: 'client-model',
+    userGroup: 'default',
+    usingGroup: 'premium',
+  },
+}
+const pageNavigations: Array<Record<string, unknown>> = []
+
+mock.module('@tanstack/react-router', () => ({
+  createFileRoute: () => (config: Record<string, unknown>) => config,
+  getRouteApi: () => ({
+    useSearch: () => pageSearch.current,
+    useNavigate: () => (options: { search: Record<string, unknown> }) => {
+      pageNavigations.push(options.search)
+    },
+  }),
+  useNavigate: () => () => {},
+  useBlocker: () => ({ status: 'idle', proceed: () => {}, reset: () => {} }),
+  useRouterState: () => ({ location: { pathname: '/cost-accounting' } }),
+  Link: (props: { children?: React.ReactNode }) => props.children ?? null,
+  Outlet: () => null,
+  redirect: (options: Record<string, unknown>) => new Error(String(options.to)),
+  useLocation: () => ({ pathname: '/cost-accounting' }),
+}))
+
 after(() => {
   for (const key of Object.keys(browserGlobals)) {
     const previousDescriptor = previousBrowserGlobals[key]
@@ -92,11 +130,13 @@ beforeEach(() => {
     username: 'super-admin',
     role: ROLE.SUPER_ADMIN,
   })
+  pageNavigations.length = 0
 })
 
 const { createRoot } = await import('react-dom/client')
 const { ProfitSummary } = await import('../profit-summary')
 const { ProfitTable } = await import('../profit-table')
+const { CostAccounting } = await import('../../index')
 const { costReportParamsFromSearch, canEnableStrictCostAccounting } =
   await import('../../lib/report')
 const { filterNavGroupsByAccess } = await import('@/hooks/use-sidebar-view')
@@ -150,6 +190,111 @@ async function unmount(mounted: { root: Root; container: { remove(): void } }) {
   await act(async () => mounted.root.unmount())
   mounted.container.remove()
 }
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    browserWindow.HTMLInputElement.prototype,
+    'value'
+  )?.set
+  assert.ok(valueSetter)
+  valueSetter.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+test('keeps report requests on committed URL filters until draft filters are applied', async () => {
+  const originalGet = api.get
+  const reportRequests: Array<{
+    url: string
+    params?: Record<string, unknown>
+  }> = []
+  api.get = (async (
+    url: string,
+    config?: { params?: Record<string, unknown> }
+  ) => {
+    if (url.includes('/reports/')) {
+      reportRequests.push({ url, params: config?.params })
+    }
+    let data: unknown = []
+    if (url.endsWith('/settings')) {
+      data = { mode: 'disabled', minimum_expected_margin_bps: 0 }
+    } else if (url.endsWith('/reports/summary')) {
+      data = summary
+    } else if (url.endsWith('/reports/breakdown')) {
+      data = [breakdown]
+    } else if (url.endsWith('/reports/filter-options')) {
+      data = {
+        channels: [{ id: 7, name: 'Primary OpenAI' }],
+        billable_upstream_models: ['vendor-model'],
+        origin_models: ['client-model'],
+        user_groups: ['default'],
+        using_groups: ['premium'],
+      }
+    }
+    return { data: { success: true, message: '', data } }
+  }) as typeof api.get
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+
+  let mounted: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    mounted = await mount(
+      <QueryClientProvider client={queryClient}>
+        <CostAccounting />
+      </QueryClientProvider>
+    )
+    await act(async () => {
+      await Promise.all(
+        queryClient
+          .getQueryCache()
+          .getAll()
+          .map((query) => query.promise?.catch(() => {}))
+      )
+    })
+
+    const committedParams = {
+      time_basis: 'requested_at',
+      start_time: 100,
+      end_time: 200,
+      channel_id: 7,
+      billable_upstream_model: 'vendor-model',
+      origin_model: 'client-model',
+      user_group: 'default',
+      using_group: 'premium',
+      billing_source: undefined,
+      status: undefined,
+    }
+    assert.deepEqual(
+      reportRequests.map((request) => request.params),
+      [committedParams, committedParams, committedParams]
+    )
+
+    const billableModel = browserWindow.document.querySelector(
+      '#profit-billable-model'
+    )
+    assert.ok(billableModel instanceof browserWindow.HTMLInputElement)
+    await act(async () =>
+      setInputValue(
+        billableModel as unknown as HTMLInputElement,
+        'draft-model'
+      )
+    )
+    assert.equal(reportRequests.length, 3)
+    assert.equal(pageNavigations.length, 0)
+
+    const applyButton = [...browserWindow.document.querySelectorAll('button')]
+      .map((button) => button as unknown as HTMLButtonElement)
+      .find((button) => button.textContent?.includes('Apply filters'))
+    assert.ok(applyButton)
+    await act(async () => applyButton.click())
+    assert.equal(pageNavigations.length, 1)
+    assert.equal(pageNavigations[0]?.billableModel, 'draft-model')
+  } finally {
+    api.get = originalGet
+    queryClient.clear()
+    if (mounted) await unmount(mounted)
+  }
+})
 
 test('renders exact billed profit totals and attributed channel rows', async () => {
   const mounted = await mount(

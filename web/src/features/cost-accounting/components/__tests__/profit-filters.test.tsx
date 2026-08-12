@@ -151,6 +151,34 @@ test('renders each editable profit filter as a searchable combobox', async () =>
   }
 })
 
+test('renders and selects candidates for every editable profit filter', async () => {
+  const mounted = await mount()
+  try {
+    for (const [id, label] of [
+      ['profit-channel-id', '7 - Primary supplier'],
+      ['profit-billable-model', 'vendor-model'],
+      ['profit-origin-model', 'client-model'],
+      ['profit-user-group', 'default'],
+      ['profit-using-group', 'premium'],
+    ]) {
+      const input = mounted.container.querySelector<HTMLInputElement>(`#${id}`)
+      assert.ok(input)
+      await act(async () => input.focus())
+      const option = [
+        ...mounted.container.querySelectorAll<HTMLElement>('[role="option"]'),
+      ].find((item) => item.textContent?.includes(label))
+      assert.ok(option)
+      await act(async () => {
+        option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      })
+      assert.equal(input.value, label)
+    }
+  } finally {
+    await act(async () => mounted.root.unmount())
+    mounted.container.remove()
+  }
+})
+
 test('keeps a free-text draft until the user applies profit filters', async () => {
   const updates: CostAccountingSearch[] = []
   const mounted = await mount({ tab: 'profit' }, (next) => updates.push(next))
@@ -215,10 +243,12 @@ test('clears only the draft value and keeps the URL unchanged until apply', asyn
       '#profit-origin-model'
     )
     assert.ok(originModel)
-    await act(async () => {
-      originModel.focus()
-      setInputValue(originModel, '')
-    })
+    const clearButton = mounted.container.querySelector<HTMLButtonElement>(
+      '[aria-label="Clear selection: Origin model"]'
+    )
+    assert.ok(clearButton)
+    await act(async () => clearButton.click())
+    assert.equal(originModel.value, '')
     assert.equal(updates.length, 0)
 
     const applyButton = findButton(mounted.container, 'Apply filters')

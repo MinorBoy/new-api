@@ -326,6 +326,7 @@ function ComboboxFilter(props: {
         }}
         allowCustomValue
         openOnFocus
+        showClear
         className='w-full'
       />
     </Field>

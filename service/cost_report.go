@@ -489,8 +489,9 @@ func ListCostReportFilterOptions(filter CostReportFilter) (CostReportFilterOptio
 	billableSet := map[string]struct{}{}
 	for _, row := range attemptRows {
 		if row.ChannelID > 0 {
-			if _, exists := channelByID[row.ChannelID]; !exists && strings.TrimSpace(row.ChannelName) != "" {
-				channelByID[row.ChannelID] = strings.TrimSpace(row.ChannelName)
+			name := strings.TrimSpace(row.ChannelName)
+			if existing, exists := channelByID[row.ChannelID]; !exists || existing == "" {
+				channelByID[row.ChannelID] = name
 			}
 		}
 	}
@@ -524,7 +525,8 @@ func ListCostReportFilterOptions(filter CostReportFilter) (CostReportFilterOptio
 			return options, err
 		}
 		query = applyCostReportAttemptSelectionToRequestQuery(query, filter, candidate.ignore)
-		rows, err := query.Select("requests." + candidate.name).Order("requests." + candidate.name + " ASC").Rows()
+		column := "requests." + candidate.name
+		rows, err := query.Select("COALESCE(" + column + ", '') AS " + candidate.name).Order(column + " ASC").Rows()
 		if err != nil {
 			return options, err
 		}
@@ -561,7 +563,7 @@ func costReportAttemptFilterRows(filter CostReportFilter, ignored string) ([]cos
 		return nil, err
 	}
 	query := model.DB.Table("cost_accounting_attempts AS attempts").
-		Select("attempts.channel_id, attempts.channel_name, attempts.billable_upstream_model").
+		Select("attempts.channel_id, COALESCE(attempts.channel_name, '') AS channel_name, COALESCE(attempts.billable_upstream_model, '') AS billable_upstream_model").
 		Joins("JOIN cost_accounting_requests AS requests ON requests.id = attempts.cost_request_id")
 	query = applyCostReportRequestQuery(query, requestQuery)
 	if ignored != "channel_id" && filter.ChannelID > 0 {

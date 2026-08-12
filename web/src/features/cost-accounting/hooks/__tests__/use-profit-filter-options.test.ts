@@ -284,3 +284,62 @@ test('loads options from committed search with a thirty-second stale time', asyn
     queryClient.clear()
   }
 })
+
+test('preserves committed values when the filter-options request fails', async () => {
+  const originalGet = api.get
+  api.get = (async () => {
+    throw new Error('candidate request failed')
+  }) as typeof api.get
+  let renderedOptions: ReturnType<typeof useProfitFilterOptions> | undefined
+
+  function Probe() {
+    renderedOptions = useProfitFilterOptions(
+      {
+        tab: 'profit',
+        channelId: 7,
+        billableModel: 'vendor-model',
+        originModel: 'client-model',
+        userGroup: 'default',
+        usingGroup: 'premium',
+      },
+      true
+    )
+    return null
+  }
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const container = browserWindow.document.createElement('div')
+  browserWindow.document.body.append(container)
+  const root = createRoot(container as unknown as Container)
+
+  try {
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          createElement(Probe)
+        )
+      )
+    })
+    await act(async () => {
+      const queryPromise = queryClient.getQueryCache().getAll()[0]?.promise
+      if (queryPromise) await queryPromise.catch(() => {})
+    })
+
+    assert.deepEqual(renderedOptions, {
+      channels: [{ value: '7', label: '7' }],
+      billableModels: [{ value: 'vendor-model', label: 'vendor-model' }],
+      originModels: [{ value: 'client-model', label: 'client-model' }],
+      userGroups: [{ value: 'default', label: 'default' }],
+      usingGroups: [{ value: 'premium', label: 'premium' }],
+    })
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+    queryClient.clear()
+    api.get = originalGet
+  }
+})

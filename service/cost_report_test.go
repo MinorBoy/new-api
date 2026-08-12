@@ -165,10 +165,16 @@ func TestCostReportFilterOptionsRespectFiltersAndReturnStableCandidates(t *testi
 		BillingSource: "wallet", ProfitStatus: string(types.CostProfitComplete), RequestedAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, model.DB.Create(&request2).Error)
+	duplicateRequest := model.CostAccountingRequest{
+		RequestID: "filter-options-duplicate", OriginModelName: "client-model", UserGroup: "group-a", UsingGroup: "using-a",
+		BillingSource: "wallet", ProfitStatus: string(types.CostProfitComplete), RequestedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, model.DB.Create(&duplicateRequest).Error)
 	for _, attempt := range []model.CostAccountingAttempt{
 		{CostRequestID: request.ID, AttemptNo: 1, ChannelID: 22, ChannelName: "channel-b", BillableUpstreamModel: "vendor-b", CreatedAt: now, UpdatedAt: now},
 		{CostRequestID: request.ID, AttemptNo: 2, ChannelID: 11, ChannelName: "channel-a", BillableUpstreamModel: "vendor-a", CreatedAt: now, UpdatedAt: now},
 		{CostRequestID: request.ID, AttemptNo: 3, ChannelID: 0, ChannelName: " ", BillableUpstreamModel: " ", CreatedAt: now, UpdatedAt: now},
+		{CostRequestID: request.ID, AttemptNo: 4, ChannelID: 11, ChannelName: "channel-a-renamed", BillableUpstreamModel: "vendor-a", CreatedAt: now, UpdatedAt: now},
 		{CostRequestID: request2.ID, AttemptNo: 1, ChannelID: 22, ChannelName: "channel-b-renamed", BillableUpstreamModel: "vendor-b", CreatedAt: now, UpdatedAt: now},
 	} {
 		require.NoError(t, model.DB.Create(&attempt).Error)
@@ -222,6 +228,139 @@ func TestCostReportFilterOptionsReturnCandidatesThatMatchLedgerFilters(t *testin
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []CostReportFilterChannel{{ID: 7, Name: "supplier"}}, filtered.Channels)
+}
+
+func TestCostReportFilterOptionsIgnoreNullLedgerValues(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	now := common.GetTimestamp()
+	request := model.CostAccountingRequest{
+		RequestID: "filter-options-null", BillingSource: "wallet",
+		ProfitStatus: string(types.CostProfitComplete), RequestedAt: now,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, model.DB.Create(&request).Error)
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("id = ?", request.ID).Updates(map[string]any{
+		"origin_model_name": nil,
+		"user_group":        nil,
+		"using_group":       nil,
+	}).Error)
+	attempt := model.CostAccountingAttempt{
+		CostRequestID: request.ID, AttemptNo: 1, ChannelID: 7,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, model.DB.Create(&attempt).Error)
+	require.NoError(t, model.DB.Model(&model.CostAccountingAttempt{}).Where("id = ?", attempt.ID).Updates(map[string]any{
+		"channel_name":             nil,
+		"billable_upstream_model":  nil,
+		"predicted_upstream_model": nil,
+	}).Error)
+
+	options, err := ListCostReportFilterOptions(CostReportFilter{})
+	require.NoError(t, err)
+	assert.Equal(t, []CostReportFilterChannel{{ID: 7}}, options.Channels)
+	assert.Empty(t, options.BillableUpstreamModels)
+	assert.Empty(t, options.OriginModels)
+	assert.Empty(t, options.UserGroups)
+	assert.Empty(t, options.UsingGroups)
+}
+
+func TestCostReportFilterOptionsUseSelectedTimeBasis(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	now := common.GetTimestamp()
+	requestedRequest, _, _ := seedCompleteCostReportRequest(t, "requested-window", now, now-1_000)
+	profitRequest, _, _ := seedCompleteCostReportRequest(t, "profit-window", now-1_000, now)
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("id = ?", requestedRequest.ID).
+		Update("origin_model_name", "requested-model").Error)
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("id = ?", profitRequest.ID).
+		Update("origin_model_name", "profit-model").Error)
+
+	requestedOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		TimeBasis: CostReportTimeRequested, StartTime: now - 10, EndTime: now + 10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"requested-model"}, requestedOptions.OriginModels)
+	assert.Equal(t, []CostReportFilterChannel{{ID: 11, Name: "channel-a"}, {ID: 22, Name: "channel-b"}}, requestedOptions.Channels)
+
+	profitOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		TimeBasis: CostReportTimeProfitRecognized, StartTime: now - 10, EndTime: now + 10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"profit-model"}, profitOptions.OriginModels)
+	assert.Equal(t, []CostReportFilterChannel{{ID: 11, Name: "channel-a"}, {ID: 22, Name: "channel-b"}}, profitOptions.Channels)
+
+	requestedOutside, err := ListCostReportFilterOptions(CostReportFilter{
+		TimeBasis: CostReportTimeRequested, StartTime: now + 100, EndTime: now + 200,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, requestedOutside.Channels)
+
+	profitOutside, err := ListCostReportFilterOptions(CostReportFilter{
+		TimeBasis: CostReportTimeProfitRecognized, StartTime: now + 100, EndTime: now + 200,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, profitOutside.Channels)
+}
+
+func TestCostReportFilterOptionsIgnoreEachCandidateOwnFilter(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	now := common.GetTimestamp()
+	for index, fixture := range []struct {
+		origin, userGroup, usingGroup, billingSource, status, model, channelName string
+		channelID                                                                int
+	}{
+		{"origin-a", "user-a", "using-a", "wallet", string(types.CostProfitComplete), "vendor-a", "channel-a", 11},
+		{"origin-b", "user-b", "using-b", "wallet", string(types.CostProfitComplete), "vendor-b", "channel-b", 22},
+		{"origin-c", "user-c", "using-c", "subscription", string(types.CostProfitIncompleteCost), "vendor-c", "channel-c", 33},
+	} {
+		request := model.CostAccountingRequest{
+			RequestID:       "filter-options-own-filter-" + string(rune('a'+index)),
+			OriginModelName: fixture.origin, UserGroup: fixture.userGroup, UsingGroup: fixture.usingGroup,
+			BillingSource: fixture.billingSource, ProfitStatus: fixture.status,
+			RequestedAt: now, CreatedAt: now, UpdatedAt: now,
+		}
+		require.NoError(t, model.DB.Create(&request).Error)
+		require.NoError(t, model.DB.Create(&model.CostAccountingAttempt{
+			CostRequestID: request.ID, AttemptNo: 1, ChannelID: fixture.channelID,
+			ChannelName: fixture.channelName, BillableUpstreamModel: fixture.model,
+			CreatedAt: now, UpdatedAt: now,
+		}).Error)
+	}
+
+	base := CostReportFilter{BillingSource: "wallet", Status: string(types.CostProfitComplete)}
+	channelOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		BillingSource: base.BillingSource, Status: base.Status, ChannelID: 11,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []CostReportFilterChannel{{ID: 11, Name: "channel-a"}, {ID: 22, Name: "channel-b"}}, channelOptions.Channels)
+	assert.Equal(t, []string{"origin-a"}, channelOptions.OriginModels)
+
+	originOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		BillingSource: base.BillingSource, Status: base.Status, OriginModelName: "origin-a",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"origin-a", "origin-b"}, originOptions.OriginModels)
+	assert.Equal(t, []string{"user-a"}, originOptions.UserGroups)
+
+	userOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		BillingSource: base.BillingSource, Status: base.Status, UserGroup: "user-a",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user-a", "user-b"}, userOptions.UserGroups)
+	assert.Equal(t, []string{"using-a"}, userOptions.UsingGroups)
+
+	usingOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		BillingSource: base.BillingSource, Status: base.Status, UsingGroup: "using-a",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"using-a", "using-b"}, usingOptions.UsingGroups)
+	assert.Equal(t, []string{"vendor-a"}, usingOptions.BillableUpstreamModels)
+
+	modelOptions, err := ListCostReportFilterOptions(CostReportFilter{
+		BillingSource: base.BillingSource, Status: base.Status, BillableUpstreamModel: "vendor-a",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"vendor-a", "vendor-b"}, modelOptions.BillableUpstreamModels)
+	assert.Equal(t, []string{"origin-a"}, modelOptions.OriginModels)
 }
 
 func seedCompleteCostReportRequest(t *testing.T, suffix string, requestedAt, profitAt int64) (model.CostAccountingRequest, model.CostAccountingAttempt, model.CostAccountingAttempt) {

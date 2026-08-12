@@ -50,6 +50,7 @@ type LegacyComboboxProps = {
   id?: string
   ariaLabel?: string
   openOnFocus?: boolean
+  showClear?: boolean
   onCompositionStart?: React.CompositionEventHandler<HTMLInputElement>
   onCompositionEnd?: React.CompositionEventHandler<HTMLInputElement>
 }
@@ -76,6 +77,7 @@ function Combobox(
         className={props.className}
         allowCustomValue={props.allowCustomValue}
         openOnFocus={props.openOnFocus}
+        showClear={props.showClear}
         onCompositionStart={props.onCompositionStart}
         onCompositionEnd={props.onCompositionEnd}
       />

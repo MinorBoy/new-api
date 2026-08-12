@@ -287,6 +287,10 @@ type RoutingRevenuePreviewInput struct {
 	InputVideoDurationMS int64
 	// UserId carries the requesting user so the helper can resolve per-user settings.
 	UserId int
+	// GroupRatioOverride is used only by read-only scenario previews such as the
+	// route-margin catalog. A nil value preserves the live request's configured
+	// group ratio.
+	GroupRatioOverride *float64
 }
 
 // RoutingRevenuePreviewFunc previews the final user quota (and the QuotaPerUnit

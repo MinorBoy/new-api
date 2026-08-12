@@ -209,7 +209,7 @@ function writeRows(
     const row = sheet.getRow(rowOffset + 5)
     row.hidden = false
     for (const [columnOffset, value] of values.entries()) {
-      row.getCell(columnOffset + 1).value = value
+      row.getCell(columnOffset + 1).value = value === '' ? null : value
     }
   }
 }

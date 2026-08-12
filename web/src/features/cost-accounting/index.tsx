@@ -52,6 +52,7 @@ import { CostAccountingModeToggle } from './components/cost-accounting-mode-togg
 import { ProfitFilters } from './components/profit-filters'
 import { ProfitSummary } from './components/profit-summary'
 import { ProfitTable } from './components/profit-table'
+import { RouteMarginCatalog } from './components/route-margin-catalog'
 import { SupplierCostCatalog } from './components/supplier-cost-catalog'
 import {
   COST_ACCOUNTING_TABS,
@@ -250,6 +251,7 @@ export function CostAccounting() {
             <TabsTrigger value='catalog'>
               {t('Supplier cost catalog')}
             </TabsTrigger>
+            <TabsTrigger value='route-margin'>{t('Route margin')}</TabsTrigger>
             <TabsTrigger value='anomalies'>{t('Anomalies')}</TabsTrigger>
           </TabsList>
           <TabsContent
@@ -268,6 +270,16 @@ export function CostAccounting() {
               loading={breakdownQuery.isLoading}
               error={breakdownQuery.error}
               onRetry={() => void breakdownQuery.refetch()}
+            />
+          </TabsContent>
+          <TabsContent
+            value='route-margin'
+            className='min-h-0 overflow-hidden pr-1 pb-2'
+          >
+            <RouteMarginCatalog
+              enabled={tab === 'route-margin'}
+              search={search}
+              onSearchChange={updateSearch}
             />
           </TabsContent>
           <TabsContent

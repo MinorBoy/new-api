@@ -26,6 +26,8 @@ var costAccountingPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/catalog", permission: authz.CostAccountingRead, handler: controller.ListSupplierCostCatalog},
 	{method: http.MethodGet, path: "/catalog/export", permission: authz.CostAccountingRead, handler: controller.ExportSupplierCostCatalog},
 	{method: http.MethodGet, path: "/catalog/:rule_id", permission: authz.CostAccountingRead, handler: controller.GetSupplierCostCatalogDetail},
+	{method: http.MethodGet, path: "/route-margin-catalog", permission: authz.CostAccountingRead, handler: controller.ListRouteMarginCatalog},
+	{method: http.MethodGet, path: "/route-margin-catalog/export", permission: authz.CostAccountingRead, handler: controller.ExportRouteMarginCatalog},
 	{method: http.MethodGet, path: "/rules", permission: authz.CostAccountingRead, handler: controller.ListCostRules},
 	{method: http.MethodPost, path: "/rules", permission: authz.CostAccountingWrite, handler: controller.CreateCostRule},
 	{method: http.MethodPut, path: "/rules/:id", permission: authz.CostAccountingWrite, handler: controller.UpdateCostRule},

@@ -560,3 +560,84 @@ export interface CostCatalogParams {
   sort_by?: CostCatalogSort
   sort_order?: 'asc' | 'desc'
 }
+
+export type RouteMarginScenario = 'all' | 'no_video' | 'with_video'
+export type RouteMarginStatus = 'all' | 'eligible' | 'ineligible'
+export type RouteMarginCatalogSort =
+  | 'target_name'
+  | 'channel_name'
+  | 'upstream_model'
+  | 'gross_margin_ppm'
+  | 'estimated_profit_nano_usd'
+
+export interface RouteMarginCatalogItem {
+  target_id: number
+  target_name: string
+  policy_id: number
+  group_name: string
+  canonical_model: string
+  channel_id: number
+  channel_name: string
+  channel_type: number
+  upstream_model: string
+  cost_variant_key: string
+  resolution: string
+  duration_seconds: number
+  scenario: Exclude<RouteMarginScenario, 'all'>
+  group_ratio: string
+  cost_mode?: CostMode
+  rule_id?: number
+  rule_version?: number
+  estimated_revenue_nano_usd?: number
+  estimated_cost_nano_usd?: number
+  estimated_profit_nano_usd?: number
+  gross_margin_ppm?: number
+  requested_minimum_margin_ppm: number
+  configured_minimum_margin_bps?: number
+  eligible: boolean
+  failure_reason?: string
+  cost_source?: string
+  revenue_source: string
+}
+
+export interface RouteMarginCatalogSummary {
+  target_count: number
+  scenario_count: number
+  eligible_target_count: number
+  fully_eligible_target_count: number
+  partially_eligible_target_count: number
+  ineligible_target_count: number
+  eligible_scenario_count: number
+}
+
+export interface RouteMarginCatalogFacets {
+  channels: CostCatalogChannelFacet[]
+  resolutions: string[]
+  canonical_models: string[]
+}
+
+export interface RouteMarginCatalogPage {
+  items: RouteMarginCatalogItem[]
+  total: number
+  page: number
+  page_size: number
+  summary: RouteMarginCatalogSummary
+  facets: RouteMarginCatalogFacets
+}
+
+export interface RouteMarginCatalogParams {
+  min_margin_ppm: number
+  duration_seconds: number
+  group_ratio: number
+  scenario: RouteMarginScenario
+  channel_id?: number
+  model?: string
+  upstream_model?: string
+  route_target?: string
+  resolution?: string
+  status: RouteMarginStatus
+  page: number
+  page_size: 25 | 50 | 100
+  sort_by: RouteMarginCatalogSort
+  sort_order: 'asc' | 'desc'
+}

@@ -188,7 +188,7 @@ test('keeps a free-text draft until the user applies profit filters', async () =
     )
     assert.ok(billableModel instanceof browserWindow.HTMLInputElement)
     await act(async () => {
-      setInputValue(billableModel, 'historic-model')
+      setInputValue(billableModel, ' \u00a0historic-model\u00a0 ')
     })
     assert.equal(updates.length, 0)
 
@@ -196,7 +196,7 @@ test('keeps a free-text draft until the user applies profit filters', async () =
     assert.ok(applyButton)
     await act(async () => applyButton.click())
     assert.equal(updates.length, 1)
-    assert.equal(updates[0]?.billableModel, 'historic-model')
+    assert.equal(updates[0]?.billableModel, '\u00a0historic-model\u00a0')
   } finally {
     await act(async () => mounted.root.unmount())
     mounted.container.remove()

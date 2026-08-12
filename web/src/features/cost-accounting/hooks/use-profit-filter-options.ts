@@ -22,6 +22,7 @@ import type { ComboboxInputOption } from '@/components/ui/combobox-input'
 import { costAccountingQueryKeys, getCostReportFilterOptions } from '../api'
 import {
   costReportParamsFromSearch,
+  trimCostReportDimension,
   type CostAccountingSearch,
 } from '../lib/report'
 import type { CostReportFilterOptions } from '../types'
@@ -53,10 +54,10 @@ function stringOptions(
 ): ComboboxInputOption[] {
   const uniqueValues = new Set<string>()
   for (const value of values ?? []) {
-    const trimmed = value.trim()
+    const trimmed = trimCostReportDimension(value)
     if (trimmed) uniqueValues.add(trimmed)
   }
-  const selected = selectedValue?.trim()
+  const selected = trimCostReportDimension(selectedValue ?? '')
   if (selected) uniqueValues.add(selected)
   return [...uniqueValues]
     .sort((left, right) => left.localeCompare(right))
@@ -80,7 +81,7 @@ export function normalizeProfitFilterOptions(
     ) {
       continue
     }
-    const name = channel.name.trim()
+    const name = trimCostReportDimension(channel.name)
     channels.set(channel.id, {
       value: String(channel.id),
       label: name ? `${channel.id} - ${name}` : String(channel.id),

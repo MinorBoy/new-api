@@ -141,7 +141,13 @@ test('normalizes, deduplicates, sorts, and preserves committed filter values', (
         { id: 7, name: 'Duplicate' },
         { id: 0, name: 'Invalid' },
       ],
-      billable_upstream_models: ['vendor-z', '', ' vendor-a ', 'vendor-a'],
+      billable_upstream_models: [
+        'vendor-z',
+        '',
+        ' vendor-a ',
+        'vendor-a',
+        ' \tvendor-tab\t ',
+      ],
       origin_models: ['client-b', 'client-a', 'client-a'],
       user_groups: ['', 'default', ' default '],
       using_groups: ['premium', ''],
@@ -161,6 +167,7 @@ test('normalizes, deduplicates, sorts, and preserves committed filter values', (
     { value: '9', label: '9' },
   ])
   assert.deepEqual(options.billableModels, [
+    { value: '\tvendor-tab\t', label: '\tvendor-tab\t' },
     { value: 'historic-model', label: 'historic-model' },
     { value: 'vendor-a', label: 'vendor-a' },
     { value: 'vendor-z', label: 'vendor-z' },

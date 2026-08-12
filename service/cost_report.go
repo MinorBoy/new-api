@@ -311,7 +311,7 @@ func CheckCostCoverage(filter CostCoverageFilter) ([]CostCoverageRow, error) {
 
 func SummarizeCostProfit(filter CostReportFilter) (CostProfitSummary, error) {
 	var summary CostProfitSummary
-	attemptFiltered := filter.ChannelID > 0 || strings.TrimSpace(filter.BillableUpstreamModel) != ""
+	attemptFiltered := filter.ChannelID > 0 || strings.Trim(filter.BillableUpstreamModel, " ") != ""
 	var err error
 	if attemptFiltered {
 		summary, err = summarizeFilteredCostProfit(filter)
@@ -489,7 +489,7 @@ func ListCostReportFilterOptions(filter CostReportFilter) (CostReportFilterOptio
 	billableSet := map[string]struct{}{}
 	for _, row := range attemptRows {
 		if row.ChannelID > 0 {
-			name := strings.TrimSpace(row.ChannelName)
+			name := strings.Trim(row.ChannelName, " ")
 			if existing, exists := channelByID[row.ChannelID]; !exists || existing == "" {
 				channelByID[row.ChannelID] = name
 			}
@@ -505,7 +505,7 @@ func ListCostReportFilterOptions(filter CostReportFilter) (CostReportFilterOptio
 		return options, err
 	}
 	for _, row := range attemptRows {
-		if value := strings.TrimSpace(row.BillableModel); value != "" {
+		if value := strings.Trim(row.BillableModel, " "); value != "" {
 			billableSet[value] = struct{}{}
 		}
 	}
@@ -537,7 +537,7 @@ func ListCostReportFilterOptions(filter CostReportFilter) (CostReportFilterOptio
 				rows.Close()
 				return options, err
 			}
-			if value = strings.TrimSpace(value); value != "" {
+			if value = strings.Trim(value, " "); value != "" {
 				values[value] = struct{}{}
 			}
 		}
@@ -570,7 +570,7 @@ func costReportAttemptFilterRows(filter CostReportFilter, ignored string) ([]cos
 		query = query.Where("attempts.channel_id = ?", filter.ChannelID)
 	}
 	if ignored != "billable_upstream_model" {
-		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
+		if value := strings.Trim(filter.BillableUpstreamModel, " "); value != "" {
 			query = query.Where("TRIM(attempts.billable_upstream_model) = ?", value)
 		}
 	}
@@ -854,7 +854,7 @@ func applyCostReportAttemptSelectionToRequestQuery(query *gorm.DB, filter CostRe
 		args = append(args, filter.ChannelID)
 	}
 	if ignored != "billable_upstream_model" {
-		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
+		if value := strings.Trim(filter.BillableUpstreamModel, " "); value != "" {
 			conditions += " AND TRIM(selected_attempts.billable_upstream_model) = ?"
 			args = append(args, value)
 		}
@@ -866,7 +866,7 @@ func applyCostReportAttemptSelectionToRequestQuery(query *gorm.DB, filter CostRe
 }
 
 func applyCostReportTrimmedTextFilter(query *gorm.DB, column, rawValue string) *gorm.DB {
-	value := strings.TrimSpace(rawValue)
+	value := strings.Trim(rawValue, " ")
 	if value == "" {
 		return query
 	}
@@ -885,7 +885,7 @@ func costReportAttemptQuery(filter CostReportFilter) (*gorm.DB, error) {
 	if filter.ChannelID > 0 {
 		query = query.Where("attempts.channel_id = ?", filter.ChannelID)
 	}
-	if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
+	if value := strings.Trim(filter.BillableUpstreamModel, " "); value != "" {
 		query = query.Where("TRIM(attempts.billable_upstream_model) = ?", value)
 	}
 	return query, nil
@@ -903,14 +903,14 @@ func validateCostReportWinners(filter CostReportFilter) error {
 	if err != nil {
 		return err
 	}
-	if filter.ChannelID > 0 || strings.TrimSpace(filter.BillableUpstreamModel) != "" {
+	if filter.ChannelID > 0 || strings.Trim(filter.BillableUpstreamModel, " ") != "" {
 		selected := "EXISTS (SELECT 1 FROM cost_accounting_attempts AS selected_attempts WHERE selected_attempts.cost_request_id = requests.id"
 		args := []any{}
 		if filter.ChannelID > 0 {
 			selected += " AND selected_attempts.channel_id = ?"
 			args = append(args, filter.ChannelID)
 		}
-		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
+		if value := strings.Trim(filter.BillableUpstreamModel, " "); value != "" {
 			selected += " AND TRIM(selected_attempts.billable_upstream_model) = ?"
 			args = append(args, value)
 		}

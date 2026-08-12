@@ -90,6 +90,17 @@ function optionalText(value: string | undefined): string | undefined {
   return trimmed || undefined
 }
 
+export function trimCostReportDimension(value: string): string {
+  return value.replace(/^ +/, '').replace(/ +$/, '')
+}
+
+function optionalCostReportDimension(
+  value: string | undefined
+): string | undefined {
+  const trimmed = trimCostReportDimension(value ?? '')
+  return trimmed || undefined
+}
+
 export function costReportParamsFromSearch(
   search: CostAccountingSearch
 ): CostReportParams {
@@ -98,10 +109,10 @@ export function costReportParamsFromSearch(
     start_time: search.startTime,
     end_time: search.endTime,
     channel_id: search.channelId,
-    billable_upstream_model: optionalText(search.billableModel),
-    origin_model: optionalText(search.originModel),
-    user_group: optionalText(search.userGroup),
-    using_group: optionalText(search.usingGroup),
+    billable_upstream_model: optionalCostReportDimension(search.billableModel),
+    origin_model: optionalCostReportDimension(search.originModel),
+    user_group: optionalCostReportDimension(search.userGroup),
+    using_group: optionalCostReportDimension(search.usingGroup),
     billing_source: optionalText(search.billingSource),
     status: optionalText(search.status),
   }

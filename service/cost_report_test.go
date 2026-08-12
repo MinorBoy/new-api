@@ -230,6 +230,38 @@ func TestCostReportFilterOptionsReturnCandidatesThatMatchLedgerFilters(t *testin
 	assert.Equal(t, []CostReportFilterChannel{{ID: 7, Name: "supplier"}}, filtered.Channels)
 }
 
+func TestCostReportFilterOptionsPreserveNonSpaceWhitespaceForLedgerMatching(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	now := common.GetTimestamp()
+	profitAt := now + 100
+	request := model.CostAccountingRequest{
+		RequestID: "filter-options-non-space-whitespace", OriginModelName: "\tclient-model\t",
+		UserGroup: "\u00a0group-a\u00a0", UsingGroup: "\nusing-a\n", BillingSource: "wallet",
+		ProfitStatus: string(types.CostProfitComplete), RequestedAt: now,
+		ProfitRecognizedAt: &profitAt, CreatedAt: now, UpdatedAt: profitAt,
+	}
+	require.NoError(t, model.DB.Create(&request).Error)
+	require.NoError(t, model.DB.Create(&model.CostAccountingAttempt{
+		CostRequestID: request.ID, AttemptNo: 1, ChannelID: 7, ChannelName: " \tsupplier\t ",
+		BillableUpstreamModel: "\tvendor-model\t", CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	options, err := ListCostReportFilterOptions(CostReportFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []CostReportFilterChannel{{ID: 7, Name: "\tsupplier\t"}}, options.Channels)
+	require.Equal(t, []string{"\tclient-model\t"}, options.OriginModels)
+	require.Equal(t, []string{"\u00a0group-a\u00a0"}, options.UserGroups)
+	require.Equal(t, []string{"\nusing-a\n"}, options.UsingGroups)
+	require.Equal(t, []string{"\tvendor-model\t"}, options.BillableUpstreamModels)
+
+	filtered, err := ListCostReportFilterOptions(CostReportFilter{
+		OriginModelName: options.OriginModels[0], UserGroup: options.UserGroups[0],
+		UsingGroup: options.UsingGroups[0], BillableUpstreamModel: options.BillableUpstreamModels[0],
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []CostReportFilterChannel{{ID: 7, Name: "\tsupplier\t"}}, filtered.Channels)
+}
+
 func TestCostReportFilterOptionsIgnoreNullLedgerValues(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	now := common.GetTimestamp()
@@ -310,7 +342,8 @@ func TestCostReportFilterOptionsIgnoreEachCandidateOwnFilter(t *testing.T) {
 	}{
 		{"origin-a", "user-a", "using-a", "wallet", string(types.CostProfitComplete), "vendor-a", "channel-a", 11},
 		{"origin-b", "user-b", "using-b", "wallet", string(types.CostProfitComplete), "vendor-b", "channel-b", 22},
-		{"origin-c", "user-c", "using-c", "subscription", string(types.CostProfitIncompleteCost), "vendor-c", "channel-c", 33},
+		{"origin-c", "user-c", "using-c", "subscription", string(types.CostProfitComplete), "vendor-c", "channel-c", 33},
+		{"origin-d", "user-d", "using-d", "wallet", string(types.CostProfitIncompleteCost), "vendor-d", "channel-d", 44},
 	} {
 		request := model.CostAccountingRequest{
 			RequestID:       "filter-options-own-filter-" + string(rune('a'+index)),

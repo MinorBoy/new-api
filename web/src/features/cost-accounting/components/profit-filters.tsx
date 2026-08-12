@@ -43,7 +43,10 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import dayjs from '@/lib/dayjs'
 
 import type { ProfitFilterOptions } from '../hooks/use-profit-filter-options'
-import type { CostAccountingSearch } from '../lib/report'
+import {
+  trimCostReportDimension,
+  type CostAccountingSearch,
+} from '../lib/report'
 
 type ProfitFiltersProps = {
   search: CostAccountingSearch
@@ -65,6 +68,11 @@ type FilterDraft = {
 
 function optionalText(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? ''
+  return trimmed || undefined
+}
+
+function optionalCostReportDimension(value: string): string | undefined {
+  const trimmed = trimCostReportDimension(value)
   return trimmed || undefined
 }
 
@@ -116,10 +124,10 @@ export function ProfitFilters(props: ProfitFiltersProps) {
         draft.channelId && Number.isInteger(channelID) && channelID > 0
           ? channelID
           : undefined,
-      billableModel: optionalText(draft.billableModel),
-      originModel: optionalText(draft.originModel),
-      userGroup: optionalText(draft.userGroup),
-      usingGroup: optionalText(draft.usingGroup),
+      billableModel: optionalCostReportDimension(draft.billableModel),
+      originModel: optionalCostReportDimension(draft.originModel),
+      userGroup: optionalCostReportDimension(draft.userGroup),
+      usingGroup: optionalCostReportDimension(draft.usingGroup),
       billingSource: optionalText(draft.billingSource),
       status: optionalText(draft.status),
     })

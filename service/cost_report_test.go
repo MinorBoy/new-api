@@ -193,6 +193,37 @@ func TestCostReportFilterOptionsRespectFiltersAndReturnStableCandidates(t *testi
 	assert.NotNil(t, options.Channels)
 }
 
+func TestCostReportFilterOptionsReturnCandidatesThatMatchLedgerFilters(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	now := common.GetTimestamp()
+	profitAt := now + 100
+	request := model.CostAccountingRequest{
+		RequestID: "filter-options-whitespace", OriginModelName: " client-model ",
+		UserGroup: " group-a ", UsingGroup: " using-a ", BillingSource: "wallet",
+		ProfitStatus: string(types.CostProfitComplete), RequestedAt: now,
+		ProfitRecognizedAt: &profitAt, CreatedAt: now, UpdatedAt: profitAt,
+	}
+	require.NoError(t, model.DB.Create(&request).Error)
+	require.NoError(t, model.DB.Create(&model.CostAccountingAttempt{
+		CostRequestID: request.ID, AttemptNo: 1, ChannelID: 7, ChannelName: "supplier",
+		BillableUpstreamModel: " vendor-model ", CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	options, err := ListCostReportFilterOptions(CostReportFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"client-model"}, options.OriginModels)
+	require.Equal(t, []string{"group-a"}, options.UserGroups)
+	require.Equal(t, []string{"using-a"}, options.UsingGroups)
+	require.Equal(t, []string{"vendor-model"}, options.BillableUpstreamModels)
+
+	filtered, err := ListCostReportFilterOptions(CostReportFilter{
+		OriginModelName: options.OriginModels[0], UserGroup: options.UserGroups[0],
+		UsingGroup: options.UsingGroups[0], BillableUpstreamModel: options.BillableUpstreamModels[0],
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []CostReportFilterChannel{{ID: 7, Name: "supplier"}}, filtered.Channels)
+}
+
 func seedCompleteCostReportRequest(t *testing.T, suffix string, requestedAt, profitAt int64) (model.CostAccountingRequest, model.CostAccountingAttempt, model.CostAccountingAttempt) {
 	t.Helper()
 	revenue := int64(1_000_000_000)

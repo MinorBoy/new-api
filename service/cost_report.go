@@ -569,7 +569,7 @@ func costReportAttemptFilterRows(filter CostReportFilter, ignored string) ([]cos
 	}
 	if ignored != "billable_upstream_model" {
 		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
-			query = query.Where("attempts.billable_upstream_model = ?", value)
+			query = query.Where("TRIM(attempts.billable_upstream_model) = ?", value)
 		}
 	}
 	rows, err := query.Order("attempts.channel_id ASC, attempts.id ASC").Rows()
@@ -806,19 +806,13 @@ func costReportRequestQueryIgnoring(filter CostReportFilter, ignored string) (*g
 	}
 	query := model.DB.Table("cost_accounting_requests AS requests")
 	if ignored != "origin_model" {
-		if value := strings.TrimSpace(filter.OriginModelName); value != "" {
-			query = query.Where("requests.origin_model_name = ?", value)
-		}
+		query = applyCostReportTrimmedTextFilter(query, "requests.origin_model_name", filter.OriginModelName)
 	}
 	if ignored != "user_group" {
-		if value := strings.TrimSpace(filter.UserGroup); value != "" {
-			query = query.Where("requests.user_group = ?", value)
-		}
+		query = applyCostReportTrimmedTextFilter(query, "requests.user_group", filter.UserGroup)
 	}
 	if ignored != "using_group" {
-		if value := strings.TrimSpace(filter.UsingGroup); value != "" {
-			query = query.Where("requests.using_group = ?", value)
-		}
+		query = applyCostReportTrimmedTextFilter(query, "requests.using_group", filter.UsingGroup)
 	}
 	if value := strings.TrimSpace(filter.BillingSource); value != "" {
 		query = query.Where("requests.billing_source = ?", value)
@@ -859,7 +853,7 @@ func applyCostReportAttemptSelectionToRequestQuery(query *gorm.DB, filter CostRe
 	}
 	if ignored != "billable_upstream_model" {
 		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
-			conditions += " AND selected_attempts.billable_upstream_model = ?"
+			conditions += " AND TRIM(selected_attempts.billable_upstream_model) = ?"
 			args = append(args, value)
 		}
 	}
@@ -867,6 +861,14 @@ func applyCostReportAttemptSelectionToRequestQuery(query *gorm.DB, filter CostRe
 		return query
 	}
 	return query.Where("EXISTS (SELECT 1 FROM cost_accounting_attempts AS selected_attempts WHERE selected_attempts.cost_request_id = requests.id"+conditions+")", args...)
+}
+
+func applyCostReportTrimmedTextFilter(query *gorm.DB, column, rawValue string) *gorm.DB {
+	value := strings.TrimSpace(rawValue)
+	if value == "" {
+		return query
+	}
+	return query.Where("TRIM("+column+") = ?", value)
 }
 
 func costReportAttemptQuery(filter CostReportFilter) (*gorm.DB, error) {
@@ -882,7 +884,7 @@ func costReportAttemptQuery(filter CostReportFilter) (*gorm.DB, error) {
 		query = query.Where("attempts.channel_id = ?", filter.ChannelID)
 	}
 	if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
-		query = query.Where("attempts.billable_upstream_model = ?", value)
+		query = query.Where("TRIM(attempts.billable_upstream_model) = ?", value)
 	}
 	return query, nil
 }
@@ -907,7 +909,7 @@ func validateCostReportWinners(filter CostReportFilter) error {
 			args = append(args, filter.ChannelID)
 		}
 		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
-			selected += " AND selected_attempts.billable_upstream_model = ?"
+			selected += " AND TRIM(selected_attempts.billable_upstream_model) = ?"
 			args = append(args, value)
 		}
 		selected += ")"

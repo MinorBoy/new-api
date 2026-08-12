@@ -433,6 +433,19 @@ export interface CostReportParams {
   status?: string
 }
 
+export interface CostReportFilterChannel {
+  id: number
+  name: string
+}
+
+export interface CostReportFilterOptions {
+  channels: CostReportFilterChannel[]
+  billable_upstream_models: string[]
+  origin_models: string[]
+  user_groups: string[]
+  using_groups: string[]
+}
+
 export interface CostProfitSummary {
   realized_revenue_nano_usd: NanoUSD
   realized_cost_nano_usd: NanoUSD

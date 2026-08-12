@@ -17,10 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { FilterX, Search } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  useEffect,
+  useState,
+  type CompositionEvent,
+  type HTMLAttributes,
+  type HTMLInputTypeAttribute,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
+import type { ComboboxInputOption } from '@/components/ui/combobox-input'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
@@ -34,11 +42,13 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import dayjs from '@/lib/dayjs'
 
+import type { ProfitFilterOptions } from '../hooks/use-profit-filter-options'
 import type { CostAccountingSearch } from '../lib/report'
 
 type ProfitFiltersProps = {
   search: CostAccountingSearch
   onChange: (search: CostAccountingSearch) => void
+  filterOptions: ProfitFilterOptions
 }
 
 type FilterDraft = {
@@ -163,39 +173,43 @@ export function ProfitFilters(props: ProfitFiltersProps) {
           type='datetime-local'
           onChange={(value) => updateDraft('endTime', value)}
         />
-        <TextFilter
+        <ComboboxFilter
           id='profit-channel-id'
           label={t('Channel ID')}
           value={draft.channelId}
-          inputMode='numeric'
+          options={props.filterOptions.channels}
           className='w-28'
           onChange={(value) => updateDraft('channelId', value)}
         />
-        <TextFilter
+        <ComboboxFilter
           id='profit-billable-model'
           label={t('Billable upstream model')}
           value={draft.billableModel}
+          options={props.filterOptions.billableModels}
           className='w-52'
           onChange={(value) => updateDraft('billableModel', value)}
         />
-        <TextFilter
+        <ComboboxFilter
           id='profit-origin-model'
           label={t('Origin model')}
           value={draft.originModel}
+          options={props.filterOptions.originModels}
           className='w-44'
           onChange={(value) => updateDraft('originModel', value)}
         />
-        <TextFilter
+        <ComboboxFilter
           id='profit-user-group'
           label={t('User group')}
           value={draft.userGroup}
+          options={props.filterOptions.userGroups}
           className='w-32'
           onChange={(value) => updateDraft('userGroup', value)}
         />
-        <TextFilter
+        <ComboboxFilter
           id='profit-using-group'
           label={t('Using group')}
           value={draft.usingGroup}
+          options={props.filterOptions.usingGroups}
           className='w-32'
           onChange={(value) => updateDraft('usingGroup', value)}
         />
@@ -266,8 +280,8 @@ function TextFilter(props: {
   label: string
   value: string
   onChange: (value: string) => void
-  type?: React.HTMLInputTypeAttribute
-  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
+  type?: HTMLInputTypeAttribute
+  inputMode?: HTMLAttributes<HTMLInputElement>['inputMode']
   className?: string
 }) {
   return (
@@ -279,6 +293,40 @@ function TextFilter(props: {
         inputMode={props.inputMode}
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
+      />
+    </Field>
+  )
+}
+
+function ComboboxFilter(props: {
+  id: string
+  label: string
+  value: string
+  options: ComboboxInputOption[]
+  onChange: (value: string) => void
+  className?: string
+}) {
+  const [isComposing, setIsComposing] = useState(false)
+
+  return (
+    <Field className={props.className ?? 'w-48'}>
+      <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
+      <Combobox
+        id={props.id}
+        ariaLabel={props.label}
+        options={props.options}
+        value={props.value}
+        onValueChange={(value) => {
+          if (!isComposing) props.onChange(value ?? '')
+        }}
+        onCompositionStart={() => setIsComposing(true)}
+        onCompositionEnd={(event: CompositionEvent<HTMLInputElement>) => {
+          setIsComposing(false)
+          props.onChange(event.currentTarget.value)
+        }}
+        allowCustomValue
+        openOnFocus
+        className='w-full'
       />
     </Field>
   )

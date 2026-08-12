@@ -34,6 +34,7 @@ import type {
   CostPreviewResult,
   CostProfitBreakdown,
   CostProfitSummary,
+  CostReportFilterOptions,
   CostReportParams,
   CostRequestDetail,
   CostRule,
@@ -80,6 +81,8 @@ export const costAccountingQueryKeys = {
     [...costAccountingQueryKeys.reports(), 'summary', params] as const,
   reportBreakdown: (params: CostReportParams = {}) =>
     [...costAccountingQueryKeys.reports(), 'breakdown', params] as const,
+  reportFilterOptions: (params: CostReportParams = {}) =>
+    [...costAccountingQueryKeys.reports(), 'filter-options', params] as const,
 }
 
 export async function getCostAccountingSettings(): Promise<
@@ -244,6 +247,15 @@ export async function getCostReportBreakdown(
   const response = await api.get<
     CostAccountingApiResponse<CostProfitBreakdown[]>
   >(`${COST_ACCOUNTING_PATH}/reports/breakdown`, { params })
+  return response.data
+}
+
+export async function getCostReportFilterOptions(
+  params: CostReportParams = {}
+): Promise<CostAccountingApiResponse<CostReportFilterOptions>> {
+  const response = await api.get<
+    CostAccountingApiResponse<CostReportFilterOptions>
+  >(`${COST_ACCOUNTING_PATH}/reports/filter-options`, { params })
   return response.data
 }
 

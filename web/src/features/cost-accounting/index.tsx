@@ -54,6 +54,7 @@ import { ProfitSummary } from './components/profit-summary'
 import { ProfitTable } from './components/profit-table'
 import { RouteMarginCatalog } from './components/route-margin-catalog'
 import { SupplierCostCatalog } from './components/supplier-cost-catalog'
+import { useProfitFilterOptions } from './hooks/use-profit-filter-options'
 import {
   COST_ACCOUNTING_TABS,
   costReportParamsFromSearch,
@@ -94,6 +95,7 @@ export function CostAccounting() {
     queryFn: () => getCostReportBreakdown(reportParams),
     enabled: tab === 'profit',
   })
+  const profitFilterOptions = useProfitFilterOptions(search, tab === 'profit')
 
   const updateSearch = (next: CostAccountingSearch) => {
     void navigate({ search: next, replace: true })
@@ -258,7 +260,11 @@ export function CostAccounting() {
             value='profit'
             className='min-h-0 space-y-4 overflow-auto pr-1 pb-2'
           >
-            <ProfitFilters search={search} onChange={updateSearch} />
+            <ProfitFilters
+              search={search}
+              onChange={updateSearch}
+              filterOptions={profitFilterOptions}
+            />
             <ProfitSummary
               summary={summaryQuery.data?.data}
               loading={summaryQuery.isLoading}

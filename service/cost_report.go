@@ -80,6 +80,19 @@ type CostReportFilter struct {
 	Status                string
 }
 
+type CostReportFilterChannel struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type CostReportFilterOptions struct {
+	Channels               []CostReportFilterChannel `json:"channels"`
+	BillableUpstreamModels []string                  `json:"billable_upstream_models"`
+	OriginModels           []string                  `json:"origin_models"`
+	UserGroups             []string                  `json:"user_groups"`
+	UsingGroups            []string                  `json:"using_groups"`
+}
+
 type CostProfitSummary struct {
 	RealizedRevenueNanoUSD     int64  `json:"realized_revenue_nano_usd"`
 	RealizedCostNanoUSD        int64  `json:"realized_cost_nano_usd"`
@@ -453,6 +466,137 @@ func BreakDownCostProfit(filter CostReportFilter) ([]CostProfitBreakdownRow, err
 	return result, nil
 }
 
+// ListCostReportFilterOptions returns distinct values available under the
+// submitted report filters. The field being populated is intentionally
+// ignored so users can replace an existing value with another option.
+func ListCostReportFilterOptions(filter CostReportFilter) (CostReportFilterOptions, error) {
+	options := CostReportFilterOptions{
+		Channels:               make([]CostReportFilterChannel, 0),
+		BillableUpstreamModels: make([]string, 0),
+		OriginModels:           make([]string, 0),
+		UserGroups:             make([]string, 0),
+		UsingGroups:            make([]string, 0),
+	}
+	if _, err := costReportRequestQuery(filter); err != nil {
+		return options, err
+	}
+
+	attemptRows, err := costReportAttemptFilterRows(filter, "channel_id")
+	if err != nil {
+		return options, err
+	}
+	channelByID := map[int]string{}
+	billableSet := map[string]struct{}{}
+	for _, row := range attemptRows {
+		if row.ChannelID > 0 {
+			if _, exists := channelByID[row.ChannelID]; !exists && strings.TrimSpace(row.ChannelName) != "" {
+				channelByID[row.ChannelID] = strings.TrimSpace(row.ChannelName)
+			}
+		}
+	}
+	for id, name := range channelByID {
+		options.Channels = append(options.Channels, CostReportFilterChannel{ID: id, Name: name})
+	}
+	sort.Slice(options.Channels, func(i, j int) bool { return options.Channels[i].ID < options.Channels[j].ID })
+
+	attemptRows, err = costReportAttemptFilterRows(filter, "billable_upstream_model")
+	if err != nil {
+		return options, err
+	}
+	for _, row := range attemptRows {
+		if value := strings.TrimSpace(row.BillableModel); value != "" {
+			billableSet[value] = struct{}{}
+		}
+	}
+	options.BillableUpstreamModels = sortedCostReportStrings(billableSet)
+
+	for _, candidate := range []struct {
+		ignore string
+		name   string
+		target *[]string
+	}{
+		{ignore: "origin_model", name: "origin_model_name", target: &options.OriginModels},
+		{ignore: "user_group", name: "user_group", target: &options.UserGroups},
+		{ignore: "using_group", name: "using_group", target: &options.UsingGroups},
+	} {
+		query, err := costReportRequestQueryIgnoring(filter, candidate.ignore)
+		if err != nil {
+			return options, err
+		}
+		query = applyCostReportAttemptSelectionToRequestQuery(query, filter, candidate.ignore)
+		rows, err := query.Select("requests." + candidate.name).Order("requests." + candidate.name + " ASC").Rows()
+		if err != nil {
+			return options, err
+		}
+		values := map[string]struct{}{}
+		for rows.Next() {
+			var value string
+			if err := rows.Scan(&value); err != nil {
+				rows.Close()
+				return options, err
+			}
+			if value = strings.TrimSpace(value); value != "" {
+				values[value] = struct{}{}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return options, err
+		}
+		rows.Close()
+		*candidate.target = sortedCostReportStrings(values)
+	}
+	return options, nil
+}
+
+type costReportFilterAttemptOptionRow struct {
+	ChannelID     int    `gorm:"column:channel_id"`
+	ChannelName   string `gorm:"column:channel_name"`
+	BillableModel string `gorm:"column:billable_upstream_model"`
+}
+
+func costReportAttemptFilterRows(filter CostReportFilter, ignored string) ([]costReportFilterAttemptOptionRow, error) {
+	requestQuery, err := costReportRequestQueryIgnoring(filter, "")
+	if err != nil {
+		return nil, err
+	}
+	query := model.DB.Table("cost_accounting_attempts AS attempts").
+		Select("attempts.channel_id, attempts.channel_name, attempts.billable_upstream_model").
+		Joins("JOIN cost_accounting_requests AS requests ON requests.id = attempts.cost_request_id")
+	query = applyCostReportRequestQuery(query, requestQuery)
+	if ignored != "channel_id" && filter.ChannelID > 0 {
+		query = query.Where("attempts.channel_id = ?", filter.ChannelID)
+	}
+	if ignored != "billable_upstream_model" {
+		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
+			query = query.Where("attempts.billable_upstream_model = ?", value)
+		}
+	}
+	rows, err := query.Order("attempts.channel_id ASC, attempts.id ASC").Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]costReportFilterAttemptOptionRow, 0)
+	for rows.Next() {
+		var row costReportFilterAttemptOptionRow
+		if err := query.ScanRows(rows, &row); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+func sortedCostReportStrings(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func summarizeRequestLedgerCostProfit(filter CostReportFilter) (CostProfitSummary, error) {
 	var summary CostProfitSummary
 	requestQuery, err := costReportRequestQuery(filter)
@@ -646,6 +790,10 @@ func summarizeFilteredCostProfit(filter CostReportFilter) (CostProfitSummary, er
 }
 
 func costReportRequestQuery(filter CostReportFilter) (*gorm.DB, error) {
+	return costReportRequestQueryIgnoring(filter, "")
+}
+
+func costReportRequestQueryIgnoring(filter CostReportFilter, ignored string) (*gorm.DB, error) {
 	if filter.StartTime > 0 && filter.EndTime > 0 && filter.StartTime > filter.EndTime {
 		return nil, errors.New("cost report start time must not exceed end time")
 	}
@@ -657,14 +805,20 @@ func costReportRequestQuery(filter CostReportFilter) (*gorm.DB, error) {
 		return nil, errors.New("unsupported cost report time basis")
 	}
 	query := model.DB.Table("cost_accounting_requests AS requests")
-	if value := strings.TrimSpace(filter.OriginModelName); value != "" {
-		query = query.Where("requests.origin_model_name = ?", value)
+	if ignored != "origin_model" {
+		if value := strings.TrimSpace(filter.OriginModelName); value != "" {
+			query = query.Where("requests.origin_model_name = ?", value)
+		}
 	}
-	if value := strings.TrimSpace(filter.UserGroup); value != "" {
-		query = query.Where("requests.user_group = ?", value)
+	if ignored != "user_group" {
+		if value := strings.TrimSpace(filter.UserGroup); value != "" {
+			query = query.Where("requests.user_group = ?", value)
+		}
 	}
-	if value := strings.TrimSpace(filter.UsingGroup); value != "" {
-		query = query.Where("requests.using_group = ?", value)
+	if ignored != "using_group" {
+		if value := strings.TrimSpace(filter.UsingGroup); value != "" {
+			query = query.Where("requests.using_group = ?", value)
+		}
 	}
 	if value := strings.TrimSpace(filter.BillingSource); value != "" {
 		query = query.Where("requests.billing_source = ?", value)
@@ -694,6 +848,25 @@ func costReportRequestQuery(filter CostReportFilter) (*gorm.DB, error) {
 		}
 	}
 	return query, nil
+}
+
+func applyCostReportAttemptSelectionToRequestQuery(query *gorm.DB, filter CostReportFilter, ignored string) *gorm.DB {
+	conditions := ""
+	args := make([]any, 0, 2)
+	if ignored != "channel_id" && filter.ChannelID > 0 {
+		conditions += " AND selected_attempts.channel_id = ?"
+		args = append(args, filter.ChannelID)
+	}
+	if ignored != "billable_upstream_model" {
+		if value := strings.TrimSpace(filter.BillableUpstreamModel); value != "" {
+			conditions += " AND selected_attempts.billable_upstream_model = ?"
+			args = append(args, value)
+		}
+	}
+	if conditions == "" {
+		return query
+	}
+	return query.Where("EXISTS (SELECT 1 FROM cost_accounting_attempts AS selected_attempts WHERE selected_attempts.cost_request_id = requests.id"+conditions+")", args...)
 }
 
 func costReportAttemptQuery(filter CostReportFilter) (*gorm.DB, error) {

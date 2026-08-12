@@ -17,21 +17,21 @@
 - Modify: `controller/cost_accounting_test.go`
 - Modify: `router/cost_accounting_router_test.go`
 
-- [ ] **Step 1: 添加服务层候选类型与查询契约测试**
+- [x] **Step 1: 添加服务层候选类型与查询契约测试**
 
 在 `service/cost_report_test.go` 增加 SQLite fixture，写入两条请求和三条尝试，覆盖：去除空字符串、去重、按字符串稳定排序；请求筛选 `channel_id`、`billable_upstream_model`、`origin_model`、`user_group`、`using_group` 和时间范围会约束其它字段候选，但生成某字段候选时忽略该字段自身条件。
 
 断言 `ListCostReportFilterOptions(CostReportFilter{...})` 返回的五个集合分别为精确的候选值，且渠道同时保留 ID 和账本中的渠道名。
 
-- [ ] **Step 2: 添加控制器响应契约测试**
+- [x] **Step 2: 添加控制器响应契约测试**
 
 在 `controller/cost_accounting_test.go` 增加对候选响应转换函数的测试，断言 JSON 字段为 `channels`、`billable_upstream_models`、`origin_models`、`user_groups`、`using_groups`，空列表序列化为 `[]` 而不是 `null`。
 
-- [ ] **Step 3: 添加专用路由权限测试**
+- [x] **Step 3: 添加专用路由权限测试**
 
 在 `router/cost_accounting_router_test.go` 添加 `GET /reports/filter-options` 使用 `authz.CostAccountingRead` 且绑定 `controller.GetCostReportFilterOptions` 的断言。
 
-- [ ] **Step 4: 运行新增测试确认先失败**
+- [x] **Step 4: 运行新增测试确认先失败**
 
 运行：
 
@@ -48,7 +48,7 @@ go test ./service ./controller ./router -run 'CostReport(FilterOptions|Responses
 - Modify: `controller/cost_accounting.go`
 - Modify: `router/cost-accounting-router.go`
 
-- [ ] **Step 1: 定义候选响应领域类型**
+- [x] **Step 1: 定义候选响应领域类型**
 
 在 `service/cost_report.go` 增加：
 
@@ -65,11 +65,11 @@ type CostReportFilterOptions struct {
 
 初始化每个切片为空数组，保证没有数据时仍返回 JSON `[]`。
 
-- [ ] **Step 2: 抽取可复用的请求过滤条件构造**
+- [x] **Step 2: 抽取可复用的请求过滤条件构造**
 
 将当前 `costReportRequestQuery` 的日期、时间口径、请求字段筛选构造为可选择忽略某一字段的内部查询函数；保留 `costReportRequestQuery` 现有行为。候选查询调用该函数五次，每次忽略自身筛选字段，并对 attempts 使用同一请求子查询条件。
 
-- [ ] **Step 3: 实现跨数据库候选查询**
+- [x] **Step 3: 实现跨数据库候选查询**
 
 使用 GORM `Select`、`Joins`、`Distinct`、`Order`、`Rows`/`ScanRows` 读取：
 
@@ -78,11 +78,11 @@ type CostReportFilterOptions struct {
 
 不使用数据库专用字符串聚合；在 Go 中 trim、过滤空值、去重和排序。渠道按 ID 升序，字符串按 `sort.Strings` 升序。
 
-- [ ] **Step 4: 暴露控制器处理函数**
+- [x] **Step 4: 暴露控制器处理函数**
 
 在 `controller/cost_accounting.go` 增加 `GetCostReportFilterOptions`：复用 `costReportFilterFromQuery` 解析查询参数，调用服务并通过 `common.ApiSuccess` 返回候选结构；错误沿用 `writeCostAccountingError`。
 
-- [ ] **Step 5: 注册只读路由**
+- [x] **Step 5: 注册只读路由**
 
 在 `router/cost-accounting-router.go` 添加：
 
@@ -90,7 +90,7 @@ type CostReportFilterOptions struct {
 {method: http.MethodGet, path: "/reports/filter-options", permission: authz.CostAccountingRead, handler: controller.GetCostReportFilterOptions},
 ```
 
-- [ ] **Step 6: 运行后端测试确认通过**
+- [x] **Step 6: 运行后端测试确认通过**
 
 运行 Task 1 命令及完整成本报表测试：
 
@@ -110,7 +110,7 @@ go test ./service ./controller ./router -run 'CostReport|CostAccounting'
 
 - [ ] **Step 1: 添加候选类型和 API 测试**
 
-定义 `CostReportFilterOptions`、`CostReportFilterChannel` 和 `getCostReportFilterOptions(params)`，测试 API 使用 `/api/cost-accounting/reports/filter-options` 并将 `CostReportParams` 原样作为 query 参数传递。
+定义 `CostReportFilterOptions`、`CostReportFilterChannel` 和 `getCostReportFilterOptions(params)`，测试 API 使用 `/api/cost-accounting/reports/filter-options` 并将 `CostReportParams` 原样作为 query 参数传递。由于现有前端测试通过直接替换 `api.get` 验证请求，本任务使用同一方式，不引入新的 mock 框架。
 
 - [ ] **Step 2: 编写 hook 候选映射测试**
 

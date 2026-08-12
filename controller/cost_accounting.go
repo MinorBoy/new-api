@@ -419,6 +419,52 @@ func GetCostReportBreakdown(c *gin.Context) {
 	common.ApiSuccess(c, costProfitBreakdownResponses(rows))
 }
 
+type costReportFilterChannelAPIResponse struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type costReportFilterOptionsAPIResponse struct {
+	Channels               []costReportFilterChannelAPIResponse `json:"channels"`
+	BillableUpstreamModels []string                             `json:"billable_upstream_models"`
+	OriginModels           []string                             `json:"origin_models"`
+	UserGroups             []string                             `json:"user_groups"`
+	UsingGroups            []string                             `json:"using_groups"`
+}
+
+func GetCostReportFilterOptions(c *gin.Context) {
+	filter, err := costReportFilterFromQuery(c)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	options, err := service.ListCostReportFilterOptions(filter)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	common.ApiSuccess(c, costReportFilterOptionsResponse(options))
+}
+
+func costReportFilterOptionsResponse(options service.CostReportFilterOptions) costReportFilterOptionsAPIResponse {
+	channels := make([]costReportFilterChannelAPIResponse, 0, len(options.Channels))
+	for _, channel := range options.Channels {
+		channels = append(channels, costReportFilterChannelAPIResponse{ID: channel.ID, Name: channel.Name})
+	}
+	return costReportFilterOptionsAPIResponse{
+		Channels: channels, BillableUpstreamModels: nonNilCostReportStrings(options.BillableUpstreamModels),
+		OriginModels: nonNilCostReportStrings(options.OriginModels), UserGroups: nonNilCostReportStrings(options.UserGroups),
+		UsingGroups: nonNilCostReportStrings(options.UsingGroups),
+	}
+}
+
+func nonNilCostReportStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
 func bindReconcileCostAttemptRequest(c *gin.Context) (dto.ReconcileCostAttemptRequest, error) {
 	var request dto.ReconcileCostAttemptRequest
 	err := c.ShouldBindJSON(&request)

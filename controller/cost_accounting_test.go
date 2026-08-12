@@ -60,6 +60,27 @@ func TestCostAccountingReconcileBindingPreservesMissingAndExplicitZero(t *testin
 	}
 }
 
+func TestCostReportFilterOptionsResponseUsesStableArrayFields(t *testing.T) {
+	response := costReportFilterOptionsResponse(service.CostReportFilterOptions{
+		Channels:               []service.CostReportFilterChannel{{ID: 7, Name: "Primary"}},
+		BillableUpstreamModels: []string{"vendor-model"}, OriginModels: []string{"client-model"},
+		UserGroups: []string{"default"}, UsingGroups: []string{"team-a"},
+	})
+	assert.Equal(t, 7, response.Channels[0].ID)
+	assert.Equal(t, "Primary", response.Channels[0].Name)
+	assert.Equal(t, []string{"vendor-model"}, response.BillableUpstreamModels)
+
+	empty := costReportFilterOptionsResponse(service.CostReportFilterOptions{})
+	assert.NotNil(t, empty.Channels)
+	assert.NotNil(t, empty.BillableUpstreamModels)
+	assert.NotNil(t, empty.OriginModels)
+	assert.NotNil(t, empty.UserGroups)
+	assert.NotNil(t, empty.UsingGroups)
+	encoded, err := common.Marshal(empty)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"channels":[],"billable_upstream_models":[],"origin_models":[],"user_groups":[],"using_groups":[]}`, string(encoded))
+}
+
 func TestCostAccountingRevenueReconcileBindingPreservesExplicitZero(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"action":"settle","final_user_quota":0,"reason":"billing receipt"}`))

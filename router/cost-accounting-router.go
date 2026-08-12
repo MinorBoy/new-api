@@ -43,4 +43,5 @@ var costAccountingPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/requests/:id/reconcile-revenue", permission: authz.CostAccountingReconcile, handler: controller.ReconcileCostRevenue},
 	{method: http.MethodGet, path: "/reports/summary", permission: authz.CostAccountingRead, handler: controller.GetCostReportSummary},
 	{method: http.MethodGet, path: "/reports/breakdown", permission: authz.CostAccountingRead, handler: controller.GetCostReportBreakdown},
+	{method: http.MethodGet, path: "/reports/filter-options", permission: authz.CostAccountingRead, handler: controller.GetCostReportFilterOptions},
 }

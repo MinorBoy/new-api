@@ -24,6 +24,7 @@ import {
   FileText,
   FileUp,
   FlaskConical,
+  Images,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -70,6 +71,11 @@ export function useSidebarData(): SidebarData {
             title: t('Video generation'),
             url: '/video-generation',
             icon: Video,
+          },
+          {
+            title: t('Asset library'),
+            url: '/assets',
+            icon: Images,
           },
           {
             title: t('Chat'),

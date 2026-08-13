@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +45,7 @@ func SetVideoRouter(router *gin.Engine) {
 
 	seedanceVideoRouter := router.Group("/api/v3/contents/generations")
 	seedanceVideoRouter.Use(middleware.RouteTag("relay"))
-	seedanceVideoRouter.Use(middleware.SeedanceRequestConvert(), middleware.DeferVideoBase64Policy(), middleware.VideoRequestPolicy(), middleware.TokenAuth())
+	seedanceVideoRouter.Use(middleware.SeedanceRequestConvert(), middleware.DeferVideoBase64Policy(), middleware.VideoRequestPolicy(), middleware.TokenAuth(), middleware.NewVideoAssetRouting(service.NewAssetService(nil, nil)))
 	{
 		seedanceVideoRouter.POST("/tasks", middleware.Distribute(), middleware.SelectedChannelVideoBase64Policy(), controller.RelayTask)
 		seedanceVideoRouter.GET("/tasks", controller.RelaySeedanceTaskFetch)

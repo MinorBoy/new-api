@@ -23,6 +23,8 @@ const (
 	AssetErrorNotActive           = "asset_not_active"
 	AssetErrorChannelUnavailable  = "asset_channel_unavailable"
 	AssetErrorChannelMismatch     = "asset_channel_mismatch"
+	AssetErrorReferenceMixed      = "asset_reference_mixed"
+	AssetErrorLimitExceeded       = "asset_limit_exceeded"
 	AssetErrorIdempotencyConflict = "asset_idempotency_conflict"
 	AssetErrorUpstream            = "asset_upstream_error"
 )

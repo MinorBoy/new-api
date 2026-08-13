@@ -589,6 +589,17 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
       },
     ],
   })
+  extracted.channels.push({
+    ...sourceChannel,
+    businessId: 'CH-MIKOTO',
+    sourceLocations: [
+      {
+        ...sourceLocation,
+        businessId: 'CH-MIKOTO',
+        row: 1003,
+      },
+    ],
+  })
   const result = await buildImportDocument({
     extracted,
     sourceBytes,
@@ -609,7 +620,96 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-8YES'), 210)
   assert.equal(typesByChannel.get('CH-Z5API'), 211)
   assert.equal(typesByChannel.get('CH-ZZONE'), 212)
+  assert.equal(typesByChannel.get('CH-MIKOTO'), 213)
   assert.equal(typesByChannel.get('CH-FFLINK'), 214)
+})
+
+test('v1 adapter separates Mikoto Sora from Seedance channel lines', async () => {
+  const snapshot = cloneSnapshot(await loadFixture())
+  const channelSheet = snapshot.sheets.find((sheet) => sheet.name === '渠道')
+  const costSheet = snapshot.sheets.find((sheet) => sheet.name === '渠道成本')
+  const mappingSheet = snapshot.sheets.find((sheet) => sheet.name === '模型映射')
+  assert.ok(channelSheet)
+  assert.ok(costSheet)
+  assert.ok(mappingSheet)
+
+  const sourceChannel = channelSheet.rows[4]
+  assert.ok(sourceChannel)
+  const sourceChannelId = requiredCell(sourceChannel, 0)
+  const sourceLocation = { ...sourceChannelId }
+  channelSheet.rows.push({
+    ...sourceChannel,
+    rowNumber: 999,
+    cells: sourceChannel.cells.map((cell) => ({ ...cell })),
+  })
+  requiredCell(channelSheet.rows.at(-1)!, 0).value = 'CH-MIKOTO'
+
+  const sourceCost = costSheet.rows[4]
+  const sourceMapping = mappingSheet.rows[4]
+  assert.ok(sourceCost)
+  assert.ok(sourceMapping)
+  const costChannelColumn = V1_HEADERS.渠道成本.indexOf('渠道代码')
+  const costModelColumn = V1_HEADERS.渠道成本.indexOf('上游模型')
+  const mappingChannelColumn = V1_HEADERS.模型映射.indexOf('渠道代码')
+  const mappingModelColumn = V1_HEADERS.模型映射.indexOf('上游模型')
+  for (const [businessId, upstreamModel] of [
+    ['COST-MIKOTO-SORA', 'sora-v3-pro'],
+    ['COST-MIKOTO-SEEDANCE', 'seedance-2.0-720p'],
+  ]) {
+    const row = {
+      ...sourceCost,
+      rowNumber: costSheet.rows.length + 1,
+      cells: sourceCost.cells.map((cell) => ({ ...cell })),
+    }
+    requiredCell(row, 0).value = businessId
+    requiredCell(row, costChannelColumn).value = 'CH-MIKOTO'
+    requiredCell(row, costModelColumn).value = upstreamModel
+    costSheet.rows.push(row)
+  }
+  for (const [businessId, upstreamModel] of [
+    ['MAP-MIKOTO-SORA', 'sora-v3-pro'],
+    ['MAP-MIKOTO-SEEDANCE', 'seedance-2.0-720p'],
+  ]) {
+    const row = {
+      ...sourceMapping,
+      rowNumber: mappingSheet.rows.length + 1,
+      cells: sourceMapping.cells.map((cell) => ({ ...cell })),
+    }
+    requiredCell(row, 0).value = businessId
+    requiredCell(row, mappingChannelColumn).value = 'CH-MIKOTO'
+    requiredCell(row, mappingModelColumn).value = upstreamModel
+    mappingSheet.rows.push(row)
+  }
+
+  const extracted = extractWorkbook(snapshot)
+
+  assert.deepEqual(
+    extracted.channelLines
+      .filter((line) => line.channelRef === 'CH-MIKOTO')
+      .map((line) => line.businessId)
+      .sort(),
+    ['mikoto-sd', 'mikoto-sora']
+  )
+  assert.deepEqual(
+    extracted.costRuleDrafts
+      .filter((draft) => draft.fields['渠道代码']?.value === 'CH-MIKOTO')
+      .map((draft) => [draft.fields['上游模型']?.value, draft.lineRef])
+      .sort(),
+    [
+      ['seedance-2.0-720p', 'mikoto-sd'],
+      ['sora-v3-pro', 'mikoto-sora'],
+    ]
+  )
+  assert.deepEqual(
+    extracted.modelMappings
+      .filter((mapping) => mapping.fields['渠道代码']?.value === 'CH-MIKOTO')
+      .map((mapping) => [mapping.fields['上游模型']?.value, mapping.lineRef])
+      .sort(),
+    [
+      ['seedance-2.0-720p', 'mikoto-sd'],
+      ['sora-v3-pro', 'mikoto-sora'],
+    ]
+  )
 })
 
 test('v1 adapter treats line and SKU price differences as distinct variants and removes Secure unsupported 480p rows', async () => {

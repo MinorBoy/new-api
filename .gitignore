@@ -81,3 +81,4 @@ _codex_sheet_work/
 .claude/
 **/node_modules/
 .codex-tmp/
+.tmp/

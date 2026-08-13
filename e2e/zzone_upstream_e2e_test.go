@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +14,16 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -212,6 +219,178 @@ func TestZZoneArkLifecycleE2E(t *testing.T) {
 	require.Len(t, requests, 4)
 	assert.Equal(t, "/v1/videos/"+zzoneE2ETaskID+"/content", requests[3].Path)
 	assert.Equal(t, "Bearer mock-zzone-key", requests[3].Authorization)
+}
+
+func TestZZoneArkLifecycleUses720pRoutingContractWithoutUpstreamResolutionE2E(t *testing.T) {
+	environment := setupZZoneE2E(t,
+		`{"id":"zzone-private-task","status":"completed","progress":100,"seconds":"5"}`,
+	)
+
+	status, submit := performJSONRequest(t, environment.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1", `{
+		"model":"zzone-imported-model",
+		"content":[{"type":"text","text":"720p contract"}],
+		"duration":5,
+		"ratio":"16:9",
+		"resolution":"720p"
+	}`)
+	require.Equal(t, http.StatusOK, status, string(submit))
+
+	requests := environment.mock.snapshot()
+	require.Len(t, requests, 1)
+	assert.JSONEq(t, `{
+		"model":"zzone-private-model",
+		"prompt":"720p contract",
+		"seconds":"5",
+		"aspect_ratio":"16:9"
+	}`, string(requests[0].Body))
+	assert.NotContains(t, string(requests[0].Body), `"resolution"`)
+}
+
+func TestZZoneArkCapabilityRouteMaintainsStrict60PercentMarginE2E(t *testing.T) {
+	environment := setupZZoneE2E(t, `{"id":"zzone-private-task","status":"completed","progress":100,"seconds":"5"}`)
+	require.NoError(t, model.DB.AutoMigrate(&model.ChannelModelCostRule{}, &model.CostAccountingRequest{}, &model.CostAccountingAttempt{}, &model.CostAccountingAudit{}, &model.RoutingPolicy{}, &model.RouteTarget{}))
+
+	const (
+		expectedCostNanoUSD      = int64(100_000_000)
+		expectedRevenueNanoUSD   = int64(540_000_000)
+		expectedProfitNanoUSD    = int64(440_000_000)
+		expectedGrossMarginPPM   = int64(814_815)
+		minimumExpectedMarginBPS = 6000
+	)
+	previousCostCapabilityLookup := service.CostCapabilityLookup
+	previousRevenuePreview := service.RevenuePreviewHookForTest()
+	service.CostCapabilityLookup = relay.CostCapabilitiesForRoute
+	service.SetRoutingRevenuePreview(func(_ context.Context, input service.RoutingRevenuePreviewInput) (int64, string, error) {
+		return relayhelper.PreviewRoutingRevenueWithSeedanceInput(input.OriginModelName, input.Group, input.RequestPath, input.RelayMode, input.DurationSeconds, input.UserId, input.OutputResolution, input.HasReferenceVideo, input.InputVideoDurationMS)
+	})
+	service.InvalidateCostCoverage(0, "", "")
+	t.Cleanup(func() {
+		service.CostCapabilityLookup = previousCostCapabilityLookup
+		service.SetRoutingRevenuePreview(previousRevenuePreview)
+		service.InvalidateCostCoverage(0, "", "")
+	})
+
+	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
+	previousCostConfig, err := config.ConfigToMap(costConfig)
+	require.NoError(t, err)
+	require.NoError(t, config.UpdateConfigFromMap(costConfig, map[string]string{
+		cost_setting.KeyMode:                     string(types.CostAccountingStrict),
+		cost_setting.KeyMinimumExpectedMarginBPS: fmt.Sprint(minimumExpectedMarginBPS),
+	}))
+	cost_setting.UpdateAndSync()
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(costConfig, previousCostConfig))
+		cost_setting.UpdateAndSync()
+	})
+	previousBillingConfig, err := config.ConfigToMap(config.GlobalConfig.Get("billing_setting"))
+	require.NoError(t, err)
+	seedanceTokenPriceJSON, err := common.Marshal(map[string]types.SeedanceTokenPrice{
+		modelrouting.Seedance20Fast: {Scenarios: map[string]types.SeedanceTokenPriceScenario{
+			types.SeedanceTokenScenarioKey("720p", types.SeedanceTokenScenarioNoVideo): {
+				PricePerMillion: "5", Width: 1280, Height: 720, FrameRate: 24,
+				PricingVersion: "e2e", Source: "zzone strict contract",
+			},
+		}},
+	})
+	require.NoError(t, err)
+	billingModeJSON, err := common.Marshal(map[string]string{
+		modelrouting.Seedance20Fast: billing_setting.BillingModeSeedanceTokens,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+		billing_setting.BillingModeField:        string(billingModeJSON),
+		billing_setting.DurationPriceField:      "{}",
+		billing_setting.SeedanceTokenPriceField: string(seedanceTokenPriceJSON),
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), previousBillingConfig))
+	})
+
+	costConfigValue, err := service.NormalizeCostRuleConfig(types.CostModePerRequest, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: common.GetPointer("0.10"), ChargeEvent: types.CostChargeTaskSucceeded,
+	})
+	require.NoError(t, err)
+	costConfigJSON, err := common.Marshal(costConfigValue)
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: e2eChannelID, BillableUpstreamModel: zzoneE2EUpstreamModel, CostVariantKey: "zzone-720p", Version: 1,
+		Status: string(types.CostRuleActive), CostMode: string(types.CostModePerRequest), SchemaVersion: 1,
+		ConfigJSON: string(costConfigJSON), Source: "e2e", CreatedBy: 1, ActivatedBy: 1,
+		EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+	service.InvalidateCostCoverage(e2eChannelID, zzoneE2EUpstreamModel, "zzone-720p")
+	channel, err := model.GetChannelById(e2eChannelID, true)
+	require.NoError(t, err)
+	channel.Models = strings.Join([]string{zzoneE2EClientModel, modelrouting.Seedance20Fast}, ",")
+	require.NoError(t, channel.Update())
+
+	margin := minimumExpectedMarginBPS
+	policy, err := service.SaveRoutingPolicy(0, service.RoutingPolicyWriteRequest{
+		GroupName: "default", Model: modelrouting.Seedance20Fast, Enabled: true,
+		Defaults: modelrouting.Defaults{OutputResolution: "720p", DurationSeconds: 5, AspectRatio: "16:9"},
+		Targets: []service.RouteTargetWriteRequest{{
+			ChannelID: e2eChannelID, Name: "zzone 720p", UpstreamModel: zzoneE2EUpstreamModel, CostVariantKey: "zzone-720p",
+			TargetPriority: 100, MinimumExpectedMarginBPS: &margin, Enabled: true,
+			Constraints: modelrouting.Constraints{
+				OutputResolutions: []string{"720p"}, Durations: modelrouting.DurationConstraint{Values: []int{5}}, AspectRatios: []string{"16:9"},
+				ReferenceLimits: modelrouting.ReferenceLimits{Images: 4, Videos: 3, Audios: 1},
+			},
+		}},
+	})
+	require.NoError(t, err)
+
+	status, submit := performJSONRequest(t, environment.engine, http.MethodPost, "/api/v3/contents/generations/tasks", "Bearer e2e-1-"+fmt.Sprint(e2eChannelID), `{
+		"model":"doubao-seedance-2-0-fast-260128",
+		"content":[{"type":"text","text":"strict 720p contract"}],
+		"duration":5,
+		"ratio":"16:9",
+		"resolution":"720p"
+	}`)
+	require.Equal(t, http.StatusOK, status, string(submit))
+
+	requests := environment.mock.snapshot()
+	require.Len(t, requests, 1)
+	assert.JSONEq(t, `{"model":"zzone-private-model","prompt":"strict 720p contract","seconds":"5","aspect_ratio":"16:9"}`, string(requests[0].Body))
+	assert.NotContains(t, string(requests[0].Body), `"resolution"`)
+
+	var task model.Task
+	require.NoError(t, model.DB.Order("id DESC").First(&task).Error)
+	require.NotNil(t, task.PrivateData.Routing)
+	assert.Equal(t, policy.ID, task.PrivateData.Routing.PolicyID)
+	assert.Equal(t, "720p", task.PrivateData.Routing.Facts.OutputResolution)
+	assert.Equal(t, zzoneE2EUpstreamModel, task.PrivateData.Routing.UpstreamModel)
+	assert.Equal(t, "zzone-720p", task.PrivateData.Routing.CostVariantKey)
+	var costRequest model.CostAccountingRequest
+	require.NoError(t, model.DB.Where("task_id = ?", task.TaskID).First(&costRequest).Error)
+	var costAttempt model.CostAccountingAttempt
+	require.NoError(t, model.DB.Where("cost_request_id = ?", costRequest.ID).First(&costAttempt).Error)
+	assert.Equal(t, string(types.CostChargeTaskSucceeded), costAttempt.ChargeEvent)
+	assert.Equal(t, "zzone-720p", costAttempt.CostVariantKey)
+	assert.Equal(t, string(types.CostAttemptAwaitingMeter), costAttempt.Status)
+	assert.Nil(t, costAttempt.CostNanoUSD)
+
+	task = pollNewAPIVideoTask(t, task.TaskID)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+	require.NoError(t, model.DB.First(&costAttempt, costAttempt.ID).Error)
+	assert.Equal(t, string(types.CostAttemptSettled), costAttempt.Status)
+	require.NotNil(t, costAttempt.CostNanoUSD)
+	assert.Equal(t, expectedCostNanoUSD, *costAttempt.CostNanoUSD)
+	require.NoError(t, model.DB.First(&costRequest, costRequest.ID).Error)
+	require.NotNil(t, costRequest.BilledRevenueEquivalentNanoUSD)
+	require.NotNil(t, costRequest.BilledGrossProfitNanoUSD)
+	require.NotNil(t, costRequest.GrossMarginPPM)
+	assert.Equal(t, string(types.CostRevenueSettled), costRequest.RevenueStatus)
+	assert.Equal(t, string(types.CostProfitComplete), costRequest.ProfitStatus)
+	assert.Equal(t, expectedCostNanoUSD, costRequest.ConfirmedCostNanoUSD)
+	assert.Equal(t, expectedRevenueNanoUSD, *costRequest.BilledRevenueEquivalentNanoUSD)
+	assert.Equal(t, expectedProfitNanoUSD, *costRequest.BilledGrossProfitNanoUSD)
+	assert.Equal(t, expectedGrossMarginPPM, *costRequest.GrossMarginPPM)
+	assert.GreaterOrEqual(t, *costRequest.GrossMarginPPM, int64(minimumExpectedMarginBPS*100))
+	assert.Equal(t, types.CostAccountingStrict, cost_setting.Runtime().Mode)
+	assert.Equal(t, minimumExpectedMarginBPS, cost_setting.Runtime().MinimumExpectedMarginBPS)
 }
 
 func TestZZoneFailedTaskRefundsExactlyOnceE2E(t *testing.T) {

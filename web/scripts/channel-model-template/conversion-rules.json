@@ -28,6 +28,9 @@
   },
   "modelRules": {},
   "overrides": {
+    "13/R211": {
+      "maxReferenceTotal": 12
+    },
     "15/R223": {
       "maxDurationSeconds": 12
     },

@@ -105,8 +105,8 @@ func TestDisableRemovedSeedChannelsLeavesOnlyCurrentMatrixLinesEnabled(t *testin
 func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	targets, err := loadTargets(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
-	require.Len(t, targets, 143)
-	require.Equal(t, map[string]int{"431": 47, "900": 12, "903": 4, "933": 80}, materialDistribution(targets))
+	require.Len(t, targets, 45)
+	require.Equal(t, map[string]int{"431": 17, "933": 28}, materialDistribution(targets))
 	enabledCosts := 0
 	for _, target := range targets {
 		if target.CostEnabled {
@@ -119,10 +119,11 @@ func TestLoadTargetsPreservesImportedMaterialMatrix(t *testing.T) {
 	for _, target := range targets {
 		targetsByLine[target.LineRef] = append(targetsByLine[target.LineRef], target)
 	}
-	require.Equal(t, constant.ChannelTypeFourSToken, targetsByLine["channel-4stoken"][0].ChannelType)
-	require.NotContains(t, targetsByLine, "channel-lucen")
-	require.NotContains(t, targetsByLine, "megabyai-fast-real-person")
-	require.Equal(t, constant.ChannelTypeSecure, targetsByLine["secure-discount"][0].ChannelType)
+	require.Equal(t, constant.ChannelTypeFFLink, targetsByLine["channel-fflink"][0].ChannelType)
+	require.Equal(t, constant.ChannelTypeZZone, targetsByLine["channel-zzone"][0].ChannelType)
+	require.Equal(t, constant.ChannelTypeMegaByAI, targetsByLine["megabyai-fast-real-person"][0].ChannelType)
+	require.Equal(t, constant.ChannelTypeMikoto, targetsByLine["mikoto-sd"][0].ChannelType)
+	require.Equal(t, constant.ChannelTypeMikoto, targetsByLine["mikoto-sora"][0].ChannelType)
 }
 
 func TestLoadTargetsUsesAllowedAspectRatioForPolicyAndRequest(t *testing.T) {
@@ -131,13 +132,13 @@ func TestLoadTargetsUsesAllowedAspectRatioForPolicyAndRequest(t *testing.T) {
 
 	var target matrixTarget
 	for _, candidate := range targets {
-		if candidate.RouteTargetRef == "route-target/MAP-CLMM-R3-720" {
+		if candidate.RouteTargetRef == "route-target/MAP-ZZONE-R217-720" {
 			target = candidate
 			break
 		}
 	}
 	require.NotEmpty(t, target.RouteTargetRef)
-	require.Equal(t, "9:16", target.AspectRatio)
+	require.Equal(t, "16:9", target.AspectRatio)
 	require.Contains(t, target.AspectRatios, target.AspectRatio)
 
 	var body map[string]any
@@ -574,21 +575,24 @@ func TestLoadChannelDefinitionsPreservesImportedProviderTypesAndModels(t *testin
 
 	definitions, err := loadChannelDefinitions(document)
 	require.NoError(t, err)
-	require.Equal(t, constant.ChannelTypeFourSToken, definitions["channel-4stoken"].Type)
-	require.Equal(t, constant.ChannelTypeEightYes, definitions["channel-8yes"].Type)
-	require.Equal(t, constant.ChannelTypeClmmMall, definitions["channel-clmm"].Type)
-	require.True(t, definitions["channel-4stoken"].Enabled)
-	require.True(t, definitions["channel-8yes"].Enabled)
-	require.Contains(t, definitions["channel-4stoken"].Models, "4sdance_fast431")
-	require.Contains(t, definitions["channel-paipu"].Models, "lec-seedance-videos-standard")
-	require.NotContains(t, definitions["channel-4stoken"].Models, modelroutingCanonicalModels())
+	require.Equal(t, constant.ChannelTypeFFLink, definitions["channel-fflink"].Type)
+	require.Equal(t, constant.ChannelTypeZZone, definitions["channel-zzone"].Type)
+	require.Equal(t, constant.ChannelTypeMegaByAI, definitions["megabyai-fast-real-person"].Type)
+	require.Equal(t, constant.ChannelTypeMikoto, definitions["mikoto-sd"].Type)
+	require.True(t, definitions["channel-fflink"].Enabled)
+	require.True(t, definitions["channel-zzone"].Enabled)
+	require.Contains(t, definitions["channel-fflink"].Models, "seedance-2.0")
+	require.Contains(t, definitions["channel-fflink"].Models, "seedance-2.0-fast")
+	require.Contains(t, definitions["megabyai-fast-real-person"].Models, "videos-fast")
+	require.Contains(t, definitions["mikoto-sd"].Models, "seedance-fast-720p")
+	require.Contains(t, definitions["channel-zzone"].Models, "video-ds-2.0")
 }
 
 func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	document, err := loadDocument(filepath.Join("..", "..", "e2e", "testdata", "channel-config-v1.json"))
 	require.NoError(t, err)
 
-	rule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R166-480")
+	rule, ok := findImportedCostRule(document, "route-target/MAP-MEGABYAI-R136-480")
 	require.True(t, ok)
 	config, err := importedCostRuleConfig(rule)
 	require.NoError(t, err)
@@ -600,12 +604,12 @@ func TestImportedCostRuleConfigPreservesSourcePriceAndCurrency(t *testing.T) {
 	require.Equal(t, "0.4794520547945205", *config.value.NormalizedUSDPrices.UnitPrice)
 	require.NotEqual(t, "0.20", *config.value.UnitPrice)
 
-	durationRule, ok := findImportedCostRule(document, "route-target/MAP-4STOKEN-R176-720")
+	durationRule, ok := findImportedCostRule(document, "route-target/MAP-FFLINK-R222-720")
 	require.True(t, ok)
 	durationConfig, err := importedCostRuleConfig(durationRule)
 	require.NoError(t, err)
 	require.Equal(t, types.CostModePerDuration, durationConfig.mode)
-	require.Equal(t, "0.48", *durationConfig.value.PricePerSecond)
+	require.Equal(t, "0.25", *durationConfig.value.PricePerSecond)
 	require.Equal(t, types.CostChargeTaskSucceeded, durationConfig.value.ChargeEvent)
 	require.Equal(t, types.CostMeterValidatedRequest, durationConfig.value.MeterSource)
 

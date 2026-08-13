@@ -69,13 +69,29 @@ func TestBuildZZoneRequestEncodesDocumentedFields(t *testing.T) {
 	}
 }
 
+func TestBuildZZoneRequestUses720pAsRoutingFactWithoutUpstreamField(t *testing.T) {
+	request, err := parseARKRequest([]byte(`{
+		"model":"client-model",
+		"content":[{"type":"text","text":"city at night"}],
+		"resolution":"720p"
+	}`), zzoneProtocolProfile())
+	require.NoError(t, err)
+
+	body, err := buildZZoneRequest(request, "imported-zzone-model")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"imported-zzone-model","prompt":"city at night"}`, string(body))
+	assert.NotContains(t, string(body), `"resolution"`)
+}
+
 func TestBuildZZoneRequestRejectsUnsupportedFields(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
 		code string
 	}{
-		{name: "resolution", body: `{"model":"m","content":[{"type":"text","text":"t"}],"resolution":"720p"}`, code: "InvalidParameter.resolution"},
+		{name: "480p resolution", body: `{"model":"m","content":[{"type":"text","text":"t"}],"resolution":"480p"}`, code: "InvalidParameter.resolution"},
+		{name: "1080p resolution", body: `{"model":"m","content":[{"type":"text","text":"t"}],"resolution":"1080p"}`, code: "InvalidParameter.resolution"},
+		{name: "4k resolution", body: `{"model":"m","content":[{"type":"text","text":"t"}],"resolution":"4k"}`, code: "InvalidParameter.resolution"},
 		{name: "seed", body: `{"model":"m","content":[{"type":"text","text":"t"}],"seed":0}`, code: "InvalidParameter.seed"},
 		{name: "watermark false", body: `{"model":"m","content":[{"type":"text","text":"t"}],"watermark":false}`, code: "InvalidParameter.watermark"},
 		{name: "generate audio false", body: `{"model":"m","content":[{"type":"text","text":"t"}],"generate_audio":false}`, code: "InvalidParameter.generate_audio"},

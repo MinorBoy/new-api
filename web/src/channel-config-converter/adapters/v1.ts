@@ -89,6 +89,11 @@ function megaByAILineRef(entity: ExtractedEntity): string {
   return 'channel-megabyai'
 }
 
+function mikotoLineRef(entity: ExtractedEntity): string {
+  const upstreamModel = cellText(entity.fields['上游模型'])
+  return upstreamModel === 'sora-v3-pro' ? 'mikoto-sora' : 'mikoto-sd'
+}
+
 function lineRefFor(
   channelCode: string,
   entity: ExtractedEntity
@@ -105,6 +110,9 @@ function lineRefFor(
   }
   if (channelCode === 'CH-MEGABYAI') {
     return megaByAILineRef(entity)
+  }
+  if (channelCode === 'CH-MIKOTO') {
+    return mikotoLineRef(entity)
   }
   return defaultLineRef(channelCode)
 }
@@ -215,6 +223,18 @@ function createChannelLines(
             : {
                 supports_real_person: generatedField(line.supportsRealPerson),
               }),
+        },
+        sourceLocations,
+      }))
+    }
+    if (channelRef === 'CH-MIKOTO') {
+      return ['mikoto-sd', 'mikoto-sora'].map((businessId) => ({
+        businessId,
+        channelRef,
+        fields: {
+          channel_ref: generatedField(channelRef),
+          line_ref: generatedField(businessId),
+          status_proposal: generatedField('disabled'),
         },
         sourceLocations,
       }))

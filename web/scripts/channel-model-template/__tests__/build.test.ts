@@ -818,6 +818,44 @@ test('generates FYLink mappings and applies the R223 duration override', () => {
   )
 })
 
+test('applies the verified Mikoto Sora reference total override', () => {
+  const source = sourceWithOfficialPrice()
+  const model = firstSourceModel(source)
+  model.location.row = 211
+  model.fields.渠道 = 13
+  model.fields.模型ID = 'sora-v3-pro'
+  model.fields.清晰度 = '720p'
+  model.fields.参考图数 = 9
+  model.fields.参考视频数 = 3
+  model.fields.参考音频数 = 3
+  model.fields.最大素材数 = 15
+  model.fields.视频音频合计上限 = null
+  model.fields.最小参考图数 = 0
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { '13': 'CH-MIKOTO' },
+      modelRules: {
+        'sora-v3-pro': {
+          clientModel: 'seedance-2.0',
+          upstreamModel: 'sora-v3-pro',
+        },
+      },
+      overrides: { '13/R211': { maxReferenceTotal: 12 } },
+    })
+  )
+
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.code === 'CHANNEL_CONTRACT_REFERENCES' && item.severity === 'FAIL'
+    ),
+    false
+  )
+  assert.match(output.mappings[0]?.note ?? '', /最大素材数=12/)
+})
+
 test('accepts MegaByAI 1080p and 4k resolutions from the source contract', () => {
   for (const resolutionValue of ['1080p', '4k']) {
     const source = sourceWithOfficialPrice()

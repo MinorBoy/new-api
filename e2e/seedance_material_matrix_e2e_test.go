@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -117,6 +116,18 @@ type importedMaterialMatrixEnv struct {
 	publishedTargets map[string]model.RouteTarget
 	materialSeen     map[string]int
 	assetBaseURL     string
+}
+
+type importedMaterialMatrixVideoMetadataClient struct{}
+
+func (importedMaterialMatrixVideoMetadataClient) Metadata(context.Context, string) (videometa.Metadata, error) {
+	return videometa.Metadata{DurationMS: 5_000}, nil
+}
+
+type importedMaterialMatrixAudioDurationResolver struct{}
+
+func (importedMaterialMatrixAudioDurationResolver) ResolveMS(context.Context, []string) (int64, error) {
+	return 5_000, nil
 }
 
 func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
@@ -390,8 +401,16 @@ func TestSeedanceImportedMaterialMatrixFullFlowE2E(t *testing.T) {
 		require.Equal(t, len(targets), accepted)
 		require.Zero(t, contractBlocks)
 		require.Zero(t, disabledPricingDrafts)
-		require.Equal(t, map[string]int{"431": 47, "900": 12, "903": 4, "933": 80}, env.materialSeen)
+		require.Equal(t, importedMaterialMatrixMaterialCounts(targets), env.materialSeen)
 	}
+}
+
+func importedMaterialMatrixMaterialCounts(targets []importedMaterialMatrixTarget) map[string]int {
+	counts := make(map[string]int)
+	for _, target := range targets {
+		counts[fmt.Sprintf("%d%d%d", target.References.Images, target.References.Videos, target.References.Audios)]++
+	}
+	return counts
 }
 
 func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatrixTarget) *importedMaterialMatrixEnv {
@@ -462,15 +481,9 @@ func setupImportedMaterialMatrixE2E(t *testing.T, targets []importedMaterialMatr
 
 	mock := &capabilityRecordingServer{}
 	server := httptestNewServer(t, importedMaterialMatrixAssetHandler(mock))
-	assetClient := importedMaterialMatrixAssetClient(t, server)
-	metadataFetcher := videometa.NewFetcher(videometa.FetcherOptions{Client: assetClient, Cache: videometa.NewCache(64), TempDir: t.TempDir()})
-	const metadataToken = "material-matrix-metadata"
-	metadataServer := httptestNewServer(t, videometa.NewServer(videometa.ServerOptions{
-		Token: metadataToken, MaxConcurrency: 8, Metadata: metadataFetcher.Metadata,
-	}))
-	service.SetVideoMetadataClient(service.NewHTTPVideoMetadataClient(metadataServer.URL, metadataToken, metadataServer.Client(), videometa.MaxVideoBytes))
+	service.SetVideoMetadataClient(importedMaterialMatrixVideoMetadataClient{})
 	t.Cleanup(func() { service.SetVideoMetadataClient(nil) })
-	service.SetReferenceAudioDurationResolver(service.NewReferenceAudioDurationResolver(assetClient, t.TempDir()))
+	service.SetReferenceAudioDurationResolver(importedMaterialMatrixAudioDurationResolver{})
 	t.Cleanup(func() { service.SetReferenceAudioDurationResolver(nil) })
 	document := loadImportedMaterialMatrixDocument(t)
 	channelIDs := seedImportedMaterialMatrixChannels(t, server.URL, document)
@@ -624,9 +637,9 @@ func importedMaterialChannelType(t *testing.T, document types.ConfigImportDocume
 	return 0
 }
 
-func TestImportedMaterialChannelTypeNormalizesLegacyEightYesType(t *testing.T) {
+func TestImportedMaterialChannelTypePreservesMikotoType(t *testing.T) {
 	document := loadImportedMaterialMatrixDocument(t)
-	require.Equal(t, constant.ChannelTypeEightYes, importedMaterialChannelType(t, document, "channel-8yes"))
+	require.Equal(t, constant.ChannelTypeMikoto, importedMaterialChannelType(t, document, "mikoto-sd"))
 }
 
 func importedMaterialChannelModels(t *testing.T, document types.ConfigImportDocument, lineRef string) []string {
@@ -792,6 +805,8 @@ func importedMaterialStringValue(value *string) string {
 func importedMaterialSubmitPath(channelType int, lineRef string) string {
 	switch channelType {
 	case constant.ChannelTypeDimensio:
+		return "/v1/videos/generations"
+	case constant.ChannelTypeFFLink:
 		return "/v1/videos/generations"
 	case constant.ChannelTypeLucen, constant.ChannelTypeNewAPIVideo:
 		return "/v1/video/generations"
@@ -959,10 +974,14 @@ func importedMaterialMatrixRequestBody(t *testing.T, target importedMaterialMatr
 			"audio_url": map[string]any{"url": fmt.Sprintf("%s/audio.wav?provider=%s&index=%d", assetBaseURL, target.Provider, index+1)},
 		})
 	}
-	body, err := common.Marshal(map[string]any{
-		"model": target.RuntimeModel, "content": content, "resolution": target.Resolution,
+	payload := map[string]any{
+		"model": target.RuntimeModel, "content": content,
 		"duration": target.Duration, "ratio": target.AspectRatio,
-	})
+	}
+	if target.ChannelType != constant.ChannelTypeZZone {
+		payload["resolution"] = target.Resolution
+	}
+	body, err := common.Marshal(payload)
 	require.NoError(t, err)
 	return string(body)
 }
@@ -1002,30 +1021,6 @@ func importedMaterialMatrixAssetHandler(upstream http.Handler) http.Handler {
 			upstream.ServeHTTP(w, r)
 		}
 	})
-}
-
-type importedMaterialMatrixAssetTransport struct {
-	base   http.RoundTripper
-	target *url.URL
-}
-
-func (t importedMaterialMatrixAssetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	clone := request.Clone(request.Context())
-	clone.URL.Scheme = t.target.Scheme
-	clone.URL.Host = t.target.Host
-	clone.Host = t.target.Host
-	return t.base.RoundTrip(clone)
-}
-
-func importedMaterialMatrixAssetClient(t *testing.T, server *httptest.Server) *http.Client {
-	t.Helper()
-	target, err := url.Parse(server.URL)
-	require.NoError(t, err)
-	base := server.Client().Transport
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	return &http.Client{Transport: importedMaterialMatrixAssetTransport{base: base, target: target}}
 }
 
 func importedMaterialMatrixPCM16WAV(durationMS int) []byte {

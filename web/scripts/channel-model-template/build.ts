@@ -74,7 +74,10 @@ function numericField(
   }
 }
 
-function referenceContract(record: SourceRecord): {
+function referenceContract(
+  record: SourceRecord,
+  maxReferenceTotal?: number
+): {
   contract: ReferenceContract | null
   error: string
   structured: boolean
@@ -174,7 +177,8 @@ function referenceContract(record: SourceRecord): {
     .filter((value) => value !== '' && value !== 'auto')
   const effectiveTotalMax = Math.min(
     totalMax,
-    images + (videoAudioTotalMax ?? videos + audios)
+    images + (videoAudioTotalMax ?? videos + audios),
+    maxReferenceTotal ?? Number.MAX_SAFE_INTEGER
   )
   return {
     contract: {
@@ -401,6 +405,54 @@ function channelContractIssues(
         `MegaByAI 不支持分辨率 ${resolutionValue}。`
       ),
     ]
+  }
+
+  if (channelCode === 'CH-MIKOTO') {
+    const model = upstreamModel.trim().toLowerCase()
+    const requiredResolution =
+      model === 'sora-v3-pro'
+        ? '720p'
+        : model.endsWith('-1080p')
+          ? '1080p'
+          : model.endsWith('-480p')
+            ? '480p'
+            : model.endsWith('-720p')
+              ? '720p'
+              : ''
+    if (requiredResolution === '') {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_MODEL',
+          `Mikoto 未验证上游模型 ${upstreamModel}。`
+        ),
+      ]
+    }
+    if (resolutionValue !== requiredResolution) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_RESOLUTION',
+          `Mikoto 模型 ${upstreamModel} 要求 ${requiredResolution}。`
+        ),
+      ]
+    }
+    if (!durationWithin(4, 15)) {
+      return [
+        fail('CHANNEL_CONTRACT_DURATION', 'Mikoto 视频时长必须位于 4 至 15 秒。'),
+      ]
+    }
+    if (
+      reference &&
+      !referencesWithin(9, 3, 3, model === 'sora-v3-pro' ? 12 : 15)
+    ) {
+      return [
+        fail(
+          'CHANNEL_CONTRACT_REFERENCES',
+          model === 'sora-v3-pro'
+            ? 'Mikoto Sora 素材总数最多为 12 个。'
+            : 'Mikoto Seedance 素材上限超过已验证协议。'
+        ),
+      ]
+    }
   }
 
   if (channelCode === 'CH-CLMM') {
@@ -914,10 +966,10 @@ function buildCostsAndMappings(
     const sourceId = channelSource
       ? sourceIdForChannel(channelSource)
       : `SRC-${slug(sourceChannel)}-${baseId}`
-    const reference = referenceContract(record)
+    const override = rowOverrideFor(record, rules)
+    const reference = referenceContract(record, override?.maxReferenceTotal)
     const hasReferenceContract = reference.contract !== null
     const referenceBusinessValid = hasReferenceContract
-    const override = rowOverrideFor(record, rules)
     const effectiveMode = mode
     if (!effectiveMode) {
       issues.push(

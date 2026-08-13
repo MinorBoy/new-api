@@ -27,8 +27,8 @@ func validateZZoneRequest(request arkRequest) error {
 	if err := validateARKSemantics(request, zzoneProtocolProfile()); err != nil {
 		return err
 	}
-	if request.Resolution != nil {
-		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "resolution is not supported by ZZone"}
+	if request.Resolution != nil && strings.TrimSpace(*request.Resolution) != "720p" {
+		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "ZZone only supports 720p resolution"}
 	}
 	if request.Seed != nil {
 		return &arkRequestError{Code: "InvalidParameter.seed", Message: "seed is not supported by ZZone"}

@@ -46,6 +46,7 @@ export type RowOverride = {
   clientModel?: string
   minDurationSeconds?: number
   maxDurationSeconds?: number
+  maxReferenceTotal?: number
   nativePerMillion?: string
   nativePerRequest?: string
   nativePerSecond?: string

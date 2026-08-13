@@ -496,6 +496,11 @@ func BatchDeleteChannels(ids []int) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	for _, id := range ids {
+		if err := ValidateChannelAssetDeletion(id); err != nil {
+			return 0, err
+		}
+	}
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return 0, tx.Error
@@ -646,6 +651,9 @@ func (channel *Channel) UpdateBalance(balance float64) {
 }
 
 func (channel *Channel) Delete() error {
+	if err := ValidateChannelAssetDeletion(channel.Id); err != nil {
+		return err
+	}
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return tx.Error

@@ -1,5 +1,7 @@
 package model
 
+import "gorm.io/gorm"
+
 const (
 	AssetTypeImage = "image"
 
@@ -39,4 +41,21 @@ type AssetProviderBinding struct {
 	LastError              string  `json:"-" gorm:"type:text"`
 	CreatedAt              int64   `json:"-" gorm:"bigint;not null"`
 	UpdatedAt              int64   `json:"-" gorm:"bigint;not null"`
+}
+
+func HasAssetProviderBindings(channelID int) (bool, error) {
+	var count int64
+	err := DB.Model(&AssetProviderBinding{}).Where("channel_id = ?", channelID).Count(&count).Error
+	return count > 0, err
+}
+
+func ValidateChannelAssetDeletion(channelID int) error {
+	bound, err := HasAssetProviderBindings(channelID)
+	if err != nil {
+		return err
+	}
+	if bound {
+		return gorm.ErrInvalidData
+	}
+	return nil
 }

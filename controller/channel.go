@@ -773,6 +773,10 @@ func AddChannel(c *gin.Context) {
 
 func DeleteChannel(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	if err := secureAssetChannelDeleteError(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	channelName := ""
 	channelProxy := ""
 	channelLookupFailed := false
@@ -1123,6 +1127,10 @@ func UpdateChannel(c *gin.Context) {
 			return
 		}
 	}
+	if err := secureAssetChannelMutationError(originChannel, &effectiveChannel, channelHasAssetBindings(originChannel.Id)); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
@@ -1271,6 +1279,36 @@ func UpdateChannel(c *gin.Context) {
 		"data":    channel,
 	})
 	return
+}
+
+func channelHasAssetBindings(channelID int) bool {
+	bound, err := model.HasAssetProviderBindings(channelID)
+	return err == nil && bound
+}
+
+func secureAssetChannelDeleteError(channelID int) error {
+	if !channelHasAssetBindings(channelID) {
+		return nil
+	}
+	return fmt.Errorf("Secure channel %d is bound to role assets and cannot be deleted", channelID)
+}
+
+func secureAssetChannelMutationError(original, effective *model.Channel, bound bool) error {
+	if !bound || original == nil || effective == nil {
+		return nil
+	}
+	if original.Type != constant.ChannelTypeSecure {
+		return nil
+	}
+	if original.Type != effective.Type || original.Key != effective.Key || original.ChannelInfo.IsMultiKey != effective.ChannelInfo.IsMultiKey {
+		return fmt.Errorf("Secure channel credentials and video group cannot be changed while role assets are bound")
+	}
+	originalGroup := strings.TrimSpace(string(original.GetOtherSettings().SecureVideoGroup))
+	effectiveGroup := strings.TrimSpace(string(effective.GetOtherSettings().SecureVideoGroup))
+	if originalGroup != effectiveGroup {
+		return fmt.Errorf("Secure channel credentials and video group cannot be changed while role assets are bound")
+	}
+	return nil
 }
 
 func UpdateChannelStatus(c *gin.Context) {

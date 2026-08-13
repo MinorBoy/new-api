@@ -245,6 +245,7 @@ func SetApiRouter(router *gin.Engine) {
 		registerAuthzRoutes(apiRouter)
 		registerCostAccountingRoutes(apiRouter)
 		registerConfigImportRoutes(apiRouter)
+		registerAssetRoutes(apiRouter, controller.NewAssetController(nil), middleware.TokenOrUserAuth())
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{
@@ -396,5 +397,20 @@ func SetApiRouter(router *gin.Engine) {
 			deploymentsRoute.POST("/:id/extend", controller.ExtendDeployment)
 			deploymentsRoute.DELETE("/:id", controller.DeleteDeployment)
 		}
+	}
+}
+
+func registerAssetRoutes(
+	apiRouter *gin.RouterGroup,
+	assetController *controller.AssetController,
+	auth gin.HandlerFunc,
+) {
+	assetRoute := apiRouter.Group("/v3/assets")
+	assetRoute.Use(auth)
+	{
+		assetRoute.POST("", assetController.Create)
+		assetRoute.GET("", assetController.List)
+		assetRoute.GET("/:asset_id", assetController.Get)
+		assetRoute.POST("/:asset_id/refresh", assetController.Refresh)
 	}
 }

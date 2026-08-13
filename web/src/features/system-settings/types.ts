@@ -441,6 +441,24 @@ export type ObjectStorageTestResponse = {
   }
 }
 
+export type SecureAssetChannelOption = {
+  id: number
+  name: string
+  status: number
+  default: boolean
+}
+
+export type SecureAssetSettings = {
+  default_channel_id: number
+  channels: SecureAssetChannelOption[]
+}
+
+export type SecureAssetSettingsResponse = {
+  success: boolean
+  message: string
+  data: SecureAssetSettings
+}
+
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean
   ModelRequestRateLimitCount: number

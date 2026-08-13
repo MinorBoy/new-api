@@ -246,6 +246,12 @@ func SetApiRouter(router *gin.Engine) {
 		registerCostAccountingRoutes(apiRouter)
 		registerConfigImportRoutes(apiRouter)
 		registerAssetRoutes(apiRouter, controller.NewAssetController(nil), middleware.TokenOrUserAuth())
+		secureAssetSettingsRoute := apiRouter.Group("/asset-settings/secure")
+		secureAssetSettingsRoute.Use(middleware.RootAuth())
+		{
+			secureAssetSettingsRoute.GET("", controller.GetSecureAssetSettings)
+			secureAssetSettingsRoute.PUT("", controller.UpdateSecureAssetSettings)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

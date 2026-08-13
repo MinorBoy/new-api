@@ -6168,6 +6168,16 @@
     "Map client-visible Ark model names to verified Mikoto upstream models": "クライアントに表示する Ark モデル名を検証済みの Mikoto 上流モデルにマッピングします",
     "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto はタスク専用です。実際の上流 API 契約を検証した後にのみ有効化してください。",
     "ZZone": "ZZone",
-    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone はタスク専用です。実際の上流契約の受け入れ確認後にのみ有効化してください。"
+    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone はタスク専用です。実際の上流契約の受け入れ確認後にのみ有効化してください。",
+    "Secure asset settings saved": "Secure 素材設定を保存しました",
+    "Failed to save Secure asset settings": "Secure 素材設定の保存に失敗しました",
+    "Secure role assets": "Secure ロール素材",
+    "Loading Secure asset settings...": "Secure 素材設定を読み込んでいます...",
+    "Failed to load Secure asset settings": "Secure 素材設定の読み込みに失敗しました",
+    "Save Secure asset settings": "Secure 素材設定を保存",
+    "Default Secure enterprise channel": "デフォルト Secure Enterprise チャネル",
+    "Select a Secure enterprise channel": "Secure Enterprise チャネルを選択",
+    "Role assets use the channel and API key selected when they are created.": "ロール素材は作成時に選択したチャネルと API キーを使用します。",
+    "Secure asset channel": "Secure 素材チャネル"
   }
 }

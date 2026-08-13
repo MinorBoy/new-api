@@ -26,6 +26,7 @@ import type {
   ObjectStorageSettingsRequest,
   ObjectStorageSettingsResponse,
   ObjectStorageTestResponse,
+  SecureAssetSettingsResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -63,6 +64,21 @@ export async function testObjectStorageSettings(
   const res = await api.post<ObjectStorageTestResponse>(
     '/api/object-storage/test',
     request
+  )
+  return res.data
+}
+
+export async function getSecureAssetSettings() {
+  const res = await api.get<SecureAssetSettingsResponse>(
+    '/api/asset-settings/secure'
+  )
+  return res.data
+}
+
+export async function updateSecureAssetSettings(channelID: number) {
+  const res = await api.put<SecureAssetSettingsResponse>(
+    '/api/asset-settings/secure',
+    { channel_id: channelID }
   )
   return res.data
 }

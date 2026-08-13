@@ -6168,6 +6168,16 @@
     "Map client-visible Ark model names to verified Mikoto upstream models": "Сопоставьте видимые клиенту названия моделей Ark с проверенными вышестоящими моделями Mikoto",
     "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto поддерживает только задачи. Включайте канал только после проверки реального контракта с вышестоящим API.",
     "ZZone": "ZZone",
-    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone поддерживает только задачи. Включайте его только после приемки реального контракта вышестоящего API."
+    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone поддерживает только задачи. Включайте его только после приемки реального контракта вышестоящего API.",
+    "Secure asset settings saved": "Настройки ресурсов Secure сохранены",
+    "Failed to save Secure asset settings": "Не удалось сохранить настройки Secure",
+    "Secure role assets": "Ролевые ресурсы Secure",
+    "Loading Secure asset settings...": "Загрузка настроек Secure...",
+    "Failed to load Secure asset settings": "Не удалось загрузить настройки Secure",
+    "Save Secure asset settings": "Сохранить настройки Secure",
+    "Default Secure enterprise channel": "Канал Secure Enterprise по умолчанию",
+    "Select a Secure enterprise channel": "Выберите канал Secure Enterprise",
+    "Role assets use the channel and API key selected when they are created.": "Ролевые ресурсы используют канал и API-ключ, выбранные при создании.",
+    "Secure asset channel": "Канал ресурсов Secure"
   }
 }

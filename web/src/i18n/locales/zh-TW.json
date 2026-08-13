@@ -6168,6 +6168,16 @@
     "Map client-visible Ark model names to verified Mikoto upstream models": "將用戶端可見的 Ark 模型名稱對應到已驗證的 Mikoto 上游模型",
     "Mikoto is task-only. Enable it only after real upstream contract acceptance.": "Mikoto 僅支援任務 API。請僅在完成真實上游協定驗收後啟用。",
     "ZZone": "ZZone",
-    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone 僅支援任務介面，請僅在真實上游契約驗收通過後啟用。"
+    "ZZone is task-only. Enable it only after real upstream contract acceptance.": "ZZone 僅支援任務介面，請僅在真實上游契約驗收通過後啟用。",
+    "Secure asset settings saved": "Secure 素材設定已儲存",
+    "Failed to save Secure asset settings": "Secure 素材設定儲存失敗",
+    "Secure role assets": "Secure 角色素材",
+    "Loading Secure asset settings...": "正在載入 Secure 素材設定...",
+    "Failed to load Secure asset settings": "Secure 素材設定載入失敗",
+    "Save Secure asset settings": "儲存 Secure 素材設定",
+    "Default Secure enterprise channel": "預設 Secure 企業頻道",
+    "Select a Secure enterprise channel": "選擇 Secure 企業頻道",
+    "Role assets use the channel and API key selected when they are created.": "角色素材建立後固定使用建立時選擇的頻道和 API Key。",
+    "Secure asset channel": "Secure 素材頻道"
   }
 }

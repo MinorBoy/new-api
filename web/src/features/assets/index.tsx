@@ -16,11 +16,21 @@ import type { Asset } from './types'
 
 const queryKey = ['role-assets']
 
+async function loadAssets() {
+  const response = await listAssets()
+  const processing = response.data.items.filter(
+    (asset) => asset.status === 'processing' || asset.status === 'pending'
+  )
+  if (processing.length === 0) return response
+  await Promise.allSettled(processing.map(refreshAsset))
+  return listAssets()
+}
+
 export function Assets() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [url, setURL] = useState('')
-  const assetsQuery = useQuery({ queryKey, queryFn: listAssets, refetchInterval: (query) => query.state.data?.data.items.some((asset) => asset.status === 'processing' || asset.status === 'pending') ? 2000 : false })
+  const assetsQuery = useQuery({ queryKey, queryFn: loadAssets, refetchInterval: (query) => query.state.data?.data.items.some((asset) => asset.status === 'processing' || asset.status === 'pending') ? 2000 : false })
   const createMutation = useMutation({ mutationFn: createAsset, onSuccess: () => { setURL(''); void queryClient.invalidateQueries({ queryKey }); toast.success(t('Asset created')) }, onError: () => toast.error(t('Failed to create asset')) })
   const refreshMutation = useMutation({ mutationFn: refreshAsset, onSuccess: () => void queryClient.invalidateQueries({ queryKey }) })
   const items = assetsQuery.data?.data.items ?? []

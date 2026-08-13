@@ -29,6 +29,48 @@ import type { ApiEndpoint } from '../types'
  */
 export const apiEndpoints: ApiEndpoint[] = [
   {
+    slug: 'role-assets-create',
+    method: 'POST',
+    path: '/api/v3/assets',
+    protocol: 'gateway',
+    category: 'video',
+    title: { en: 'Role Asset Create', zh: '角色素材创建' },
+    summary: { en: 'Create a public image role asset bound to Secure enterprise.', zh: '创建绑定 Secure 企业渠道的公网图片角色素材。' },
+    auth: 'Bearer Token',
+    contentType: 'application/json',
+    requestParams: [
+      { name: 'type', type: 'string', required: 'yes', description: { en: 'Must be image.', zh: '必须为 image。' } },
+      { name: 'url', type: 'string', required: 'yes', description: { en: 'Public HTTP(S) image URL.', zh: '公网 HTTP(S) 图片 URL。' } },
+      { name: 'Idempotency-Key (header)', type: 'string', required: 'recommended', description: { en: 'Unique retry key.', zh: '用于重试的唯一键。' } },
+    ],
+    responseParams: [
+      { name: 'id', type: 'string', required: 'yes', description: { en: 'Project asset ID, asset-*.', zh: '项目素材 ID，格式为 asset-*。' } },
+      { name: 'status', type: 'string', required: 'yes', description: { en: 'processing, active, failed, or unknown.', zh: 'processing、active、failed 或 unknown。' } },
+      { name: 'reference', type: 'string', required: 'conditional', description: { en: 'asset:// reference when active.', zh: '素材 active 时返回 asset:// 引用。' } },
+    ],
+    errorCodes: [
+      { status: 400, description: { en: 'Invalid URL or type.', zh: 'URL 或类型无效。' } },
+      { status: 503, description: { en: 'Secure asset channel unavailable.', zh: 'Secure 素材渠道不可用。' } },
+      { status: 502, description: { en: 'Secure upstream request failed.', zh: 'Secure 上游请求失败。' } },
+    ],
+    codeSamples: [],
+  },
+  {
+    slug: 'role-assets-query',
+    method: 'GET',
+    path: '/api/v3/assets/{asset_id}',
+    protocol: 'gateway',
+    category: 'video',
+    title: { en: 'Role Asset Query', zh: '角色素材查询' },
+    summary: { en: 'Query a project role asset and refresh its Secure status.', zh: '查询项目角色素材并刷新 Secure 状态。' },
+    auth: 'Bearer Token',
+    contentType: 'application/json',
+    requestParams: [{ name: 'asset_id (path)', type: 'string', required: 'yes', description: { en: 'Project asset ID.', zh: '项目素材 ID。' } }],
+    responseParams: [{ name: 'status', type: 'string', required: 'yes', description: { en: 'Current asset status.', zh: '当前素材状态。' } }],
+    errorCodes: [{ status: 404, description: { en: 'Asset not found for this user.', zh: '素材不存在或不属于当前用户。' } }],
+    codeSamples: [],
+  },
+  {
     slug: 'chat-completions',
     method: 'POST',
     path: '/v1/chat/completions',

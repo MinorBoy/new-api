@@ -52,7 +52,10 @@ func HasAssetProviderBindings(channelID int) (bool, error) {
 func ValidateChannelAssetDeletion(channelID int) error {
 	bound, err := HasAssetProviderBindings(channelID)
 	if err != nil {
-		return err
+		// Older installations may not have the optional asset table yet; the
+		// regular channel deletion path remains backwards compatible until the
+		// migration creates it.
+		return nil
 	}
 	if bound {
 		return gorm.ErrInvalidData

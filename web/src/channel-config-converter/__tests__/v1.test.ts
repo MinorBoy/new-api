@@ -635,14 +635,14 @@ test('v1 adapter separates Mikoto Sora from Seedance channel lines', async () =>
 
   const sourceChannel = channelSheet.rows[4]
   assert.ok(sourceChannel)
-  const sourceChannelId = requiredCell(sourceChannel, 0)
-  const sourceLocation = { ...sourceChannelId }
   channelSheet.rows.push({
     ...sourceChannel,
     rowNumber: 999,
     cells: sourceChannel.cells.map((cell) => ({ ...cell })),
   })
-  requiredCell(channelSheet.rows.at(-1)!, 0).value = 'CH-MIKOTO'
+  const copiedChannel = channelSheet.rows.at(-1)
+  assert.ok(copiedChannel)
+  requiredCell(copiedChannel, 0).value = 'CH-MIKOTO'
 
   const sourceCost = costSheet.rows[4]
   const sourceMapping = mappingSheet.rows[4]

@@ -41,7 +41,7 @@ export const apiEndpoints: ApiEndpoint[] = [
     requestParams: [
       { name: 'type', type: 'string', required: 'yes', description: { en: 'Must be image.', zh: '必须为 image。' } },
       { name: 'url', type: 'string', required: 'yes', description: { en: 'Public HTTP(S) image URL.', zh: '公网 HTTP(S) 图片 URL。' } },
-      { name: 'Idempotency-Key (header)', type: 'string', required: 'recommended', description: { en: 'Unique retry key.', zh: '用于重试的唯一键。' } },
+      { name: 'Idempotency-Key (header)', type: 'string', required: 'no', description: { en: 'Recommended unique retry key.', zh: '建议提供用于重试的唯一键。' } },
     ],
     responseParams: [
       { name: 'id', type: 'string', required: 'yes', description: { en: 'Project asset ID, asset-*.', zh: '项目素材 ID，格式为 asset-*。' } },

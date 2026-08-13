@@ -169,4 +169,3 @@
 - [ ] Step 2: 新增简体中文 docs/secure-role-assets.md，记录接口、状态、Ark 引用格式、API Key 归属、固定渠道、无删除接口和错误码；把接口加入内置 API 文档。
 - [ ] Step 3: 运行 go test ./model ./service ./controller ./middleware ./relay/channel/task/newapivideo ./router -count=1; go test ./e2e -run SecureAsset -count=1; cd web; bun run typecheck; bun run build; git diff --check; git status --short。
 - [ ] Step 4: 提交 test: verify Secure role asset lifecycle，并输出验收报告，列出 API、数据表、默认渠道、请求转换、状态映射、固定渠道规则、测试证据和真实上游风险。
-

@@ -237,7 +237,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			if err != nil || state.ARK == nil {
 				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
 			}
-			if err := validateSecureRequest(*state.ARK, *profile.secureRequest, ""); err != nil {
+			mappings, _ := common.GetContextKeyType[map[string]string](c, constant.ContextKeyVideoAssetMappings)
+			if err := validateSecureRequestWithAssets(*state.ARK, *profile.secureRequest, "", mappings); err != nil {
 				var requestErr *arkRequestError
 				if errors.As(err, &requestErr) {
 					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
@@ -571,7 +572,8 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		if info != nil {
 			upstreamModel = info.UpstreamModelName
 		}
-		if err := validateSecureRequest(*state.ARK, *profile.secureRequest, upstreamModel); err != nil {
+		mappings, _ := common.GetContextKeyType[map[string]string](c, constant.ContextKeyVideoAssetMappings)
+		if err := validateSecureRequestWithAssets(*state.ARK, *profile.secureRequest, upstreamModel, mappings); err != nil {
 			var requestErr *arkRequestError
 			if errors.As(err, &requestErr) {
 				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
@@ -771,7 +773,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 			case videoRequestDialectSecureOverseas:
 				body, a.requestContentType, err = buildSecureOverseasRequest(*state.ARK, modelName, *profile.secureRequest)
 			case videoRequestDialectSecureEnterprise:
-				body, err = buildSecureEnterpriseRequest(*state.ARK, modelName, *profile.secureRequest)
+				body, err = buildSecureEnterpriseRequestWithContext(c, *state.ARK, modelName, *profile.secureRequest)
 			}
 		case videoRequestDialectTextJSON:
 			state, stateErr := getRequestState(c)

@@ -11,9 +11,11 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/gin-gonic/gin"
 )
 
 const maxSecureOverseasReferenceVideoDurationMS int64 = 15000
@@ -23,14 +25,15 @@ type secureRequestProfile struct {
 }
 
 type secureEnterpriseRequest struct {
-	Model       string   `json:"model"`
-	Prompt      string   `json:"prompt"`
-	Duration    *int     `json:"duration"`
-	AspectRatio *string  `json:"aspect_ratio,omitempty"`
-	ImageURL    string   `json:"image_url,omitempty"`
-	ExtraImages []string `json:"extra_images,omitempty"`
-	ExtraVideos []string `json:"extra_videos,omitempty"`
-	ExtraAudios []string `json:"extra_audios,omitempty"`
+	Model              string   `json:"model"`
+	Prompt             string   `json:"prompt"`
+	Duration           *int     `json:"duration"`
+	AspectRatio        *string  `json:"aspect_ratio,omitempty"`
+	ImageURL           string   `json:"image_url,omitempty"`
+	ExtraImages        []string `json:"extra_images,omitempty"`
+	UsePersonCharacter bool     `json:"use_person_character,omitempty"`
+	ExtraVideos        []string `json:"extra_videos,omitempty"`
+	ExtraAudios        []string `json:"extra_audios,omitempty"`
 }
 
 type secureMediaInputs struct {
@@ -344,9 +347,39 @@ func buildSecureOverseasRequest(request arkRequest, upstreamModel string, profil
 }
 
 func buildSecureEnterpriseRequest(request arkRequest, upstreamModel string, profile secureRequestProfile) ([]byte, error) {
-	if err := validateSecureRequest(request, profile, upstreamModel); err != nil {
+	return buildSecureEnterpriseRequestWithAssets(request, upstreamModel, profile, nil)
+}
+
+func buildSecureEnterpriseRequestWithContext(c *gin.Context, request arkRequest, upstreamModel string, profile secureRequestProfile) ([]byte, error) {
+	mappings, _ := common.GetContextKeyType[map[string]string](c, constant.ContextKeyVideoAssetMappings)
+	return buildSecureEnterpriseRequestWithAssets(request, upstreamModel, profile, mappings)
+}
+
+func buildSecureEnterpriseRequestWithAssets(request arkRequest, upstreamModel string, profile secureRequestProfile, mappings map[string]string) ([]byte, error) {
+	if profile.group != dto.SecureVideoGroupEnterprise {
+		for _, item := range request.Content {
+			if item.Type == "image_url" && item.ImageURL != nil && strings.HasPrefix(strings.TrimSpace(item.ImageURL.URL), "asset://") {
+				return nil, &arkRequestError{Code: "InvalidParameter.content", Message: "role assets are only supported by Secure enterprise video"}
+			}
+		}
+	}
+	validatedRequest, upstreamImages, err := prepareSecureEnterpriseRoleAssets(request, mappings)
+	if err != nil {
 		return nil, err
 	}
+	if err := validateSecureRequest(validatedRequest, profile, upstreamModel); err != nil {
+		return nil, err
+	}
+	if len(upstreamImages) > 0 {
+		media := collectSecureMedia(request)
+		result := secureEnterpriseRequest{
+			Model: upstreamModel, Prompt: arkPrompt(request.Content), Duration: request.Duration,
+			AspectRatio: request.Ratio, ExtraVideos: media.videos, ExtraAudios: media.audios,
+			UsePersonCharacter: true, ExtraImages: upstreamImages,
+		}
+		return common.Marshal(result)
+	}
+
 	media := collectSecureMedia(request)
 	result := secureEnterpriseRequest{
 		Model:       upstreamModel,
@@ -366,4 +399,58 @@ func buildSecureEnterpriseRequest(request arkRequest, upstreamModel string, prof
 		}
 	}
 	return common.Marshal(result)
+}
+
+func prepareSecureEnterpriseRoleAssets(request arkRequest, mappings map[string]string) (arkRequest, []string, error) {
+	roleAssetURLs := make([]string, 0)
+	publicImage := false
+	for _, item := range request.Content {
+		if item.Type != "image_url" || strings.TrimSpace(item.Role) != "reference_image" || item.ImageURL == nil {
+			continue
+		}
+		value := strings.TrimSpace(item.ImageURL.URL)
+		if strings.HasPrefix(value, "asset://") {
+			roleAssetURLs = append(roleAssetURLs, value)
+		} else if value != "" {
+			publicImage = true
+		}
+	}
+	if len(roleAssetURLs) > 0 {
+		if publicImage || len(roleAssetURLs) > 9 || len(mappings) == 0 {
+			return arkRequest{}, nil, &arkRequestError{Code: "InvalidParameter.content", Message: "role assets cannot be mixed with public image URLs"}
+		}
+		normalized := request
+		normalized.Content = append([]arkContent(nil), request.Content...)
+		upstreamImages := make([]string, 0, len(roleAssetURLs))
+		for index := range normalized.Content {
+			item := &normalized.Content[index]
+			if item.Type != "image_url" || strings.TrimSpace(item.Role) != "reference_image" || item.ImageURL == nil {
+				continue
+			}
+			projectID := strings.TrimPrefix(strings.TrimSpace(item.ImageURL.URL), "asset://")
+			upstreamID, ok := mappings[projectID]
+			if !ok || !strings.HasPrefix(upstreamID, "asset-local-") {
+				return arkRequest{}, nil, &arkRequestError{Code: "InvalidParameter.content", Message: "role asset reference is unavailable"}
+			}
+			upstreamImages = append(upstreamImages, "asset://"+upstreamID)
+			item.ImageURL.URL = "https://example.com/asset-reference/" + projectID + ".png"
+		}
+		return normalized, upstreamImages, nil
+	}
+	return request, nil, nil
+}
+
+func validateSecureRequestWithAssets(request arkRequest, profile secureRequestProfile, upstreamModel string, mappings map[string]string) error {
+	if profile.group != dto.SecureVideoGroupEnterprise {
+		for _, item := range request.Content {
+			if item.Type == "image_url" && item.ImageURL != nil && strings.HasPrefix(strings.TrimSpace(item.ImageURL.URL), "asset://") {
+				return &arkRequestError{Code: "InvalidParameter.content", Message: "role assets are only supported by Secure enterprise video"}
+			}
+		}
+	}
+	validated, _, err := prepareSecureEnterpriseRoleAssets(request, mappings)
+	if err != nil {
+		return err
+	}
+	return validateSecureRequest(validated, profile, upstreamModel)
 }

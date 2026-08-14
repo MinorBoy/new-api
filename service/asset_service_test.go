@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -13,7 +16,9 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type fakeAssetProvider struct {
@@ -105,6 +110,25 @@ func processingAssetProvider() *fakeAssetProvider {
 			}, nil
 		},
 	}
+}
+
+func TestAssetServiceDefaultChannelLookupQuotesOptionKeyForMySQL(t *testing.T) {
+	var logs bytes.Buffer
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(127.0.0.1:9910)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+		Logger:               logger.New(log.New(&logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	require.NoError(t, err)
+
+	service := NewAssetService(db, processingAssetProvider())
+	_, _, _, err = service.defaultChannel(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, logs.String(), "`options`.`key`")
+	assert.NotContains(t, strings.ReplaceAll(logs.String(), "`options`.`key`", ""), "WHERE key")
 }
 
 func TestAssetServiceRejectsInvalidDefaultChannels(t *testing.T) {

@@ -98,7 +98,7 @@ func isEligibleSecureAssetChannel(channel *model.Channel) bool {
 
 func secureAssetDefaultChannelID() int {
 	var option model.Option
-	if err := model.DB.First(&option, "key = ?", service.SecureAssetDefaultChannelOptionKey).Error; err != nil {
+	if err := model.DB.Where(&model.Option{Key: service.SecureAssetDefaultChannelOptionKey}).First(&option).Error; err != nil {
 		return 0
 	}
 	channelID, err := strconv.Atoi(strings.TrimSpace(option.Value))

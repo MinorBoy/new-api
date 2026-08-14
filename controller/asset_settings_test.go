@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -16,7 +18,9 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func prepareAssetSettingsDB(t *testing.T) *gorm.DB {
@@ -83,6 +87,27 @@ func TestSecureAssetSettingsFiltersEligibleChannels(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "disabled")
 	assert.NotContains(t, recorder.Body.String(), "multi")
 	assert.NotContains(t, recorder.Body.String(), "key")
+}
+
+func TestSecureAssetDefaultChannelLookupQuotesOptionKeyForMySQL(t *testing.T) {
+	var logs bytes.Buffer
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(127.0.0.1:9910)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DisableAutomaticPing: true,
+		DryRun:               true,
+		Logger:               logger.New(log.New(&logs, "", 0), logger.Config{LogLevel: logger.Info}),
+	})
+	require.NoError(t, err)
+
+	previousDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+
+	assert.Zero(t, secureAssetDefaultChannelID())
+	assert.Contains(t, logs.String(), "`options`.`key`")
+	assert.NotContains(t, strings.ReplaceAll(logs.String(), "`options`.`key`", ""), "WHERE key")
 }
 
 func TestUpdateSecureAssetSettingsValidatesAndPersistsDefaultChannel(t *testing.T) {

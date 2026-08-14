@@ -473,7 +473,7 @@ func (service *AssetService) defaultChannel(
 ) (*model.Channel, AssetProviderCredential, string, error) {
 	var option model.Option
 	if err := service.db.WithContext(ctx).
-		Where("key = ?", SecureAssetDefaultChannelOptionKey).
+		Where(&model.Option{Key: SecureAssetDefaultChannelOptionKey}).
 		First(&option).Error; err != nil {
 		return nil, AssetProviderCredential{}, "", &AssetServiceError{
 			Code: AssetErrorChannelUnavailable,

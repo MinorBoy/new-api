@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
 
 import type {
   ApiKey,
@@ -32,6 +32,14 @@ import type {
 // API Key Management
 // ============================================================================
 
+export function getApiKeyRequestConfig(apiKey: string): ApiRequestConfig {
+  return {
+    authToken: apiKey,
+    skipAuthRefresh: true,
+    skipErrorHandler: true,
+  }
+}
+
 // Get paginated API keys list
 export async function getApiKeys(
   params: GetApiKeysParams = {}
@@ -39,6 +47,30 @@ export async function getApiKeys(
   const { p = 1, size = 10 } = params
   const res = await api.get(`/api/token/?p=${p}&size=${size}`)
   return res.data
+}
+
+export async function loadEnabledApiKeyPages(
+  fetchPage: (params: GetApiKeysParams) => Promise<GetApiKeysResponse>
+): Promise<ApiKey[]> {
+  const firstPage = await fetchPage({ p: 1, size: 100 })
+  const firstData = firstPage.data
+  if (!firstPage.success || !firstData) return []
+
+  const pageSize = firstData.page_size || 100
+  const pageCount = Math.ceil(firstData.total / pageSize)
+  const remainingPages = await Promise.all(
+    Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) =>
+      fetchPage({ p: index + 2, size: pageSize })
+    )
+  )
+  return [
+    ...firstData.items,
+    ...remainingPages.flatMap((response) => response.data?.items ?? []),
+  ].filter((key) => key.status === 1)
+}
+
+export async function getEnabledApiKeys(): Promise<ApiKey[]> {
+  return loadEnabledApiKeyPages(getApiKeys)
 }
 
 // Search API keys by keyword or token (with pagination)
@@ -118,9 +150,7 @@ export async function updateApiKeyGroup(
 export async function getTokenUsage(
   ids: number[]
 ): Promise<{ success: boolean; message?: string; data?: TokenUsageMap }> {
-  const res = await api.get(
-    `/api/token/usage?token_ids=${ids.join(',')}`
-  )
+  const res = await api.get(`/api/token/usage?token_ids=${ids.join(',')}`)
   return res.data
 }
 
@@ -130,6 +160,14 @@ export async function fetchTokenKey(
 ): Promise<{ success: boolean; message?: string; data?: { key: string } }> {
   const res = await api.post(`/api/token/${id}/key`)
   return res.data
+}
+
+export async function getApiKeyValue(id: number): Promise<string> {
+  const response = await fetchTokenKey(id)
+  if (!response.success || !response.data?.key) {
+    throw new Error(response.message || 'Unable to load API key')
+  }
+  return response.data.key
 }
 
 // Batch fetch real (unmasked) keys for multiple tokens

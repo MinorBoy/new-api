@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-import { VIDEO_MEDIA_LIMITS } from '../lib/request'
 import type { VideoMedia } from '../types'
 
 type MediaKind = keyof VideoMedia
@@ -13,6 +12,8 @@ type MediaKind = keyof VideoMedia
 type ReferenceMediaEditorProps = {
   kind: MediaKind
   values: string[]
+  limit: number
+  disabled?: boolean
   onChange: (values: string[]) => void
 }
 
@@ -38,7 +39,6 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
   const { t } = useTranslation()
   const Icon = MEDIA_ICONS[props.kind]
   const copy = MEDIA_COPY[props.kind]
-  const limit = VIDEO_MEDIA_LIMITS[props.kind]
   const rowIds = useRef<string[]>([])
   while (rowIds.current.length < props.values.length) {
     rowIds.current.push(crypto.randomUUID())
@@ -48,6 +48,7 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
   }
 
   function updateValue(index: number, value: string) {
+    if (props.disabled) return
     props.onChange(
       props.values.map((current, currentIndex) =>
         currentIndex === index ? value : current
@@ -56,12 +57,13 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
   }
 
   function addValue() {
-    if (props.values.length >= limit) return
+    if (props.disabled || props.values.length >= props.limit) return
     rowIds.current.push(crypto.randomUUID())
     props.onChange([...props.values, ''])
   }
 
   function removeValue(index: number) {
+    if (props.disabled) return
     rowIds.current.splice(index, 1)
     props.onChange(
       props.values.filter((_, currentIndex) => currentIndex !== index)
@@ -69,7 +71,10 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
   }
 
   return (
-    <section className='bg-muted/20 rounded-lg border p-3'>
+    <section
+      className='bg-muted/20 rounded-lg border p-3'
+      aria-disabled={props.disabled}
+    >
       <div className='mb-3 flex items-center justify-between gap-2'>
         <div className='flex min-w-0 items-center gap-2'>
           <Icon className='text-primary size-4 shrink-0' aria-hidden='true' />
@@ -81,7 +86,7 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
           </div>
         </div>
         <span className='text-muted-foreground shrink-0 text-xs tabular-nums'>
-          {props.values.length} / {limit}
+          {props.values.length} / {props.limit}
         </span>
       </div>
 
@@ -93,6 +98,7 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
               inputMode='url'
               placeholder='https://'
               value={value}
+              disabled={props.disabled}
               onChange={(event) => updateValue(index, event.target.value)}
             />
             <Button
@@ -101,6 +107,7 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
               size='icon'
               type='button'
               variant='ghost'
+              disabled={props.disabled}
               onClick={() => removeValue(index)}
             >
               <X aria-hidden='true' />
@@ -111,7 +118,7 @@ export function ReferenceMediaEditor(props: ReferenceMediaEditorProps) {
 
       <Button
         className='mt-3 w-full'
-        disabled={props.values.length >= limit}
+        disabled={props.disabled || props.values.length >= props.limit}
         size='sm'
         type='button'
         variant='outline'

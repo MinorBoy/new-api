@@ -40,6 +40,7 @@ import {
   getVideoModels,
   queryVideoTask,
 } from './api'
+import { ReferenceImageEditor } from './components/reference-image-editor'
 import { ReferenceMediaEditor } from './components/reference-media-editor'
 import { VideoTaskCard } from './components/video-task-card'
 import { DEFAULT_VIDEO_FORM } from './lib/defaults'
@@ -51,12 +52,14 @@ import {
   buildVideoRequest,
   buildVideoTaskCurl,
   filterModelsForApiKey,
+  getVideoMediaLimits,
 } from './lib/request'
 import { createVideoGenerationSchema } from './lib/schema'
 import { appendTaskRecord, updateTaskRecord } from './lib/task-record'
 import { getVideoTaskId, getVideoTaskStatus } from './lib/task-state'
 import type {
   VideoGenerationForm,
+  VideoImageSource,
   VideoTaskRecord,
   VideoTaskStatus,
 } from './types'
@@ -66,6 +69,7 @@ const POLL_INTERVAL_MS = 5000
 function cloneDefaultForm(): VideoGenerationForm {
   return {
     ...DEFAULT_VIDEO_FORM,
+    assetIds: [...DEFAULT_VIDEO_FORM.assetIds],
     media: {
       images: [...DEFAULT_VIDEO_FORM.media.images],
       videos: [...DEFAULT_VIDEO_FORM.media.videos],
@@ -130,8 +134,12 @@ export function VideoGeneration() {
         : [],
     [modelsQuery.data, selectedKey]
   )
+  const model = form.watch('model')
+  const imageSource = form.watch('imageSource')
+  const assetIds = form.watch('assetIds')
   const media = form.watch('media')
   const prompt = form.watch('prompt')
+  const mediaLimits = getVideoMediaLimits(model)
   const requestPreview = buildVideoRequest(form.watch())
   let modelPlaceholder = t('No models available')
   if (modelsQuery.isLoading) {
@@ -285,6 +293,17 @@ export function VideoGeneration() {
     form.reset(defaults)
   }
 
+  function changeImageSource(next: VideoImageSource) {
+    if (next === imageSource) return
+    if (next === 'asset') {
+      form.setValue('media.images', [], { shouldValidate: true })
+      form.setValue('media.videos', [], { shouldValidate: true })
+    } else {
+      form.setValue('assetIds', [], { shouldValidate: true })
+    }
+    form.setValue('imageSource', next, { shouldValidate: true })
+  }
+
   return (
     <div className='flex h-full min-h-0 flex-col overflow-y-auto'>
       <div className='mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6'>
@@ -292,7 +311,7 @@ export function VideoGeneration() {
           <div>
             <div className='text-primary mb-2 flex items-center gap-2 text-xs font-medium'>
               <Sparkles className='size-4' aria-hidden='true' />
-              Seedance 2.0
+              {model || t('Multimodal video')}
             </div>
             <h1 className='text-2xl font-semibold'>{t('Video generation')}</h1>
             <p className='text-muted-foreground mt-1 max-w-3xl text-sm'>
@@ -302,9 +321,15 @@ export function VideoGeneration() {
             </p>
           </div>
           <div className='flex flex-wrap gap-2'>
-            <Badge variant='outline'>{t('Images')} 0–9</Badge>
-            <Badge variant='outline'>{t('Videos')} 0–3</Badge>
-            <Badge variant='outline'>{t('Audio')} 0–3</Badge>
+            <Badge variant='outline'>
+              {t('Images')} 0–{mediaLimits.images}
+            </Badge>
+            <Badge variant='outline'>
+              {t('Videos')} 0–{mediaLimits.videos}
+            </Badge>
+            <Badge variant='outline'>
+              {t('Audio')} 0–{mediaLimits.audios}
+            </Badge>
           </div>
         </header>
 
@@ -409,43 +434,61 @@ export function VideoGeneration() {
                 <div>
                   <div className='mb-3'>
                     <h2 className='text-sm font-medium'>
-                      {t('Reference media URLs')}
+                      {t('Reference media')}
                     </h2>
                     <p className='text-muted-foreground mt-1 text-xs'>
-                      {t('Only public HTTP(S) URLs are supported.')}
+                      {t(
+                        'Use public URLs or role assets supported by the selected model.'
+                      )}
                     </p>
                   </div>
-                  <div className='grid gap-3 lg:grid-cols-3'>
-                    <ReferenceMediaEditor
-                      kind='images'
-                      values={media.images}
-                      onChange={(values) =>
+                  <div className='space-y-3'>
+                    <ReferenceImageEditor
+                      model={model}
+                      source={imageSource}
+                      imageUrls={media.images}
+                      assetIds={assetIds}
+                      imageLimit={mediaLimits.images}
+                      onSourceChange={changeImageSource}
+                      onImageUrlsChange={(values) =>
                         form.setValue('media.images', values, {
                           shouldValidate: true,
                         })
                       }
-                    />
-                    <ReferenceMediaEditor
-                      kind='videos'
-                      values={media.videos}
-                      onChange={(values) =>
-                        form.setValue('media.videos', values, {
+                      onAssetIdsChange={(values) =>
+                        form.setValue('assetIds', values, {
                           shouldValidate: true,
                         })
                       }
                     />
-                    <ReferenceMediaEditor
-                      kind='audios'
-                      values={media.audios}
-                      onChange={(values) =>
-                        form.setValue('media.audios', values, {
-                          shouldValidate: true,
-                        })
-                      }
-                    />
+                    <div className='grid gap-3 lg:grid-cols-2'>
+                      <ReferenceMediaEditor
+                        kind='videos'
+                        values={media.videos}
+                        limit={mediaLimits.videos}
+                        disabled={imageSource === 'asset'}
+                        onChange={(values) =>
+                          form.setValue('media.videos', values, {
+                            shouldValidate: true,
+                          })
+                        }
+                      />
+                      <ReferenceMediaEditor
+                        kind='audios'
+                        values={media.audios}
+                        limit={mediaLimits.audios}
+                        onChange={(values) =>
+                          form.setValue('media.audios', values, {
+                            shouldValidate: true,
+                          })
+                        }
+                      />
+                    </div>
                   </div>
                   <FieldError className='mt-2'>
-                    {form.formState.errors.media?.images?.message ||
+                    {form.formState.errors.imageSource?.message ||
+                      form.formState.errors.assetIds?.message ||
+                      form.formState.errors.media?.images?.message ||
                       form.formState.errors.media?.videos?.message ||
                       form.formState.errors.media?.audios?.message}
                   </FieldError>
@@ -632,7 +675,10 @@ export function VideoGeneration() {
                   variant='outline'
                   onClick={() =>
                     void copy(
-                      buildVideoTaskCurl(requestPreview, window.location.origin),
+                      buildVideoTaskCurl(
+                        requestPreview,
+                        window.location.origin
+                      ),
                       'cURL copied'
                     )
                   }

@@ -87,6 +87,8 @@ async function mountEditor(
         source={source}
         imageUrls={[]}
         assetIds={[]}
+        apiKeyId={7}
+        apiKey='sk-seven'
         imageLimit={9}
         onSourceChange={(next) => {
           changes.push(next)

@@ -140,6 +140,13 @@ export function VideoGeneration() {
   const media = form.watch('media')
   const prompt = form.watch('prompt')
   const mediaLimits = getVideoMediaLimits(model)
+  const apiKeyValueQuery = useQuery({
+    queryKey: ['video-generation', 'api-key-value', selectedKeyId],
+    queryFn: () => getVideoApiKeyValue(Number(selectedKeyId)),
+    enabled: Boolean(selectedKey && imageSource === 'asset'),
+    staleTime: 30_000,
+  })
+  const selectedApiKey = apiKeyValueQuery.data ?? ''
   const requestPreview = buildVideoRequest(form.watch())
   let modelPlaceholder = t('No models available')
   if (modelsQuery.isLoading) {
@@ -253,7 +260,8 @@ export function VideoGeneration() {
     setTasks((current) => appendTaskRecord(current, record))
 
     try {
-      const apiKey = await getVideoApiKeyValue(selectedKey.id)
+      const apiKey =
+        selectedApiKey || (await getVideoApiKeyValue(selectedKey.id))
       const response = await createVideoTask(request, apiKey)
       const taskId = getVideoTaskId(response)
       if (!taskId) throw new Error(t('The server did not return a task ID'))
@@ -304,6 +312,12 @@ export function VideoGeneration() {
     form.setValue('imageSource', next, { shouldValidate: true })
   }
 
+  function changeApiKey(nextKeyId: string) {
+    if (nextKeyId === selectedKeyId) return
+    setSelectedKeyId(nextKeyId)
+    form.setValue('assetIds', [], { shouldValidate: true })
+  }
+
   return (
     <div className='flex h-full min-h-0 flex-col overflow-y-auto'>
       <div className='mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6'>
@@ -346,7 +360,7 @@ export function VideoGeneration() {
                 className='w-full'
                 disabled={apiKeysQuery.isLoading}
                 value={selectedKeyId}
-                onChange={(event) => setSelectedKeyId(event.target.value)}
+                onChange={(event) => changeApiKey(event.target.value)}
               >
                 <NativeSelectOption value=''>
                   {apiKeysQuery.isLoading
@@ -448,6 +462,8 @@ export function VideoGeneration() {
                       source={imageSource}
                       imageUrls={media.images}
                       assetIds={assetIds}
+                      apiKeyId={selectedKey?.id ?? null}
+                      apiKey={selectedApiKey}
                       imageLimit={mediaLimits.images}
                       onSourceChange={changeImageSource}
                       onImageUrlsChange={(values) =>

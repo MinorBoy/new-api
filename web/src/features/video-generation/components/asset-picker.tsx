@@ -26,7 +26,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -54,6 +54,8 @@ import type { Asset } from '../../assets/types'
 const ASSET_PAGE_SIZE = 12
 
 type AssetPickerProps = {
+  apiKeyId: number | null
+  apiKey: string
   selectedIds: string[]
   limit: number
   onChange: (ids: string[]) => void
@@ -69,9 +71,15 @@ export function AssetPicker(props: AssetPickerProps) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [failedPreviewIds, setFailedPreviewIds] = useState<string[]>([])
+  useEffect(() => {
+    setPage(1)
+    setFailedPreviewIds([])
+  }, [props.apiKeyId])
   const assetsQuery = useQuery({
-    queryKey: ['video-generation', 'role-assets', page],
-    queryFn: () => listAssets({ page, pageSize: ASSET_PAGE_SIZE }),
+    queryKey: ['video-generation', 'role-assets', props.apiKeyId, page],
+    queryFn: () =>
+      listAssets(props.apiKey, { page, pageSize: ASSET_PAGE_SIZE }),
+    enabled: Boolean(props.apiKeyId && props.apiKey),
   })
   const assets = assetsQuery.data?.data.items ?? []
   const totalPages = Math.max(
@@ -90,6 +98,22 @@ export function AssetPicker(props: AssetPickerProps) {
     }
     if (props.selectedIds.length >= props.limit) return
     props.onChange([...props.selectedIds, asset.id])
+  }
+
+  if (!props.apiKeyId || !props.apiKey) {
+    return (
+      <Empty className='border'>
+        <EmptyHeader>
+          <EmptyMedia variant='icon'>
+            <HugeiconsIcon icon={Image01Icon} strokeWidth={2} />
+          </EmptyMedia>
+          <EmptyTitle>{t('Select an API key')}</EmptyTitle>
+          <EmptyDescription>
+            {t('Select an API key to view assets.')}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
   }
 
   if (assetsQuery.isError) {

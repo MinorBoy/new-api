@@ -103,7 +103,7 @@ type MountedPicker = {
   root: Root
   queryClient: QueryClient
   changes: string[][]
-  requests: number[]
+  requests: Array<{ page: number; authToken?: string }>
 }
 
 type AssetPageLoader = (
@@ -114,12 +114,16 @@ type AssetPageLoader = (
 async function mountPicker(
   limit = 9,
   pages: Record<number, AssetListResponse> = { 1: assetList },
-  loadPage?: AssetPageLoader
+  loadPage?: AssetPageLoader,
+  identity: { apiKeyId: number | null; apiKey: string } = {
+    apiKeyId: 7,
+    apiKey: 'sk-seven',
+  }
 ): Promise<MountedPicker> {
-  const requests: number[] = []
+  const requests: Array<{ page: number; authToken?: string }> = []
   api.defaults.adapter = async (config) => {
     const page = Number(config.params?.page ?? 1)
-    requests.push(page)
+    requests.push({ page, authToken: config.authToken })
     return {
       data: loadPage
         ? await loadPage(page, requests.length)
@@ -142,6 +146,8 @@ async function mountPicker(
     const [selectedIds, setSelectedIds] = useState<string[]>([])
     return (
       <AssetPicker
+        apiKeyId={identity.apiKeyId}
+        apiKey={identity.apiKey}
         selectedIds={selectedIds}
         limit={limit}
         onChange={(ids) => {
@@ -169,6 +175,31 @@ async function mountPicker(
     requests,
   }
 }
+
+test('does not request assets without a selected API key', async () => {
+  const mounted = await mountPicker(9, { 1: assetList }, undefined, {
+    apiKeyId: null,
+    apiKey: '',
+  })
+
+  assert.deepEqual(mounted.requests, [])
+  assert.match(
+    mounted.container.textContent ?? '',
+    /Select an API key to view assets/
+  )
+  await unmountPicker(mounted)
+})
+
+test('uses the selected API key when loading assets', async () => {
+  const mounted = await mountPicker()
+  await waitForButton(
+    mounted.container,
+    'Select asset asset-20260401123823-6d4x2'
+  )
+
+  assert.equal(mounted.requests[0]?.authToken, 'sk-seven')
+  await unmountPicker(mounted)
+})
 
 async function waitForButton(container: HTMLElement, label: string) {
   for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -296,7 +327,10 @@ test('keeps selections while moving between asset pages', async () => {
   )
   await act(async () => second.click())
 
-  assert.deepEqual(mounted.requests, [1, 2])
+  assert.deepEqual(
+    mounted.requests.map((request) => request.page),
+    [1, 2]
+  )
   assert.deepEqual(mounted.changes.at(-1), [
     'asset-20260401123823-6d4x2',
     'asset-20260401124227-r5t4y',

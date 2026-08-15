@@ -33,6 +33,8 @@ type ReferenceImageEditorProps = {
   source: VideoImageSource
   imageUrls: string[]
   assetIds: string[]
+  apiKeyId: number | null
+  apiKey: string
   imageLimit: number
   onSourceChange: (source: VideoImageSource) => void
   onImageUrlsChange: (urls: string[]) => void
@@ -85,6 +87,8 @@ export function ReferenceImageEditor(props: ReferenceImageEditorProps) {
 
       {props.source === 'asset' ? (
         <AssetPicker
+          apiKeyId={props.apiKeyId}
+          apiKey={props.apiKey}
           selectedIds={props.assetIds}
           limit={Math.min(props.imageLimit, ROLE_ASSET_LIMIT)}
           onChange={props.onAssetIdsChange}

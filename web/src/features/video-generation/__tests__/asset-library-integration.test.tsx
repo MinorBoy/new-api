@@ -44,6 +44,7 @@ Object.assign(globalThis as Record<string, unknown>, {
 })
 
 const originalAdapter = api.defaults.adapter
+const assetRequests: Array<{ authToken?: string }> = []
 api.defaults.adapter = async (config) => {
   let data: unknown
   if (config.url?.startsWith('/api/token/?')) {
@@ -52,9 +53,26 @@ api.defaults.adapter = async (config) => {
       data: {
         items: [
           {
-            id: 1,
-            name: 'Video key',
-            key: 'sk-1',
+            id: 7,
+            name: 'Video key seven',
+            key: 'sk-7**********ven',
+            status: 1,
+            remain_quota: 0,
+            used_quota: 0,
+            unlimited_quota: true,
+            expired_time: -1,
+            created_time: 0,
+            accessed_time: 0,
+            group: 'default',
+            cross_group_retry: false,
+            model_limits_enabled: false,
+            model_limits: '',
+            allow_ips: '',
+          },
+          {
+            id: 8,
+            name: 'Video key eight',
+            key: 'sk-8********ight',
             status: 1,
             remain_quota: 0,
             used_quota: 0,
@@ -74,17 +92,30 @@ api.defaults.adapter = async (config) => {
         page_size: 100,
       },
     }
+  } else if (config.url === '/api/token/7/key') {
+    data = { success: true, data: { key: 'sk-seven' } }
+  } else if (config.url === '/api/token/8/key') {
+    data = { success: true, data: { key: 'sk-eight' } }
   } else if (config.url === '/api/user/models') {
     data = {
       success: true,
       data: ['doubao-seedance-2-0-260128', 'doubao-seedance-2-5-260628'],
     }
   } else if (config.url === '/api/v3/assets') {
-    data = {
-      success: true,
-      data: {
-        items: [
-          {
+    assetRequests.push({ authToken: config.authToken })
+    const asset =
+      config.authToken === 'sk-eight'
+        ? {
+            id: 'asset-20260401129959-eight',
+            type: 'image',
+            url: 'https://example.com/eight.png',
+            status: 'active',
+            provider: 'secure',
+            reference: 'asset://asset-20260401129959-eight',
+            created_at: 1_700_000_001,
+            updated_at: 1_700_000_001,
+          }
+        : {
             id: 'asset-20260401123823-6d4x2',
             type: 'image',
             url: 'https://example.com/character.png',
@@ -93,8 +124,11 @@ api.defaults.adapter = async (config) => {
             reference: 'asset://asset-20260401123823-6d4x2',
             created_at: 1_700_000_000,
             updated_at: 1_700_000_000,
-          },
-        ],
+          }
+    data = {
+      success: true,
+      data: {
+        items: [asset],
         total: 1,
         page: 1,
         page_size: 12,
@@ -125,6 +159,7 @@ type MountedPage = {
 }
 
 async function mountPage(): Promise<MountedPage> {
+  assetRequests.length = 0
   const container = browserWindow.document.createElement('div')
   browserWindow.document.body.append(container)
   const root = createRoot(container as unknown as Container)
@@ -175,15 +210,15 @@ function readRequest(container: HTMLElement): SeedanceVideoRequest {
   return JSON.parse(preview.textContent) as SeedanceVideoRequest
 }
 
-async function chooseApiKey(container: HTMLElement) {
+async function selectApiKey(container: HTMLElement, id: string) {
   const apiKey = await waitFor(() => {
     const select = container.querySelector(
       'select[aria-label="API key"]'
     ) as HTMLSelectElement | null
-    return select?.querySelector('option[value="1"]') ? select : null
+    return select?.querySelector(`option[value="${id}"]`) ? select : null
   })
   await act(async () => {
-    apiKey.value = '1'
+    apiKey.value = id
     apiKey.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await waitFor(() =>
@@ -191,6 +226,10 @@ async function chooseApiKey(container: HTMLElement) {
       'select[aria-label="Model"] option[value="doubao-seedance-2-5-260628"]'
     )
   )
+}
+
+async function chooseApiKey(container: HTMLElement) {
+  await selectApiKey(container, '7')
 }
 
 async function unmountPage(mounted: MountedPage) {
@@ -262,6 +301,48 @@ test('keeps the request preview consistent across asset and model modes', async 
     ),
     false
   )
+  await unmountPage(mounted)
+})
+
+test('clears selected assets and reloads the asset library when the API key changes', async () => {
+  const mounted = await mountPage()
+  await chooseApiKey(mounted.container)
+  const assetLibrary = await waitFor(() =>
+    findButton(mounted.container, 'Asset library')
+  )
+  await act(async () => assetLibrary.click())
+  const asset = await waitFor(
+    () =>
+      mounted.container.querySelector(
+        'button[aria-label="Select asset asset-20260401123823-6d4x2"]'
+      ) as HTMLButtonElement | null
+  )
+  await act(async () => asset.click())
+  assert.equal(
+    readRequest(mounted.container).content.some(
+      (item) =>
+        item.type === 'image_url' &&
+        item.image_url.url === 'asset://asset-20260401123823-6d4x2'
+    ),
+    true
+  )
+
+  await selectApiKey(mounted.container, '8')
+  await waitFor(
+    () =>
+      mounted.container.querySelector(
+        'button[aria-label="Select asset asset-20260401129959-eight"]'
+      ) as HTMLButtonElement | null
+  )
+
+  assert.equal(
+    readRequest(mounted.container).content.some(
+      (item) =>
+        item.type === 'image_url' && item.image_url.url.startsWith('asset://')
+    ),
+    false
+  )
+  assert.equal(assetRequests.at(-1)?.authToken, 'sk-eight')
   await unmountPage(mounted)
 })
 

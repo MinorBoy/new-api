@@ -43,15 +43,16 @@ type ReferenceImageEditorProps = {
 
 export function ReferenceImageEditor(props: ReferenceImageEditorProps) {
   const { t } = useTranslation()
-  const roleAssetsSupported = supportsRoleAssets(props.model)
+  const roleAssetsSupported =
+    props.model.length === 0 || supportsRoleAssets(props.model)
   const source = props.source
   const onSourceChange = props.onSourceChange
 
   useEffect(() => {
-    if (source === 'asset' && !roleAssetsSupported) {
+    if (source === 'asset' && props.model && !roleAssetsSupported) {
       onSourceChange('url')
     }
-  }, [source, onSourceChange, roleAssetsSupported])
+  }, [source, onSourceChange, props.model, roleAssetsSupported])
 
   return (
     <div className='space-y-3'>

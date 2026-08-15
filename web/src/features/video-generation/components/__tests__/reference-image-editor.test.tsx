@@ -197,6 +197,17 @@ test('returns to public URLs when the model does not support role assets', async
   await unmountEditor(mounted)
 })
 
+test('keeps asset mode while the selected key model is loading', async () => {
+  const mounted = await mountEditor('asset')
+
+  await mounted.renderModel('')
+  const assetLibrary = await waitForButton(mounted.container, 'Asset library')
+
+  assert.equal(assetLibrary.getAttribute('aria-pressed'), 'true')
+  assert.deepEqual(mounted.changes, [])
+  await unmountEditor(mounted)
+})
+
 after(() => {
   api.defaults.adapter = originalAdapter
   browserWindow.close()

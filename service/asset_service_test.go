@@ -222,6 +222,18 @@ func TestAssetServiceCreatesAssetAndBinding(t *testing.T) {
 	assert.NotContains(t, binding.CredentialFingerprint, "secure-key")
 }
 
+func TestAssetServiceRequiresTokenIdentity(t *testing.T) {
+	assetService, _ := prepareAssetService(t, processingAssetProvider())
+
+	_, err := assetService.Create(context.Background(), 42, 0, AssetCreateInput{
+		Type: model.AssetTypeImage,
+		URL:  "https://8.8.8.8/character.png",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, AssetErrorTokenRequired, AssetErrorCode(err))
+}
+
 func TestAssetServiceMigratesLegacyCredentialFingerprintAfterSecretRotation(t *testing.T) {
 	provider := processingAssetProvider()
 	service, db := prepareAssetService(t, provider)
@@ -247,7 +259,7 @@ func TestAssetServiceMigratesLegacyCredentialFingerprintAfterSecretRotation(t *t
 		}, nil
 	}
 
-	bindings, err := service.ResolveActiveReferences(context.Background(), 42, []string{created.ID})
+	bindings, err := service.ResolveActiveReferences(context.Background(), 42, 7, []string{created.ID})
 
 	require.NoError(t, err)
 	require.Len(t, bindings, 1)
@@ -267,7 +279,7 @@ func TestAssetServiceRejectsChangedCredentialAfterFingerprintMigration(t *testin
 	require.NoError(t, err)
 	require.NoError(t, db.Model(&channel).Update("key", "replacement-secure-key").Error)
 
-	_, err = service.ResolveActiveReferences(context.Background(), 42, []string{created.ID})
+	_, err = service.ResolveActiveReferences(context.Background(), 42, 7, []string{created.ID})
 
 	require.Error(t, err)
 	assert.Equal(t, AssetErrorChannelUnavailable, AssetErrorCode(err))
@@ -287,10 +299,70 @@ func TestAssetServiceIdempotentRetryReturnsOriginalAsset(t *testing.T) {
 
 	first, err := service.Create(context.Background(), 42, 7, input)
 	require.NoError(t, err)
-	second, err := service.Create(context.Background(), 42, 8, input)
+	second, err := service.Create(context.Background(), 42, 7, input)
 	require.NoError(t, err)
 
 	assert.Equal(t, first.ID, second.ID)
+	assert.Len(t, provider.createCalls, 1)
+}
+
+func TestAssetServiceScopesIdempotencyToToken(t *testing.T) {
+	provider := processingAssetProvider()
+	createCount := 0
+	provider.create = func(CreateAssetRequest) (*ProviderAsset, error) {
+		createCount++
+		return &ProviderAsset{
+			ID:             "asset-local-created-" + strconv.Itoa(createCount),
+			Status:         model.AssetStatusProcessing,
+			ProviderStatus: "Processing",
+		}, nil
+	}
+	assetService, db := prepareAssetService(t, provider)
+	createSecureAssetChannel(t, db, nil)
+	input := AssetCreateInput{
+		Type:           model.AssetTypeImage,
+		URL:            "https://8.8.8.8/character.png",
+		IdempotencyKey: "shared-request",
+	}
+
+	first, err := assetService.Create(context.Background(), 42, 7, input)
+	require.NoError(t, err)
+	second, err := assetService.Create(context.Background(), 42, 8, input)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first.ID, second.ID)
+	assert.Len(t, provider.createCalls, 2)
+}
+
+func TestAssetServiceResumesLegacyTokenIdempotencyHash(t *testing.T) {
+	provider := processingAssetProvider()
+	assetService, db := prepareAssetService(t, provider)
+	createSecureAssetChannel(t, db, nil)
+	existing, err := assetService.Create(context.Background(), 42, 7, AssetCreateInput{
+		Type: model.AssetTypeImage,
+		URL:  "https://8.8.8.8/character.png",
+	})
+	require.NoError(t, err)
+	legacyHash := common.GenerateHMAC("role-asset-idempotency:legacy-request")
+	require.NoError(t, db.Model(&model.Asset{}).
+		Where("id = ?", existing.ID).
+		Update("idempotency_key_hash", legacyHash).Error)
+	require.NoError(t, db.Model(&model.AssetProviderBinding{}).
+		Where("asset_id = ?", existing.ID).
+		Updates(map[string]any{
+			"upstream_asset_id": nil,
+			"upstream_status":   "Pending",
+		}).Error)
+	provider.createCalls = nil
+
+	retried, err := assetService.Create(context.Background(), 42, 7, AssetCreateInput{
+		Type:           model.AssetTypeImage,
+		URL:            "https://8.8.8.8/character.png",
+		IdempotencyKey: "legacy-request",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, existing.ID, retried.ID)
 	assert.Len(t, provider.createCalls, 1)
 }
 
@@ -326,9 +398,50 @@ func TestAssetServiceScopesAssetsToUser(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = service.Get(context.Background(), 43, created.ID)
+	_, err = service.Get(context.Background(), 43, 7, created.ID)
 	require.Error(t, err)
 	assert.Equal(t, AssetErrorNotFound, AssetErrorCode(err))
+}
+
+func TestAssetServiceScopesListAndLookupToToken(t *testing.T) {
+	provider := processingAssetProvider()
+	assetService, db := prepareAssetService(t, provider)
+	createSecureAssetChannel(t, db, nil)
+	created, err := assetService.Create(context.Background(), 42, 7, AssetCreateInput{
+		Type: model.AssetTypeImage,
+		URL:  "https://8.8.8.8/character.png",
+	})
+	require.NoError(t, err)
+
+	items, total, err := assetService.List(context.Background(), 42, 8, AssetListInput{})
+	require.NoError(t, err)
+	assert.Empty(t, items)
+	assert.Zero(t, total)
+
+	_, err = assetService.Get(context.Background(), 42, 8, created.ID)
+	require.Error(t, err)
+	assert.Equal(t, AssetErrorNotFound, AssetErrorCode(err))
+}
+
+func TestAssetServiceHidesLegacyUnboundAssets(t *testing.T) {
+	assetService, db := prepareAssetService(t, processingAssetProvider())
+	now := common.GetTimestamp()
+	require.NoError(t, db.Create(&model.Asset{
+		ID:               "asset-00000000000000000000000000000001",
+		UserID:           42,
+		CreatedByTokenID: 0,
+		Type:             model.AssetTypeImage,
+		SourceURL:        "https://8.8.8.8/legacy.png",
+		Status:           model.AssetStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}).Error)
+
+	items, total, err := assetService.List(context.Background(), 42, 7, AssetListInput{})
+
+	require.NoError(t, err)
+	assert.Empty(t, items)
+	assert.Zero(t, total)
 }
 
 func TestAssetServiceRefreshPreservesStatusOnTemporaryProviderFailure(t *testing.T) {
@@ -344,7 +457,7 @@ func TestAssetServiceRefreshPreservesStatusOnTemporaryProviderFailure(t *testing
 		return nil, errors.New("temporary upstream failure")
 	}
 
-	view, err := service.Refresh(context.Background(), 42, created.ID)
+	view, err := service.Refresh(context.Background(), 42, 7, created.ID)
 	require.Error(t, err)
 	assert.Equal(t, AssetErrorUpstream, AssetErrorCode(err))
 	require.NotNil(t, view)
@@ -369,7 +482,7 @@ func TestAssetServiceOnlyResolvesActiveReferences(t *testing.T) {
 	provider.get = func(id string) (*ProviderAsset, error) {
 		return &ProviderAsset{ID: id, Status: model.AssetStatusActive, ProviderStatus: "Active"}, nil
 	}
-	bindings, err := service.ResolveActiveReferences(context.Background(), 42, []string{created.ID})
+	bindings, err := service.ResolveActiveReferences(context.Background(), 42, 7, []string{created.ID})
 	require.NoError(t, err)
 	require.Len(t, bindings, 1)
 	assert.Equal(t, created.ID, bindings[0].AssetID)
@@ -379,7 +492,7 @@ func TestAssetServiceOnlyResolvesActiveReferences(t *testing.T) {
 	provider.get = func(id string) (*ProviderAsset, error) {
 		return &ProviderAsset{ID: id, Status: model.AssetStatusProcessing, ProviderStatus: "Processing"}, nil
 	}
-	_, err = service.ResolveActiveReferences(context.Background(), 42, []string{created.ID})
+	_, err = service.ResolveActiveReferences(context.Background(), 42, 7, []string{created.ID})
 	require.Error(t, err)
 	assert.Equal(t, AssetErrorNotActive, AssetErrorCode(err))
 }

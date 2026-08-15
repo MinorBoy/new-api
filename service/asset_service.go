@@ -28,6 +28,7 @@ const (
 	AssetErrorLimitExceeded       = "asset_limit_exceeded"
 	AssetErrorIdempotencyConflict = "asset_idempotency_conflict"
 	AssetErrorUpstream            = "asset_upstream_error"
+	AssetErrorTokenRequired       = "asset_token_required"
 )
 
 type AssetServiceError struct {
@@ -55,6 +56,16 @@ func AssetErrorCode(err error) string {
 		return serviceErr.Code
 	}
 	return ""
+}
+
+func requireAssetToken(tokenID int) error {
+	if tokenID > 0 {
+		return nil
+	}
+	return &AssetServiceError{
+		Code: AssetErrorTokenRequired,
+		Err:  fmt.Errorf("API key authentication is required"),
+	}
 }
 
 type AssetCreateInput struct {
@@ -108,6 +119,9 @@ func (service *AssetService) Create(
 	tokenID int,
 	input AssetCreateInput,
 ) (*AssetView, error) {
+	if err := requireAssetToken(tokenID); err != nil {
+		return nil, err
+	}
 	assetType := strings.TrimSpace(input.Type)
 	if assetType != model.AssetTypeImage {
 		return nil, &AssetServiceError{
@@ -121,18 +135,18 @@ func (service *AssetService) Create(
 	}
 
 	var idempotencyHash *string
+	var idempotencyHashes []string
 	if idempotencyKey := strings.TrimSpace(input.IdempotencyKey); idempotencyKey != "" {
-		hash := common.GenerateHMAC("role-asset-idempotency:" + idempotencyKey)
+		hash := common.GenerateHMAC("role-asset-idempotency:" + strconv.Itoa(tokenID) + ":" + idempotencyKey)
+		legacyHash := common.GenerateHMAC("role-asset-idempotency:" + idempotencyKey)
 		idempotencyHash = &hash
-		var existing model.Asset
-		err := service.db.WithContext(ctx).
-			Where("user_id = ? AND idempotency_key_hash = ?", userID, hash).
-			First(&existing).Error
-		if err == nil {
-			return service.resumeCreation(ctx, &existing, assetType, sourceURL)
+		idempotencyHashes = []string{hash, legacyHash}
+		existing, err := service.findIdempotentAsset(ctx, userID, tokenID, idempotencyHashes)
+		if err != nil {
+			return nil, err
 		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("find idempotent role asset: %w", err)
+		if existing != nil {
+			return service.resumeCreation(ctx, existing, assetType, sourceURL)
 		}
 	}
 
@@ -172,13 +186,13 @@ func (service *AssetService) Create(
 		}
 		return tx.Create(&binding).Error
 	}); err != nil {
-		if idempotencyHash != nil {
-			var existing model.Asset
-			findErr := service.db.WithContext(ctx).
-				Where("user_id = ? AND idempotency_key_hash = ?", userID, *idempotencyHash).
-				First(&existing).Error
-			if findErr == nil {
-				return service.resumeCreation(ctx, &existing, assetType, sourceURL)
+		if len(idempotencyHashes) > 0 {
+			existing, findErr := service.findIdempotentAsset(ctx, userID, tokenID, idempotencyHashes)
+			if findErr != nil {
+				return nil, findErr
+			}
+			if existing != nil {
+				return service.resumeCreation(ctx, existing, assetType, sourceURL)
 			}
 		}
 		return nil, fmt.Errorf("persist role asset placeholder: %w", err)
@@ -187,16 +201,47 @@ func (service *AssetService) Create(
 	return service.completeCreation(ctx, &asset, &binding, credential)
 }
 
-func (service *AssetService) Get(ctx context.Context, userID int, assetID string) (*AssetView, error) {
-	return service.Refresh(ctx, userID, assetID)
+func (service *AssetService) findIdempotentAsset(
+	ctx context.Context,
+	userID int,
+	tokenID int,
+	hashes []string,
+) (*model.Asset, error) {
+	for _, hash := range hashes {
+		var existing model.Asset
+		err := service.db.WithContext(ctx).
+			Where(
+				"user_id = ? AND created_by_token_id = ? AND idempotency_key_hash = ?",
+				userID,
+				tokenID,
+				hash,
+			).
+			First(&existing).Error
+		if err == nil {
+			return &existing, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("find idempotent role asset: %w", err)
+		}
+	}
+	return nil, nil
+}
+
+func (service *AssetService) Get(ctx context.Context, userID int, tokenID int, assetID string) (*AssetView, error) {
+	return service.Refresh(ctx, userID, tokenID, assetID)
 }
 
 func (service *AssetService) List(
 	ctx context.Context,
 	userID int,
+	tokenID int,
 	input AssetListInput,
 ) ([]AssetView, int64, error) {
-	query := service.db.WithContext(ctx).Model(&model.Asset{}).Where("user_id = ?", userID)
+	if err := requireAssetToken(tokenID); err != nil {
+		return nil, 0, err
+	}
+	query := service.db.WithContext(ctx).Model(&model.Asset{}).
+		Where("user_id = ? AND created_by_token_id = ?", userID, tokenID)
 	if assetType := strings.TrimSpace(input.Type); assetType != "" {
 		query = query.Where("type = ?", assetType)
 	}
@@ -230,8 +275,11 @@ func (service *AssetService) List(
 	return views, total, nil
 }
 
-func (service *AssetService) Refresh(ctx context.Context, userID int, assetID string) (*AssetView, error) {
-	asset, binding, err := service.ownedAssetWithBinding(ctx, userID, assetID)
+func (service *AssetService) Refresh(ctx context.Context, userID int, tokenID int, assetID string) (*AssetView, error) {
+	if err := requireAssetToken(tokenID); err != nil {
+		return nil, err
+	}
+	asset, binding, err := service.ownedAssetWithBinding(ctx, userID, tokenID, assetID)
 	if err != nil {
 		return nil, err
 	}
@@ -268,12 +316,16 @@ func (service *AssetService) Refresh(ctx context.Context, userID int, assetID st
 func (service *AssetService) ResolveActiveReferences(
 	ctx context.Context,
 	userID int,
+	tokenID int,
 	assetIDs []string,
 ) ([]AssetReferenceBinding, error) {
+	if err := requireAssetToken(tokenID); err != nil {
+		return nil, err
+	}
 	resolved := make([]AssetReferenceBinding, 0, len(assetIDs))
 	channelID := 0
 	for _, assetID := range assetIDs {
-		view, err := service.Refresh(ctx, userID, assetID)
+		view, err := service.Refresh(ctx, userID, tokenID, assetID)
 		if err != nil {
 			return nil, err
 		}
@@ -283,7 +335,7 @@ func (service *AssetService) ResolveActiveReferences(
 				Err:  fmt.Errorf("role asset %s is not active", assetID),
 			}
 		}
-		_, binding, err := service.ownedAssetWithBinding(ctx, userID, assetID)
+		_, binding, err := service.ownedAssetWithBinding(ctx, userID, tokenID, assetID)
 		if err != nil {
 			return nil, err
 		}
@@ -419,11 +471,12 @@ func (service *AssetService) recordRefreshError(
 func (service *AssetService) ownedAssetWithBinding(
 	ctx context.Context,
 	userID int,
+	tokenID int,
 	assetID string,
 ) (*model.Asset, *model.AssetProviderBinding, error) {
 	var asset model.Asset
 	if err := service.db.WithContext(ctx).
-		Where("id = ? AND user_id = ?", strings.TrimSpace(assetID), userID).
+		Where("id = ? AND user_id = ? AND created_by_token_id = ?", strings.TrimSpace(assetID), userID, tokenID).
 		First(&asset).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, &AssetServiceError{

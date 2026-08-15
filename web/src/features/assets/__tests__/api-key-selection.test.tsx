@@ -202,12 +202,18 @@ async function mountAssets(): Promise<MountedAssets> {
       </I18nextProvider>
     )
   })
-  await waitFor(
-    () =>
-      container.querySelector<HTMLSelectElement>('#asset-api-key')?.options
-        .length === 3
-  )
-  return { assetRequests, container, queryClient, root }
+  await waitFor(() => {
+    const select = container.querySelector('#asset-api-key') as unknown as {
+      options: { length: number }
+    } | null
+    return select?.options.length === 3
+  })
+  return {
+    assetRequests,
+    container: container as unknown as HTMLElement,
+    queryClient,
+    root,
+  }
 }
 
 async function selectKey(mounted: MountedAssets, tokenID: string) {

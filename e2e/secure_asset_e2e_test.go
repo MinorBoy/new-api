@@ -52,16 +52,16 @@ func TestSecureRoleAssetLifecycleE2E(t *testing.T) {
 	assert.Equal(t, model.AssetStatusProcessing, created.Status)
 	assert.Equal(t, 1, createCalls)
 
-	refs, err := assetService.ResolveActiveReferences(context.Background(), 1001, []string{created.ID})
+	refs, err := assetService.ResolveActiveReferences(context.Background(), 1001, 7, []string{created.ID})
 	require.NoError(t, err)
 	require.Len(t, refs, 1)
 	assert.Equal(t, "asset-local-e2e", refs[0].UpstreamAssetID)
 	assert.Equal(t, "asset://"+created.ID, (func() string {
-		view, _ := assetService.Get(context.Background(), 1001, created.ID)
+		view, _ := assetService.Get(context.Background(), 1001, 7, created.ID)
 		return view.Reference
 	})())
 	assert.Positive(t, getCalls)
 
-	_, err = assetService.Get(context.Background(), 1002, created.ID)
+	_, err = assetService.Get(context.Background(), 1002, 7, created.ID)
 	assert.Equal(t, service.AssetErrorNotFound, service.AssetErrorCode(err))
 }

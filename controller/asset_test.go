@@ -16,18 +16,21 @@ import (
 )
 
 type fakeAssetControllerService struct {
-	createInput service.AssetCreateInput
-	createUser  int
-	createToken int
-	createView  *service.AssetView
-	createErr   error
-	getView     *service.AssetView
-	getErr      error
-	listViews   []service.AssetView
-	listTotal   int64
-	listErr     error
-	refreshView *service.AssetView
-	refreshErr  error
+	createInput  service.AssetCreateInput
+	createUser   int
+	createToken  int
+	createView   *service.AssetView
+	createErr    error
+	getView      *service.AssetView
+	getErr       error
+	getToken     int
+	listViews    []service.AssetView
+	listTotal    int64
+	listErr      error
+	listToken    int
+	refreshView  *service.AssetView
+	refreshErr   error
+	refreshToken int
 }
 
 func (fake *fakeAssetControllerService) Create(
@@ -42,19 +45,23 @@ func (fake *fakeAssetControllerService) Create(
 	return fake.createView, fake.createErr
 }
 
-func (fake *fakeAssetControllerService) Get(context.Context, int, string) (*service.AssetView, error) {
+func (fake *fakeAssetControllerService) Get(_ context.Context, _ int, tokenID int, _ string) (*service.AssetView, error) {
+	fake.getToken = tokenID
 	return fake.getView, fake.getErr
 }
 
 func (fake *fakeAssetControllerService) List(
-	context.Context,
-	int,
-	service.AssetListInput,
+	_ context.Context,
+	_ int,
+	tokenID int,
+	_ service.AssetListInput,
 ) ([]service.AssetView, int64, error) {
+	fake.listToken = tokenID
 	return fake.listViews, fake.listTotal, fake.listErr
 }
 
-func (fake *fakeAssetControllerService) Refresh(context.Context, int, string) (*service.AssetView, error) {
+func (fake *fakeAssetControllerService) Refresh(_ context.Context, _ int, tokenID int, _ string) (*service.AssetView, error) {
+	fake.refreshToken = tokenID
 	return fake.refreshView, fake.refreshErr
 }
 
@@ -126,6 +133,7 @@ func TestAssetControllerMapsServiceErrors(t *testing.T) {
 		{service.AssetErrorIdempotencyConflict, http.StatusConflict},
 		{service.AssetErrorChannelUnavailable, http.StatusServiceUnavailable},
 		{service.AssetErrorUpstream, http.StatusBadGateway},
+		{service.AssetErrorTokenRequired, http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -141,6 +149,7 @@ func TestAssetControllerMapsServiceErrors(t *testing.T) {
 			controller.Get(ctx)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
+			assert.Equal(t, 7, fake.getToken)
 			assert.Contains(t, recorder.Body.String(), `"code":"`+tt.code+`"`)
 		})
 	}
@@ -159,10 +168,12 @@ func TestAssetControllerListAndRefresh(t *testing.T) {
 	controller.List(listContext)
 	assert.Equal(t, http.StatusOK, listRecorder.Code)
 	assert.Contains(t, listRecorder.Body.String(), `"total":1`)
+	assert.Equal(t, 7, fake.listToken)
 
 	refreshRecorder, refreshContext := assetControllerContext(http.MethodPost, "/api/v3/assets/asset-project-one/refresh", "")
 	refreshContext.Params = gin.Params{{Key: "asset_id", Value: "asset-project-one"}}
 	controller.Refresh(refreshContext)
 	assert.Equal(t, http.StatusOK, refreshRecorder.Code)
 	assert.Contains(t, refreshRecorder.Body.String(), `"id":"asset-project-one"`)
+	assert.Equal(t, 7, fake.refreshToken)
 }

@@ -18,7 +18,7 @@ var projectAssetIDPattern = regexp.MustCompile(
 )
 
 type VideoAssetRoutingService interface {
-	ResolveActiveReferences(ctx context.Context, userID int, assetIDs []string) ([]service.AssetReferenceBinding, error)
+	ResolveActiveReferences(ctx context.Context, userID int, tokenID int, assetIDs []string) ([]service.AssetReferenceBinding, error)
 }
 
 func NewVideoAssetRouting(assetService VideoAssetRoutingService) gin.HandlerFunc {
@@ -53,7 +53,7 @@ func NewVideoAssetRouting(assetService VideoAssetRoutingService) gin.HandlerFunc
 			abortVideoAssetError(c, http.StatusBadRequest, service.AssetErrorLimitExceeded, fmt.Errorf("Secure enterprise video supports at most nine role assets"))
 			return
 		}
-		resolved, err := assetService.ResolveActiveReferences(c.Request.Context(), c.GetInt("id"), assetIDs)
+		resolved, err := assetService.ResolveActiveReferences(c.Request.Context(), c.GetInt("id"), c.GetInt("token_id"), assetIDs)
 		if err != nil {
 			code := service.AssetErrorCode(err)
 			status := videoAssetErrorStatus(code)
@@ -118,6 +118,8 @@ func GetVideoAssetMappings(c *gin.Context) (map[string]string, bool) {
 
 func videoAssetErrorStatus(code string) int {
 	switch code {
+	case service.AssetErrorTokenRequired:
+		return http.StatusUnauthorized
 	case service.AssetErrorNotFound:
 		return http.StatusNotFound
 	case service.AssetErrorNotActive, service.AssetErrorChannelMismatch:

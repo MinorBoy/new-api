@@ -12,9 +12,9 @@ import (
 
 type AssetControllerService interface {
 	Create(ctx context.Context, userID int, tokenID int, input service.AssetCreateInput) (*service.AssetView, error)
-	Get(ctx context.Context, userID int, assetID string) (*service.AssetView, error)
-	List(ctx context.Context, userID int, input service.AssetListInput) ([]service.AssetView, int64, error)
-	Refresh(ctx context.Context, userID int, assetID string) (*service.AssetView, error)
+	Get(ctx context.Context, userID int, tokenID int, assetID string) (*service.AssetView, error)
+	List(ctx context.Context, userID int, tokenID int, input service.AssetListInput) ([]service.AssetView, int64, error)
+	Refresh(ctx context.Context, userID int, tokenID int, assetID string) (*service.AssetView, error)
 }
 
 type AssetController struct {
@@ -50,7 +50,7 @@ func (controller *AssetController) Create(c *gin.Context) {
 }
 
 func (controller *AssetController) Get(c *gin.Context) {
-	view, err := controller.service.Get(c.Request.Context(), c.GetInt("id"), c.Param("asset_id"))
+	view, err := controller.service.Get(c.Request.Context(), c.GetInt("id"), c.GetInt("token_id"), c.Param("asset_id"))
 	if err != nil {
 		controller.writeServiceError(c, err, view)
 		return
@@ -69,7 +69,7 @@ func (controller *AssetController) List(c *gin.Context) {
 		writeAssetError(c, http.StatusBadRequest, "asset_invalid_request", "page_size must be a positive integer", nil)
 		return
 	}
-	views, total, err := controller.service.List(c.Request.Context(), c.GetInt("id"), service.AssetListInput{
+	views, total, err := controller.service.List(c.Request.Context(), c.GetInt("id"), c.GetInt("token_id"), service.AssetListInput{
 		Type:     c.Query("type"),
 		Page:     page,
 		PageSize: pageSize,
@@ -91,7 +91,7 @@ func (controller *AssetController) List(c *gin.Context) {
 }
 
 func (controller *AssetController) Refresh(c *gin.Context) {
-	view, err := controller.service.Refresh(c.Request.Context(), c.GetInt("id"), c.Param("asset_id"))
+	view, err := controller.service.Refresh(c.Request.Context(), c.GetInt("id"), c.GetInt("token_id"), c.Param("asset_id"))
 	if err != nil {
 		controller.writeServiceError(c, err, view)
 		return
@@ -103,6 +103,8 @@ func (controller *AssetController) writeServiceError(c *gin.Context, err error, 
 	code := service.AssetErrorCode(err)
 	status := http.StatusInternalServerError
 	switch code {
+	case service.AssetErrorTokenRequired:
+		status = http.StatusUnauthorized
 	case service.AssetErrorInvalidURL, service.AssetErrorTypeUnsupported:
 		status = http.StatusBadRequest
 	case service.AssetErrorNotFound:

@@ -17,12 +17,14 @@ import (
 )
 
 type fakeVideoAssetService struct {
-	refs []service.AssetReferenceBinding
-	err  error
-	seen []string
+	refs      []service.AssetReferenceBinding
+	err       error
+	seen      []string
+	seenToken int
 }
 
-func (fake *fakeVideoAssetService) ResolveActiveReferences(_ context.Context, _ int, assetIDs []string) ([]service.AssetReferenceBinding, error) {
+func (fake *fakeVideoAssetService) ResolveActiveReferences(_ context.Context, _ int, tokenID int, assetIDs []string) ([]service.AssetReferenceBinding, error) {
+	fake.seenToken = tokenID
 	fake.seen = append(fake.seen, assetIDs...)
 	return fake.refs, fake.err
 }
@@ -33,6 +35,7 @@ func videoAssetContext(body string) (*gin.Context, *httptest.ResponseRecorder) {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set("id", 42)
+	ctx.Set("token_id", 7)
 	return ctx, recorder
 }
 
@@ -56,6 +59,7 @@ func TestVideoAssetRoutingAcceptsSupportedPublicAssetIDFormats(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, recorder.Code)
 			assert.Equal(t, []string{assetID}, fake.seen)
+			assert.Equal(t, 7, fake.seenToken)
 		})
 	}
 }

@@ -16,6 +16,7 @@ import { act } from 'react'
 import type { Container } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 
+import type { ApiKey } from '../../keys/types'
 import type { AssetListResponse } from '../types'
 
 const browserWindow = new Window({ url: 'http://localhost/assets' })
@@ -70,6 +71,24 @@ const assetList: AssetListResponse = {
   },
 }
 
+const apiKey: ApiKey = {
+  id: 7,
+  name: 'Key Seven',
+  key: 'sk-7**********even',
+  status: 1,
+  remain_quota: 0,
+  used_quota: 0,
+  unlimited_quota: true,
+  expired_time: -1,
+  created_time: 0,
+  accessed_time: 0,
+  group: 'default',
+  cross_group_retry: false,
+  model_limits_enabled: false,
+  model_limits: '',
+  allow_ips: '',
+}
+
 const { createRoot } = await import('react-dom/client')
 const { Assets } = await import('../index')
 const i18n = createInstance()
@@ -100,7 +119,9 @@ test('copies the asset ID when its ID button is clicked', async () => {
       mutations: { retry: false },
     },
   })
-  queryClient.setQueryData(['role-assets'], assetList)
+  queryClient.setQueryData(['assets', 'api-keys'], [apiKey])
+  queryClient.setQueryData(['assets', 'api-key-value', '7'], 'sk-seven')
+  queryClient.setQueryData(['role-assets', '7'], assetList)
 
   await act(async () => {
     root.render(
@@ -110,6 +131,16 @@ test('copies the asset ID when its ID button is clicked', async () => {
         </QueryClientProvider>
       </I18nextProvider>
     )
+    for (let index = 0; index < 12; index += 1) await Promise.resolve()
+  })
+
+  const select = browserWindow.document.querySelector(
+    '#asset-api-key'
+  ) as HTMLSelectElement | null
+  assert.ok(select)
+  await act(async () => {
+    select.value = '7'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
     for (let index = 0; index < 12; index += 1) await Promise.resolve()
   })
 

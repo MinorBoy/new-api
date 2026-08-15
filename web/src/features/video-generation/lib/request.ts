@@ -27,7 +27,7 @@ function compactModelName(model: string): string {
   return model
     .toLowerCase()
     .trim()
-    .replace(/[-_.\s]/g, '')
+    .replaceAll(/[-_.\s]/g, '')
 }
 
 export function getVideoMediaLimits(model: string): VideoMediaLimits {

@@ -1,6 +1,12 @@
 package model
 
-import "gorm.io/gorm"
+import (
+	"strings"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
 
 const (
 	AssetTypeImage = "image"
@@ -13,6 +19,15 @@ const (
 
 	AssetProviderSecure = "secure"
 )
+
+// GenerateAssetID returns the public project asset ID format.
+func GenerateAssetID() (string, error) {
+	suffix, err := common.GenerateRandomCharsKey(5)
+	if err != nil {
+		return "", err
+	}
+	return "asset-" + time.Now().UTC().Format("20060102150405") + "-" + strings.ToLower(suffix), nil
+}
 
 type Asset struct {
 	ID                 string  `json:"id" gorm:"primaryKey;size:64"`

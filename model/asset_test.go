@@ -9,6 +9,13 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestGenerateAssetIDUsesTimestampAndLowercaseSuffix(t *testing.T) {
+	id, err := GenerateAssetID()
+
+	require.NoError(t, err)
+	assert.Regexp(t, `^asset-[0-9]{14}-[a-z0-9]{5}$`, id)
+}
+
 func prepareAssetDB(t *testing.T) {
 	t.Helper()
 

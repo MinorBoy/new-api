@@ -199,7 +199,7 @@ func TestAssetServiceCreatesAssetAndBinding(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Regexp(t, `^asset-[0-9a-f]{32}$`, view.ID)
+	assert.Regexp(t, `^asset-[0-9]{14}-[a-z0-9]{5}$`, view.ID)
 	assert.Equal(t, model.AssetTypeImage, view.Type)
 	assert.Equal(t, model.AssetStatusProcessing, view.Status)
 	assert.Equal(t, model.AssetProviderSecure, view.Provider)

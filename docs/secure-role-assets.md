@@ -4,7 +4,7 @@
 
 ## 素材接口
 
-所有接口均支持登录会话或项目 API Key。素材只属于创建用户，其他用户访问同一 `asset-*` 返回 `asset_not_found`。
+所有接口均支持登录会话或项目 API Key。新建素材的项目 ID 格式为 `asset-YYYYMMDDHHmmss-xxxxx`（例如 `asset-20260401123823-6d4x2`）。素材只属于创建用户，其他用户访问同一 `asset-*` 返回 `asset_not_found`。
 
 - `POST /api/v3/assets`：创建图片素材。请求体为 `{"type":"image","url":"https://example.com/character.png"}`，`url` 必须是无需登录即可访问的公网 HTTP(S) 地址；建议携带唯一 `Idempotency-Key`。
 - `GET /api/v3/assets`：列出当前用户素材。

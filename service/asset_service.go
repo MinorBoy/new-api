@@ -139,9 +139,13 @@ func (service *AssetService) Create(
 	if err != nil {
 		return nil, err
 	}
+	assetID, err := model.GenerateAssetID()
+	if err != nil {
+		return nil, fmt.Errorf("generate role asset id: %w", err)
+	}
 	now := common.GetTimestamp()
 	asset := model.Asset{
-		ID:                 "asset-" + common.GetUUID(),
+		ID:                 assetID,
 		UserID:             userID,
 		CreatedByTokenID:   tokenID,
 		Type:               assetType,

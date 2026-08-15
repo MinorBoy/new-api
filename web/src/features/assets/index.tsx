@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { CopyButton } from '@/components/copy-button'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -166,8 +167,16 @@ export function Assets() {
                           </DialogContent>
                         </Dialog>
                       </TableCell>
-                      <TableCell className='font-mono text-xs'>
-                        {asset.id}
+                      <TableCell>
+                        <CopyButton
+                          value={asset.id}
+                          size='sm'
+                          tooltip={t('Copy to clipboard')}
+                          className='h-auto max-w-full justify-start px-1 py-1 font-mono text-xs font-normal'
+                          iconClassName='size-3.5'
+                        >
+                          {asset.id}
+                        </CopyButton>
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusVariant(asset.status)}>

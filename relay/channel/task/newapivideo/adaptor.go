@@ -117,6 +117,11 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	}
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
 		profile := a.activeProfile()
+		if profile.secureRequest != nil && profile.secureRequest.group == dto.SecureVideoGroupEnterprise {
+			mappings, _ := common.GetContextKeyType[map[string]string](c, constant.ContextKeyVideoAssetMappings)
+			// Secure validation below verifies each mapping and normalizes valid role assets.
+			profile.allowEmbeddedMedia = len(mappings) > 0
+		}
 		if taskErr := validateARKRequest(c, info, body, profile); taskErr != nil {
 			return taskErr
 		}

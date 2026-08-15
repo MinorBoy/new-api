@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/videometa"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -195,6 +196,21 @@ func TestSecureBuildEnterpriseRequest(t *testing.T) {
 	for _, field := range []string{`"ratio"`, `"resolution"`, `"files"`, `"functionMode"`} {
 		assert.NotContains(t, string(requestBody), field)
 	}
+}
+
+func TestSecureEnterpriseValidationAcceptsMappedRoleAssets(t *testing.T) {
+	body := `{
+		"model":"client","content":[
+			{"type":"text","text":"a character dances"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"asset://asset-20260815055844-wsdfw"}}
+		],"duration":5,"ratio":"9:16","resolution":"720p"
+	}`
+	adaptor, c, info := secureValidationContext(t, dto.SecureVideoGroupEnterprise, "video-2.0-pro", body)
+	common.SetContextKey(c, constant.ContextKeyVideoAssetMappings, map[string]string{
+		"asset-20260815055844-wsdfw": "asset-local-0123456789abcdef0123456789abcdef",
+	})
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
 }
 
 func TestSecureRequestCapabilityMatrix(t *testing.T) {

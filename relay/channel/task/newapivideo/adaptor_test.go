@@ -321,3 +321,17 @@ func TestLucenBillingValidationAllowsOpenAIRequests(t *testing.T) {
 	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
 	assert.Nil(t, adaptor.ValidateBillingRequest(c, info))
 }
+
+func TestWxArtBuildRequestRequiresProviderValidation(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"seedance2.5","content":[{"type":"text","text":"text"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(common.KeySeedanceOfficialAPI, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance2.5"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor := NewWxArtTaskAdaptor()
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	_, err := adaptor.BuildRequestBody(c, info)
+	require.Error(t, err)
+	assert.EqualError(t, err, "WxArt provider validation is incomplete")
+}

@@ -6,9 +6,10 @@ const (
 	Seedance20     = "doubao-seedance-2-0-260128"
 	Seedance20Fast = "doubao-seedance-2-0-fast-260128"
 	Seedance20Mini = "doubao-seedance-2-0-mini-260615"
+	Seedance25     = "doubao-seedance-2-5-260628"
 )
 
-var CanonicalModels = []string{Seedance20, Seedance20Fast, Seedance20Mini}
+var CanonicalModels = []string{Seedance20, Seedance20Fast, Seedance20Mini, Seedance25}
 
 // NormalizeCanonicalModel maps supported public aliases to the single routing
 // policy identity for that model family. The caller's original model remains

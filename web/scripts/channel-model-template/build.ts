@@ -409,16 +409,14 @@ function channelContractIssues(
 
   if (channelCode === 'CH-MIKOTO') {
     const model = upstreamModel.trim().toLowerCase()
-    const requiredResolution =
-      model === 'sora-v3-pro'
-        ? '720p'
-        : model.endsWith('-1080p')
-          ? '1080p'
-          : model.endsWith('-480p')
-            ? '480p'
-            : model.endsWith('-720p')
-              ? '720p'
-              : ''
+    let requiredResolution = ''
+    if (model === 'sora-v3-pro' || model.endsWith('-720p')) {
+      requiredResolution = '720p'
+    } else if (model.endsWith('-1080p')) {
+      requiredResolution = '1080p'
+    } else if (model.endsWith('-480p')) {
+      requiredResolution = '480p'
+    }
     if (requiredResolution === '') {
       return [
         fail(
@@ -938,18 +936,21 @@ function buildCostsAndMappings(
     const sourceChannel = field(record, '渠道')
     const channelCode =
       rules.channelCodes[sourceChannel] ?? `CH-RAW-${slug(sourceChannel)}`
+    const seriesValue = field(record, '系列')
+    const seriesOfficialPrices = source.officialPrices.filter(
+      (price) => field(price, '系列') === seriesValue
+    )
     const modelRule = modelRuleFor(
       rawModel,
       rules,
       inferClientModel(
         rawModel,
-        source.officialPrices.map((price) => field(price, '模型'))
+        seriesOfficialPrices.map((price) => field(price, '模型'))
       )
     )
     const clientModel = modelRule.clientModel ?? rawModel
     const upstreamModel = modelRule.upstreamModel ?? rawModel
     const resolutionValue = resolution(field(record, '清晰度'))
-    const seriesValue = field(record, '系列')
     const resolutionId = slug(resolutionValue).replace(/P$/u, '')
     const sku = skuBySeriesModelResolution.get(
       officialPriceKey(seriesValue, clientModel, resolutionValue)

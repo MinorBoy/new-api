@@ -29,6 +29,8 @@ const ChannelNameZZone = "ZZone"
 const ChannelNameMikoto = "Mikoto"
 const ChannelNameFYLink = "FYLink"
 
+const ChannelNameWxArt = "WxArt"
+
 type videoRequestDialect string
 
 const (
@@ -47,6 +49,7 @@ const (
 	videoRequestDialectZZone               videoRequestDialect = "zzone"
 	videoRequestDialectMikoto              videoRequestDialect = "mikoto"
 	videoRequestDialectFFLink              videoRequestDialect = "fflink"
+	videoRequestDialectWxArt               videoRequestDialect = "wxart"
 )
 
 type omegaRequestProfile struct {
@@ -360,6 +363,21 @@ func fflinkProtocolProfile() protocolProfile {
 	}
 }
 
+func wxartProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:                ChannelNameWxArt,
+		modelList:                  []string{"seedance2.0", "seedance2.5"},
+		submitPath:                 "/v1/videos",
+		pollPath:                   "/v1/videos/{task_id}",
+		contentType:                "application/json",
+		requestDialect:             videoRequestDialectWxArt,
+		requirePublicHTTPMedia:     true,
+		untypedImagesAreReferences: true,
+		allowAudioWithoutVisual:    true,
+		defaultDurationSeconds:     4,
+	}
+}
+
 func (p protocolProfile) normalized() protocolProfile {
 	if p.submitPath == "" {
 		p.submitPath = "/v1/video/generations"
@@ -429,6 +447,10 @@ type FYLinkTaskAdaptor struct {
 
 func NewFYLinkTaskAdaptor() *FYLinkTaskAdaptor {
 	return &FYLinkTaskAdaptor{TaskAdaptor: &TaskAdaptor{profile: fflinkProtocolProfile()}}
+}
+
+func NewWxArtTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: wxartProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

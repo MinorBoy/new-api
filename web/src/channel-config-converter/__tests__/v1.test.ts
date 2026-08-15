@@ -600,6 +600,17 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
       },
     ],
   })
+  extracted.channels.push({
+    ...sourceChannel,
+    businessId: 'CH-WXART',
+    sourceLocations: [
+      {
+        ...sourceLocation,
+        businessId: 'CH-WXART',
+        row: 1004,
+      },
+    ],
+  })
   const result = await buildImportDocument({
     extracted,
     sourceBytes,
@@ -622,6 +633,7 @@ test('v1 import document uses the reserved YSR channel type IDs', async () => {
   assert.equal(typesByChannel.get('CH-ZZONE'), 212)
   assert.equal(typesByChannel.get('CH-MIKOTO'), 213)
   assert.equal(typesByChannel.get('CH-FFLINK'), 214)
+  assert.equal(typesByChannel.get('CH-WXART'), 215)
 })
 
 test('v1 adapter separates Mikoto Sora from Seedance channel lines', async () => {

@@ -15,7 +15,7 @@ func init() {
 
 func IsPublicSeedanceModel(modelName string) bool {
 	switch modelName {
-	case Seedance20, Seedance20Fast, Seedance20Mini:
+	case Seedance20, Seedance20Fast, Seedance20Mini, Seedance25:
 		return true
 	default:
 		return false
@@ -62,4 +62,35 @@ func FilterPublicModels(modelNames []string) []string {
 		filtered = append(filtered, modelName)
 	}
 	return filtered
+}
+
+// OrderPublicModels keeps non-Seedance models in their existing slots while
+// presenting canonical public Seedance models in CanonicalModels order.
+func OrderPublicModels(modelNames []string) []string {
+	ordered := append([]string(nil), modelNames...)
+	canonicalPositions := make([]int, 0, len(CanonicalModels))
+	for index, modelName := range ordered {
+		if IsPublicSeedanceModel(modelName) {
+			canonicalPositions = append(canonicalPositions, index)
+		}
+	}
+	if len(canonicalPositions) < 2 {
+		return ordered
+	}
+
+	canonicalPresent := make(map[string]struct{}, len(canonicalPositions))
+	for _, modelName := range ordered {
+		if IsPublicSeedanceModel(modelName) {
+			canonicalPresent[modelName] = struct{}{}
+		}
+	}
+	canonicalIndex := 0
+	for _, modelName := range CanonicalModels {
+		if _, present := canonicalPresent[modelName]; !present {
+			continue
+		}
+		ordered[canonicalPositions[canonicalIndex]] = modelName
+		canonicalIndex++
+	}
+	return ordered
 }

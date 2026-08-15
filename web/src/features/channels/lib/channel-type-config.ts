@@ -378,10 +378,22 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         'Map client-visible Ark model names to verified FYLink upstream models',
     },
   },
+  215: {
+    id: 215,
+    name: CHANNEL_TYPES[215],
+    icon: 'NewAPI',
+    defaultBaseUrl: 'https://api.wxart.space',
+    supportedModels: ['seedance2.0', 'seedance2.5'],
+    hints: {
+      baseUrl: 'Default: https://api.wxart.space',
+      key: 'Enter the raw API key issued by WxArt',
+      models: 'Map client-visible Ark model names to verified WxArt Seedance models',
+    },
+  },
 }
 
 const MANAGED_DEFAULT_BASE_URL_TYPES = new Set([
-  200, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214,
+  200, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215,
 ])
 
 const KNOWN_PROVIDER_BASE_URLS = new Set([

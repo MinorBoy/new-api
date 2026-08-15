@@ -8,6 +8,8 @@ import (
 )
 
 func TestIsPublicSeedanceModelRequiresExactCanonicalID(t *testing.T) {
+	require.Contains(t, CanonicalModels, Seedance25)
+	assert.True(t, IsPublicSeedanceModel(Seedance25))
 	for _, modelName := range CanonicalModels {
 		assert.True(t, IsPublicSeedanceModel(modelName), modelName)
 	}
@@ -75,5 +77,25 @@ func TestFilterPublicModelsKeepsNonSeedanceAndPublicSeedanceInInputOrder(t *test
 		"claude-sonnet-4-5",
 		Seedance20,
 		Seedance20Fast,
+	}, actual)
+}
+
+func TestOrderPublicModelsUsesCanonicalSeedanceOrderWithoutMovingOtherModels(t *testing.T) {
+	actual := OrderPublicModels([]string{
+		"gpt-5",
+		Seedance25,
+		Seedance20Mini,
+		"claude-sonnet-4-5",
+		Seedance20,
+		Seedance20Fast,
+	})
+
+	require.Equal(t, []string{
+		"gpt-5",
+		Seedance20,
+		Seedance20Fast,
+		"claude-sonnet-4-5",
+		Seedance20Mini,
+		Seedance25,
 	}, actual)
 }

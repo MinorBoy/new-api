@@ -122,6 +122,57 @@ test('omits channel lines that have no imported model mapping or route target', 
   assert.equal(result.document.manifest.counts.channel_lines, 14)
 })
 
+test('skips a channel without a backend identity without leaving dangling entities', async () => {
+  const bytes = await fs.readFile(fixturePath)
+  const extracted = structuredClone(
+    extractWorkbook(await loadWorkbookSnapshot(bytes))
+  )
+  const channel = extracted.channels.find(
+    (candidate) => candidate.businessId === 'CH-CLMM'
+  )
+  assert.ok(channel)
+  channel.businessId = 'CH-APIAW'
+  for (const line of extracted.channelLines) {
+    if (line.channelRef === 'CH-CLMM') {
+      line.channelRef = 'CH-APIAW'
+    }
+  }
+
+  const result = await buildImportDocument({
+    extracted,
+    sourceBytes: bytes,
+    sourceFileName: 'channel-config-v1-unsupported-channel.xlsx',
+  })
+
+  assert.equal(result.hasFailures, false)
+  assert.equal(
+    result.document.entities.channels.some(
+      (candidate) => candidate.business_id === 'CH-APIAW'
+    ),
+    false
+  )
+  assert.equal(
+    result.document.entities.channel_lines.some((line) =>
+      String(line.channel_ref).includes('APIAW')
+    ),
+    false
+  )
+  assert.equal(
+    result.document.entities.model_mappings.some((mapping) =>
+      String(mapping.line_ref).includes('clmm')
+    ),
+    false
+  )
+  assert.ok(
+    result.document.issues.some(
+      (issue) =>
+        issue.code === 'CHANNEL_UNSUPPORTED_SKIPPED' &&
+        issue.severity === 'warning' &&
+        issue.entity_ref === 'CH-APIAW'
+    )
+  )
+})
+
 test('keeps draft cost evidence without publishing its mapping or route', async () => {
   const bytes = await fs.readFile(fixturePath)
   const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))

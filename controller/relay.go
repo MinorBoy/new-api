@@ -779,7 +779,8 @@ func persistSubmittedTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, resu
 		}
 	}
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
-	if relayInfo.ChannelMeta != nil && relayInfo.ChannelType == constant.ChannelTypeFFLink {
+	if relayInfo.ChannelMeta != nil &&
+		(relayInfo.ChannelType == constant.ChannelTypeFFLink || relayInfo.ChannelType == constant.ChannelTypeWxArt) {
 		task.PrivateData.Key = relayInfo.ApiKey
 	}
 	task.PrivateData.BillingSource = relayInfo.BillingSource

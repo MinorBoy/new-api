@@ -199,6 +199,37 @@ func TestPersistSubmittedTaskStoresSelectedFYLinkKeyPrivately(t *testing.T) {
 	assert.NotContains(t, string(public), "selected-fflink-key")
 }
 
+func TestPersistSubmittedTaskStoresSelectedWxArtKeyPrivately(t *testing.T) {
+	setupControllerTaskCostDB(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"client-video","content":[{"type":"text","text":"t"}]}`))
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          12,
+		OriginModelName: "client-video",
+		PriceData:       types.PriceData{Quota: 100},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:   74,
+			ChannelType: constant.ChannelTypeWxArt,
+			ApiKey:      "selected-wxart-key",
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task-wxart-key"},
+	}
+	result := &relay.TaskSubmitResult{
+		UpstreamTaskID: "wxart-private",
+		TaskData:       []byte(`{"id":"wxart-private","status":"queued"}`),
+		Platform:       constant.TaskPlatform("215"),
+		Quota:          100,
+	}
+
+	require.NoError(t, persistSubmittedTask(c, relayInfo, result))
+	var task model.Task
+	require.NoError(t, model.DB.Where("task_id = ?", "task-wxart-key").First(&task).Error)
+	assert.Equal(t, "selected-wxart-key", task.PrivateData.Key)
+	public, err := common.Marshal(task)
+	require.NoError(t, err)
+	assert.NotContains(t, string(public), "selected-wxart-key")
+}
+
 func TestPersistSubmittedSeedanceTaskFreezesOfficialTokenBilling(t *testing.T) {
 	setupControllerTaskCostDB(t)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

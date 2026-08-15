@@ -265,6 +265,7 @@ func ListModels(c *gin.Context, modelType int) {
 	}
 
 	userModelNames = modelrouting.FilterPublicModels(userModelNames)
+	userModelNames = modelrouting.OrderPublicModels(userModelNames)
 	ownerByModel := map[string]string{}
 	if len(ownerGroups) > 0 {
 		ownerByModel = getPreferredModelOwners(userModelNames, ownerGroups)

@@ -48,7 +48,7 @@ func TestSecureRoleAssetLifecycleE2E(t *testing.T) {
 	assetService := service.NewAssetService(db, service.NewSecureAssetProvider(&http.Client{}))
 	created, err := assetService.Create(context.Background(), 1001, 7, service.AssetCreateInput{Type: model.AssetTypeImage, URL: "https://8.8.8.8/character.png", IdempotencyKey: "e2e-create"})
 	require.NoError(t, err)
-	assert.Regexp(t, `^asset-[0-9a-f]{32}$`, created.ID)
+	assert.Regexp(t, `^asset-[0-9]{14}-[a-z0-9]{5}$`, created.ID)
 	assert.Equal(t, model.AssetStatusProcessing, created.Status)
 	assert.Equal(t, 1, createCalls)
 

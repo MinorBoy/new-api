@@ -186,7 +186,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if _, exists := c.Get(string(constant.ContextKeyTaskDraft)); !exists {
 		draft = metadataBoolDefault(req.Metadata, "draft", false)
 	}
-	generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily
+	generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily || family == seedance25Family
 	if value, exists := c.Get(string(constant.ContextKeyTaskGenerateAudio)); exists {
 		generateAudio, _ = value.(bool)
 	}
@@ -248,7 +248,7 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		); fieldsErr != nil {
 			return service.TaskErrorWrapperLocal(fieldsErr, "invalid_request", http.StatusBadRequest)
 		}
-		generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily
+		generateAudio := family == seedance15ProFamily || family == seedance20Family || family == seedance20FastFamily || family == seedance20MiniFamily || family == seedance25Family
 		if nativeRequest.GenerateAudio != nil {
 			generateAudio = bool(*nativeRequest.GenerateAudio)
 		}

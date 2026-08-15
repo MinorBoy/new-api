@@ -63,8 +63,14 @@ func parseARKRequest(body []byte, profiles ...protocolProfile) (arkRequest, erro
 		}
 		return arkRequest{}, &arkRequestError{Code: "InvalidParameter", Message: "request body contains invalid parameters"}
 	}
-	if err := validateARKSemantics(request, profile); err != nil {
-		return arkRequest{}, err
+	var validationErr error
+	if profile.requestDialect == videoRequestDialectWxArt {
+		validationErr = validateWxArtRequest(request)
+	} else {
+		validationErr = validateARKSemantics(request, profile)
+	}
+	if validationErr != nil {
+		return arkRequest{}, validationErr
 	}
 	return request, nil
 }

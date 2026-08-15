@@ -664,10 +664,11 @@ func GetUserModels(c *gin.Context) {
 		}
 	}
 	userModels := service.GetGroupsEnabledModels(groupsToQuery)
+	userModels = modelrouting.OrderPublicModels(modelrouting.FilterPublicModels(userModels))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    modelrouting.FilterPublicModels(userModels),
+		"data":    userModels,
 	})
 }
 

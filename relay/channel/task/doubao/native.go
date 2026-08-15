@@ -107,7 +107,7 @@ func (a *TaskAdaptor) validateNativeRequest(c *gin.Context, info *relaycommon.Re
 	relaycommon.StoreTaskRequest(c, info, constant.TaskActionGenerate, taskRequest)
 
 	modelFamily := seedanceModelFamily(request.Model)
-	generateAudio := modelFamily == "2.0" || modelFamily == "2.0-fast" || modelFamily == "2.0-mini" || modelFamily == "1.5"
+	generateAudio := modelFamily == "2.0" || modelFamily == "2.0-fast" || modelFamily == "2.0-mini" || modelFamily == "2.5" || modelFamily == "1.5"
 	if request.GenerateAudio != nil {
 		generateAudio = bool(*request.GenerateAudio)
 	}
@@ -244,10 +244,14 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 	if family == "" {
 		return fmt.Errorf("unsupported Seedance model: %s", request.Model)
 	}
-	if facts.imageCount > 9 || facts.videoCount > 3 || facts.audioCount > 3 {
-		return fmt.Errorf("reference media count exceeds Seedance 2.0 limits")
+	maximumImages, maximumVideos, maximumAudios := 9, 3, 3
+	if family == "2.5" {
+		maximumImages, maximumVideos, maximumAudios = 30, 10, 10
 	}
-	if family != "2.0" && family != "2.0-fast" && family != "2.0-mini" && (facts.videoCount > 0 || facts.audioCount > 0 || facts.referenceImageCount > 0) {
+	if facts.imageCount > maximumImages || facts.videoCount > maximumVideos || facts.audioCount > maximumAudios {
+		return fmt.Errorf("reference media count exceeds Seedance %s limits", family)
+	}
+	if family != "2.0" && family != "2.0-fast" && family != "2.0-mini" && family != "2.5" && (facts.videoCount > 0 || facts.audioCount > 0 || facts.referenceImageCount > 0) {
 		return fmt.Errorf("reference video/audio and reference_image require Seedance 2.0")
 	}
 	if family == "2.0-fast" || family == "2.0-mini" {
@@ -269,7 +273,7 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 			return fmt.Errorf("resolution %s is invalid", resolution)
 		}
 		if !resolutionPrevalidated && (resolution == "4k" && family != "2.0" ||
-			(resolution == "1080p" && (family == "2.0-fast" || family == "2.0-mini"))) {
+			(resolution == "1080p" && (family == "2.0-fast" || family == "2.0-mini" || family == "2.5"))) {
 			return fmt.Errorf("resolution %s is not supported by %s", resolution, family)
 		}
 	}
@@ -285,11 +289,14 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 				return fmt.Errorf("duration must be positive and bounded")
 			}
 			minDuration, maxDuration := 2, 12
-			if family == "1.5" || family == "2.0" || family == "2.0-fast" || family == "2.0-mini" {
+			if family == "1.5" || family == "2.0" || family == "2.0-fast" || family == "2.0-mini" || family == "2.5" {
 				minDuration = 4
 			}
 			if family == "2.0" || family == "2.0-fast" || family == "2.0-mini" {
 				maxDuration = 15
+			}
+			if family == "2.5" {
+				maxDuration = 30
 			}
 			if duration < minDuration || duration > maxDuration {
 				return fmt.Errorf("duration is outside the %s model range", family)
@@ -318,7 +325,7 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 		return fmt.Errorf("service_tier=%s is not supported by %s", serviceTier, family)
 	}
 
-	if request.GenerateAudio != nil && family != "1.5" && family != "2.0" && family != "2.0-fast" && family != "2.0-mini" {
+	if request.GenerateAudio != nil && family != "1.5" && family != "2.0" && family != "2.0-fast" && family != "2.0-mini" && family != "2.5" {
 		return fmt.Errorf("generate_audio is not supported by %s", family)
 	}
 	draft := request.Draft != nil && bool(*request.Draft)
@@ -351,7 +358,7 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 		}
 	}
 	if request.Seed != nil {
-		if family == "2.0" || family == "2.0-fast" || family == "2.0-mini" {
+		if family == "2.0" || family == "2.0-fast" || family == "2.0-mini" || family == "2.5" {
 			return fmt.Errorf("seed is not supported by Seedance 2.0")
 		}
 		seed := int64(*request.Seed)
@@ -360,13 +367,13 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 		}
 	}
 	if request.CameraFixed != nil && bool(*request.CameraFixed) {
-		if family == "2.0" || family == "2.0-fast" || family == "2.0-mini" || facts.firstFrameCount > 0 || facts.lastFrameCount > 0 {
+		if family == "2.0" || family == "2.0-fast" || family == "2.0-mini" || family == "2.5" || facts.firstFrameCount > 0 || facts.lastFrameCount > 0 {
 			return fmt.Errorf("camera_fixed is not supported for this request")
 		}
 	}
 	if ratio := strings.ToLower(strings.TrimSpace(request.Ratio)); ratio != "" {
 		allowed := map[string]bool{"16:9": true, "4:3": true, "1:1": true, "3:4": true, "9:16": true, "21:9": true, "adaptive": true}
-		if !allowed[ratio] || (ratio == "adaptive" && family != "1.5" && family != "2.0" && family != "2.0-fast" && family != "2.0-mini") {
+		if !allowed[ratio] || (ratio == "adaptive" && family != "1.5" && family != "2.0" && family != "2.0-fast" && family != "2.0-mini" && family != "2.5") {
 			return fmt.Errorf("ratio %s is not supported by %s", ratio, family)
 		}
 		if ratio == "adaptive" && (facts.videoCount > 0 || facts.audioCount > 0) {
@@ -374,7 +381,7 @@ func validateSeedanceNativeFields(request seedanceNativeRequest, facts seedanceC
 		}
 	}
 	for _, tool := range request.Tools {
-		if family != "2.0" && family != "2.0-fast" && family != "2.0-mini" || tool.Type != "web_search" {
+		if family != "2.0" && family != "2.0-fast" && family != "2.0-mini" && family != "2.5" || tool.Type != "web_search" {
 			return fmt.Errorf("unsupported Seedance tool")
 		}
 	}
@@ -409,6 +416,8 @@ func seedanceModelFamily(modelName string) string {
 		return "2.0-mini"
 	case strings.HasPrefix(modelName, "doubao-seedance-2-0"):
 		return "2.0"
+	case strings.HasPrefix(modelName, "doubao-seedance-2-5"):
+		return "2.5"
 	case strings.HasPrefix(modelName, "doubao-seedance-1-5-pro"):
 		return "1.5"
 	case strings.HasPrefix(modelName, "doubao-seedance-1-0-pro-fast"):

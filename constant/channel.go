@@ -73,7 +73,8 @@ const (
 	ChannelTypeZZone          = 212 // ZZone Seedance task protocol
 	ChannelTypeMikoto         = 213 // Mikoto Sora and Seedance task protocol
 	ChannelTypeFFLink         = 214 // FYLink Seedance task protocol
-	ChannelTypeDummy          = 215 // this one is only for count, do not add any channel after this
+	ChannelTypeWxArt          = 215 // WxArt Seedance task protocol
+	ChannelTypeDummy          = 216 // this one is only for count, do not add any channel after this
 
 )
 
@@ -156,6 +157,7 @@ var ChannelBaseURLs = func() []string {
 	baseURLs[ChannelTypeZZone] = "https://zzone.cc.cd"
 	baseURLs[ChannelTypeMikoto] = "https://api.mikoto.vip"
 	baseURLs[ChannelTypeFFLink] = "https://api.fflink.top"
+	baseURLs[ChannelTypeWxArt] = "https://api.wxart.space"
 	return baseURLs
 }()
 
@@ -232,6 +234,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeZZone:          "ZZone",
 	ChannelTypeMikoto:         "Mikoto",
 	ChannelTypeFFLink:         "FYLink",
+	ChannelTypeWxArt:          "WxArt",
 }
 
 func GetChannelTypeName(channelType int) string {

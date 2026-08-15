@@ -42,6 +42,9 @@ func (a *TaskAdaptor) ParseTaskResult(body []byte) (*relaycommon.TaskInfo, error
 	if err != nil {
 		return nil, err
 	}
+	if dialect == videoRequestDialectWxArt {
+		sanitizeWxArtFailureProjection(parsed)
+	}
 	result := &relaycommon.TaskInfo{
 		Code:                    0,
 		Status:                  string(parsed.Status),
@@ -544,6 +547,9 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if a.activeProfile().requestDialect == videoRequestDialectWxArt && task.Status == model.TaskStatusFailure {
+		sanitizeWxArtFailureProjection(parsed)
+	}
 	nested := parsed.Nested
 	response := arkTaskResponse{
 		ID:                    task.TaskID,
@@ -589,7 +595,8 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 			response.UpdatedAt = &updatedAt
 		}
 	}
-	if (response.Content == nil || response.Content.VideoURL == "") && task.PrivateData.ResultURL != "" {
+	if (response.Content == nil || response.Content.VideoURL == "") && task.PrivateData.ResultURL != "" &&
+		(task.Status != model.TaskStatusFailure || a.activeProfile().requestDialect != videoRequestDialectWxArt) {
 		response.Content = &arkVideoContent{VideoURL: task.PrivateData.ResultURL}
 	}
 	if (response.Content == nil || response.Content.VideoURL == "") && task.Status == model.TaskStatusSuccess && a.activeProfile().requestDialect == videoRequestDialectFFLink {
@@ -617,6 +624,22 @@ func (a *TaskAdaptor) ConvertToArkVideoTask(task *model.Task) ([]byte, error) {
 		}
 	}
 	return common.Marshal(response)
+}
+
+func sanitizeWxArtFailureProjection(parsed *parsedTask) {
+	if parsed == nil || parsed.Status != model.TaskStatusFailure {
+		return
+	}
+	if parsed.Nested != nil && parsed.Nested.Content != nil {
+		if (parsed.Reason == "" || parsed.Reason == "task failed") && strings.TrimSpace(parsed.Nested.Content.VideoURL) != "" {
+			parsed.Reason = sanitizeUpstreamFailure(parsed.Nested.Content.VideoURL)
+		}
+		parsed.Nested.Content = nil
+	}
+	parsed.URL = ""
+	if parsed.Reason == "" {
+		parsed.Reason = "task failed"
+	}
 }
 
 func z5APIRequestedDuration(task *model.Task) *json.Number {

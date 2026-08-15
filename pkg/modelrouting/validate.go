@@ -60,7 +60,7 @@ func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 			if target.MinimumExpectedMarginBPS != nil && (*target.MinimumExpectedMarginBPS < 0 || *target.MinimumExpectedMarginBPS > 10_000) {
 				return newValidationError(ValidationInvalidMinimumExpectedMargin, "targets.minimum_expected_margin_bps", "minimum expected margin must be between 0 and 10000 basis points")
 			}
-			if err := validateConstraints(target.Constraints, maxDuration); err != nil {
+			if err := validateConstraints(target.Constraints, maxDuration, policy.CanonicalModel); err != nil {
 				return err
 			}
 		}
@@ -96,17 +96,27 @@ func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 	}
 }
 
-func validateConstraints(constraints Constraints, maxDuration int) error {
+func validateConstraints(constraints Constraints, maxDuration int, canonicalModel string) error {
 	if len(constraints.OutputResolutions) == 0 {
 		return newValidationError(ValidationInvalidOutputResolution, "targets.constraints.output_resolutions", "at least one output resolution is required")
 	}
+	allowedModelResolutions := allowedResolutions
+	modelMaxDuration := maxDuration
+	maxImages, maxVideos, maxAudios := 9, 3, 3
+	if canonicalModel == Seedance25 {
+		allowedModelResolutions = []string{"480p", "720p"}
+		if modelMaxDuration > 30 {
+			modelMaxDuration = 30
+		}
+		maxImages, maxVideos, maxAudios = 30, 10, 10
+	}
 	for _, resolution := range constraints.OutputResolutions {
-		if !containsString(allowedResolutions, resolution) {
+		if !containsString(allowedModelResolutions, resolution) {
 			return newValidationError(ValidationInvalidOutputResolution, "targets.constraints.output_resolutions", "output resolution is invalid")
 		}
 	}
 
-	if err := validateDurationConstraint(constraints.Durations, maxDuration); err != nil {
+	if err := validateDurationConstraint(constraints.Durations, modelMaxDuration); err != nil {
 		return err
 	}
 	for _, ratio := range constraints.AspectRatios {
@@ -120,7 +130,7 @@ func validateConstraints(constraints Constraints, maxDuration int) error {
 		}
 	}
 	limits := constraints.ReferenceLimits
-	if limits.Images < 0 || limits.Images > 9 || limits.Videos < 0 || limits.Videos > 3 || limits.Audios < 0 || limits.Audios > 3 {
+	if limits.Images < 0 || limits.Images > maxImages || limits.Videos < 0 || limits.Videos > maxVideos || limits.Audios < 0 || limits.Audios > maxAudios {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_limits", "reference limits are invalid")
 	}
 	minimums := constraints.ReferenceMinimums

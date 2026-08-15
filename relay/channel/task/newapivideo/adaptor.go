@@ -413,6 +413,48 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		c.Set(requestStateContextKey, state)
 		return nil
 	}
+	if profile.requestDialect == videoRequestDialectWxArt {
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		upstreamModel := ""
+		if info != nil {
+			upstreamModel = info.UpstreamModelName
+			if upstreamModel == "" {
+				upstreamModel = info.OriginModelName
+			}
+		}
+		if err := validateWxArtRequest(*state.ARK); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+		mappedModel, ok := wxArtModel(upstreamModel)
+		if !ok {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("mapped model %s is not supported by WxArt", upstreamModel), "InvalidParameter.model", http.StatusBadRequest)
+		}
+		if err := validateWxArtReferenceDurations(c.Request.Context(), *state.ARK, mappedModel); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			var videoMetadataErr *service.VideoMetadataError
+			if errors.As(err, &videoMetadataErr) && videoMetadataErr.Kind == service.VideoMetadataInvalidMedia {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference video is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+			var audioMetadataErr *service.ReferenceAudioDurationError
+			if errors.As(err, &audioMetadataErr) && audioMetadataErr.Kind == service.ReferenceAudioInvalidMedia {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("reference audio is invalid"), "InvalidParameter.content", http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(fmt.Errorf("reference media metadata is unavailable"), "reference_media_metadata_unavailable", http.StatusServiceUnavailable)
+		}
+		state.ProviderValidationComplete = true
+		c.Set(requestStateContextKey, state)
+		return nil
+	}
 	if profile.omegaRequest != nil {
 		state, err := getRequestState(c)
 		if err != nil || state.ARK == nil {
@@ -907,6 +949,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, fmt.Errorf("FYLink provider validation is incomplete")
 			}
 			body, err = buildFFLinkRequest(*state.ARK, modelName)
+		case videoRequestDialectWxArt:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if !state.ProviderValidationComplete {
+				return nil, fmt.Errorf("WxArt provider validation is incomplete")
+			}
+			body, err = buildWxArtRequest(*state.ARK, modelName)
 		default:
 			body, err = buildARKRequestBody(c, info, profile)
 		}

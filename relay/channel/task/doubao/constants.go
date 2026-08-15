@@ -12,6 +12,7 @@ const (
 	seedance20Family     = seedancepricing.Family20
 	seedance20FastFamily = seedancepricing.Family20Fast
 	seedance20MiniFamily = seedancepricing.Family20Mini
+	seedance25Family     = seedancepricing.Family25
 	seedance15ProFamily  = seedancepricing.Family15Pro
 )
 
@@ -23,6 +24,7 @@ var ModelList = []string{
 	"doubao-seedance-2-0-260128",
 	"doubao-seedance-2-0-fast-260128",
 	"doubao-seedance-2-0-mini-260615",
+	"doubao-seedance-2-5-260628",
 }
 
 var ChannelName = "doubao-video"

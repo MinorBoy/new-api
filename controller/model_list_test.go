@@ -414,6 +414,7 @@ func TestGetUserModelsProjectsAutoGroupsInPublicCatalogOrder(t *testing.T) {
 		{Group: "vip", Model: modelrouting.Seedance20Fast, ChannelId: 1, Enabled: true},
 		{Group: "vip", Model: modelrouting.Seedance20, ChannelId: 1, Enabled: true},
 		{Group: "default", Model: modelrouting.Seedance20Mini, ChannelId: 1, Enabled: true},
+		{Group: "vip", Model: modelrouting.Seedance25, ChannelId: 1, Enabled: true},
 		{Group: "default", Model: modelrouting.Seedance20, ChannelId: 2, Enabled: true},
 		{Group: "unavailable", Model: "provider-hidden", ChannelId: 1, Enabled: true},
 	}).Error)

@@ -597,6 +597,13 @@ export const STATIC_I18N_KEYS = [
   'Map client-visible Ark model names to verified FYLink upstream models',
   'FYLink is task-only. Enable it only after real upstream contract acceptance.',
 
+  // WxArt channel configuration
+  'WxArt',
+  'Default: https://api.wxart.space',
+  'Enter the raw API key issued by WxArt',
+  'Map client-visible Ark model names to verified WxArt Seedance models',
+  'WxArt is task-only. Enable it only after real upstream contract acceptance.',
+
   // Route margin catalog dynamic labels
   'All results',
   'All scenarios',

@@ -16,7 +16,8 @@
     "13": "CH-MIKOTO",
     "14": "CH-ZZONE",
     "15": "CH-FFLINK",
-    "16": "CH-AOTIAN"
+    "16": "CH-AOTIAN",
+    "17": "CH-WXART"
   },
   "defaults": {
     "currency": "CNY",
@@ -26,7 +27,38 @@
     "tokenDivisor": 1024,
     "groupRatio": "1"
   },
-  "modelRules": {},
+  "modelRules": {
+    "lec-ac-seedance-2-5": {
+      "clientModel": "seedance-2.5"
+    },
+    "lec-seedance-2-5-720p": {
+      "clientModel": "seedance-2.5"
+    },
+    "jmg-video-seedance-2.5": {
+      "clientModel": "seedance-2.5"
+    },
+    "pxv-seedance-2.5": {
+      "clientModel": "seedance-2.5"
+    },
+    "hgf-seedance-2.5": {
+      "clientModel": "seedance-2.5"
+    },
+    "dvc-seedance-2.5": {
+      "clientModel": "seedance-2.5"
+    },
+    "4sdance_2.5": {
+      "clientModel": "seedance-2.5"
+    },
+    "video-ds-2.5": {
+      "clientModel": "seedance-2.5"
+    },
+    "video-ds-2.5-480": {
+      "clientModel": "seedance-2.5"
+    },
+    "seedance2.5": {
+      "clientModel": "seedance-2.5"
+    }
+  },
   "overrides": {
     "13/R211": {
       "maxReferenceTotal": 12
@@ -35,6 +67,33 @@
       "maxDurationSeconds": 12
     },
     "6/R100": {
+      "status": "draft"
+    },
+    "6/R104": {
+      "status": "draft"
+    },
+    "6/R105": {
+      "status": "draft"
+    },
+    "6/R111": {
+      "status": "draft"
+    },
+    "6/R112": {
+      "status": "draft"
+    },
+    "6/R116": {
+      "status": "draft"
+    },
+    "6/R117": {
+      "status": "draft"
+    },
+    "13/R239": {
+      "status": "draft"
+    },
+    "15/R253": {
+      "status": "draft"
+    },
+    "15/R256": {
       "status": "draft"
     }
   }

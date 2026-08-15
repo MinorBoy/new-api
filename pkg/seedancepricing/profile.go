@@ -13,6 +13,7 @@ const (
 	Family20     = "seedance-2.0"
 	Family20Fast = "seedance-2.0-fast"
 	Family20Mini = "seedance-2.0-mini"
+	Family25     = "seedance-2.5"
 	Family15Pro  = "seedance-1.5-pro"
 )
 
@@ -46,6 +47,7 @@ var familyResolutionSupport = map[string]map[string]bool{
 	Family20:     {"480p": true, "720p": true, "1080p": true, "4k": true},
 	Family20Fast: {"480p": true, "720p": true},
 	Family20Mini: {"480p": true, "720p": true},
+	Family25:     {"480p": true, "720p": true},
 	Family15Pro:  {"480p": true, "720p": true, "1080p": true},
 }
 
@@ -64,6 +66,8 @@ func Family(modelName string) string {
 		return Family20Mini
 	case strings.Contains(compact, "seedance15pro"):
 		return Family15Pro
+	case strings.Contains(compact, "seedance25"):
+		return Family25
 	case strings.Contains(compact, "seedance20"):
 		return Family20
 	default:

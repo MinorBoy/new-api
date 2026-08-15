@@ -168,7 +168,7 @@ func seedanceTaskList(c *gin.Context) (*seedanceTaskListResponse, error) {
 
 func seedanceModelEvidencePredicate(expression string) (string, []interface{}) {
 	compact := "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(" + expression + ", ''), '-', ''), '_', ''), '.', ''), ' ', ''))"
-	return "(" + compact + " LIKE ? OR " + compact + " LIKE ?)", []interface{}{"%seedance20%", "%seedance15pro%"}
+	return "(" + compact + " LIKE ? OR " + compact + " LIKE ? OR " + compact + " LIKE ?)", []interface{}{"%seedance20%", "%seedance25%", "%seedance15pro%"}
 }
 
 func seedanceFilteredTaskList(query *gorm.DB, pageNum, pageSize int, modelFilter, serviceTierFilter string) (*seedanceTaskListResponse, error) {
@@ -316,7 +316,8 @@ func seedanceTaskPayload(task *model.Task, adaptor channel.TaskAdaptor) (map[str
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZ5API)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeZZone)),
 		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMikoto)),
-		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFFLink)):
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeFFLink)),
+		constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeWxArt)):
 		return nil, fmt.Errorf("new-api video task adaptor must implement ARK conversion")
 	case constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeClmmMall)):
 		return nil, errClmmMallArkTaskConverterUnavailable

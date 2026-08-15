@@ -95,6 +95,7 @@ const V1_CHANNEL_TYPES: Record<string, number> = {
   'CH-ZZONE': 212,
   'CH-MIKOTO': 213,
   'CH-FFLINK': 214,
+  'CH-WXART': 215,
 }
 
 function cellText(cell: CellSnapshot | undefined): string {
@@ -461,10 +462,11 @@ export async function buildImportDocument(
   const channelsByRef = new Map(
     input.extracted.channels.map((channel) => [channel.businessId, channel])
   )
+  const supportedChannelRefs = new Set<string>()
   for (const channel of input.extracted.channels) {
     const source = sourceRef(channel)
     const type = channelType(channel.businessId)
-    if (!sourceIDs.has(source) || type === undefined) {
+    if (!sourceIDs.has(source)) {
       issues.push(
         sourceIssue(
           'CHANNEL_IDENTITY_UNRESOLVED',
@@ -475,6 +477,18 @@ export async function buildImportDocument(
       )
       continue
     }
+    if (type === undefined) {
+      issues.push(
+        sourceIssue(
+          'CHANNEL_UNSUPPORTED_SKIPPED',
+          'warning',
+          'The channel has no supported backend identity and was skipped from this import.',
+          channel
+        )
+      )
+      continue
+    }
+    supportedChannelRefs.add(channel.businessId)
     entities.channels.push(
       await authoritativeEntity(channel, source, {
         channel_type: type,
@@ -486,8 +500,9 @@ export async function buildImportDocument(
   }
 
   const lineIDs = new Set(
-    input.extracted.channelLines.map((line) => line.businessId)
+    entities.channel_lines.map((line) => String(line.line_ref ?? ''))
   )
+  const skippedLineRefs = new Set<string>()
   for (const line of input.extracted.channelLines) {
     const channel = channelsByRef.get(line.channelRef)
     const source = channel ? sourceRef(channel) : ''
@@ -500,6 +515,10 @@ export async function buildImportDocument(
           line
         )
       )
+      continue
+    }
+    if (!supportedChannelRefs.has(line.channelRef)) {
+      skippedLineRefs.add(line.businessId)
       continue
     }
     const realPerson =
@@ -522,6 +541,7 @@ export async function buildImportDocument(
         status_proposal: 'disabled',
       })
     )
+    lineIDs.add(line.businessId)
   }
 
   const skuIDs = new Set(input.extracted.modelSkus.map((sku) => sku.businessId))
@@ -670,6 +690,9 @@ export async function buildImportDocument(
       const skuRef = field(mapping, 'sku_ref')
       const source = sourceRef(mapping)
       const lineRef = mapping.lineRef ?? field(mapping, 'line_ref')
+      if (skippedLineRefs.has(lineRef)) {
+        continue
+      }
       const sku = skuByRef.get(skuRef)
       if (
         !sku ||
@@ -706,6 +729,9 @@ export async function buildImportDocument(
       const lineRef = cost.lineRef ?? field(cost, 'line_ref')
       const routeTargetRef = field(cost, 'route_target_ref')
       const variant = field(cost, 'cost_variant_key')
+      if (skippedLineRefs.has(lineRef)) {
+        continue
+      }
       if (
         !lineIDs.has(lineRef) ||
         !sourceIDs.has(source) ||
@@ -885,6 +911,9 @@ export async function buildImportDocument(
     const mappingsByKey = new Map<string, ExtractedEntity[]>()
     for (const cost of input.extracted.costRuleDrafts) {
       if (cost.lineRef) {
+        if (skippedLineRefs.has(cost.lineRef)) {
+          continue
+        }
         const candidates = costsByKey.get(pairingKey(cost)) ?? []
         candidates.push(cost)
         costsByKey.set(pairingKey(cost), candidates)
@@ -892,6 +921,9 @@ export async function buildImportDocument(
     }
     for (const mapping of input.extracted.modelMappings) {
       if (mapping.lineRef) {
+        if (skippedLineRefs.has(mapping.lineRef)) {
+          continue
+        }
         const candidates = mappingsByKey.get(pairingKey(mapping)) ?? []
         candidates.push(mapping)
         mappingsByKey.set(pairingKey(mapping), candidates)

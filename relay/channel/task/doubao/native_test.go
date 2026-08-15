@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -137,6 +138,17 @@ func TestValidateNativeRequestMalformedBooleanUsesStableARKError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSeedance25AcceptsItsPublishedDurationAndReferenceLimits(t *testing.T) {
+	duration := dto.IntValue(30)
+	request := seedanceNativeRequest{
+		Model:      "doubao-seedance-2-5-260628",
+		Resolution: "720p",
+		Duration:   &duration,
+	}
+	facts := seedanceContentFacts{imageCount: 30, videoCount: 10, audioCount: 10}
+	require.NoError(t, validateSeedanceNativeFields(request, facts, false))
 }
 
 func TestBuildNativeRequestBodyAppliesMappedModel(t *testing.T) {

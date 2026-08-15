@@ -58,9 +58,44 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 		return validateSecureVideoRoute(channel.GetOtherSettings().SecureVideoGroup, target)
 	case constant.ChannelTypeFFLink:
 		return validateFFLinkVideoRoute(target)
+	case constant.ChannelTypeWxArt:
+		return validateWxArtVideoRoute(target)
 	default:
 		return nil
 	}
+}
+
+func validateWxArtVideoRoute(target modelrouting.Target) error {
+	modelName, ok := tasknewapivideo.AnalyzeWxArtModel(target.UpstreamModel)
+	if !ok {
+		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for WxArt")
+	}
+	maxDuration := 15
+	maxImages, maxVideos, maxAudios, maxTotal := 9, 3, 3, 12
+	allowedResolutions := []string{"480p", "720p", "1080p", "4k"}
+	switch modelName {
+	case "seedance2.0":
+	case "seedance2.5":
+		maxDuration = 30
+		maxImages, maxVideos, maxAudios, maxTotal = 30, 10, 10, 50
+		allowedResolutions = []string{"480p", "720p"}
+	default:
+		return newVideoRouteContractError("route_contract_model", "mapped upstream model is not verified for WxArt")
+	}
+	if !routeResolutionsWithin(target.Constraints.OutputResolutions, allowedResolutions...) {
+		return newVideoRouteContractError("route_contract_resolution", "WxArt route resolution is unsupported")
+	}
+	if !routeDurationWithin(target.Constraints.Durations, 4, maxDuration) {
+		return newVideoRouteContractError("route_contract_duration", fmt.Sprintf("WxArt routes require durations from 4 to %d seconds", maxDuration))
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios ||
+		routeReferenceTotalMax(target.Constraints) > maxTotal {
+		return newVideoRouteContractError("route_contract_references", "WxArt route reference limits exceed the verified protocol")
+	}
+	return nil
 }
 
 func validateMikotoVideoRoute(target modelrouting.Target) error {

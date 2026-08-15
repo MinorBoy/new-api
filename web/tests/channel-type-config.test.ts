@@ -695,3 +695,47 @@ describe('FYLink channel configuration', () => {
     ).toBe('https://proxy.example.com')
   })
 })
+
+describe('WxArt channel configuration', () => {
+  test('registers task-only type 215 with the two Seedance models', () => {
+    expect(CHANNEL_TYPES[215]).toBe('WxArt')
+    expect(CHANNEL_TYPE_OPTIONS).toContainEqual({ value: 215, label: 'WxArt' })
+    expect(
+      CHANNEL_TYPE_OPTIONS.findIndex((option) => option.value === 215)
+    ).toBe(CHANNEL_TYPE_OPTIONS.findIndex((option) => option.value === 214) + 1)
+    expect(getChannelTypeIcon(215)).toBe('NewAPI')
+    expect(TASK_ONLY_CHANNEL_TYPES.has(215)).toBe(true)
+    expect(GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES.has(215)).toBe(true)
+    expect(MODEL_FETCHABLE_TYPES.has(215)).toBe(false)
+    expect(getChannelModelOptions(215, [], [])).toEqual([
+      'seedance2.0',
+      'seedance2.5',
+    ])
+  })
+
+  test('uses the managed default and keeps new channels disabled', () => {
+    expect(getChannelTypeConfig(215)).toMatchObject({
+      id: 215,
+      name: 'WxArt',
+      icon: 'NewAPI',
+      defaultBaseUrl: 'https://api.wxart.space',
+      supportedModels: ['seedance2.0', 'seedance2.5'],
+    })
+    expect(getDefaultBaseUrl(215)).toBe('https://api.wxart.space')
+    expect(getBaseUrlOnChannelTypeChange(215, '', false)).toBe(
+      'https://api.wxart.space'
+    )
+    expect(
+      getBaseUrlOnChannelTypeChange(215, 'https://proxy.example.com', false)
+    ).toBe('https://proxy.example.com')
+    expect(getStatusOnChannelTypeChange(1, 215, CHANNEL_STATUS.ENABLED)).toBe(
+      CHANNEL_STATUS.MANUAL_DISABLED
+    )
+    expect(TYPE_TO_KEY_PROMPT[215]).toBe(
+      'Enter the raw API key issued by WxArt'
+    )
+    expect(CHANNEL_TYPE_WARNINGS[215]).toBe(
+      'WxArt is task-only. Enable it only after real upstream contract acceptance.'
+    )
+  })
+})

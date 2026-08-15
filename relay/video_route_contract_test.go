@@ -422,6 +422,26 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 	}
 }
 
+func TestValidateWxArtVideoRouteContract(t *testing.T) {
+	t.Run("seedance 2.5 accepts expanded media contract", func(t *testing.T) {
+		target := videoContractTargetWithMinimums("seedance2.5", []string{"480p", "720p"}, 4, 30,
+			[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeOmniReference},
+			modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10}, modelrouting.ReferenceLimits{})
+		require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, target))
+	})
+	t.Run("seedance 2.5 rejects 1080p", func(t *testing.T) {
+		target := videoContractTarget("seedance2.5", []string{"1080p"}, 4, 30, nil, modelrouting.ReferenceLimits{})
+		err := ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, target)
+		require.Error(t, err)
+		assert.Equal(t, "route_contract_resolution", err.(*VideoRouteContractError).Code)
+	})
+	t.Run("seedance 2.5 accepts canonical upstream model", func(t *testing.T) {
+		target := videoContractTargetWithMinimums("doubao-seedance-2-5-260628", []string{"480p", "720p"}, 4, 30,
+			[]modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10}, modelrouting.ReferenceLimits{})
+		require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, target))
+	})
+}
+
 func TestValidateFFLinkVideoRouteTargetContract(t *testing.T) {
 	tests := []struct {
 		name     string

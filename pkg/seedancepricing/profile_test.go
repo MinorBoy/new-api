@@ -61,6 +61,9 @@ func TestSupportsResolutionUsesCapabilityContractWithoutPricing(t *testing.T) {
 		{"doubao-seedance-2-0-fast-260128", "1080p", false},
 		{"doubao-seedance-2-0-mini-260615", "480p", true},
 		{"doubao-seedance-2-0-mini-260615", "4k", false},
+		{"doubao-seedance-2-5-260628", "480p", true},
+		{"doubao-seedance-2-5-260628", "720p", true},
+		{"doubao-seedance-2-5-260628", "1080p", false},
 		{"doubao-seedance-1-5-pro-251215", "1080p", true},
 		{"other-model", "720p", false},
 	}
@@ -81,6 +84,7 @@ func TestFamilyResolvesFromCanonicalModelNames(t *testing.T) {
 		{"doubao-seedance-2-0-260128", Family20},
 		{"doubao-seedance-1-5-pro-251215", Family15Pro},
 		{"doubao-seedance-2-0-fast-270101", Family20Fast},
+		{"doubao-seedance-2-5-260628", Family25},
 		{"other-model", ""},
 	}
 	for _, tt := range tests {

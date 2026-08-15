@@ -96,13 +96,14 @@ export const CHANNEL_TYPES = {
   212: 'ZZone',
   213: 'Mikoto',
   214: 'FYLink',
+  215: 'WxArt',
 } as const
 
 const CHANNEL_TYPE_DISPLAY_ORDER: number[] = [
   1, 14, 33, 24, 43, 3, 41, 48, 60, 58, 42, 34, 20, 4, 40, 27, 25, 17, 26, 15,
   46, 23, 18, 45, 31, 35, 49, 19, 47, 37, 38, 39, 11, 8, 57, 59, 22, 21, 44, 2,
   5, 36, 50, 51, 52, 53, 54, 55, 56, 200, 201, 202, 203, 204, 205, 206, 207,
-  208, 209, 210, 211, 212, 213, 214,
+  208, 209, 210, 211, 212, 213, 214, 215,
 ]
 
 export const CHANNEL_TYPE_OPTIONS: { value: number; label: string }[] = (() => {
@@ -405,11 +406,12 @@ export const MODEL_FETCHABLE_TYPES = new Set([
 
 export const GENERIC_CHANNEL_TEST_UNSUPPORTED_TYPES = new Set([
   2, 5, 36, 50, 51, 52, 54, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
-  210, 211, 212, 213, 214,
+  210, 211, 212, 213, 214, 215,
 ])
 
 export const TASK_ONLY_CHANNEL_TYPES = new Set([
   200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214,
+  215,
 ])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
@@ -438,6 +440,7 @@ export const TYPE_TO_KEY_PROMPT: Record<number, string> = {
   212: 'Enter the raw API key issued by ZZone',
   213: 'Enter the raw API key issued by Mikoto',
   214: 'Enter the raw API key issued by FYLink',
+  215: 'Enter the raw API key issued by WxArt',
 }
 
 export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
@@ -459,4 +462,5 @@ export const CHANNEL_TYPE_WARNINGS: Record<number, string> = {
   212: 'ZZone is task-only. Enable it only after real upstream contract acceptance.',
   213: 'Mikoto is task-only. Enable it only after real upstream contract acceptance.',
   214: 'FYLink is task-only. Enable it only after real upstream contract acceptance.',
+  215: 'WxArt is task-only. Enable it only after real upstream contract acceptance.',
 }

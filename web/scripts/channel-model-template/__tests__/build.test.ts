@@ -1043,3 +1043,88 @@ test('writes a confirmed real-person override to the mapping audit note', () => 
 
   assert.match(output.mappings[0]?.note ?? '', /真人脸=否/)
 })
+
+test('maps wxart seedance2.5 rows to the official seedance-2.5 family', () => {
+  const source = sourceWithOfficialPrice()
+  const channel = source.channels[0]
+  const model = source.models[0]
+  const official = source.officialPrices[0]
+  assert.ok(channel)
+  assert.ok(model)
+  assert.ok(official)
+  channel.fields.渠道 = 17
+  channel.fields.名称 = 'wxart'
+  channel.fields['Base Url'] = 'https://api.wxart.space'
+  model.fields.渠道 = 17
+  model.fields.模型ID = 'seedance2.5'
+  model.fields.系列 = 2.5
+  model.fields.版本 = '标准'
+  model.fields.清晰度 = '720p'
+  model.fields.参考图数 = 30
+  model.fields.参考视频数 = 10
+  model.fields.参考音频数 = 10
+  model.fields.最大素材数 = 50
+  model.fields['参考视频总时长上限 秒'] = 30
+  model.fields.时长范围 = '4-30'
+  official.fields.系列 = 2.5
+  official.fields.模型 = 'seedance-2.5'
+  official.fields.分辨率 = '720p'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { '17': 'CH-WXART' },
+      modelRules: { 'seedance2.5': { clientModel: 'seedance-2.5' } },
+    })
+  )
+
+  assert.equal(output.skus[0]?.model, 'seedance-2.5')
+  assert.equal(output.skus[0]?.status, 'active')
+  assert.equal(output.sales.length, 2)
+  assert.equal(output.mappings[0]?.clientModel, 'seedance-2.5')
+  assert.equal(output.issues.some((item) => item.code === 'SALE_UNRESOLVED'), false)
+})
+
+test('uses the same draft SKU identity when a source model has a cross-series label', () => {
+  const source = sourceWithOfficialPrice()
+  const channel = source.channels[0]
+  const model = source.models[0]
+  const official = source.officialPrices[0]
+  assert.ok(channel)
+  assert.ok(model)
+  assert.ok(official)
+  channel.fields.渠道 = 7
+  model.fields.渠道 = 7
+  model.fields.模型ID = 'pxv-seedance-2.0-fast'
+  model.fields.系列 = 2.5
+  model.fields.版本 = '标准'
+  model.fields.清晰度 = '480p'
+  official.fields.系列 = 2
+  official.fields.模型 = 'seedance-2.0-fast'
+  official.fields.版本 = 'fast'
+  official.fields.分辨率 = '480p'
+
+  const output = buildTemplateData(
+    source,
+    parseRules({
+      ...rulesInput,
+      channelCodes: { '7': 'CH-DIMENSIO' },
+      modelRules: {},
+    })
+  )
+  const sku = output.skus.find((item) => item.model === 'pxv-seedance-2.0-fast')
+  const cost = output.costs.find((item) => item.sourceRow === 3)
+
+  assert.ok(sku)
+  assert.ok(cost)
+  assert.equal(cost.skuCode, sku.businessId)
+  assert.equal(
+    output.issues.some(
+      (item) =>
+        item.code === 'COST_SKU_UNRESOLVED' &&
+        item.businessId === cost.businessId
+    ),
+    false
+  )
+})

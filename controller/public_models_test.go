@@ -93,6 +93,7 @@ func mixedPublicModelNames() []string {
 		modelrouting.Seedance20,
 		modelrouting.Seedance20Fast,
 		modelrouting.Seedance20Mini,
+		modelrouting.Seedance25,
 	}
 }
 
@@ -109,7 +110,7 @@ func TestListModelsKeepsNonSeedanceAndUsesDoubaoOwnerOnlyForPublicSeedance(t *te
 	ListModels(ctx, constant.ChannelTypeOpenAI)
 
 	payload := decodeListModelsPayload(t, recorder)
-	require.Len(t, payload.Data, 4)
+	require.Len(t, payload.Data, 5)
 	modelsByID := make(map[string]dto.OpenAIModels, len(payload.Data))
 	for _, item := range payload.Data {
 		modelsByID[item.Id] = item

@@ -32,6 +32,7 @@ func TestSeedanceResolutionCapabilityMatrix(t *testing.T) {
 		})
 	}
 	require.Contains(t, ModelList, "doubao-seedance-2-0-mini-260615")
+	require.Contains(t, ModelList, "doubao-seedance-2-5-260628")
 }
 
 func TestSeedancePricing15ProRatios(t *testing.T) {

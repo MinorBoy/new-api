@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -513,10 +514,22 @@ func (service *AssetService) bindingCredential(
 		return AssetProviderCredential{}, err
 	}
 	if fingerprint != binding.CredentialFingerprint {
-		return AssetProviderCredential{}, &AssetServiceError{
-			Code: AssetErrorChannelUnavailable,
-			Err:  fmt.Errorf("role asset channel credentials have changed"),
+		legacyDigest, decodeErr := hex.DecodeString(binding.CredentialFingerprint)
+		if strings.HasPrefix(binding.CredentialFingerprint, "sha256:") || decodeErr != nil || len(legacyDigest) != 32 {
+			return AssetProviderCredential{}, &AssetServiceError{
+				Code: AssetErrorChannelUnavailable,
+				Err:  fmt.Errorf("role asset channel credentials have changed"),
+			}
 		}
+		now := common.GetTimestamp()
+		if err := service.db.WithContext(ctx).Model(binding).Updates(map[string]any{
+			"credential_fingerprint": fingerprint,
+			"updated_at":             now,
+		}).Error; err != nil {
+			return AssetProviderCredential{}, fmt.Errorf("migrate role asset credential fingerprint: %w", err)
+		}
+		binding.CredentialFingerprint = fingerprint
+		binding.UpdatedAt = now
 	}
 	return credential, nil
 }
@@ -563,6 +576,8 @@ func (service *AssetService) channelCredential(
 			Err:  fmt.Errorf("Secure role asset channel base URL is unavailable"),
 		}
 	}
-	fingerprint := common.GenerateHMAC("secure-role-asset-credential:" + credential.APIKey)
+	fingerprint := "sha256:" + hex.EncodeToString(common.Sha256Raw(
+		[]byte("secure-role-asset-credential:"+credential.APIKey),
+	))
 	return &channel, credential, fingerprint, nil
 }

@@ -222,6 +222,59 @@ func TestAssetServiceCreatesAssetAndBinding(t *testing.T) {
 	assert.NotContains(t, binding.CredentialFingerprint, "secure-key")
 }
 
+func TestAssetServiceMigratesLegacyCredentialFingerprintAfterSecretRotation(t *testing.T) {
+	provider := processingAssetProvider()
+	service, db := prepareAssetService(t, provider)
+	createSecureAssetChannel(t, db, nil)
+	created, err := service.Create(context.Background(), 42, 7, AssetCreateInput{
+		Type: model.AssetTypeImage,
+		URL:  "https://8.8.8.8/character.png",
+	})
+	require.NoError(t, err)
+
+	var binding model.AssetProviderBinding
+	require.NoError(t, db.First(&binding, "asset_id = ?", created.ID).Error)
+	legacyFingerprint := common.GenerateHMACWithKey(
+		[]byte("previous-process-secret"),
+		"secure-role-asset-credential:secure-key",
+	)
+	require.NoError(t, db.Model(&binding).Update("credential_fingerprint", legacyFingerprint).Error)
+	provider.get = func(id string) (*ProviderAsset, error) {
+		return &ProviderAsset{
+			ID:             id,
+			Status:         model.AssetStatusActive,
+			ProviderStatus: "Active",
+		}, nil
+	}
+
+	bindings, err := service.ResolveActiveReferences(context.Background(), 42, []string{created.ID})
+
+	require.NoError(t, err)
+	require.Len(t, bindings, 1)
+	require.NoError(t, db.First(&binding, "asset_id = ?", created.ID).Error)
+	assert.NotEqual(t, legacyFingerprint, binding.CredentialFingerprint)
+	assert.True(t, strings.HasPrefix(binding.CredentialFingerprint, "sha256:"))
+}
+
+func TestAssetServiceRejectsChangedCredentialAfterFingerprintMigration(t *testing.T) {
+	provider := processingAssetProvider()
+	service, db := prepareAssetService(t, provider)
+	channel := createSecureAssetChannel(t, db, nil)
+	created, err := service.Create(context.Background(), 42, 7, AssetCreateInput{
+		Type: model.AssetTypeImage,
+		URL:  "https://8.8.8.8/character.png",
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&channel).Update("key", "replacement-secure-key").Error)
+
+	_, err = service.ResolveActiveReferences(context.Background(), 42, []string{created.ID})
+
+	require.Error(t, err)
+	assert.Equal(t, AssetErrorChannelUnavailable, AssetErrorCode(err))
+	assert.Contains(t, err.Error(), "credentials have changed")
+	assert.Empty(t, provider.getCalls)
+}
+
 func TestAssetServiceIdempotentRetryReturnsOriginalAsset(t *testing.T) {
 	provider := processingAssetProvider()
 	service, db := prepareAssetService(t, provider)

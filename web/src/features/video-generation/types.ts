@@ -4,9 +4,13 @@ export type VideoMedia = {
   audios: string[]
 }
 
+export type VideoImageSource = 'url' | 'asset'
+
 export type VideoGenerationForm = {
   model: string
   prompt: string
+  imageSource: VideoImageSource
+  assetIds: string[]
   media: VideoMedia
   resolution: string
   ratio: string

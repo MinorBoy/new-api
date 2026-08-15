@@ -4,15 +4,45 @@ import type {
   VideoMedia,
 } from '../types'
 
-export const VIDEO_MEDIA_LIMITS = {
+export type VideoMediaLimits = Record<keyof VideoMedia, number>
+
+export const VIDEO_MEDIA_LIMITS: VideoMediaLimits = {
   images: 9,
   videos: 3,
   audios: 3,
-} as const
+}
+
+const SEEDANCE_25_MEDIA_LIMITS: VideoMediaLimits = {
+  images: 30,
+  videos: 10,
+  audios: 10,
+}
 
 type ApiKeyModelLimit = {
   model_limits_enabled: boolean
   model_limits?: string | null
+}
+
+function compactModelName(model: string): string {
+  return model
+    .toLowerCase()
+    .trim()
+    .replace(/[-_.\s]/g, '')
+}
+
+export function getVideoMediaLimits(model: string): VideoMediaLimits {
+  return compactModelName(model).includes('seedance25')
+    ? SEEDANCE_25_MEDIA_LIMITS
+    : VIDEO_MEDIA_LIMITS
+}
+
+export function supportsRoleAssets(model: string): boolean {
+  const compact = compactModelName(model)
+  return (
+    compact.includes('seedance20') &&
+    !compact.includes('seedance20fast') &&
+    !compact.includes('seedance20mini')
+  )
 }
 
 function isHttpUrl(value: string): boolean {
@@ -55,16 +85,20 @@ function appendMedia(
     })
 }
 
-export function validateMediaLimits(media: VideoMedia): string | null {
+export function validateMediaLimits(
+  model: string,
+  media: VideoMedia
+): string | null {
   const entries: Array<[keyof VideoMedia, string]> = [
     ['images', 'Reference images'],
     ['videos', 'Reference videos'],
     ['audios', 'Reference audios'],
   ]
+  const limits = getVideoMediaLimits(model)
 
   for (const [kind, label] of entries) {
-    if (media[kind].length > VIDEO_MEDIA_LIMITS[kind]) {
-      return `${label} cannot exceed ${VIDEO_MEDIA_LIMITS[kind]} items.`
+    if (media[kind].length > limits[kind]) {
+      return `${label} cannot exceed ${limits[kind]} items.`
     }
     if (media[kind].some((url) => url.trim() && !isHttpUrl(url.trim()))) {
       return `${label} must use an HTTP(S) URL.`
@@ -80,8 +114,16 @@ export function buildVideoRequest(
   const content: SeedanceVideoRequest['content'] = []
   const prompt = form.prompt.trim()
   if (prompt) content.push({ type: 'text', text: prompt })
-  appendMedia(content, form.media.images, 'image_url')
-  appendMedia(content, form.media.videos, 'video_url')
+  if (form.imageSource === 'asset') {
+    appendMedia(
+      content,
+      form.assetIds.map((assetId) => `asset://${assetId}`),
+      'image_url'
+    )
+  } else {
+    appendMedia(content, form.media.images, 'image_url')
+    appendMedia(content, form.media.videos, 'video_url')
+  }
   appendMedia(content, form.media.audios, 'audio_url')
 
   const request: SeedanceVideoRequest = {

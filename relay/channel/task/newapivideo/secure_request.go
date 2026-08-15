@@ -427,6 +427,8 @@ func prepareSecureEnterpriseRoleAssets(request arkRequest, mappings map[string]s
 			if item.Type != "image_url" || strings.TrimSpace(item.Role) != "reference_image" || item.ImageURL == nil {
 				continue
 			}
+			imageURL := *item.ImageURL
+			item.ImageURL = &imageURL
 			projectID := strings.TrimPrefix(strings.TrimSpace(item.ImageURL.URL), "asset://")
 			upstreamID, ok := mappings[projectID]
 			if !ok || !strings.HasPrefix(upstreamID, "asset-local-") {

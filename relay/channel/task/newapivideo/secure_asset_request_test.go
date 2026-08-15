@@ -30,6 +30,27 @@ func TestBuildSecureEnterpriseRequestTranslatesRoleAssets(t *testing.T) {
 	assert.JSONEq(t, `{"model":"video-2.0-pro","prompt":"a character runs","duration":8,"aspect_ratio":"16:9","use_person_character":true,"extra_images":["asset://asset-local-one","asset://asset-local-two"]}`, string(body))
 }
 
+func TestSecureEnterpriseValidationPreservesRoleAssetsForRequestBuild(t *testing.T) {
+	ratio := "9:16"
+	duration := 5
+	request := arkRequest{
+		Model:    "doubao-seedance-2-0-260128",
+		Ratio:    &ratio,
+		Duration: &duration,
+		Content: []arkContent{
+			{Type: "text", Text: "a character dances"},
+			{Type: "image_url", Role: "reference_image", ImageURL: &arkMedia{URL: "asset://asset-project"}},
+		},
+	}
+	profile := secureRequestProfile{group: dto.SecureVideoGroupEnterprise}
+	mappings := map[string]string{"asset-project": "asset-local-upstream"}
+
+	require.NoError(t, validateSecureRequestWithAssets(request, profile, "video-2.0-pro", mappings))
+	body, err := buildSecureEnterpriseRequestWithAssets(request, "video-2.0-pro", profile, mappings)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"video-2.0-pro","prompt":"a character dances","duration":5,"aspect_ratio":"9:16","use_person_character":true,"extra_images":["asset://asset-local-upstream"]}`, string(body))
+}
+
 func TestBuildSecureEnterpriseRequestRejectsMixedRoleAndPublicImages(t *testing.T) {
 	duration := 8
 	request := arkRequest{

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +34,30 @@ func videoAssetContext(body string) (*gin.Context, *httptest.ResponseRecorder) {
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	ctx.Set("id", 42)
 	return ctx, recorder
+}
+
+func TestVideoAssetRoutingAcceptsSupportedPublicAssetIDFormats(t *testing.T) {
+	tests := []string{
+		"asset-00000000000000000000000000000001",
+		"asset-20260401123823-6d4x2",
+	}
+
+	for _, assetID := range tests {
+		t.Run(assetID, func(t *testing.T) {
+			fake := &fakeVideoAssetService{refs: []service.AssetReferenceBinding{{
+				AssetID: assetID, UpstreamAssetID: "asset-local-one", ChannelID: 77,
+			}}}
+			ctx, recorder := videoAssetContext(fmt.Sprintf(
+				`{"model":"video-2.0-pro","content":[{"type":"image_url","role":"reference_image","image_url":{"url":"asset://%s"}}]}`,
+				assetID,
+			))
+
+			NewVideoAssetRouting(fake)(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			assert.Equal(t, []string{assetID}, fake.seen)
+		})
+	}
 }
 
 func TestVideoAssetRoutingLocksSingleChannelAndStoresMappings(t *testing.T) {

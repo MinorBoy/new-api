@@ -13,7 +13,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var projectAssetIDPattern = regexp.MustCompile(`^asset-[0-9a-f]{32}$`)
+var projectAssetIDPattern = regexp.MustCompile(
+	`^asset-(?:[0-9a-f]{32}|[0-9]{14}-[a-z0-9]{5})$`,
+)
 
 type VideoAssetRoutingService interface {
 	ResolveActiveReferences(ctx context.Context, userID int, assetIDs []string) ([]service.AssetReferenceBinding, error)

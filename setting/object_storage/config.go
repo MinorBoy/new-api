@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
@@ -114,6 +115,35 @@ func NormalizeConfig(cfg ObjectStorageConfig) ObjectStorageConfig {
 		}
 	}
 	return cfg
+}
+
+// ShouldMigrateLegacyRulesDefaultTransfer identifies the legacy configuration
+// that represented "transfer everything except blacklisted domains" before
+// the explicit default-transfer switch existed.
+func ShouldMigrateLegacyRulesDefaultTransfer(options map[string]string) bool {
+	if _, exists := options["rules_default_transfer"]; exists {
+		return false
+	}
+	if strings.TrimSpace(options["transfer_mode"]) != "" {
+		return false
+	}
+	readDomains := func(key string) ([]string, bool) {
+		raw := strings.TrimSpace(options[key])
+		if raw == "" {
+			return []string{}, true
+		}
+		var domains []string
+		if err := common.UnmarshalJsonStr(raw, &domains); err != nil {
+			return nil, false
+		}
+		return domains, true
+	}
+	whitelist, whitelistValid := readDomains("transfer_domain_whitelist")
+	blacklist, blacklistValid := readDomains("no_transfer_domain_blacklist")
+	if !whitelistValid || !blacklistValid {
+		return false
+	}
+	return len(whitelist) == 0 && len(blacklist) > 0
 }
 
 func ValidateConfig(cfg ObjectStorageConfig) error {

@@ -196,11 +196,25 @@ func InitOptionMap() {
 
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
+	objectStorageOptions := make(map[string]string)
 	for _, option := range options {
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
+		if strings.HasPrefix(option.Key, object_storage.ConfigName+".") {
+			objectStorageOptions[strings.TrimPrefix(option.Key, object_storage.ConfigName+".")] = option.Value
+		}
+	}
+	migrateLegacyObjectStorageTransferDefaults(objectStorageOptions)
+}
+
+func migrateLegacyObjectStorageTransferDefaults(options map[string]string) {
+	if !object_storage.ShouldMigrateLegacyRulesDefaultTransfer(options) {
+		return
+	}
+	if err := UpdateOption(object_storage.ConfigName+".rules_default_transfer", "true"); err != nil {
+		common.SysError("failed to migrate object storage default transfer: " + err.Error())
 	}
 }
 

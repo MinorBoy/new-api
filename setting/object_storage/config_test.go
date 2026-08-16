@@ -127,3 +127,66 @@ func TestNormalizeConfigRejectsUnknownModeByDefaulting(t *testing.T) {
 
 	require.Equal(t, TransferModeDefault, NormalizeConfig(cfg).TransferMode)
 }
+
+func TestShouldMigrateLegacyRulesDefaultTransfer(t *testing.T) {
+	tests := []struct {
+		name    string
+		options map[string]string
+		want    bool
+	}{
+		{
+			name: "legacy blacklist only",
+			options: map[string]string{
+				"transfer_domain_whitelist":    `[]`,
+				"no_transfer_domain_blacklist": `["official.example.com"]`,
+			},
+			want: true,
+		},
+		{
+			name: "legacy blacklist without whitelist option",
+			options: map[string]string{
+				"no_transfer_domain_blacklist": `["official.example.com"]`,
+			},
+			want: true,
+		},
+		{
+			name: "explicit default disabled",
+			options: map[string]string{
+				"rules_default_transfer":       "false",
+				"transfer_domain_whitelist":    `[]`,
+				"no_transfer_domain_blacklist": `["official.example.com"]`,
+			},
+			want: false,
+		},
+		{
+			name: "explicit mode",
+			options: map[string]string{
+				"transfer_mode":                TransferModeRules,
+				"transfer_domain_whitelist":    `[]`,
+				"no_transfer_domain_blacklist": `["official.example.com"]`,
+			},
+			want: false,
+		},
+		{
+			name: "legacy whitelist and blacklist",
+			options: map[string]string{
+				"transfer_domain_whitelist":    `["owned.example.com"]`,
+				"no_transfer_domain_blacklist": `["official.example.com"]`,
+			},
+			want: false,
+		},
+		{
+			name: "invalid list JSON",
+			options: map[string]string{
+				"transfer_domain_whitelist":    `[]`,
+				"no_transfer_domain_blacklist": `not-json`,
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ShouldMigrateLegacyRulesDefaultTransfer(tt.options))
+		})
+	}
+}

@@ -81,6 +81,7 @@ type ObjectStorageFormValues = {
   transferMode: ObjectStorageSettings['transfer_mode']
   whitelistEnabled: boolean
   blacklistEnabled: boolean
+  rulesDefaultTransfer: boolean
   endpoint: string
   publicEndpoint: string
   region: string
@@ -151,6 +152,7 @@ function createObjectStorageSchema(
       transferMode: z.enum(['default', 'all', 'rules']),
       whitelistEnabled: z.boolean(),
       blacklistEnabled: z.boolean(),
+      rulesDefaultTransfer: z.boolean(),
       endpoint: z.string(),
       publicEndpoint: z.string(),
       region: z.string(),
@@ -253,6 +255,7 @@ function settingsToFormValues(
     transferMode: settings.transfer_mode,
     whitelistEnabled: settings.whitelist_enabled,
     blacklistEnabled: settings.blacklist_enabled,
+    rulesDefaultTransfer: settings.rules_default_transfer,
     endpoint: settings.endpoint,
     publicEndpoint: settings.public_endpoint,
     region: settings.region,
@@ -276,6 +279,7 @@ function formValuesToRequest(
     transfer_mode: values.transferMode,
     whitelist_enabled: values.whitelistEnabled,
     blacklist_enabled: values.blacklistEnabled,
+    rules_default_transfer: values.rulesDefaultTransfer,
     endpoint: values.endpoint.trim(),
     public_endpoint: values.publicEndpoint.trim(),
     region: values.region.trim(),
@@ -347,6 +351,7 @@ export function ObjectStorageSection() {
       transferMode: 'default',
       whitelistEnabled: false,
       blacklistEnabled: false,
+      rulesDefaultTransfer: false,
       endpoint: '',
       publicEndpoint: '',
       region: 'us-east-1',
@@ -815,9 +820,33 @@ export function ObjectStorageSection() {
               icon={<ShieldCheck />}
               title={t('Domain rules')}
               description={t(
-                'Domains not selected by an enabled rule are not transferred.'
+                'Blacklist and whitelist matches override the default strategy.'
               )}
             >
+              <FormField
+                control={form.control}
+                name='rulesDefaultTransfer'
+                render={({ field }) => (
+                  <SettingsSwitchItem className='py-2'>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Enable default transfer')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Transfer videos from domains that match neither list.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        aria-label={t('Enable default transfer')}
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={isBusy}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
               <SettingsControlGroup>
                 <FormField
                   control={form.control}

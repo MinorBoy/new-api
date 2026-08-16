@@ -82,6 +82,7 @@ func ProcessVideoResultURL(ctx context.Context, task *model.Task, sourceURL stri
 		cfg.TransferMode,
 		cfg.WhitelistEnabled,
 		cfg.BlacklistEnabled,
+		cfg.RulesDefaultTransfer,
 		cfg.TransferDomainWhitelist,
 		cfg.NoTransferDomainBlacklist,
 	)

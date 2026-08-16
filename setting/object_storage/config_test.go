@@ -24,6 +24,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "us-east-1", cfg.Region)
 	assert.Equal(t, 512, cfg.MaxVideoSizeMB)
 	assert.Equal(t, 86400, cfg.ExpiresSeconds)
+	assert.False(t, cfg.RulesDefaultTransfer)
 }
 
 func TestValidateConfigRequiresCredentialsWhenEnabled(t *testing.T) {
@@ -77,6 +78,7 @@ func TestNormalizeConfigTrimsAndDefaults(t *testing.T) {
 		ExpiresSeconds:            0,
 		TransferDomainWhitelist:   []string{" Own.Example.com. ", ""},
 		NoTransferDomainBlacklist: []string{" CDN.Example.com:443 ", ""},
+		RulesDefaultTransfer:      true,
 	}
 	normalized := NormalizeConfig(cfg)
 	assert.Equal(t, "us-east-1", normalized.Region)
@@ -84,6 +86,7 @@ func TestNormalizeConfigTrimsAndDefaults(t *testing.T) {
 	assert.Equal(t, 86400, normalized.ExpiresSeconds)
 	assert.Equal(t, []string{"own.example.com"}, normalized.TransferDomainWhitelist)
 	assert.Equal(t, []string{"cdn.example.com"}, normalized.NoTransferDomainBlacklist)
+	assert.True(t, normalized.RulesDefaultTransfer)
 }
 
 func TestNormalizeConfigMigratesLegacyDomainLists(t *testing.T) {
@@ -103,6 +106,7 @@ func TestNormalizeConfigDefaultsToNoTransfer(t *testing.T) {
 	require.Equal(t, TransferModeDefault, got.TransferMode)
 	require.False(t, got.WhitelistEnabled)
 	require.False(t, got.BlacklistEnabled)
+	require.False(t, got.RulesDefaultTransfer)
 }
 
 func TestNormalizeConfigPreservesExplicitModeAndRules(t *testing.T) {

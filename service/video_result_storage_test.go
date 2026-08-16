@@ -110,6 +110,7 @@ func enabledVideoStorageValues(host string) map[string]string {
 		"transfer_mode":                object_storage.TransferModeRules,
 		"whitelist_enabled":            "true",
 		"blacklist_enabled":            "false",
+		"rules_default_transfer":       "false",
 		"transfer_domain_whitelist":    fmt.Sprintf(`[%q]`, host),
 		"no_transfer_domain_blacklist": `[]`,
 	}
@@ -203,6 +204,28 @@ func TestProcessVideoResultLeavesBlacklistedAndDefaultURLs(t *testing.T) {
 			assert.Zero(t, store.putCalls)
 		})
 	}
+}
+
+func TestProcessVideoResultTransfersUnmatchedURLWhenRulesDefaultTransferEnabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "video-data")
+	}))
+	t.Cleanup(server.Close)
+	values := enabledVideoStorageValues("unmatched.example")
+	values["whitelist_enabled"] = "false"
+	values["blacklist_enabled"] = "true"
+	values["rules_default_transfer"] = "true"
+	values["transfer_domain_whitelist"] = `[]`
+	values["no_transfer_domain_blacklist"] = `["blocked.example"]`
+	configureVideoResultStorage(t, values)
+	store := &fakeVideoResultStore{}
+	installVideoResultDependencies(t, store, server.Client(), func(string) error { return nil })
+	task := testVideoTask()
+
+	require.NoError(t, ProcessVideoResultURL(context.Background(), task, server.URL+"/result.mp4"))
+	assert.Equal(t, "doubao-seedance-2-0-fast/task_public.mp4", task.PrivateData.ResultObjectKey)
+	assert.Equal(t, 1, store.putCalls)
 }
 
 func TestProcessVideoResultRejectsOversizedVideoWithoutUpstreamFallback(t *testing.T) {

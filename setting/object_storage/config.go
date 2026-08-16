@@ -38,6 +38,7 @@ type ObjectStorageConfig struct {
 	TransferMode              string   `json:"transfer_mode"`
 	WhitelistEnabled          bool     `json:"whitelist_enabled"`
 	BlacklistEnabled          bool     `json:"blacklist_enabled"`
+	RulesDefaultTransfer      bool     `json:"rules_default_transfer"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }

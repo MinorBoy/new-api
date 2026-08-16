@@ -415,6 +415,7 @@ export type ObjectStorageSettings = {
   transfer_mode: 'default' | 'all' | 'rules'
   whitelist_enabled: boolean
   blacklist_enabled: boolean
+  rules_default_transfer: boolean
   transfer_domain_whitelist: string[]
   no_transfer_domain_blacklist: string[]
 }

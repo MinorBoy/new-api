@@ -72,6 +72,7 @@ const savedSettings: ObjectStorageSettings = {
   transfer_mode: 'rules',
   whitelist_enabled: true,
   blacklist_enabled: false,
+  rules_default_transfer: false,
   transfer_domain_whitelist: ['provider.example.com'],
   no_transfer_domain_blacklist: ['official.example.com'],
 }
@@ -248,6 +249,41 @@ test('switching transfer modes preserves domain rule state and text', async () =
   ) as unknown as HTMLTextAreaElement
   assert.equal(whitelistSwitch.getAttribute('aria-checked'), 'true')
   assert.equal(whitelist.value, 'provider.example.com')
+
+  await unmount(mounted)
+})
+
+test('toggles default transfer only in domain rules mode and saves it', async () => {
+  const mounted = await renderSection()
+  const defaultTransfer = getSwitch(mounted, 'Enable default transfer')
+  const allTransfer = getSwitch(mounted, 'Enable all video transfer')
+  const domainRules = getSwitch(mounted, 'Enable domain rules')
+
+  assert.equal(defaultTransfer.getAttribute('aria-checked'), 'false')
+  await act(async () => defaultTransfer.click())
+  assert.equal(defaultTransfer.getAttribute('aria-checked'), 'true')
+
+  await act(async () => allTransfer.click())
+  assert.equal(
+    mounted.container.querySelector('[aria-label="Enable default transfer"]'),
+    null
+  )
+  await act(async () => domainRules.click())
+  const restoredDefaultTransfer = getSwitch(
+    mounted,
+    'Enable default transfer'
+  )
+  assert.equal(restoredDefaultTransfer.getAttribute('aria-checked'), 'true')
+
+  const saveButton = [...mounted.actions.querySelectorAll('button')].find(
+    (button) => button.textContent?.includes('Save object storage settings')
+  )
+  assert.ok(saveButton)
+  await act(async () => {
+    saveButton.click()
+    await Promise.resolve()
+  })
+  assert.equal(savedRequest?.rules_default_transfer, true)
 
   await unmount(mounted)
 })

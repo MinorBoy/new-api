@@ -90,6 +90,7 @@ func TestGetObjectStorageSettingsReturnsTransferControls(t *testing.T) {
 		"transfer_mode":                object_storage.TransferModeRules,
 		"whitelist_enabled":            "true",
 		"blacklist_enabled":            "false",
+		"rules_default_transfer":       "true",
 		"transfer_domain_whitelist":    `["provider.example.com"]`,
 		"no_transfer_domain_blacklist": `[]`,
 	})
@@ -99,6 +100,7 @@ func TestGetObjectStorageSettingsReturnsTransferControls(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), `"transfer_mode":"rules"`)
 	assert.Contains(t, recorder.Body.String(), `"whitelist_enabled":true`)
 	assert.Contains(t, recorder.Body.String(), `"blacklist_enabled":false`)
+	assert.Contains(t, recorder.Body.String(), `"rules_default_transfer":true`)
 }
 
 func TestUpdateObjectStorageSettingsKeepsSecretWhenInputIsBlank(t *testing.T) {
@@ -150,12 +152,13 @@ func TestUpdateObjectStorageSettingsPersistsTransferControls(t *testing.T) {
 		"expires_seconds":   "86400",
 	})
 
-	body := `{"enabled":false,"region":"us-east-1","max_video_size_mb":512,"expires_seconds":86400,"transfer_mode":"all","whitelist_enabled":true,"blacklist_enabled":false,"transfer_domain_whitelist":["provider.example.com"],"no_transfer_domain_blacklist":[]}`
+	body := `{"enabled":false,"region":"us-east-1","max_video_size_mb":512,"expires_seconds":86400,"transfer_mode":"all","whitelist_enabled":true,"blacklist_enabled":false,"rules_default_transfer":true,"transfer_domain_whitelist":["provider.example.com"],"no_transfer_domain_blacklist":[]}`
 	recorder := objectStorageRequest(t, http.MethodPut, "/api/object-storage/settings", body)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, object_storage.TransferModeAll, object_storage.Runtime().TransferMode)
 	assert.True(t, object_storage.Runtime().WhitelistEnabled)
 	assert.False(t, object_storage.Runtime().BlacklistEnabled)
+	assert.True(t, object_storage.Runtime().RulesDefaultTransfer)
 	assert.Contains(t, recorder.Body.String(), `"transfer_mode":"all"`)
 	assert.Contains(t, recorder.Body.String(), `"whitelist_enabled":true`)
 }
@@ -170,6 +173,7 @@ func TestUpdateObjectStorageSettingsPreservesTransferControlsWhenOmitted(t *test
 		"transfer_mode":                object_storage.TransferModeAll,
 		"whitelist_enabled":            "true",
 		"blacklist_enabled":            "true",
+		"rules_default_transfer":       "true",
 		"transfer_domain_whitelist":    `["provider.example.com"]`,
 		"no_transfer_domain_blacklist": `["official.example.com"]`,
 	})
@@ -180,6 +184,7 @@ func TestUpdateObjectStorageSettingsPreservesTransferControlsWhenOmitted(t *test
 	assert.Equal(t, object_storage.TransferModeAll, object_storage.Runtime().TransferMode)
 	assert.True(t, object_storage.Runtime().WhitelistEnabled)
 	assert.True(t, object_storage.Runtime().BlacklistEnabled)
+	assert.True(t, object_storage.Runtime().RulesDefaultTransfer)
 }
 
 func TestUpdateObjectStorageSettingsRejectsInvalidEnabledConfig(t *testing.T) {

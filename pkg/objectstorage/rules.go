@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func ShouldTransfer(rawURL, mode string, whitelistEnabled, blacklistEnabled bool, whitelist, blacklist []string) (bool, error) {
+func ShouldTransfer(rawURL, mode string, whitelistEnabled, blacklistEnabled, defaultTransfer bool, whitelist, blacklist []string) (bool, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return false, fmt.Errorf("video result URL must be an absolute HTTP(S) URL")
@@ -32,7 +32,7 @@ func ShouldTransfer(rawURL, mode string, whitelistEnabled, blacklistEnabled bool
 			}
 		}
 	}
-	return false, nil
+	return defaultTransfer, nil
 }
 
 func normalizeHost(host string) string {

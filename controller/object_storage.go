@@ -28,6 +28,7 @@ type objectStorageSettingsRequest struct {
 	TransferMode              *string  `json:"transfer_mode"`
 	WhitelistEnabled          *bool    `json:"whitelist_enabled"`
 	BlacklistEnabled          *bool    `json:"blacklist_enabled"`
+	RulesDefaultTransfer      *bool    `json:"rules_default_transfer"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }
@@ -46,6 +47,7 @@ type objectStorageSettingsResponse struct {
 	TransferMode              string   `json:"transfer_mode"`
 	WhitelistEnabled          bool     `json:"whitelist_enabled"`
 	BlacklistEnabled          bool     `json:"blacklist_enabled"`
+	RulesDefaultTransfer      bool     `json:"rules_default_transfer"`
 	TransferDomainWhitelist   []string `json:"transfer_domain_whitelist"`
 	NoTransferDomainBlacklist []string `json:"no_transfer_domain_blacklist"`
 }
@@ -152,6 +154,10 @@ func objectStorageConfigFromRequest(request objectStorageSettingsRequest, curren
 	if request.BlacklistEnabled != nil {
 		blacklistEnabled = *request.BlacklistEnabled
 	}
+	rulesDefaultTransfer := current.RulesDefaultTransfer
+	if request.RulesDefaultTransfer != nil {
+		rulesDefaultTransfer = *request.RulesDefaultTransfer
+	}
 	return object_storage.ObjectStorageConfig{
 		Enabled:                   request.Enabled,
 		Endpoint:                  request.Endpoint,
@@ -166,6 +172,7 @@ func objectStorageConfigFromRequest(request objectStorageSettingsRequest, curren
 		TransferMode:              transferMode,
 		WhitelistEnabled:          whitelistEnabled,
 		BlacklistEnabled:          blacklistEnabled,
+		RulesDefaultTransfer:      rulesDefaultTransfer,
 		TransferDomainWhitelist:   request.TransferDomainWhitelist,
 		NoTransferDomainBlacklist: request.NoTransferDomainBlacklist,
 	}
@@ -187,6 +194,7 @@ func objectStorageResponse(cfg object_storage.ObjectStorageConfig) objectStorage
 		TransferMode:              cfg.TransferMode,
 		WhitelistEnabled:          cfg.WhitelistEnabled,
 		BlacklistEnabled:          cfg.BlacklistEnabled,
+		RulesDefaultTransfer:      cfg.RulesDefaultTransfer,
 		TransferDomainWhitelist:   append([]string{}, cfg.TransferDomainWhitelist...),
 		NoTransferDomainBlacklist: append([]string{}, cfg.NoTransferDomainBlacklist...),
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -214,8 +215,13 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if request.Resolution != nil && strings.TrimSpace(*request.Resolution) == "" {
 		return &arkRequestError{Code: "InvalidParameter.resolution", Message: "resolution cannot be empty"}
 	}
-	if request.Duration != nil && (*request.Duration <= 0 || *request.Duration > relaycommon.MaxTaskDurationSeconds) {
-		return &arkRequestError{Code: "InvalidParameter.duration", Message: fmt.Sprintf("duration must be between 1 and %d", relaycommon.MaxTaskDurationSeconds)}
+	contract := modelrouting.SeedanceSeriesContractForModel(request.Model)
+	maximumDuration := contract.MaxDurationSeconds
+	if maximumDuration > relaycommon.MaxTaskDurationSeconds {
+		maximumDuration = relaycommon.MaxTaskDurationSeconds
+	}
+	if request.Duration != nil && (*request.Duration <= 0 || *request.Duration > maximumDuration) {
+		return &arkRequestError{Code: "InvalidParameter.duration", Message: fmt.Sprintf("duration must be between 1 and %d", maximumDuration)}
 	}
 	if request.CallbackURL != nil && !profile.ignoreUnsupportedOptionalARKFields {
 		return &arkRequestError{Code: "InvalidParameter.callback_url", Message: "callback_url is not supported by this channel"}
@@ -296,8 +302,8 @@ func validateARKSemantics(request arkRequest, profile protocolProfile) error {
 	if textCount != 1 || strings.TrimSpace(arkPrompt(request.Content)) == "" {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "exactly one non-empty text item is required"}
 	}
-	if imageCount > 9 || videoCount > 3 || audioCount > 3 {
-		return &arkRequestError{Code: "InvalidParameter.content", Message: "reference media count exceeds Seedance 2.0 limits"}
+	if imageCount > contract.ReferenceLimits.Images || videoCount > contract.ReferenceLimits.Videos || audioCount > contract.ReferenceLimits.Audios || imageCount+videoCount+audioCount > contract.ReferenceTotalMax {
+		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("reference media count exceeds Seedance %s limits", contract.Series)}
 	}
 	if audioCount > 0 && imageCount == 0 && videoCount == 0 && !profile.allowAudioWithoutVisual {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "audio input requires an image or video"}

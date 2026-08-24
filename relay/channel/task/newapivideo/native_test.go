@@ -59,6 +59,24 @@ func TestARKToUpstream(t *testing.T) {
 	}
 }
 
+func TestValidateARKSemanticsUsesSeedance25ReferenceAndDurationLimits(t *testing.T) {
+	content := []arkContent{{Type: "text", Text: "series boundary"}}
+	for i := 0; i < 30; i++ {
+		content = append(content, arkContent{Type: "image_url", Role: "reference_image", ImageURL: &arkMedia{URL: "https://8.8.8.8/image.png"}})
+	}
+	for i := 0; i < 10; i++ {
+		content = append(content, arkContent{Type: "video_url", Role: "reference_video", VideoURL: &arkMedia{URL: "https://8.8.4.4/video.mp4"}})
+		content = append(content, arkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &arkMedia{URL: "https://1.1.1.1/audio.mp3"}})
+	}
+	duration := 30
+	request := arkRequest{Model: "seedance-2.5", Content: content, Duration: &duration}
+	require.NoError(t, validateARKSemantics(request, fourSTokenProtocolProfile()))
+	request.Content = append(request.Content, arkContent{Type: "image_url", Role: "reference_image", ImageURL: &arkMedia{URL: "https://8.8.8.8/overflow.png"}})
+	var requestErr *arkRequestError
+	require.ErrorAs(t, validateARKSemantics(request, fourSTokenProtocolProfile()), &requestErr)
+	assert.Equal(t, "InvalidParameter.content", requestErr.Code)
+}
+
 func TestARKRequestStoresTypedState(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", nil)

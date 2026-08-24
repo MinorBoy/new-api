@@ -43,6 +43,20 @@ func TestArkToDimensioMultimodal(t *testing.T) {
 	assert.Equal(t, []string{"https://x/img1.jpg", "https://x/img2.jpg"}, dim.FilePaths)
 }
 
+func TestArkToDimensioAcceptsSeedance25ReferenceBoundary(t *testing.T) {
+	content := []ArkContent{{Type: "text", Text: "series boundary"}}
+	for i := 0; i < 30; i++ {
+		content = append(content, ArkContent{Type: "image_url", Role: "reference_image", ImageURL: &ArkMedia{URL: "https://8.8.8.8/image.png"}})
+	}
+	for i := 0; i < 10; i++ {
+		content = append(content, ArkContent{Type: "video_url", Role: "reference_video", VideoURL: &ArkMedia{URL: "https://8.8.4.4/video.mp4"}})
+		content = append(content, ArkContent{Type: "audio_url", Role: "reference_audio", AudioURL: &ArkMedia{URL: "https://1.1.1.1/audio.mp3"}})
+	}
+	dim, err := ArkToDimensio(ArkRequest{Model: "seedance-2.5", Content: content}, "jmg-video-seedance-2.5")
+	require.NoError(t, err)
+	assert.Equal(t, "jmg-video-seedance-2.5", dim.Model)
+}
+
 func TestDeriveFunctionModeMatrix(t *testing.T) {
 	cases := []struct {
 		name     string

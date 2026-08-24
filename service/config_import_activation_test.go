@@ -453,7 +453,7 @@ func TestPreviewConfigImportBatchActivationBlockers(t *testing.T) {
 func TestPreviewConfigImportBatchActivationRejectsContractMismatch(t *testing.T) {
 	fixture := createActivationFixture(t)
 	previousValidator := RouteTargetContractValidator
-	RouteTargetContractValidator = func(*model.Channel, modelrouting.Target) error {
+	RouteTargetContractValidator = func(*model.Channel, string, modelrouting.Target) error {
 		return errors.New("provider contract mismatch")
 	}
 	t.Cleanup(func() { RouteTargetContractValidator = previousValidator })

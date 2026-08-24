@@ -410,7 +410,7 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			channel := &model.Channel{Type: tt.channelType}
 			channel.SetOtherSettings(tt.settings)
 
-			err := ValidateVideoRouteTargetContract(channel, tt.target)
+			err := ValidateVideoRouteTargetContract(channel, modelrouting.Seedance20, tt.target)
 			if tt.wantCode == "" {
 				require.NoError(t, err)
 				return
@@ -427,19 +427,28 @@ func TestValidateWxArtVideoRouteContract(t *testing.T) {
 		target := videoContractTargetWithMinimums("seedance2.5", []string{"480p", "720p"}, 4, 30,
 			[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeOmniReference},
 			modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10}, modelrouting.ReferenceLimits{})
-		require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, target))
+		require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, modelrouting.Seedance20, target))
 	})
 	t.Run("seedance 2.5 rejects 1080p", func(t *testing.T) {
 		target := videoContractTarget("seedance2.5", []string{"1080p"}, 4, 30, nil, modelrouting.ReferenceLimits{})
-		err := ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, target)
+		err := ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, modelrouting.Seedance20, target)
 		require.Error(t, err)
 		assert.Equal(t, "route_contract_resolution", err.(*VideoRouteContractError).Code)
 	})
 	t.Run("seedance 2.5 accepts canonical upstream model", func(t *testing.T) {
 		target := videoContractTargetWithMinimums("doubao-seedance-2-5-260628", []string{"480p", "720p"}, 4, 30,
 			[]modelrouting.InputMode{modelrouting.InputModeText}, modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10}, modelrouting.ReferenceLimits{})
-		require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, target))
+		require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeWxArt}, modelrouting.Seedance25, target))
 	})
+}
+
+func TestValidateVideoRouteTargetContractUsesCanonicalSeedance25Limits(t *testing.T) {
+	target := videoContractTarget("jmg-video-seedance-2.5", []string{"720p"}, 4, 30, nil, modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10})
+	require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeDimensio}, modelrouting.Seedance25, target))
+	target.Constraints.ReferenceLimits.Images = 31
+	var contractErr *VideoRouteContractError
+	require.ErrorAs(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeDimensio}, modelrouting.Seedance25, target), &contractErr)
+	assert.Equal(t, "route_contract_references", contractErr.Code)
 }
 
 func TestValidateFFLinkVideoRouteTargetContract(t *testing.T) {
@@ -472,7 +481,7 @@ func TestValidateFFLinkVideoRouteTargetContract(t *testing.T) {
 			target := videoContractTarget(tt.model, tt.res, tt.min, tt.max, nil, tt.limits)
 			target.Constraints.ReferenceTotalMax = tt.total
 			target.Constraints.ReferenceVideoTotalDurationSeconds = tt.videoDur
-			err := ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeFFLink}, target)
+			err := ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeFFLink}, modelrouting.Seedance20, target)
 			if tt.wantCode == "" {
 				require.NoError(t, err)
 				return

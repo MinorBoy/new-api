@@ -48,7 +48,12 @@ func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 	if !containsString(allowedResolutions, policy.Defaults.OutputResolution) {
 		return newValidationError(ValidationInvalidOutputResolution, "defaults.output_resolution", "default output resolution is invalid")
 	}
-	if policy.Defaults.DurationSeconds < 1 || policy.Defaults.DurationSeconds > maxDuration {
+	modelContract := SeedanceSeriesContractForModel(policy.CanonicalModel)
+	policyMaxDuration := maxDuration
+	if policyMaxDuration > modelContract.MaxDurationSeconds {
+		policyMaxDuration = modelContract.MaxDurationSeconds
+	}
+	if policy.Defaults.DurationSeconds < 1 || policy.Defaults.DurationSeconds > policyMaxDuration {
 		return newValidationError(ValidationInvalidDuration, "defaults.duration_seconds", "default duration is invalid")
 	}
 	if !containsString(allowedRatios, policy.Defaults.AspectRatio) {
@@ -100,15 +105,17 @@ func validateConstraints(constraints Constraints, maxDuration int, canonicalMode
 	if len(constraints.OutputResolutions) == 0 {
 		return newValidationError(ValidationInvalidOutputResolution, "targets.constraints.output_resolutions", "at least one output resolution is required")
 	}
+	contract := SeedanceSeriesContractForModel(canonicalModel)
 	allowedModelResolutions := allowedResolutions
 	modelMaxDuration := maxDuration
-	maxImages, maxVideos, maxAudios := 9, 3, 3
-	if canonicalModel == Seedance25 {
+	if modelMaxDuration > contract.MaxDurationSeconds {
+		modelMaxDuration = contract.MaxDurationSeconds
+	}
+	maxImages := contract.ReferenceLimits.Images
+	maxVideos := contract.ReferenceLimits.Videos
+	maxAudios := contract.ReferenceLimits.Audios
+	if contract.Series == "2.5" {
 		allowedModelResolutions = []string{"480p", "720p"}
-		if modelMaxDuration > 30 {
-			modelMaxDuration = 30
-		}
-		maxImages, maxVideos, maxAudios = 30, 10, 10
 	}
 	for _, resolution := range constraints.OutputResolutions {
 		if !containsString(allowedModelResolutions, resolution) {
@@ -139,7 +146,7 @@ func validateConstraints(constraints Constraints, maxDuration int, canonicalMode
 		minimums.Audios < 0 || minimums.Audios > limits.Audios {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_minimums", "reference minimums are invalid")
 	}
-	if constraints.ReferenceTotalMax != nil && (*constraints.ReferenceTotalMax < 0 || *constraints.ReferenceTotalMax > limits.Images+limits.Videos+limits.Audios) {
+	if constraints.ReferenceTotalMax != nil && (*constraints.ReferenceTotalMax < 0 || *constraints.ReferenceTotalMax > contract.ReferenceTotalMax || *constraints.ReferenceTotalMax > limits.Images+limits.Videos+limits.Audios) {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_total_max", "reference total maximum is invalid")
 	}
 	if constraints.ReferenceVideoAudioTotalMax != nil {

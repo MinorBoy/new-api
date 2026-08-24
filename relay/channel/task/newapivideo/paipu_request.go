@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
@@ -19,12 +20,6 @@ type paipuRequest struct {
 	Audios      []string `json:"audios,omitempty"`
 }
 
-const (
-	paipuMaxImages = 9
-	paipuMaxVideos = 3
-	paipuMaxAudios = 3
-)
-
 func validatePaipuRequest(request arkRequest, upstreamModel string) error {
 	if err := validateARKSemantics(request, paipuProtocolProfile()); err != nil {
 		return err
@@ -37,6 +32,12 @@ func validatePaipuRequest(request arkRequest, upstreamModel string) error {
 	}
 	if strings.TrimSpace(upstreamModel) == "" {
 		return nil
+	}
+	contract := modelrouting.SeedanceSeriesContractForModel(request.Model)
+	maxImages, maxVideos, maxAudios, maxTotal := contract.ReferenceLimits.Images, contract.ReferenceLimits.Videos, contract.ReferenceLimits.Audios, contract.ReferenceTotalMax
+	upstream := strings.ToLower(strings.TrimSpace(upstreamModel))
+	if contract.Series == "2.5" && strings.Contains(upstream, "lec-ac-seedance-2-5") {
+		maxVideos, maxTotal = 0, 40
 	}
 
 	imageCount, videoCount, audioCount := 0, 0, 0
@@ -71,14 +72,14 @@ func validatePaipuRequest(request arkRequest, upstreamModel string) error {
 			audioCount++
 		}
 	}
-	if imageCount > paipuMaxImages {
-		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("Paipu images exceed the %d item limit", paipuMaxImages)}
+	if imageCount > maxImages {
+		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("Paipu images exceed the %d item limit", maxImages)}
 	}
-	if videoCount > paipuMaxVideos {
-		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("Paipu videos exceed the %d item limit", paipuMaxVideos)}
+	if videoCount > maxVideos {
+		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("Paipu videos exceed the %d item limit", maxVideos)}
 	}
-	if audioCount > paipuMaxAudios {
-		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("Paipu audios exceed the %d item limit", paipuMaxAudios)}
+	if audioCount > maxAudios || imageCount+videoCount+audioCount > maxTotal {
+		return &arkRequestError{Code: "InvalidParameter.content", Message: fmt.Sprintf("Paipu audios or total references exceed Seedance %s limits", contract.Series)}
 	}
 	return nil
 }

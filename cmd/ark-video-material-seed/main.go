@@ -1358,6 +1358,8 @@ func runtimeModel(modelName string) string {
 		return modelrouting.Seedance20Fast
 	case "seedance-2.0-mini":
 		return modelrouting.Seedance20Mini
+	case "seedance-2.5":
+		return modelrouting.Seedance25
 	default:
 		return ""
 	}

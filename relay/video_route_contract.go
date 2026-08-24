@@ -23,7 +23,7 @@ func (e *VideoRouteContractError) Error() string {
 	return e.Message
 }
 
-func ValidateVideoRouteTargetContract(channel *model.Channel, target modelrouting.Target) error {
+func ValidateVideoRouteTargetContract(channel *model.Channel, canonicalModel string, target modelrouting.Target) error {
 	if channel == nil {
 		return newVideoRouteContractError("route_contract_channel", "channel is required")
 	}
@@ -43,17 +43,17 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, target modelroutin
 	case constant.ChannelTypeOmegaAI:
 		return validateOmegaAIVideoRoute(target)
 	case constant.ChannelTypePaipu:
-		return validatePaipuVideoRoute(target)
+		return validatePaipuVideoRoute(canonicalModel, target)
 	case constant.ChannelTypeZ5API:
 		return validateZ5APIVideoRoute(target)
 	case constant.ChannelTypeZZone:
-		return validateZZoneVideoRoute(target)
+		return validateZZoneVideoRoute(canonicalModel, target)
 	case constant.ChannelTypeMikoto:
 		return validateMikotoVideoRoute(target)
 	case constant.ChannelTypeClmmMall:
 		return validateClmmVideoRoute(target)
 	case constant.ChannelTypeDimensio:
-		return validateDimensioVideoRoute(target)
+		return validateDimensioVideoRoute(canonicalModel, target)
 	case constant.ChannelTypeSecure:
 		return validateSecureVideoRoute(channel.GetOtherSettings().SecureVideoGroup, target)
 	case constant.ChannelTypeFFLink:
@@ -212,16 +212,21 @@ func cangyuanReferenceLimits(upstreamModel string) (images, videos, audios, tota
 	return images, videos, audios, total, videoAudio
 }
 
-func validatePaipuVideoRoute(target modelrouting.Target) error {
+func validatePaipuVideoRoute(canonicalModel string, target modelrouting.Target) error {
 	if strings.TrimSpace(target.UpstreamModel) == "" {
 		return newVideoRouteContractError("route_contract_model", "Paipu mapped upstream model is required")
 	}
-	if !routeDurationWithin(target.Constraints.Durations, 1, relaycommon.MaxTaskDurationSeconds) {
+	contract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+	maxImages, maxVideos, maxAudios, maxTotal := contract.ReferenceLimits.Images, contract.ReferenceLimits.Videos, contract.ReferenceLimits.Audios, contract.ReferenceTotalMax
+	if contract.Series == "2.5" && strings.Contains(strings.ToLower(target.UpstreamModel), "lec-ac-seedance-2-5") {
+		maxVideos, maxTotal = 0, 40
+	}
+	if !routeDurationWithin(target.Constraints.Durations, 1, contract.MaxDurationSeconds) {
 		return newVideoRouteContractError("route_contract_duration", "Paipu route duration exceeds the task protocol limit")
 	}
 	limits := target.Constraints.ReferenceLimits
 	minimums := target.Constraints.ReferenceMinimums
-	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 ||
+	if limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios || routeReferenceTotalMax(target.Constraints) > maxTotal ||
 		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios {
 		return newVideoRouteContractError("route_contract_references", "Paipu route reference limits exceed the protocol")
 	}
@@ -244,11 +249,17 @@ func validateZ5APIVideoRoute(target modelrouting.Target) error {
 	return nil
 }
 
-func validateZZoneVideoRoute(target modelrouting.Target) error {
+func validateZZoneVideoRoute(canonicalModel string, target modelrouting.Target) error {
 	if strings.TrimSpace(target.UpstreamModel) == "" {
 		return newVideoRouteContractError("route_contract_model", "ZZone mapped upstream model is required")
 	}
-	if !routeDurationWithin(target.Constraints.Durations, 1, relaycommon.MaxTaskDurationSeconds) {
+	contract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+	maxImages, maxVideos, maxAudios, maxTotal := contract.ReferenceLimits.Images, contract.ReferenceLimits.Videos, contract.ReferenceLimits.Audios, contract.ReferenceTotalMax
+	if contract.Series == "2.5" && strings.HasPrefix(strings.ToLower(target.UpstreamModel), "dvc-") {
+		maxVideos, maxAudios, maxTotal = 0, 0, 30
+	}
+	legacy := !strings.Contains(strings.ToLower(target.UpstreamModel), "2.5") && !strings.Contains(strings.ToLower(canonicalModel), "2.5") && !strings.Contains(strings.ToLower(target.UpstreamModel), "drama-video-v2-fast")
+	if !routeDurationWithin(target.Constraints.Durations, 1, contract.MaxDurationSeconds) {
 		return newVideoRouteContractError("route_contract_duration", "ZZone route duration exceeds the task protocol limit")
 	}
 	for _, ratio := range target.Constraints.AspectRatios {
@@ -260,7 +271,7 @@ func validateZZoneVideoRoute(target modelrouting.Target) error {
 	}
 	limits := target.Constraints.ReferenceLimits
 	minimums := target.Constraints.ReferenceMinimums
-	if limits.Images > 4 || limits.Videos > 3 || limits.Audios > 1 ||
+	if legacy && (limits.Images > 4 || limits.Videos > 3 || limits.Audios > 1) || !legacy && (limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios || routeReferenceTotalMax(target.Constraints) > maxTotal) ||
 		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios {
 		return newVideoRouteContractError("route_contract_references", "ZZone route reference limits exceed the documented protocol")
 	}
@@ -301,18 +312,26 @@ func validateClmmVideoRoute(target modelrouting.Target) error {
 	return nil
 }
 
-func validateDimensioVideoRoute(target modelrouting.Target) error {
+func validateDimensioVideoRoute(canonicalModel string, target modelrouting.Target) error {
 	modelName := strings.TrimSpace(target.UpstreamModel)
 	if modelName == "" {
 		return newVideoRouteContractError("route_contract_model", "Dimensio route requires an upstream model")
 	}
 	limits := target.Constraints.ReferenceLimits
-	totalLimit := 15
-	if strings.HasPrefix(modelName, "jmg-") {
+	contract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+	maxImages, maxVideos, maxAudios, maxTotal := contract.ReferenceLimits.Images, contract.ReferenceLimits.Videos, contract.ReferenceLimits.Audios, contract.ReferenceTotalMax
+	if contract.Series == "2.5" && strings.HasPrefix(strings.ToLower(modelName), "dvc-") {
+		maxVideos, maxAudios, maxTotal = 0, 0, 30
+	}
+	totalLimit := contract.ReferenceTotalMax
+	if contract.Series == "2.0" && strings.HasPrefix(modelName, "jmg-") {
 		totalLimit = 12
 	}
-	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 || routeReferenceTotalMax(target.Constraints) > totalLimit {
+	if limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios || routeReferenceTotalMax(target.Constraints) > maxTotal || routeReferenceTotalMax(target.Constraints) > totalLimit {
 		return newVideoRouteContractError("route_contract_references", "Dimensio route reference limits exceed the verified protocol")
+	}
+	if contract.Series == "2.5" && !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
+		return newVideoRouteContractError("route_contract_resolution", "Dimensio Seedance 2.5 routes support only 480p and 720p")
 	}
 	if strings.HasPrefix(modelName, "jmg-") {
 		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p") ||
@@ -326,8 +345,8 @@ func validateDimensioVideoRoute(target modelrouting.Target) error {
 	} else if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p", "1080p", "4k") {
 		return newVideoRouteContractError("route_contract_resolution", "Dimensio PXV standard route resolution is unsupported")
 	}
-	if !routeDurationWithin(target.Constraints.Durations, 4, 15) {
-		return newVideoRouteContractError("route_contract_duration", "Dimensio routes require durations from 4 to 15 seconds")
+	if !routeDurationWithin(target.Constraints.Durations, 4, contract.MaxDurationSeconds) {
+		return newVideoRouteContractError("route_contract_duration", fmt.Sprintf("Dimensio routes require durations from 4 to %d seconds", contract.MaxDurationSeconds))
 	}
 	return nil
 }

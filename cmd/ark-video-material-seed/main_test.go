@@ -169,7 +169,7 @@ func TestLoadTargetsMatchesRouteContractBlocks(t *testing.T) {
 				channel.SetOtherSettings(relaydto.ChannelOtherSettings{SecureVideoGroup: relaydto.SecureVideoGroupEnterprise})
 			}
 		}
-		err := relay.ValidateVideoRouteTargetContract(channel, modelrouting.Target{
+		err := relay.ValidateVideoRouteTargetContract(channel, target.RuntimeModel, modelrouting.Target{
 			UpstreamModel: target.UpstreamModel,
 			Constraints: modelrouting.Constraints{
 				OutputResolutions:                  []string{target.Resolution},

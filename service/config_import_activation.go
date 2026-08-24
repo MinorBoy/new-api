@@ -722,7 +722,7 @@ func buildConfigImportActivationPlan(tx *gorm.DB, batchID int64, lock bool) (*co
 				return nil, targetErr
 			}
 			if channel, channelFound := channelsByID[actual.ChannelID]; channelFound && RouteTargetContractValidator != nil {
-				if contractErr := RouteTargetContractValidator(&channel, targetSnapshot); contractErr != nil {
+				if contractErr := RouteTargetContractValidator(&channel, policy.Model, targetSnapshot); contractErr != nil {
 					plan.Blockers = append(plan.Blockers, dto.ConfigImportActivationBlocker{
 						Code: "ACTIVATION_CHANNEL_CONTRACT", Message: contractErr.Error(), LineRef: metadata.LineRef,
 						RouteTargetRef: actual.Name, ChannelID: activationIntPointer(actual.ChannelID),

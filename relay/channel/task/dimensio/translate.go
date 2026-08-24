@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 )
 
 // ArkRequest is the ARK v3 video task request accepted by the native task API.
@@ -70,16 +71,19 @@ type DimensioRequest struct {
 // ArkToDimensio translates an ARK request into Dimensio's top-level fields.
 // Model mapping is intentionally left to the adaptor, after channel model
 // mapping has selected the provider model.
-func ArkToDimensio(ark ArkRequest) (DimensioRequest, error) {
+func ArkToDimensio(ark ArkRequest, upstreamModels ...string) (DimensioRequest, error) {
 	if err := validateUnsupportedFields(ark); err != nil {
 		return DimensioRequest{}, err
 	}
-	if err := validateArkContentRoles(ark.Content, ark.Model); err != nil {
+	modelName := ark.Model
+	if len(upstreamModels) > 0 && strings.TrimSpace(upstreamModels[0]) != "" {
+		modelName = strings.TrimSpace(upstreamModels[0])
+	}
+	if err := validateArkContentRoles(ark.Content, ark.Model, modelName); err != nil {
 		return DimensioRequest{}, err
 	}
-
 	dim := DimensioRequest{
-		Model:            ark.Model,
+		Model:            modelName,
 		Ratio:            ark.Ratio,
 		Resolution:       ark.Resolution,
 		Duration:         ark.Duration,
@@ -147,7 +151,7 @@ func deriveFunctionMode(content []ArkContent) string {
 	return "first_last_frames"
 }
 
-func validateArkContentRoles(content []ArkContent, modelName string) error {
+func validateArkContentRoles(content []ArkContent, canonicalModel, upstreamModel string) error {
 	images, first, last, references, videos, audios := 0, 0, 0, 0, 0, 0
 	for _, item := range content {
 		switch item.Type {
@@ -179,18 +183,24 @@ func validateArkContentRoles(content []ArkContent, modelName string) error {
 		}
 	}
 
-	if images > 9 {
-		return fmt.Errorf("too many images: dimensio allows at most 9 (image_file_1..9)")
+	contract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+	if images > contract.ReferenceLimits.Images {
+		return fmt.Errorf("too many images: dimensio allows at most %d", contract.ReferenceLimits.Images)
 	}
-	if videos > 3 {
-		return fmt.Errorf("too many videos: dimensio allows at most 3 (video_file_1..3)")
+	if videos > contract.ReferenceLimits.Videos {
+		return fmt.Errorf("too many videos: dimensio allows at most %d", contract.ReferenceLimits.Videos)
 	}
-	if audios > 3 {
-		return fmt.Errorf("too many audios: dimensio allows at most 3 (audio_file_1..3)")
+	if audios > contract.ReferenceLimits.Audios {
+		return fmt.Errorf("too many audios: dimensio allows at most %d", contract.ReferenceLimits.Audios)
 	}
-	totalLimit := 15
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "jmg-") {
+	totalLimit := contract.ReferenceTotalMax
+	if contract.Series == "2.0" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(upstreamModel)), "jmg-") {
 		totalLimit = 12
+	}
+	if contract.Series == "2.5" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(upstreamModel)), "dvc-") {
+		contract.ReferenceLimits.Videos = 0
+		contract.ReferenceLimits.Audios = 0
+		totalLimit = 30
 	}
 	if images+videos+audios > totalLimit {
 		return fmt.Errorf("too many media items: dimensio allows at most %d total", totalLimit)

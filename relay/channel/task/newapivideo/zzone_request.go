@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 )
 
 var zzoneRatios = map[string]struct{}{
@@ -59,6 +60,8 @@ func validateZZoneRequest(request arkRequest) error {
 	}
 
 	images, videos, audios := 0, 0, 0
+	contract := modelrouting.SeedanceSeriesContractForModel(request.Model)
+	legacy := strings.TrimSpace(strings.ToLower(request.Model)) != "seedance-2.0" && strings.TrimSpace(strings.ToLower(request.Model)) != "seedance-2.5" && !strings.Contains(strings.ToLower(request.Model), "doubao-seedance")
 	for _, item := range request.Content {
 		switch item.Type {
 		case "image_url":
@@ -69,7 +72,10 @@ func validateZZoneRequest(request arkRequest) error {
 			audios++
 		}
 	}
-	if images > 4 || videos > 3 || audios > 1 {
+	if legacy && (images > 4 || videos > 3 || audios > 1) {
+		return &arkRequestError{Code: "InvalidParameter.content", Message: "reference media count exceeds ZZone limits"}
+	}
+	if !legacy && (images > contract.ReferenceLimits.Images || videos > contract.ReferenceLimits.Videos || audios > contract.ReferenceLimits.Audios || images+videos+audios > contract.ReferenceTotalMax) {
 		return &arkRequestError{Code: "InvalidParameter.content", Message: "reference media count exceeds ZZone limits"}
 	}
 	return nil

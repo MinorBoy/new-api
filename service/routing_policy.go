@@ -168,7 +168,7 @@ func SaveRoutingPolicy(id int, request RoutingPolicyWriteRequest) (*RoutingPolic
 				}
 				channelsByID[target.ChannelID] = channel
 			}
-			if err := RouteTargetContractValidator(channel, contractTarget); err != nil {
+			if err := RouteTargetContractValidator(channel, request.Model, contractTarget); err != nil {
 				return nil, newRoutingPolicyServiceError("incompatible_channel_contract", fmt.Sprintf("targets.%d.constraints", index), err.Error())
 			}
 		}

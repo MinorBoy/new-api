@@ -231,7 +231,8 @@ func TestSaveRoutingPolicyRejectsIncompatibleChannelContract(t *testing.T) {
 	prepareRoutingPolicyServiceTest(t)
 	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)
 	previousValidator := service.RouteTargetContractValidator
-	service.RouteTargetContractValidator = func(channel *model.Channel, target modelrouting.Target) error {
+	service.RouteTargetContractValidator = func(channel *model.Channel, canonicalModel string, target modelrouting.Target) error {
+		assert.Equal(t, modelrouting.Seedance20, canonicalModel)
 		assert.Equal(t, 11, channel.Id)
 		assert.Equal(t, "provider-standard", target.UpstreamModel)
 		return errors.New("provider route contract rejected the target")

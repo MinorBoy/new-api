@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -81,8 +82,9 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if len(req.Content) == 0 {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("field content is required"), "missing_content", http.StatusBadRequest)
 	}
-	if req.Duration != nil && (*req.Duration < 4 || *req.Duration > 15 || *req.Duration > relaycommon.MaxTaskDurationSeconds) {
-		return service.TaskErrorWrapperLocal(fmt.Errorf("duration must be between 4 and 15 seconds"), "invalid_duration", http.StatusBadRequest)
+	contract := modelrouting.SeedanceSeriesContractForModel(req.Model)
+	if req.Duration != nil && (*req.Duration < 4 || *req.Duration > contract.MaxDurationSeconds || *req.Duration > relaycommon.MaxTaskDurationSeconds) {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("duration must be between 4 and %d seconds", contract.MaxDurationSeconds), "invalid_duration", http.StatusBadRequest)
 	}
 	if req.Duration == nil {
 		req.Duration = common.GetPointer(5)
@@ -105,11 +107,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if !validRatios[req.Ratio] {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("ratio %s is not supported by dimensio", req.Ratio), "invalid_ratio", http.StatusBadRequest)
 	}
-	validationRequest := req
-	if info != nil && info.ChannelMeta != nil && info.UpstreamModelName != "" {
-		validationRequest.Model = info.UpstreamModelName
-	}
-	if _, err := ArkToDimensio(validationRequest); err != nil {
+	if _, err := ArkToDimensio(req); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
 	prompt := ""
@@ -138,8 +136,9 @@ func (a *TaskAdaptor) EstimateDurationSeconds(c *gin.Context, _ *relaycommon.Rel
 		return 0, service.TaskErrorWrapperLocal(fmt.Errorf("dimensio request is missing"), "invalid_duration", http.StatusBadRequest)
 	}
 	req, ok := v.(ArkRequest)
-	if !ok || req.Duration == nil || *req.Duration < 4 || *req.Duration > 15 || *req.Duration > relaycommon.MaxTaskDurationSeconds {
-		return 0, service.TaskErrorWrapperLocal(fmt.Errorf("duration must be between 4 and 15 seconds"), "invalid_duration", http.StatusBadRequest)
+	contract := modelrouting.SeedanceSeriesContractForModel(req.Model)
+	if !ok || req.Duration == nil || *req.Duration < 4 || *req.Duration > contract.MaxDurationSeconds || *req.Duration > relaycommon.MaxTaskDurationSeconds {
+		return 0, service.TaskErrorWrapperLocal(fmt.Errorf("duration must be between 4 and %d seconds", contract.MaxDurationSeconds), "invalid_duration", http.StatusBadRequest)
 	}
 	return *req.Duration, nil
 }
@@ -194,10 +193,11 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if !ok {
 		return nil, fmt.Errorf("invalid ark request type")
 	}
-	if info != nil && info.ChannelMeta != nil && info.UpstreamModelName != "" {
-		req.Model = info.UpstreamModelName
+	upstreamModel := ""
+	if info != nil && info.ChannelMeta != nil {
+		upstreamModel = info.UpstreamModelName
 	}
-	dim, err := ArkToDimensio(req)
+	dim, err := ArkToDimensio(req, upstreamModel)
 	if err != nil {
 		return nil, errors.Wrap(err, "translate ARK to dimensio failed")
 	}

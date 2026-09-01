@@ -82,3 +82,5 @@ _codex_sheet_work/
 **/node_modules/
 .codex-tmp/
 .tmp/
+**/__test__/
+**/__tests__/

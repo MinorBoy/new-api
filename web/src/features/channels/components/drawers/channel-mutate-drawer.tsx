@@ -24,6 +24,7 @@ import {
   Boxes,
   CheckCircle2,
   Circle,
+  CircleDollarSign,
   ClipboardPaste,
   HelpCircle,
   KeyRound,
@@ -41,6 +42,7 @@ import {
   Route,
   Settings,
   SlidersHorizontal,
+  TestTube2,
   Wand2,
 } from 'lucide-react'
 import {
@@ -111,6 +113,7 @@ import {
   SecureVerificationDialog,
   useSecureVerification,
 } from '@/features/auth/secure-verification'
+import { ChannelCostDrawer } from '@/features/cost-accounting/components/channel-cost-drawer'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
 import {
@@ -135,6 +138,7 @@ import {
   getGroups,
   getPrefillGroups,
   refreshCodexCredential,
+  testChannelImageProfile,
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
@@ -168,6 +172,7 @@ import {
   getStatusOnChannelTypeChange,
   getChannelTypeHints,
   getChannelModelOptions,
+  OPENAI_IMAGES_CHANNEL_TYPES,
   hasModelConfigChanged,
   findMissingModelsInMapping,
   validateModelMappingJson,
@@ -184,7 +189,11 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
-import type { Channel } from '../../types'
+import type {
+  Channel,
+  ImageCompatibilityEndpoint,
+  ImageCompatibilityTestResult,
+} from '../../types'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
 import {
@@ -312,6 +321,7 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
+  'image_profile',
 ] satisfies (keyof ChannelFormValues)[]
 
 function readAdvancedSettingsPreference(): boolean {
@@ -356,7 +366,8 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim()
+    values.upstream_model_update_ignored_models?.trim() ||
+    hasConfiguredOverrideValue(values.image_profile)
   )
 }
 
@@ -627,6 +638,11 @@ export function ChannelMutateDrawer({
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
   )
+  const canOperate = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.CHANNEL,
+    ADMIN_PERMISSION_ACTIONS.OPERATE
+  )
   const canRevealChannelKey = currentUser?.role === ROLE.SUPER_ADMIN
   const [fetchModelsDialogOpen, setFetchModelsDialogOpen] = useState(false)
   const [channelKey, setChannelKey] = useState<string | null>(null)
@@ -662,6 +678,14 @@ export function ChannelMutateDrawer({
     useState(false)
   const [clipboardConnectionInfo, setClipboardConnectionInfo] =
     useState<ChannelConnectionInfo | null>(null)
+  const [imageCompatibilityModel, setImageCompatibilityModel] = useState('')
+  const [imageCompatibilityEndpoint, setImageCompatibilityEndpoint] =
+    useState<ImageCompatibilityEndpoint>('generations')
+  const [imageCompatibilityTesting, setImageCompatibilityTesting] =
+    useState(false)
+  const [imageCompatibilityResult, setImageCompatibilityResult] =
+    useState<ImageCompatibilityTestResult | null>(null)
+  const [imageCostDrawerOpen, setImageCostDrawerOpen] = useState(false)
 
   const isEditing = Boolean(currentRow)
   const channelId = currentRow?.id ?? null
@@ -673,6 +697,7 @@ export function ChannelMutateDrawer({
     queryFn: () => getChannel(channelId || 0),
     enabled: isEditing && Boolean(channelId),
   })
+  const costDrawerChannel = channelData?.data ?? currentRow ?? null
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
@@ -787,6 +812,12 @@ export function ChannelMutateDrawer({
   )
   const currentUpstreamModelUpdateIgnoredModels = form.watch(
     'upstream_model_update_ignored_models'
+  )
+  const currentImageProfile = form.watch('image_profile')
+  const canReadCostAccounting = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.COST_ACCOUNTING,
+    ADMIN_PERMISSION_ACTIONS.READ
   )
   const shouldPreviewUnsavedModels =
     !isEditing ||
@@ -940,6 +971,70 @@ export function ChannelMutateDrawer({
     [currentModels]
   )
 
+  useEffect(() => {
+    setImageCompatibilityModel((current) =>
+      current && currentModelsArray.includes(current)
+        ? current
+        : currentModelsArray[0] || ''
+    )
+  }, [currentModelsArray])
+
+  useEffect(() => {
+    setImageCompatibilityResult(null)
+  }, [currentImageProfile, currentModels, currentType])
+
+  const imageCompatibilityNeedsSave = Boolean(
+    form.formState.dirtyFields.image_profile ||
+    form.formState.dirtyFields.models ||
+    form.formState.dirtyFields.model_mapping ||
+    form.formState.dirtyFields.base_url ||
+    form.formState.dirtyFields.key ||
+    form.formState.dirtyFields.settings ||
+    form.formState.dirtyFields.header_override ||
+    form.formState.dirtyFields.param_override
+  )
+
+  const handleImageCompatibilityTest = useCallback(async () => {
+    if (!channelId || !imageCompatibilityModel) {
+      toast.error(t('Select an image model before testing'))
+      return
+    }
+    if (imageCompatibilityNeedsSave) {
+      toast.info(t('Save the channel before running the compatibility test'))
+      return
+    }
+    setImageCompatibilityTesting(true)
+    setImageCompatibilityResult(null)
+    try {
+      const response = await testChannelImageProfile(channelId, {
+        model: imageCompatibilityModel,
+        endpoint: imageCompatibilityEndpoint,
+      })
+      if (response.data) {
+        setImageCompatibilityResult(response.data)
+      }
+      if (response.success) {
+        toast.success(t('Image compatibility test passed'))
+      } else {
+        toast.error(response.message || t('Image compatibility test failed'))
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Image compatibility test failed')
+      )
+    } finally {
+      setImageCompatibilityTesting(false)
+    }
+  }, [
+    channelId,
+    imageCompatibilityEndpoint,
+    imageCompatibilityModel,
+    imageCompatibilityNeedsSave,
+    t,
+  ])
+
   const currentTypeLabel = useMemo(
     () =>
       CHANNEL_TYPE_OPTIONS.find((option) => option.value === currentType)
@@ -1065,13 +1160,17 @@ export function ChannelMutateDrawer({
     currentUpstreamModelUpdateAutoSyncEnabled ||
     currentUpstreamModelUpdateIgnoredModels?.trim()
   )
+  const imageProfileConfigured = Boolean(
+    currentImageProfile?.trim() && currentImageProfile.trim() !== '{}'
+  )
   const advancedConfigured = Boolean(
     routingStrategyConfigured ||
     internalNotesConfigured ||
     overrideRulesConfigured ||
     extraSettingsConfigured ||
     fieldPassthroughConfigured ||
-    upstreamModelDetectionConfigured
+    upstreamModelDetectionConfigured ||
+    imageProfileConfigured
   )
   const advancedNavChildren: ChannelEditorNavChildItem[] = [
     {
@@ -1107,6 +1206,13 @@ export function ChannelMutateDrawer({
       id: ADVANCED_SETTINGS_SECTION_IDS.upstreamModelDetection,
       title: t('Upstream Model Detection Settings'),
       configured: upstreamModelDetectionConfigured,
+    })
+  }
+  if (OPENAI_IMAGES_CHANNEL_TYPES.has(currentType)) {
+    advancedNavChildren.push({
+      id: 'channel-section-advanced-image-profile',
+      title: t('OpenAI Images profile'),
+      configured: imageProfileConfigured,
     })
   }
   const editorNavItems: ChannelEditorNavItem[] = [
@@ -4382,6 +4488,223 @@ export function ChannelMutateDrawer({
                                 </FormItem>
                               )}
                             />
+
+                            {OPENAI_IMAGES_CHANNEL_TYPES.has(currentType) && (
+                              <div
+                                id='channel-section-advanced-image-profile'
+                                className='border-border/60 flex flex-col gap-3 border-t pt-4'
+                              >
+                                <SubHeading
+                                  title={t('OpenAI Images profile')}
+                                  icon={<Sparkles className='h-3.5 w-3.5' />}
+                                  iconTone='chart-2'
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='image_profile'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Image protocol binding')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <JsonCodeEditor
+                                          value={field.value || ''}
+                                          onChange={field.onChange}
+                                          name={field.name}
+                                          onBlur={field.onBlur}
+                                          textareaRef={field.ref}
+                                          disabled={
+                                            sensitiveLocked || isSubmitting
+                                          }
+                                          placeholder={t(
+                                            'Example: {"profile":"openai_images","profile_version":1,"paths":{"generations":"/v1/images/generations","edits":"/v1/images/edits"}}'
+                                          )}
+                                          heightClassName='h-44 min-h-44 max-h-44'
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t(
+                                          'Bind this channel to the built-in OpenAI Images protocol. Capability overrides are optional.'
+                                        )}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                                {isEditing && canReadCostAccounting && (
+                                  <div className='border-border/60 flex flex-wrap items-center justify-between gap-3 border-t pt-3'>
+                                    <div className='min-w-0 space-y-0.5'>
+                                      <div className='text-sm font-medium'>
+                                        {t('Supplier image costs')}
+                                      </div>
+                                      <p className='text-muted-foreground text-xs'>
+                                        {t(
+                                          'Configure per-image supplier costs for this channel and its mapped models.'
+                                        )}
+                                      </p>
+                                    </div>
+                                    <Button
+                                      type='button'
+                                      variant='outline'
+                                      onClick={() =>
+                                        setImageCostDrawerOpen(true)
+                                      }
+                                      disabled={
+                                        imageCompatibilityNeedsSave ||
+                                        isSubmitting
+                                      }
+                                    >
+                                      <CircleDollarSign
+                                        className='mr-2 h-4 w-4'
+                                        aria-hidden='true'
+                                      />
+                                      {t('Manage supplier image costs')}
+                                    </Button>
+                                  </div>
+                                )}
+                                <div className='border-border/60 space-y-3 border-t pt-3'>
+                                  <div className='grid gap-3 sm:grid-cols-2'>
+                                    <div className='space-y-1.5'>
+                                      <label
+                                        className='text-sm font-medium'
+                                        htmlFor='image-compatibility-model'
+                                      >
+                                        {t('Compatibility test model')}
+                                      </label>
+                                      <Select
+                                        value={imageCompatibilityModel}
+                                        onValueChange={(value) => {
+                                          if (value) {
+                                            setImageCompatibilityModel(value)
+                                          }
+                                        }}
+                                        disabled={
+                                          !isEditing ||
+                                          !canOperate ||
+                                          imageCompatibilityTesting ||
+                                          currentModelsArray.length === 0
+                                        }
+                                      >
+                                        <SelectTrigger id='image-compatibility-model'>
+                                          <SelectValue
+                                            placeholder={t(
+                                              'Select an image model'
+                                            )}
+                                          />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectGroup>
+                                            {currentModelsArray.map((model) => (
+                                              <SelectItem
+                                                key={model}
+                                                value={model}
+                                              >
+                                                {model}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectGroup>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className='space-y-1.5'>
+                                      <label
+                                        className='text-sm font-medium'
+                                        htmlFor='image-compatibility-endpoint'
+                                      >
+                                        {t('Compatibility test endpoint')}
+                                      </label>
+                                      <Select
+                                        value={imageCompatibilityEndpoint}
+                                        onValueChange={(value) =>
+                                          setImageCompatibilityEndpoint(
+                                            value as ImageCompatibilityEndpoint
+                                          )
+                                        }
+                                        disabled={
+                                          !isEditing ||
+                                          !canOperate ||
+                                          imageCompatibilityTesting
+                                        }
+                                      >
+                                        <SelectTrigger id='image-compatibility-endpoint'>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value='generations'>
+                                            {t('Generations')}
+                                          </SelectItem>
+                                          <SelectItem value='edits'>
+                                            {t('Edits')}
+                                          </SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  </div>
+                                  <div className='flex flex-wrap items-center gap-2'>
+                                    <Button
+                                      type='button'
+                                      variant='outline'
+                                      onClick={handleImageCompatibilityTest}
+                                      disabled={
+                                        !isEditing ||
+                                        !channelId ||
+                                        !canOperate ||
+                                        !imageCompatibilityModel ||
+                                        imageCompatibilityNeedsSave ||
+                                        imageCompatibilityTesting ||
+                                        isSubmitting
+                                      }
+                                    >
+                                      {imageCompatibilityTesting ? (
+                                        <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                      ) : (
+                                        <TestTube2 className='mr-2 h-4 w-4' />
+                                      )}
+                                      {t('Run compatibility test')}
+                                    </Button>
+                                    {(!isEditing ||
+                                      imageCompatibilityNeedsSave) && (
+                                      <span className='text-muted-foreground text-xs'>
+                                        {t(
+                                          'Save the channel before running the compatibility test'
+                                        )}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {imageCompatibilityResult && (
+                                    <div className='text-muted-foreground flex flex-wrap items-center gap-2 text-xs'>
+                                      {imageCompatibilityResult.status ===
+                                      'passed' ? (
+                                        <CheckCircle2 className='h-4 w-4 text-emerald-600' />
+                                      ) : (
+                                        <AlertCircle className='text-destructive h-4 w-4' />
+                                      )}
+                                      <span>
+                                        {imageCompatibilityResult.status ===
+                                        'passed'
+                                          ? t('Compatibility test passed')
+                                          : t('Compatibility test failed')}
+                                      </span>
+                                      {imageCompatibilityResult.error_summary && (
+                                        <span>
+                                          {
+                                            imageCompatibilityResult.error_summary
+                                          }
+                                        </span>
+                                      )}
+                                      {imageCompatibilityResult.tested_at && (
+                                        <span>
+                                          {formatUnixTime(
+                                            imageCompatibilityResult.tested_at
+                                          )}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </fieldset>
                         </div>
 
@@ -4796,6 +5119,14 @@ export function ChannelMutateDrawer({
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {imageCostDrawerOpen && costDrawerChannel ? (
+        <ChannelCostDrawer
+          open
+          channel={costDrawerChannel}
+          onOpenChange={setImageCostDrawerOpen}
+        />
+      ) : null}
 
       {paramOverrideEditorOpen && !sensitiveLocked && (
         <ParamOverrideEditorDialog

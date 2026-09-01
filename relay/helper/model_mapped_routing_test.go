@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -28,5 +30,19 @@ func TestModelMappedHelperPrefersCapabilityTarget(t *testing.T) {
 	assert.Equal(t, "provider-1080p", info.UpstreamModelName)
 	assert.Equal(t, "provider-1080p", info.PredictedUpstreamModel)
 	assert.Equal(t, "provider-1080p", request.Model)
+	assert.True(t, info.IsModelMapped)
+}
+
+func TestModelMappedHelperPrefersImageRoutingModel(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set("model_mapping", `{"gpt-image-1":"ordinary-map"}`)
+	common.SetContextKey(c, constant.ContextKeyRoutingUpstreamModel, "provider-image")
+	request := &dto.GeneralOpenAIRequest{Model: "gpt-image-1"}
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-image-1"}
+
+	require.NoError(t, ModelMappedHelper(c, info, request))
+	assert.Equal(t, "provider-image", info.UpstreamModelName)
+	assert.Equal(t, "provider-image", info.PredictedUpstreamModel)
+	assert.Equal(t, "provider-image", request.Model)
 	assert.True(t, info.IsModelMapped)
 }

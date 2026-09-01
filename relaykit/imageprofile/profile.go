@@ -3,9 +3,12 @@
 package imageprofile
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+
+	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 )
 
 const MaxImageN = 128
@@ -46,6 +49,65 @@ type ModelCapabilities struct {
 	MaxN            uint     `json:"max_n,omitempty"`
 	MaxInputImages  uint     `json:"max_input_images,omitempty"`
 	SupportsMask    bool     `json:"supports_mask,omitempty"`
+
+	// Presence bits preserve the distinction between an omitted optional
+	// override and an explicit false/zero value after JSON decoding.
+	generationsSet    bool
+	editsSet          bool
+	maxInputImagesSet bool
+	supportsMaskSet   bool
+}
+
+func (c ModelCapabilities) GenerationsSet() bool { return c.generationsSet || c.Generations }
+func (c ModelCapabilities) EditsSet() bool       { return c.editsSet || c.Edits }
+func (c ModelCapabilities) MaxInputImagesSet() bool {
+	return c.maxInputImagesSet || c.MaxInputImages > 0
+}
+func (c ModelCapabilities) SupportsMaskSet() bool {
+	return c.supportsMaskSet || c.SupportsMask
+}
+
+func (c *ModelCapabilities) UnmarshalJSON(data []byte) error {
+	type plain ModelCapabilities
+	var decoded plain
+	if err := kitutil.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := kitutil.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*c = ModelCapabilities(decoded)
+	_, c.generationsSet = fields["generations"]
+	_, c.editsSet = fields["edits"]
+	_, c.maxInputImagesSet = fields["max_input_images"]
+	_, c.supportsMaskSet = fields["supports_mask"]
+	return nil
+}
+
+func (c ModelCapabilities) MarshalJSON() ([]byte, error) {
+	type plain ModelCapabilities
+	encoded, err := kitutil.Marshal(plain(c))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]any
+	if err := kitutil.Unmarshal(encoded, &fields); err != nil {
+		return nil, err
+	}
+	if c.generationsSet {
+		fields["generations"] = c.Generations
+	}
+	if c.editsSet {
+		fields["edits"] = c.Edits
+	}
+	if c.maxInputImagesSet {
+		fields["max_input_images"] = c.MaxInputImages
+	}
+	if c.supportsMaskSet {
+		fields["supports_mask"] = c.SupportsMask
+	}
+	return kitutil.Marshal(fields)
 }
 
 type CompatibilityStatus string

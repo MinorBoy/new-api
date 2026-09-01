@@ -566,6 +566,34 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 			filter.AllowedChannelIDs[channelID] = struct{}{}
 		}
 	}
+	// Unified OpenAI Images requests use the image catalog and cost-aware
+	// selector as their source of truth. The legacy profit filter operates on
+	// token/video facts and the default cost variant, so it must not narrow this
+	// candidate set before the image decision is built.
+	if isUnifiedImageRoutingRequest(param) {
+		candidates, listErr := model.ListSatisfiedChannels(result.SourceGroup, routingModelName, param.RequestPath, filter)
+		if listErr != nil {
+			return nil, result, &ChannelSelectionError{Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: listErr}
+		}
+		decision, routeErr := BuildImageRouteDecision(param, result.SourceGroup, candidates)
+		if routeErr != nil || decision.Selected == nil {
+			if routeErr == nil {
+				routeErr = errors.New("no compatible image channel is available")
+			}
+			return nil, result, &ChannelSelectionError{Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable, Err: routeErr}
+		}
+		if publishErr := publishImageRouteSelection(param, result, decision.Selected); publishErr != nil {
+			return nil, result, &ChannelSelectionError{Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: publishErr}
+		}
+		channel, getErr := model.GetChannelById(decision.Selected.ChannelID, false)
+		if getErr != nil || channel == nil {
+			if getErr == nil {
+				getErr = errors.New("selected image channel is unavailable")
+			}
+			return nil, result, &ChannelSelectionError{Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable, Err: getErr}
+		}
+		return channel, result, nil
+	}
 	// Profit-aware candidate filter: under strict cost-accounting mode, narrow the
 	// candidate set to channels whose predicted margin meets the minimum threshold.
 	// The filter only intersects the set; it never reorders or changes priority/weight,
@@ -605,6 +633,30 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 	return channel, result, nil
 }
 
+func isUnifiedImageRoutingRequest(param *RetryParam) bool {
+	return param != nil && param.ImageRequest != nil && HasImageModel(param.ModelName)
+}
+
+func publishImageRouteSelection(param *RetryParam, result groupRoutingResult, selected *ImageRouteCandidate) error {
+	if param == nil || param.Ctx == nil || selected == nil {
+		return errors.New("image route selection is incomplete")
+	}
+	variant, err := types.NormalizeCostVariantKey(selected.SKUKey)
+	if err != nil {
+		return fmt.Errorf("invalid image route cost variant: %w", err)
+	}
+	upstreamModel := strings.TrimSpace(selected.UpstreamModel)
+	if upstreamModel == "" {
+		return errors.New("image route upstream model is empty")
+	}
+	common.SetContextKey(param.Ctx, constant.ContextKeyRoutingUpstreamModel, upstreamModel)
+	common.SetContextKey(param.Ctx, constant.ContextKeyRoutingCostVariant, variant)
+	// Keep the selected group available to billing/logging without marking this
+	// request as capability routing; image decisions have no route-target ID.
+	common.SetContextKey(param.Ctx, constant.ContextKeyRoutingSourceGroup, result.SourceGroup)
+	return nil
+}
+
 func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID int) (bool, error) {
 	clearRoutingDecision(param.Ctx)
 	routingModelName := modelrouting.NormalizeCanonicalModel(param.ModelName)
@@ -632,14 +684,13 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 			Diagnostics: []modelrouting.Audit{routingSelectionAudit(result)},
 		}
 	}
+	var target modelrouting.Target
 	if result.Capability {
-		target, compatible := result.Evaluation.CompatibleByChannel[channelID]
+		var compatible bool
+		target, compatible = result.Evaluation.CompatibleByChannel[channelID]
 		if !compatible {
 			return false, nil
 		}
-		publishRoutingDecision(param.Ctx, result, target)
-	} else {
-		publishLegacyRoutingCostVariant(param.Ctx)
 	}
 
 	channel, err := model.GetChannelById(channelID, false)
@@ -648,6 +699,51 @@ func ValidateKnownChannelForRouting(param *RetryParam, group string, channelID i
 			Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
 			Err: errors.New("channel is unavailable"),
 		}
+	}
+	if isUnifiedImageRoutingRequest(param) {
+		filter := model.ChannelSelectFilter{
+			AllowedChannelIDs:  map[int]struct{}{channelID: {}},
+			ExcludedChannelIDs: param.ExcludedChannelIDs,
+		}
+		candidates, listErr := model.ListSatisfiedChannels(result.SourceGroup, routingModelName, param.RequestPath, filter)
+		if listErr != nil {
+			return false, &ChannelSelectionError{Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: listErr}
+		}
+		if len(candidates) == 0 {
+			return false, nil
+		}
+		decision, routeErr := BuildImageRouteDecision(param, result.SourceGroup, candidates)
+		if routeErr != nil || decision.Selected == nil {
+			if routeErr == nil {
+				routeErr = errors.New("no compatible image channel is available")
+			}
+			return false, &ChannelSelectionError{Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable, Err: routeErr}
+		}
+		if decision.Selected.ChannelID != channelID {
+			return false, nil
+		}
+		if publishErr := publishImageRouteSelection(param, result, decision.Selected); publishErr != nil {
+			return false, &ChannelSelectionError{Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: publishErr}
+		}
+		covered, coverageErr := CheckSelectedChannelCostCoverage(param, channel, "")
+		if coverageErr != nil || !covered {
+			param.ExcludeChannel(channelID)
+			selectionErr := &ChannelSelectionError{
+				Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable,
+				Err: errors.New("channel is unavailable"),
+			}
+			if result.Capability {
+				selectionErr.Err = errors.New("compatible channel is unavailable")
+				selectionErr.Diagnostics = []modelrouting.Audit{routingSelectionAudit(result)}
+			}
+			return false, selectionErr
+		}
+		return true, nil
+	}
+	if result.Capability {
+		publishRoutingDecision(param.Ctx, result, target)
+	} else {
+		publishLegacyRoutingCostVariant(param.Ctx)
 	}
 	// Profit-aware gate for a caller-pinned channel. Under strict mode, a pinned channel
 	// that fails the margin threshold must NOT silently switch to another channel: it is
@@ -694,7 +790,10 @@ func CheckSelectedChannelCostCoverage(param *RetryParam, channel *model.Channel,
 	}
 
 	predictedModel := ""
-	if common.GetContextKeyBool(param.Ctx, constant.ContextKeyRoutingCapabilityMode) {
+	if param.ImageRequest != nil {
+		predictedModel = strings.TrimSpace(common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingUpstreamModel))
+	}
+	if predictedModel == "" && common.GetContextKeyBool(param.Ctx, constant.ContextKeyRoutingCapabilityMode) {
 		predictedModel = strings.TrimSpace(common.GetContextKeyString(param.Ctx, constant.ContextKeyRoutingUpstreamModel))
 	}
 	if predictedModel == "" {

@@ -90,6 +90,7 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
+  image_profile?: ImageProfileBinding
   secure_video_group?: 'discount' | 'overseas' | 'enterprise'
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
@@ -109,6 +110,32 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface ImageProfileBinding {
+  profile: string
+  profile_version: number
+  paths?: Record<string, string>
+  capability_overrides?: Record<string, ImageModelCapabilities>
+  compatibility?: Record<string, ImageCompatibility>
+}
+
+export interface ImageModelCapabilities {
+  generations?: boolean
+  edits?: boolean
+  sizes?: string[]
+  qualities?: string[]
+  response_formats?: string[]
+  max_n?: number
+  max_input_images?: number
+  supports_mask?: boolean
+}
+
+export interface ImageCompatibility {
+  status: 'untested' | 'passed' | 'failed'
+  profile_version?: number
+  contract_hash?: string
+  tested_at?: number
 }
 
 export interface AdvancedCustomConfig {
@@ -190,6 +217,22 @@ export interface ChannelTestResponse {
     response_time?: number
     error?: string
   }
+}
+
+export type ImageCompatibilityEndpoint = 'generations' | 'edits'
+
+export interface ImageCompatibilityTestResult {
+  status: 'untested' | 'passed' | 'failed'
+  profile_version: number
+  contract_hash?: string
+  tested_at?: number
+  error_summary?: string
+}
+
+export interface ImageCompatibilityTestResponse {
+  success: boolean
+  message?: string
+  data?: ImageCompatibilityTestResult
 }
 
 export interface ChannelBalanceResponse {

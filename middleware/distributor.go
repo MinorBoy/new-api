@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -58,6 +59,11 @@ func Distribute() func(c *gin.Context) {
 		if routingInput != nil {
 			common.SetContextKey(c, constant.ContextKeyRoutingFactsInput, *routingInput)
 		}
+		imageRequestContext, imageErr := extractUnifiedImageRequestContext(c, modelRequest.Model)
+		if imageErr != nil {
+			abortWithOpenAiMessage(c, http.StatusBadRequest, imageErr.Error(), types.ErrorCodeInvalidRequest)
+			return
+		}
 
 		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		if specificChannel {
@@ -78,6 +84,7 @@ func Distribute() func(c *gin.Context) {
 			retryParam = &service.RetryParam{
 				Ctx: c, TokenGroup: usingGroup, ModelName: modelRequest.Model,
 				RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0), RoutingInput: routingInput,
+				ImageRequest: imageRequestContext,
 			}
 			if shouldSelectChannel {
 				groups := []string{usingGroup}
@@ -166,42 +173,45 @@ func Distribute() func(c *gin.Context) {
 				retryParam = &service.RetryParam{
 					Ctx: c, ModelName: modelRequest.Model, TokenGroup: usingGroup,
 					RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0), RoutingInput: routingInput,
+					ImageRequest: imageRequestContext,
 				}
 
-				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
-					affinityUsable := false
-					preferred, err := model.CacheGetChannel(preferredChannelID)
-					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
-						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
-						if usingGroup == "auto" {
-							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetUserAutoGroup(userGroup)
-							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-									compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, g, preferred.Id)
-									if routeErr != nil || !compatible {
-										continue
+				if imageRequestContext == nil {
+					if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+						affinityUsable := false
+						preferred, err := model.CacheGetChannel(preferredChannelID)
+						if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
+							channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
+							if usingGroup == "auto" {
+								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+								autoGroups := service.GetUserAutoGroup(userGroup)
+								for _, g := range autoGroups {
+									if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+										compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, g, preferred.Id)
+										if routeErr != nil || !compatible {
+											continue
+										}
+										selectGroup = g
+										common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+										channel = preferred
+										affinityUsable = true
+										service.MarkChannelAffinityUsed(c, g, preferred.Id)
+										break
 									}
-									selectGroup = g
-									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+								}
+							} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+								compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, usingGroup, preferred.Id)
+								if routeErr == nil && compatible {
 									channel = preferred
+									selectGroup = usingGroup
 									affinityUsable = true
-									service.MarkChannelAffinityUsed(c, g, preferred.Id)
-									break
+									service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 								}
 							}
-						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-							compatible, routeErr := service.ValidateKnownChannelForRouting(retryParam, usingGroup, preferred.Id)
-							if routeErr == nil && compatible {
-								channel = preferred
-								selectGroup = usingGroup
-								affinityUsable = true
-								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
-							}
 						}
-					}
-					if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
-						service.ClearCurrentChannelAffinityCache(c)
+						if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
+							service.ClearCurrentChannelAffinityCache(c)
+						}
 					}
 				}
 
@@ -316,6 +326,30 @@ func abortSeedanceRoutingError(c *gin.Context, status int, code types.ErrorCode,
 		return
 	}
 	abortWithOpenAiMessage(c, status, message, code)
+}
+
+func extractUnifiedImageRequestContext(c *gin.Context, modelName string) (*service.ImageRequestContext, error) {
+	if c == nil || !service.HasImageModel(modelName) {
+		return nil, nil
+	}
+	var relayMode int
+	switch strings.ToLower(strings.TrimSpace(c.Request.URL.Path)) {
+	case "/v1/images/generations", "/api/v3/images/generations":
+		relayMode = relayconstant.RelayModeImagesGenerations
+	case "/v1/images/edits":
+		relayMode = relayconstant.RelayModeImagesEdits
+	default:
+		return nil, nil
+	}
+	imageRequest, err := relayhelper.GetAndValidOpenAIImageRequest(c, relayMode)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := service.ResolveImageRequest(imageRequest, relayMode)
+	if err != nil {
+		return nil, err
+	}
+	return &resolved, nil
 }
 
 // channelSupportsRequestPath reports whether a channel can serve the request path.

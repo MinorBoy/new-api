@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
@@ -149,7 +150,8 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 		if err != nil {
 			return &CostCoverageError{ChannelID: input.ChannelID}
 		}
-		if types.CostMode(lockedRule.CostMode) == types.CostModePerDuration && config.MeterSource == types.CostMeterValidatedRequest {
+		mode := types.CostMode(lockedRule.CostMode)
+		if mode == types.CostModePerDuration && config.MeterSource == types.CostMeterValidatedRequest {
 			if input.RequestMeter == nil {
 				return errors.New("validated request duration meter is required")
 			}
@@ -159,7 +161,17 @@ func PrepareCostAttempt(ctx context.Context, input PrepareCostAttemptInput) (*ty
 			if _, _, err := CalculateAttemptCost(types.CostMode(lockedRule.CostMode), config, *input.RequestMeter); err != nil {
 				return err
 			}
-		} else {
+		} else if mode == types.CostModePerImage && config.MeterSource == types.CostMeterValidatedRequest {
+			if input.RequestMeter == nil {
+				return errors.New("validated request image count meter is required")
+			}
+			if input.RequestMeter.Source != types.CostMeterValidatedRequest {
+				return errors.New("request cost meter source does not match the rule snapshot")
+			}
+			if _, _, err := CalculateAttemptCost(mode, config, *input.RequestMeter); err != nil {
+				return err
+			}
+		} else if mode != types.CostModePerImage {
 			attempt.RequestMeterJSON = "{}"
 		}
 		ruleConfigJSON, err := common.Marshal(config)
@@ -242,6 +254,15 @@ func RecordCostDispatchOutcome(ctx context.Context, handle *types.CostAttemptHan
 	}
 
 	switch outcome.Status {
+	case types.CostAttemptNotDispatched:
+		if outcome.UpstreamAccepted {
+			return errors.New("not-dispatched outcome cannot be upstream accepted")
+		}
+		return model.TransitionCostAttemptWithContext(persistenceCtx, attempt.ID, from, types.CostAttemptNotDispatched, map[string]any{
+			"upstream_accepted": false,
+			"failure_code":      failureCode,
+			"terminal_at":       now,
+		})
 	case types.CostAttemptAwaitingMeter:
 		if !outcome.UpstreamAccepted {
 			return errors.New("awaiting-meter outcome requires upstream acceptance")
@@ -482,6 +503,22 @@ func settleCostAttemptFromSnapshot(ctx context.Context, attempt *model.CostAccou
 			return errors.New("cost meter source does not match the rule snapshot")
 		}
 	}
+	if mode == types.CostModePerImage {
+		if meter.ImageCount == nil && attempt.RequestMeterJSON != "" && attempt.RequestMeterJSON != "{}" {
+			if err := common.UnmarshalJsonStr(attempt.RequestMeterJSON, &meter); err != nil {
+				return fmt.Errorf("decode request cost meter snapshot: %w", err)
+			}
+		}
+		if meter.ImageCount == nil {
+			return errors.New("image count meter is missing")
+		}
+		if meter.Source != types.CostMeterValidatedRequest && meter.Source != types.CostMeterUpstreamActual {
+			return errors.New("image meter source does not match the rule snapshot")
+		}
+		if config.MeterSource == types.CostMeterValidatedRequest && meter.Source != types.CostMeterValidatedRequest {
+			return errors.New("image meter source does not match the rule snapshot")
+		}
+	}
 	if err := validateCostMeterBounds(meter); err != nil {
 		return err
 	}
@@ -572,6 +609,9 @@ func costAccountingPersistenceContext(ctx context.Context) (context.Context, con
 }
 
 func validateCostMeterBounds(meter types.CostMeter) error {
+	if meter.ImageCount != nil && (*meter.ImageCount < 1 || *meter.ImageCount > int64(relaydto.MaxImageN)) {
+		return fmt.Errorf("image count must be between 1 and %d", relaydto.MaxImageN)
+	}
 	for name, value := range map[string]*int64{
 		"input tokens":      meter.InputTokens,
 		"output tokens":     meter.OutputTokens,

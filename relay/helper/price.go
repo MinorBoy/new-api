@@ -8,15 +8,63 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/imageprofile"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relaykitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/image_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
+
+// ImageSKUPriceHelper freezes the public image SKU price and computes the
+// request's pre-consume quota with checked decimal conversion.
+func ImageSKUPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, sku image_setting.ResolvedSKU) (hosttypes.PriceData, error) {
+	if info == nil {
+		return hosttypes.PriceData{}, fmt.Errorf("relay info is required")
+	}
+	if sku.N == 0 || sku.N > imageprofile.MaxImageN {
+		return hosttypes.PriceData{}, fmt.Errorf("image n must be between 1 and %d", imageprofile.MaxImageN)
+	}
+	groupRatioInfo := HandleGroupRatio(c, info)
+	price, err := decimal.NewFromString(strings.TrimSpace(sku.SalePriceUSD))
+	if err != nil || price.IsNegative() {
+		return hosttypes.PriceData{}, fmt.Errorf("invalid image sale price")
+	}
+	groupRatio := decimal.NewFromFloat(groupRatioInfo.GroupRatio)
+	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	quota, clamp := common.QuotaFromDecimalChecked(price.Mul(decimal.NewFromInt(int64(sku.N))).Mul(groupRatio).Mul(quotaPerUnit))
+	if clamp != nil {
+		info.QuotaClamp = clamp
+		return hosttypes.PriceData{}, clamp
+	}
+	priceData := hosttypes.PriceData{
+		ModelPrice:        price.InexactFloat64(),
+		UsePrice:          true,
+		GroupRatioInfo:    groupRatioInfo,
+		QuotaToPreConsume: quota,
+	}
+	priceData.AddOtherRatio("n", float64(sku.N))
+	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && (price.IsZero() || groupRatioInfo.GroupRatio == 0) {
+		priceData.FreeModel = true
+		priceData.QuotaToPreConsume = 0
+	}
+	groupRatioSnapshot := decimal.NewFromFloat(groupRatioInfo.GroupRatio).String()
+	info.ImageBillingSnapshot = &hosttypes.ImageBillingSnapshot{
+		CatalogVersion: sku.CatalogVersion, Model: sku.Model, Endpoint: string(sku.Endpoint),
+		SKUKey: sku.SKUKey, UnitSalePriceUSD: price.String(), RequestedImages: int64(sku.N),
+		MeterSource: "validated_request", GroupRatio: groupRatioSnapshot, QuotaPerUnit: quotaPerUnit.String(),
+	}
+	info.PriceData = priceData
+	return priceData, nil
+}
 
 func modelPriceNotConfiguredError(modelName string, userId int) error {
 	if model.IsAdmin(userId) {
@@ -71,6 +119,30 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (hosttypes.PriceData, error) {
+	if info != nil {
+		if imageRequest, ok := info.Request.(*relaykitdto.ImageRequest); ok && service.HasImageModel(imageRequest.Model) {
+			endpoint := imageprofile.Endpoint("")
+			switch info.RelayMode {
+			case relayconstant.RelayModeImagesGenerations:
+				endpoint = imageprofile.EndpointGenerations
+			case relayconstant.RelayModeImagesEdits:
+				endpoint = imageprofile.EndpointEdits
+			}
+			if endpoint != "" {
+				n := uint(1)
+				if imageRequest.N != nil {
+					n = *imageRequest.N
+				}
+				if imageContext, err := image_setting.Resolve(image_setting.Selection{
+					Model: imageRequest.Model, Size: imageRequest.Size, Quality: imageRequest.Quality,
+					ResponseFormat: imageRequest.ResponseFormat, Endpoint: endpoint, N: n,
+					InputImages: imageRequest.InputImageCount, HasMask: imageRequest.HasMask,
+				}); err == nil {
+					return ImageSKUPriceHelper(c, info, imageContext)
+				}
+			}
+		}
+	}
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)

@@ -72,6 +72,34 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 	})
 }
 
+func TestGetAndValidOpenAIImageRequestMultipartCapturesRoutingContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-1"))
+	require.NoError(t, writer.WriteField("prompt", "edit this image"))
+	require.NoError(t, writer.WriteField("response_format", "b64_json"))
+	image, err := writer.CreateFormFile("image", "input.png")
+	require.NoError(t, err)
+	_, err = image.Write([]byte("fake image"))
+	require.NoError(t, err)
+	mask, err := writer.CreateFormFile("mask", "mask.png")
+	require.NoError(t, err)
+	_, err = mask.Write([]byte("fake mask"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+	require.NoError(t, err)
+	require.Equal(t, "b64_json", request.ResponseFormat)
+	require.Equal(t, uint(1), request.InputImageCount)
+	require.True(t, request.HasMask)
+}
+
 // TestGetAndValidOpenAIImageRequestNBounds guards the billing invariant that
 // the image generation count can never reach quota calculation with a value
 // large enough to overflow int64 into a negative charge.

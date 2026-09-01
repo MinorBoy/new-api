@@ -124,6 +124,7 @@ export function catalogPriceUnitLabel(
 ): string {
   const keys: Record<string, string> = {
     per_request: 'Per request',
+    per_image: 'Per image',
     per_second: 'Per second',
     per_million_tokens: 'Per 1M tokens',
     per_million_completion_tokens: 'Per 1M completion tokens',
@@ -160,6 +161,7 @@ export function catalogCostModeLabel(
   const keys = {
     free: 'Free',
     per_request: 'Per request',
+    per_image: 'Per image',
     per_duration: 'Per duration',
     per_token: 'Per token',
   } as const

@@ -42,6 +42,8 @@ export interface ChannelTypeConfig {
   }
 }
 
+export const OPENAI_IMAGES_CHANNEL_TYPES = new Set([1, 3, 6, 8, 20, 47])
+
 /**
  * Configuration for each channel type
  */

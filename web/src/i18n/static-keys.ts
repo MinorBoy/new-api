@@ -617,6 +617,28 @@ export const STATIC_I18N_KEYS = [
   'Required metadata unavailable',
   'Runtime billing settings',
 
+  // OpenAI Images channel compatibility
+  'Compatibility test model',
+  'Compatibility test endpoint',
+  'Select an image model',
+  'Generations',
+  'Edits',
+  'Run compatibility test',
+  'Save the channel before running the compatibility test',
+  'Compatibility test passed',
+  'Compatibility test failed',
+  'Select an image model before testing',
+  'Image compatibility test passed',
+  'Image compatibility test failed',
+  'Per image',
+  'Price per image',
+  'Image meter source',
+  'Image count',
+  'Image count must be between 1 and 128',
+  'Supplier image costs',
+  'Configure per-image supplier costs for this channel and its mapped models.',
+  'Manage supplier image costs',
+
   // Misc
   'Cancel',
   'Status',

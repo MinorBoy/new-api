@@ -865,7 +865,7 @@ func costAttemptTransitionAllowed(from, to types.CostAttemptStatus) bool {
 	case types.CostAttemptPrepared:
 		return to == types.CostAttemptDispatching || to == types.CostAttemptNotDispatched
 	case types.CostAttemptDispatching:
-		return to == types.CostAttemptAwaitingMeter || to == types.CostAttemptSettled || to == types.CostAttemptConfirmedZero || to == types.CostAttemptUnknown
+		return to == types.CostAttemptAwaitingMeter || to == types.CostAttemptSettled || to == types.CostAttemptConfirmedZero || to == types.CostAttemptUnknown || to == types.CostAttemptNotDispatched
 	case types.CostAttemptAwaitingMeter:
 		return to == types.CostAttemptSettled || to == types.CostAttemptConfirmedZero || to == types.CostAttemptSettlementFailed || to == types.CostAttemptUnknown
 	case types.CostAttemptSettlementFailed, types.CostAttemptUnknown:

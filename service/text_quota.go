@@ -375,9 +375,21 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		noteQuotaClamp(relayInfo, clamp)
 	}
 
-	if !summary.hasBillableUsage() {
+	// Unified OpenAI Images requests use the immutable SKU snapshot captured at
+	// pre-consume time. This keeps settlement stable if an administrator edits
+	// the catalog or group ratio while the upstream request is in flight.
+	if relayInfo.ImageBillingSnapshot != nil {
+		if imageQuota, clamp, err := ImageSettlementQuota(relayInfo); err == nil {
+			summary.Quota = imageQuota
+			noteQuotaClamp(relayInfo, clamp)
+		}
+	}
+
+	// A unified image request is billable from its frozen SKU snapshot even when
+	// the upstream response has no token usage object.
+	if relayInfo.ImageBillingSnapshot == nil && !summary.hasBillableUsage() {
 		summary.Quota = 0
-	} else if !ratio.IsZero() && summary.Quota == 0 {
+	} else if relayInfo.ImageBillingSnapshot == nil && !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
 	}
 

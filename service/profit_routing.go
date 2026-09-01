@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,7 @@ type ProfitRoutingFacts struct {
 	InputTokens           int64
 	OutputTokens          int64
 	TotalTokens           int64
+	ImageCount            int64
 }
 
 // ProfitRoutingInput is the amount pair plus threshold that the pure eligibility
@@ -167,6 +169,12 @@ func BuildProfitCostMeter(mode types.CostMode, facts ProfitRoutingFacts) (types.
 	meter := types.CostMeter{Source: types.CostMeterValidatedRequest}
 	switch mode {
 	case types.CostModeFree, types.CostModePerRequest:
+		return meter, nil
+	case types.CostModePerImage:
+		if facts.ImageCount < 1 || facts.ImageCount > int64(dto.MaxImageN) {
+			return types.CostMeter{}, fmt.Errorf("per-image cost requires an image count between 1 and %d", dto.MaxImageN)
+		}
+		meter.ImageCount = &facts.ImageCount
 		return meter, nil
 	case types.CostModePerDuration:
 		if facts.OutputDurationSeconds <= 0 {
@@ -679,6 +687,9 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	}
 
 	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
+	if info.ImageBillingSnapshot != nil {
+		facts.ImageCount = info.ImageBillingSnapshot.RequestedImages
+	}
 	if strings.Contains(strings.ToLower(relaycommon.SafeRequestPath(info.RequestURLPath)), "/video") &&
 		(facts.OutputDurationSeconds <= 0 || facts.Width <= 0 || facts.Height <= 0 || facts.FrameRateNum <= 0 || facts.FrameRateDen <= 0) {
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonMeterUnknown}

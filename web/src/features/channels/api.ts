@@ -34,6 +34,8 @@ import type {
   GetChannelResponse,
   GetChannelsParams,
   GetChannelsResponse,
+  ImageCompatibilityEndpoint,
+  ImageCompatibilityTestResponse,
   MultiKeyManageParams,
   MultiKeyStatusResponse,
   SearchChannelsParams,
@@ -218,6 +220,21 @@ export async function testChannel(
   const res = await api.get(
     `/api/channel/test/${id}`,
     channelActionConfig({ params })
+  )
+  return res.data
+}
+
+/**
+ * Run the stored OpenAI Images compatibility contract for one channel model.
+ */
+export async function testChannelImageProfile(
+  id: number,
+  data: { model: string; endpoint: ImageCompatibilityEndpoint }
+): Promise<ImageCompatibilityTestResponse> {
+  const res = await api.post(
+    `/api/channel/${id}/image-profile/test`,
+    data,
+    channelActionConfig()
   )
   return res.data
 }

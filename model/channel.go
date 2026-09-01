@@ -1119,6 +1119,12 @@ func supportsOpenAIImagesChannelType(channelType int) bool {
 	}
 }
 
+// SupportsOpenAIImagesChannelType reports whether a channel can use the
+// OpenAI-compatible image adaptor and its /images endpoints.
+func SupportsOpenAIImagesChannelType(channelType int) bool {
+	return supportsOpenAIImagesChannelType(channelType)
+}
+
 func (channel *Channel) GetSetting() dto.ChannelSettings {
 	setting := dto.ChannelSettings{}
 	if channel.Setting != nil && *channel.Setting != "" {

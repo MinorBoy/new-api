@@ -12,6 +12,8 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -319,12 +321,14 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Cleanup(func() { gin.SetMode(oldMode) })
 	longImage := strings.Repeat("a", 4096)
+	overflowData := `{"data":[` + strings.TrimSuffix(strings.Repeat(`{"b64_json":"x"},`, dto.MaxImageN+1), ",") + `]}`
 
 	tests := []struct {
 		name      string
 		body      string
 		usePrice  bool
 		wantCount float64
+		wantError bool
 	}{
 		{
 			name:      "fixed price uses data length",
@@ -333,10 +337,24 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 			wantCount: 2,
 		},
 		{
-			name:      "empty data keeps requested count",
+			name:      "empty data is rejected",
 			body:      `{"data":[]}`,
 			usePrice:  true,
 			wantCount: 3,
+			wantError: true,
+		},
+		{
+			name:      "missing data keeps requested count",
+			body:      `{"usage":{"input_tokens":1}}`,
+			usePrice:  true,
+			wantCount: 3,
+		},
+		{
+			name:      "image count above maximum is rejected",
+			body:      overflowData,
+			usePrice:  true,
+			wantCount: 3,
+			wantError: true,
 		},
 		{
 			name:      "ratio billing ignores data length",
@@ -354,6 +372,12 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 
 			_, err := OpenaiImageHandler(c, info, resp)
 
+			if tt.wantError {
+				require.NotNil(t, err)
+				require.Equal(t, relaytypes.ErrorCodeBadResponse, err.GetErrorCode())
+				require.Empty(t, recorder.Body.String())
+				return
+			}
 			require.Nil(t, err)
 			require.Equal(t, tt.wantCount, info.PriceData.OtherRatios()["n"])
 			require.Equal(t, tt.body, recorder.Body.String())

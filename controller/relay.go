@@ -28,6 +28,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
@@ -136,6 +137,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 		}
 	}
+	if relayFormat == types.RelayFormatOpenAIImage {
+		if imageRequest, ok := request.(*dto.ImageRequest); ok && service.HasImageModel(imageRequest.Model) {
+			imageContext, imageErr := service.ResolveImageRequest(imageRequest, relayInfo.RelayMode)
+			if imageErr != nil {
+				newAPIError = types.NewErrorWithStatusCode(imageErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				return
+			}
+			// Keep the normalized values on the request so the converter and the
+			// pricing metadata see the same SKU defaults.
+			imageRequest.Size = imageContext.Resolved.Size
+			imageRequest.Quality = imageContext.Resolved.Quality
+			imageRequest.ResponseFormat = imageContext.Resolved.ResponseFormat
+			imageRequest.N = common.GetPointer(imageContext.Resolved.N)
+		}
+	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -199,6 +215,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	if relayFormat == types.RelayFormatOpenAIImage {
+		if imageRequest, ok := request.(*dto.ImageRequest); ok && service.HasImageModel(imageRequest.Model) {
+			if imageContext, imageErr := service.ResolveImageRequest(imageRequest, relayInfo.RelayMode); imageErr == nil {
+				retryParam.ImageRequest = &imageContext
+			}
+		}
+	}
 	if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok {
 		retryParam.RoutingInput = &input
 	}
@@ -258,7 +281,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
 		shouldRetryRequest := shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
-		if shouldRetryRequest && common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
+		if retryParam.ImageRequest != nil {
+			shouldRetryRequest = shouldRetryImageAfterCostOutcome(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), relayInfo.CostOutcome)
+		}
+		if shouldRetryRequest && (common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) || retryParam.ImageRequest != nil) {
 			retryParam.ExcludeChannel(channel.Id)
 		}
 		if !shouldRetryRequest {
@@ -276,6 +302,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func shouldRetryImageAfterCostOutcome(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, outcome *hosttypes.CostOutcome) bool {
+	if outcome != nil && (outcome.UpstreamAccepted || outcome.Status == hosttypes.CostAttemptUnknown || outcome.Status == hosttypes.CostAttemptAwaitingMeter) {
+		return false
+	}
+	return shouldRetry(c, openaiErr, retryTimes)
 }
 
 var upgrader = websocket.Upgrader{

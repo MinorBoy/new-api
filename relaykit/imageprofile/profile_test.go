@@ -3,6 +3,7 @@ package imageprofile
 import (
 	"testing"
 
+	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,4 +74,20 @@ func TestOpenAIImagesProfileBindingValidate(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
+}
+
+func TestModelCapabilitiesJSONRoundTripPreservesExplicitFalseAndZero(t *testing.T) {
+	var original ModelCapabilities
+	require.NoError(t, kitutil.Unmarshal([]byte(`{"generations":false,"edits":false,"max_input_images":0,"supports_mask":false}`), &original))
+
+	encoded, err := kitutil.Marshal(original)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"generations":false,"edits":false,"max_input_images":0,"supports_mask":false}`, string(encoded))
+
+	var roundTripped ModelCapabilities
+	require.NoError(t, kitutil.Unmarshal(encoded, &roundTripped))
+	assert.True(t, roundTripped.GenerationsSet())
+	assert.True(t, roundTripped.EditsSet())
+	assert.True(t, roundTripped.MaxInputImagesSet())
+	assert.True(t, roundTripped.SupportsMaskSet())
 }

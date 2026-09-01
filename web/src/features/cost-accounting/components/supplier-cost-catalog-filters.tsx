@@ -43,6 +43,7 @@ const COST_MODES: Array<{ value: CostMode | 'all'; label: string }> = [
   { value: 'all', label: 'All cost modes' },
   { value: 'free', label: 'Free' },
   { value: 'per_request', label: 'Per request' },
+  { value: 'per_image', label: 'Per image' },
   { value: 'per_duration', label: 'Per duration' },
   { value: 'per_token', label: 'Per token' },
 ]

@@ -33,7 +33,11 @@ type ImageRequest struct {
 	Images            json.RawMessage `json:"images,omitempty"`
 	Mask              json.RawMessage `json:"mask,omitempty"`
 	InputFidelity     json.RawMessage `json:"input_fidelity,omitempty"`
-	Watermark         *bool           `json:"watermark,omitempty"`
+	// InputImageCount and HasMask are populated by the gateway's request
+	// normalizer. They are intentionally never serialized upstream.
+	InputImageCount uint  `json:"-"`
+	HasMask         bool  `json:"-"`
+	Watermark       *bool `json:"watermark,omitempty"`
 	// zhipu 4v
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`
 	UserId           json.RawMessage `json:"user_id,omitempty"`

@@ -104,6 +104,16 @@ func TestNormalizeCostRuleConfigRejectsUnusedPrices(t *testing.T) {
 				PricePerSecond: stringPointer("1"),
 			},
 		},
+		{
+			name: "per-image rule with a duration price",
+			mode: types.CostModePerImage,
+			config: types.CostRuleConfigV1{
+				Currency: "USD", BillingMultiplier: "1",
+				PurchaseDiscountRatio: "1", RechargeExchangeRatio: "1",
+				FeeRate: "0", CurrencyToUSDRate: "1",
+				UnitPrice: stringPointer("1"), PricePerSecond: stringPointer("1"),
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -112,6 +122,22 @@ func TestNormalizeCostRuleConfigRejectsUnusedPrices(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestNormalizeCostRuleConfigSupportsPerImage(t *testing.T) {
+	unitPrice := "0.125"
+	config := types.CostRuleConfigV1{
+		Currency: "usd", BillingMultiplier: "1.2",
+		PurchaseDiscountRatio: "0.8", RechargeExchangeRatio: "2",
+		FeeRate: "0.05", CurrencyToUSDRate: "0.14",
+		UnitPrice:   &unitPrice,
+		ChargeEvent: types.CostChargeResponseSucceeded,
+		MeterSource: types.CostMeterValidatedRequest,
+	}
+
+	normalized, err := NormalizeCostRuleConfig(types.CostModePerImage, config)
+	require.NoError(t, err)
+	assert.Equal(t, "0.00882", *normalized.NormalizedUSDPrices.UnitPrice)
 }
 
 func TestCalculateAttemptCostSupportsAllModes(t *testing.T) {
@@ -164,6 +190,14 @@ func TestCalculateAttemptCostSupportsAllModes(t *testing.T) {
 			originalCost: "0.5",
 			nanoUSD:      500_000_000,
 		},
+		{
+			name:         "per image",
+			mode:         types.CostModePerImage,
+			config:       normalizedUSDConfig(types.CostRuleConfigV1{UnitPrice: stringPointer("0.125")}),
+			meter:        types.CostMeter{ImageCount: int64Pointer(3)},
+			originalCost: "0.375",
+			nanoUSD:      375_000_000,
+		},
 	}
 
 	for _, tt := range tests {
@@ -173,6 +207,22 @@ func TestCalculateAttemptCostSupportsAllModes(t *testing.T) {
 			assert.Equal(t, tt.originalCost, originalCost)
 			assert.Equal(t, tt.nanoUSD, nanoUSD)
 		})
+	}
+}
+
+func TestCalculateAttemptCostPerRequestDoesNotMultiplyImageCount(t *testing.T) {
+	config := normalizedUSDConfig(types.CostRuleConfigV1{UnitPrice: stringPointer("0.25")})
+	originalCost, nanoUSD, err := CalculateAttemptCost(types.CostModePerRequest, config, types.CostMeter{ImageCount: int64Pointer(3)})
+	require.NoError(t, err)
+	assert.Equal(t, "0.25", originalCost)
+	assert.Equal(t, int64(250_000_000), nanoUSD)
+}
+
+func TestCalculateAttemptCostPerImageRequiresBoundedImageCount(t *testing.T) {
+	config := normalizedUSDConfig(types.CostRuleConfigV1{UnitPrice: stringPointer("1")})
+	for _, count := range []*int64{nil, int64Pointer(0), int64Pointer(-1), int64Pointer(129)} {
+		_, _, err := CalculateAttemptCost(types.CostModePerImage, config, types.CostMeter{ImageCount: count})
+		require.Error(t, err)
 	}
 }
 

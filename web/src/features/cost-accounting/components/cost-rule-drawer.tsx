@@ -177,6 +177,19 @@ function createCostRuleFormValues(
       unit_price: seed.unit_price ?? '1',
     }
   }
+  if (mode === 'per_image') {
+    return {
+      cost_mode: 'per_image',
+      ...paid,
+      charge_event: 'response_succeeded',
+      meter_source:
+        seed.meter_source === 'validated_request' ||
+        seed.meter_source === 'upstream_actual'
+          ? seed.meter_source
+          : 'validated_request',
+      unit_price: seed.unit_price ?? '0.04',
+    }
+  }
   if (mode === 'per_duration') {
     return {
       cost_mode: 'per_duration',
@@ -334,6 +347,7 @@ function buildPreviewRequest(
     inputVideoDuration: string
     inputTokens: string
     outputTokens: string
+    imageCount: string
   }
 ): CostPreviewRequest {
   const taskOnly = TASK_ONLY_CHANNEL_TYPES.has(props.channel.type)
@@ -375,6 +389,17 @@ function buildPreviewRequest(
     request.meter = {
       source: values.meter_source,
       duration_seconds: samples.duration,
+    }
+  }
+  if (values.cost_mode === 'per_image') {
+    const imageCount = parseSampleInteger(samples.imageCount, 'Image count')
+    if (imageCount < 1 || imageCount > 128) {
+      throw new Error('Image count must be between 1 and 128')
+    }
+    request.request_path = '/v1/images/generations'
+    request.meter = {
+      source: values.meter_source,
+      image_count: imageCount,
     }
   }
   if (values.cost_mode === 'per_token') {
@@ -428,6 +453,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
   const [inputVideoDuration, setInputVideoDuration] = useState('5')
   const [inputTokens, setInputTokens] = useState('1000')
   const [outputTokens, setOutputTokens] = useState('500')
+  const [imageCount, setImageCount] = useState('1')
 
   useEffect(() => {
     if (!props.open) return
@@ -490,6 +516,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
           inputVideoDuration,
           inputTokens,
           outputTokens,
+          imageCount,
         })
       ),
     onError: (error) => {
@@ -602,6 +629,9 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
                   <ToggleGroupItem value='per_request'>
                     {t('Per request')}
                   </ToggleGroupItem>
+                  <ToggleGroupItem value='per_image'>
+                    {t('Per image')}
+                  </ToggleGroupItem>
                   <ToggleGroupItem value='per_duration'>
                     {t('Per duration')}
                   </ToggleGroupItem>
@@ -643,6 +673,23 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
                       label={t('Unit price')}
                       disabled={disabled}
                     />
+                  ) : null}
+                  {costMode === 'per_image' ? (
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                      <CostRuleTextField
+                        form={form}
+                        name='unit_price'
+                        label={t('Price per image')}
+                        disabled={disabled}
+                      />
+                      <CostRuleSelectField
+                        form={form}
+                        name='meter_source'
+                        label={t('Image meter source')}
+                        options={durationMeterOptions}
+                        disabled={disabled}
+                      />
+                    </div>
                   ) : null}
                   {costMode === 'per_duration' ? (
                     <div className='grid gap-4 sm:grid-cols-2'>
@@ -841,6 +888,19 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
                       </>
                     ) : null}
                   </>
+                ) : null}
+                {costMode === 'per_image' ? (
+                  <Field>
+                    <FieldLabel htmlFor='cost-preview-image-count'>
+                      {t('Image count')}
+                    </FieldLabel>
+                    <Input
+                      id='cost-preview-image-count'
+                      inputMode='numeric'
+                      value={imageCount}
+                      onChange={(event) => setImageCount(event.target.value)}
+                    />
+                  </Field>
                 ) : null}
                 {costMode === 'per_token' ? (
                   <>

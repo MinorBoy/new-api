@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -21,6 +23,19 @@ func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 	}()
 	if info.ChannelMeta == nil {
 		info.ChannelMeta = &relaycommon.ChannelMeta{}
+	}
+	// Routing may select an upstream image model without creating a capability
+	// audit (image profiles use the catalog/SKU decision directly). Treat the
+	// published routing model as authoritative before applying the channel's
+	// ordinary model_mapping, so the selected provider identity reaches both
+	// the adaptor and cost accounting.
+	if routeUpstreamModel := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyRoutingUpstreamModel)); routeUpstreamModel != "" {
+		info.UpstreamModelName = routeUpstreamModel
+		info.IsModelMapped = info.UpstreamModelName != info.OriginModelName
+		if request != nil {
+			request.SetModelName(info.UpstreamModelName)
+		}
+		return nil
 	}
 	if info.Routing != nil && strings.TrimSpace(info.Routing.UpstreamModel) != "" {
 		info.UpstreamModelName = info.Routing.UpstreamModel

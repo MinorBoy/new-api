@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/cost_setting"
+	"github.com/QuantumNous/new-api/setting/image_setting"
 	object_storage "github.com/QuantumNous/new-api/setting/object_storage"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -156,6 +157,8 @@ func InitOptionMap() {
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
 	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
+	common.OptionMap[image_setting.CatalogOptionKey] = image_setting.Catalog2JSONString()
+	common.OptionMap[image_setting.RoutingOptionKey] = image_setting.Routing2JSONString()
 	common.OptionMap["AudioRatio"] = ratio_setting.AudioRatio2JSONString()
 	common.OptionMap["AudioCompletionRatio"] = ratio_setting.AudioCompletionRatio2JSONString()
 	common.OptionMap["TopUpLink"] = common.TopUpLink
@@ -229,6 +232,14 @@ func SyncOptions(frequency int) {
 func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	if key == image_setting.CatalogOptionKey {
+		_, err := image_setting.ParseCatalogJSONString(value)
+		return err
+	}
+	if key == image_setting.RoutingOptionKey {
+		_, err := image_setting.ParseRoutingJSONString(value)
+		return err
 	}
 	return nil
 }
@@ -304,6 +315,27 @@ func RefreshOptions(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	// Validate and apply image settings before touching OptionMap. This keeps a
+	// rejected JSON update from making the persisted mirror look active while
+	// the typed runtime snapshot still contains the previous value.
+	if key == image_setting.CatalogOptionKey {
+		if err := image_setting.UpdateCatalogByJSONString(value); err != nil {
+			return err
+		}
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap[key] = value
+		common.OptionMapRWMutex.Unlock()
+		return nil
+	}
+	if key == image_setting.RoutingOptionKey {
+		if err := image_setting.UpdateRoutingByJSONString(value); err != nil {
+			return err
+		}
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap[key] = value
+		common.OptionMapRWMutex.Unlock()
+		return nil
+	}
 	if key == retiredThemeOptionKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -75,6 +76,16 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 	}
 	if info.ChannelMeta != nil && info.ChannelMeta.Routing != nil {
 		costVariantKey = info.ChannelMeta.Routing.CostVariantKey
+	} else if c != nil {
+		if selected, ok := common.GetContextKeyType[string](c, constant.ContextKeyRoutingCostVariant); ok && strings.TrimSpace(selected) != "" {
+			costVariantKey = selected
+		}
+	}
+	var requestMeter *types.CostMeter
+	if isOpenAIImagesPath(info.RequestURLPath) {
+		if count, countErr := validatedImageCount(info); countErr == nil {
+			requestMeter = &types.CostMeter{Source: types.CostMeterValidatedRequest, ImageCount: &count}
+		}
 	}
 	handle, err := service.PrepareCostAttempt(requestCtx, service.PrepareCostAttemptInput{
 		RequestID:                 info.RequestId,
@@ -94,6 +105,7 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		BillableUpstreamModel:     info.BillableUpstreamModel,
 		RequestPath:               relaycommon.SafeRequestPath(info.RequestURLPath),
 		CostVariantKey:            costVariantKey,
+		RequestMeter:              requestMeter,
 		CostProfitRecheckSnapshot: info.CostProfitRecheckSnapshot,
 	})
 	if err != nil {
@@ -123,7 +135,9 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		httpResponse, _ = response.(*http.Response)
 	}
 	persistenceCtx, cancel := costPersistenceContext()
-	outcomeErr := service.RecordCostDispatchOutcome(persistenceCtx, handle, a.ClassifyCostOutcome(info, httpResponse, requestErr))
+	outcome := a.ClassifyCostOutcome(info, httpResponse, requestErr)
+	info.CostOutcome = &outcome
+	outcomeErr := service.RecordCostDispatchOutcome(persistenceCtx, handle, outcome)
 	cancel()
 	if outcomeErr != nil {
 		logger.LogWarn(c, fmt.Sprintf("persist cost dispatch outcome failed: %s", outcomeErr.Error()))
@@ -137,18 +151,27 @@ func (a *costAccountingAdaptor) DoResponse(c *gin.Context, response *http.Respon
 		return result, apiErr
 	}
 
-	if info.CostAttempt.CostMode == types.CostModePerRequest && apiErr != nil {
+	if (info.CostAttempt.CostMode == types.CostModePerRequest ||
+		info.CostAttempt.CostMode == types.CostModePerImage) && apiErr != nil {
+		outcome := a.ClassifyCostOutcome(info, response, nil)
+		if outcome.Status != types.CostAttemptNotDispatched {
+			// A successful HTTP response with an invalid image payload means the
+			// upstream accepted the request, but the result cannot be settled.
+			outcome = types.CostOutcome{
+				Status:           types.CostAttemptUnknown,
+				UpstreamAccepted: response != nil,
+				FailureCode:      "upstream_response_invalid",
+			}
+		}
 		persistenceCtx, cancel := costPersistenceContext()
-		outcomeErr := service.RecordCostDispatchOutcome(persistenceCtx, info.CostAttempt, types.CostOutcome{
-			Status:           types.CostAttemptUnknown,
-			UpstreamAccepted: true,
-			FailureCode:      "upstream_response_invalid",
-		})
+		outcomeErr := service.RecordCostDispatchOutcome(persistenceCtx, info.CostAttempt, outcome)
+		info.CostOutcome = &outcome
 		cancel()
 		if outcomeErr != nil {
 			logger.LogWarn(c, fmt.Sprintf("persist cost response outcome failed: %s", outcomeErr.Error()))
 		}
 	} else if info.CostAttempt.CostMode == types.CostModePerRequest ||
+		info.CostAttempt.CostMode == types.CostModePerImage ||
 		info.CostAttempt.CostMode == types.CostModePerDuration || info.CostAttempt.CostMode == types.CostModePerToken {
 		meter := types.CostMeter{}
 		var meterErr error
@@ -163,6 +186,10 @@ func (a *costAccountingAdaptor) DoResponse(c *gin.Context, response *http.Respon
 		if meterErr != nil || settleErr != nil {
 			logger.LogWarn(c, fmt.Sprintf("persist cost settlement failed: meter=%v settlement=%v", meterErr, settleErr))
 		}
+		if meterErr == nil && settleErr == nil {
+			outcome := types.CostOutcome{Status: types.CostAttemptSettled, UpstreamAccepted: true}
+			info.CostOutcome = &outcome
+		}
 	}
 	if apiErr == nil {
 		persistenceCtx, cancel := costPersistenceContext()
@@ -176,10 +203,11 @@ func (a *costAccountingAdaptor) DoResponse(c *gin.Context, response *http.Respon
 }
 
 func (a *costAccountingAdaptor) CostCapabilities(info *relaycommon.RelayInfo) types.CostCapabilities {
-	if a.contract == nil {
+	contract := a.contractForInfo(info)
+	if contract == nil {
 		return types.CostCapabilities{}
 	}
-	return a.contract.CostCapabilities(info)
+	return contract.CostCapabilities(info)
 }
 
 func (a *costAccountingAdaptor) ConfirmCostIdentity(info *relaycommon.RelayInfo, finalRequestBody []byte) error {
@@ -190,17 +218,26 @@ func (a *costAccountingAdaptor) ConfirmCostIdentity(info *relaycommon.RelayInfo,
 }
 
 func (a *costAccountingAdaptor) NormalizeCostMeter(info *relaycommon.RelayInfo, usage any) (types.CostMeter, error) {
-	if a.contract == nil {
+	contract := a.contractForInfo(info)
+	if contract == nil {
 		return types.CostMeter{}, ErrAuthoritativeCostMeter
 	}
-	return a.contract.NormalizeCostMeter(info, usage)
+	return contract.NormalizeCostMeter(info, usage)
+}
+
+func (a *costAccountingAdaptor) contractForInfo(info *relaycommon.RelayInfo) channel.CostAccountingAdaptor {
+	if info != nil && isOpenAIImagesPath(info.RequestURLPath) && isOpenAIImagesChannelType(info.ChannelType) {
+		return openAIImagesCostContract()
+	}
+	return a.contract
 }
 
 func (a *costAccountingAdaptor) ClassifyCostOutcome(info *relaycommon.RelayInfo, response *http.Response, requestErr error) types.CostOutcome {
-	if a.contract == nil {
+	contract := a.contractForInfo(info)
+	if contract == nil {
 		return types.CostOutcome{Status: types.CostAttemptUnknown, FailureCode: "cost_contract_unavailable"}
 	}
-	return a.contract.ClassifyCostOutcome(info, response, requestErr)
+	return contract.ClassifyCostOutcome(info, response, requestErr)
 }
 
 type jsonCostAccountingContract struct {
@@ -220,6 +257,95 @@ func perRequestCostContract() *jsonCostAccountingContract {
 		CanResolveBillableModel: true,
 		ChargeEvents:            []types.CostChargeEvent{types.CostChargeResponseSucceeded},
 	}}
+}
+
+// openAIImagesCostContract describes the shared /v1/images contract used by
+// OpenAI-compatible channels. Image rules are charged per successfully
+// generated image and may use either the validated request count or an
+// authoritative upstream count.
+func openAIImagesCostContract() *openAIImagesCostAccountingContract {
+	return &openAIImagesCostAccountingContract{jsonCostAccountingContract: &jsonCostAccountingContract{capabilities: types.CostCapabilities{
+		CanResolveBillableModel: true,
+		ChargeEvents:            []types.CostChargeEvent{types.CostChargeResponseSucceeded},
+		MeterSources:            []types.CostMeterSource{types.CostMeterValidatedRequest, types.CostMeterUpstreamActual},
+	}}}
+}
+
+type openAIImagesCostAccountingContract struct {
+	*jsonCostAccountingContract
+}
+
+func (c *openAIImagesCostAccountingContract) NormalizeCostMeter(info *relaycommon.RelayInfo, usage any) (types.CostMeter, error) {
+	if info != nil && info.ImageBillingSnapshot != nil && info.ImageBillingSnapshot.SettledImages != nil {
+		count := *info.ImageBillingSnapshot.SettledImages
+		if count < 1 || count > int64(dto.MaxImageN) {
+			return types.CostMeter{}, fmt.Errorf("image count must be between 1 and %d", dto.MaxImageN)
+		}
+		return imageCostMeter(types.CostMeterUpstreamActual, count), nil
+	}
+	if count, present, err := imageCountFromUsage(usage); present {
+		if err != nil {
+			return types.CostMeter{}, err
+		}
+		return imageCostMeter(types.CostMeterUpstreamActual, count), nil
+	}
+	count, err := validatedImageCount(info)
+	if err != nil {
+		return types.CostMeter{}, err
+	}
+	return imageCostMeter(types.CostMeterValidatedRequest, count), nil
+}
+
+func imageCostMeter(source types.CostMeterSource, count int64) types.CostMeter {
+	return types.CostMeter{Source: source, ImageCount: &count}
+}
+
+func imageCountFromUsage(usage any) (int64, bool, error) {
+	var count int
+	switch value := usage.(type) {
+	case *dto.Usage:
+		if value == nil {
+			return 0, false, nil
+		}
+		count = value.GeneratedImages
+	case dto.Usage:
+		count = value.GeneratedImages
+	case *dto.BillingUsage:
+		if value == nil || value.OpenAIUsage == nil {
+			return 0, false, nil
+		}
+		count = value.OpenAIUsage.GeneratedImages
+	default:
+		return 0, false, nil
+	}
+	if count == 0 {
+		return 0, false, nil
+	}
+	if count < 0 || count > dto.MaxImageN {
+		return 0, true, fmt.Errorf("image count must be between 1 and %d", dto.MaxImageN)
+	}
+	return int64(count), true, nil
+}
+
+func validatedImageCount(info *relaycommon.RelayInfo) (int64, error) {
+	if info == nil {
+		return 0, errors.New("image request info is required")
+	}
+	if info.ImageBillingSnapshot != nil && info.ImageBillingSnapshot.RequestedImages > 0 {
+		count := info.ImageBillingSnapshot.RequestedImages
+		if count > int64(dto.MaxImageN) {
+			return 0, fmt.Errorf("image count must be between 1 and %d", dto.MaxImageN)
+		}
+		return count, nil
+	}
+	if count, ok := info.PriceData.OtherRatios()["n"]; ok {
+		if count < 1 || count > float64(dto.MaxImageN) || math.Trunc(count) != count {
+			return 0, fmt.Errorf("image count must be between 1 and %d", dto.MaxImageN)
+		}
+		return int64(count), nil
+	}
+	// OpenAI Images defaults n to one when the client omits it.
+	return 1, nil
 }
 
 func (c *jsonCostAccountingContract) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
@@ -332,7 +458,7 @@ func (c *jsonCostAccountingContract) ClassifyCostOutcome(info *relaycommon.Relay
 		return types.CostOutcome{Status: types.CostAttemptUnknown, FailureCode: "upstream_transport_ambiguous"}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return types.CostOutcome{Status: types.CostAttemptUnknown, UpstreamAccepted: true, FailureCode: "upstream_response_rejected"}
+		return types.CostOutcome{Status: types.CostAttemptNotDispatched, FailureCode: "upstream_response_rejected"}
 	}
 	outcome := types.CostOutcome{Status: types.CostAttemptAwaitingMeter, UpstreamAccepted: true}
 	return outcome
@@ -396,6 +522,12 @@ func CostCapabilitiesForRoute(channelType int, requestPath string, taskPlatform 
 	if strings.Contains(requestPath, "/realtime") || strings.Contains(requestPath, "/mj") {
 		return types.CostCapabilities{}
 	}
+	if isOpenAIImagesPath(requestPath) {
+		if !isOpenAIImagesChannelType(channelType) {
+			return types.CostCapabilities{}
+		}
+		return openAIImagesCostContract().CostCapabilities(nil)
+	}
 	if taskPlatform != "" {
 		return taskCostCapabilities(taskPlatform)
 	}
@@ -408,6 +540,29 @@ func CostCapabilitiesForRoute(channelType int, requestPath string, taskPlatform 
 		return types.CostCapabilities{}
 	}
 	return contract.CostCapabilities(&relaycommon.RelayInfo{RequestURLPath: requestPath})
+}
+
+func isOpenAIImagesPath(requestPath string) bool {
+	switch strings.ToLower(strings.TrimSpace(relaycommon.SafeRequestPath(requestPath))) {
+	case "/v1/images/generations", "/v1/images/edits":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOpenAIImagesChannelType(channelType int) bool {
+	switch channelType {
+	case constant.ChannelTypeOpenAI,
+		constant.ChannelTypeAzure,
+		constant.ChannelTypeOpenAIMax,
+		constant.ChannelTypeCustom,
+		constant.ChannelTypeOpenRouter,
+		constant.ChannelTypeXinference:
+		return true
+	default:
+		return false
+	}
 }
 
 func costContractForAPIType(apiType int) channel.CostAccountingAdaptor {

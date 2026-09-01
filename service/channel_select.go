@@ -20,6 +20,7 @@ type RetryParam struct {
 	TokenGroup         string
 	ModelName          string
 	RequestPath        string
+	ImageRequest       *ImageRequestContext
 	Retry              *int
 	RoutingInput       *modelrouting.FactsInput
 	ExcludedChannelIDs map[int]struct{}

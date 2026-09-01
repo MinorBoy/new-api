@@ -75,6 +75,36 @@ func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	require.Equal(t, 1488, chatSummary.Quota)
 }
 
+func TestCalculateTextQuotaSummaryUsesFrozenImageSnapshotWithoutTokenUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAIImage,
+		OriginModelName: "gpt-image-1",
+		PriceData: hosttypes.PriceData{
+			UsePrice:       true,
+			GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+		ImageBillingSnapshot: &hosttypes.ImageBillingSnapshot{
+			CatalogVersion:   1,
+			Model:            "gpt-image-1",
+			Endpoint:         "generations",
+			SKUKey:           "gen-1024x1024-medium",
+			UnitSalePriceUSD: "0.04",
+			RequestedImages:  2,
+			GroupRatio:       "1",
+			QuotaPerUnit:     "1000000",
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{})
+
+	assert.Equal(t, 80000, summary.Quota)
+}
+
 func TestCalculateTextQuotaSummaryUsesSplitClaudeCacheCreationRatios(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

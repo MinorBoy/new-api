@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -77,7 +78,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		defer closer.Close()
 		info.UpstreamRequestBodySize = size
 		requestBody = body
-	} else if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	} else if (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) && !service.HasImageModel(imageReq.Model) {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -90,6 +91,21 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		requestBody = common.ReaderOnly(storage)
+	} else if (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) && service.HasImageModel(imageReq.Model) && strings.HasPrefix(strings.ToLower(c.Request.Header.Get("Content-Type")), "application/json") {
+		jsonData, err := buildUnifiedImageRequestBody(c, *request)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if err := ConfirmCostIdentity(adaptor, info, jsonData); err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		defer closer.Close()
+		info.UpstreamRequestBodySize = size
+		requestBody = body
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
@@ -225,6 +241,57 @@ func buildSeedreamImageRequestBody(c *gin.Context, upstreamModel string) ([]byte
 			return nil, err
 		}
 		fields["model"] = modelJSON
+	}
+	return common.Marshal(fields)
+}
+
+func buildUnifiedImageRequestBody(c *gin.Context, request dto.ImageRequest) ([]byte, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, err
+	}
+	rawBody, err := storage.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(rawBody, &fields); err != nil {
+		return nil, fmt.Errorf("invalid unified image request body: %w", err)
+	}
+	if fields == nil {
+		return nil, errors.New("unified image request body must be a JSON object")
+	}
+
+	setField := func(name string, value any) error {
+		encoded, encodeErr := common.Marshal(value)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		fields[name] = encoded
+		return nil
+	}
+	if err := setField("model", request.Model); err != nil {
+		return nil, err
+	}
+	if request.N != nil {
+		if err := setField("n", *request.N); err != nil {
+			return nil, err
+		}
+	}
+	if request.Size != "" {
+		if err := setField("size", request.Size); err != nil {
+			return nil, err
+		}
+	}
+	if request.Quality != "" {
+		if err := setField("quality", request.Quality); err != nil {
+			return nil, err
+		}
+	}
+	if request.ResponseFormat != "" {
+		if err := setField("response_format", request.ResponseFormat); err != nil {
+			return nil, err
+		}
 	}
 	return common.Marshal(fields)
 }

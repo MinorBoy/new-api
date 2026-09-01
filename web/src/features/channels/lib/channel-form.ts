@@ -250,6 +250,10 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    image_profile: z
+      .string()
+      .optional()
+      .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
   })
   .superRefine((data, ctx) => {
     if (data.type === SECURE_CHANNEL_TYPE && !data.secure_video_group) {
@@ -437,6 +441,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  image_profile: '',
   advanced_custom: '',
   secure_video_group: undefined,
 }
@@ -496,6 +501,7 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
   let secureVideoGroup: 'discount' | 'overseas' | 'enterprise' | undefined
+  let imageProfile = ''
 
   if (channel.settings) {
     try {
@@ -523,6 +529,9 @@ export function transformChannelToFormDefaults(
         : ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
+      }
+      if (parsed.image_profile) {
+        imageProfile = JSON.stringify(parsed.image_profile, null, 2)
       }
       if (
         channel.type === SECURE_CHANNEL_TYPE &&
@@ -584,6 +593,7 @@ export function transformChannelToFormDefaults(
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     advanced_custom: advancedCustom,
     secure_video_group: secureVideoGroup,
+    image_profile: imageProfile,
   }
 }
 
@@ -623,6 +633,16 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.vertex_key_type = formData.vertex_key_type || 'json'
   } else if ('vertex_key_type' in settingsObj) {
     delete settingsObj.vertex_key_type
+  }
+
+  if (formData.image_profile?.trim()) {
+    try {
+      settingsObj.image_profile = JSON.parse(formData.image_profile)
+    } catch {
+      // Schema validation reports malformed JSON before submission.
+    }
+  } else {
+    delete settingsObj.image_profile
   }
 
   // Add azure_responses_version for Azure channels (type 3)

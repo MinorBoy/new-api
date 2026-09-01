@@ -63,6 +63,17 @@ const perRequestCostRuleFormSchema = z.strictObject({
   ...paidFieldSchemas,
   unit_price: positiveDecimalSchema,
 })
+const perImageCostRuleFormSchema = z
+  .strictObject({
+    cost_mode: z.literal('per_image'),
+    ...paidFieldSchemas,
+    meter_source: z.enum(['validated_request', 'upstream_actual']),
+    unit_price: positiveDecimalSchema,
+  })
+  .refine((values) => values.charge_event === 'response_succeeded', {
+    message: 'Per-image rules require response-succeeded charge event',
+    path: ['charge_event'],
+  })
 const perDurationCostRuleFormSchema = z
   .strictObject({
     cost_mode: z.literal('per_duration'),
@@ -106,6 +117,7 @@ const splitTokenCostRuleFormSchema = z.strictObject({
 export const costRuleFormSchema = z.union([
   freeCostRuleFormSchema,
   perRequestCostRuleFormSchema,
+  perImageCostRuleFormSchema,
   perDurationCostRuleFormSchema,
   totalTokenCostRuleFormSchema,
   completionTokenCostRuleFormSchema,
@@ -194,6 +206,15 @@ export function parseCostRuleForm(
   if (values.cost_mode === 'per_request') {
     return {
       ...paidFields,
+      unit_price: values.unit_price,
+      normalized_usd_prices: {},
+    }
+  }
+
+  if (values.cost_mode === 'per_image') {
+    return {
+      ...paidFields,
+      meter_source: values.meter_source,
       unit_price: values.unit_price,
       normalized_usd_prices: {},
     }

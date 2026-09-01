@@ -1244,8 +1244,16 @@ func prepareStrictCostRoutingServiceTest(t *testing.T) {
 	service.InvalidateCostCoverage(0, "", "")
 
 	previousLookup := service.CostCapabilityLookup
-	service.CostCapabilityLookup = func(int, string, constant.TaskPlatform) types.CostCapabilities {
-		return types.CostCapabilities{CanResolveBillableModel: true}
+	service.CostCapabilityLookup = func(_ int, requestPath string, _ constant.TaskPlatform) types.CostCapabilities {
+		capabilities := types.CostCapabilities{CanResolveBillableModel: true}
+		if requestPath == "/v1/images/generations" || requestPath == "/v1/images/edits" {
+			capabilities.ChargeEvents = []types.CostChargeEvent{types.CostChargeResponseSucceeded}
+			capabilities.MeterSources = []types.CostMeterSource{
+				types.CostMeterValidatedRequest,
+				types.CostMeterUpstreamActual,
+			}
+		}
+		return capabilities
 	}
 	costConfig := config.GlobalConfig.Get(cost_setting.ConfigName)
 	require.NotNil(t, costConfig)

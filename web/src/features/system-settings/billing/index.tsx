@@ -40,6 +40,8 @@ const defaultBillingSettings: BillingSettings = {
   DisplayInCurrencyEnabled: true,
   DisplayTokenStatEnabled: true,
   ModelPrice: '',
+  ImageModelCatalog: '{"version":1,"models":{}}',
+  ImageRoutingPolicy: '{"version":1,"default":{"strategy":"manual"}}',
   ModelRatio: '',
   CacheRatio: '',
   CreateCacheRatio: '',

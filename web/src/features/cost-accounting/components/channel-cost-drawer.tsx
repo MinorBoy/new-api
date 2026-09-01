@@ -237,6 +237,9 @@ function rulePrice(
   if (rule.cost_mode === 'per_request') {
     return `${currency} ${prices.unit_price ?? '-'} · ${t('Per request')}`
   }
+  if (rule.cost_mode === 'per_image') {
+    return `${currency} ${prices.unit_price ?? '-'} · ${t('Per image')}`
+  }
   if (rule.cost_mode === 'per_duration') {
     return `${currency} ${prices.price_per_second ?? '-'} · ${t('Per second')}`
   }
@@ -255,6 +258,7 @@ function ruleModeLabel(rule: CostRule | null, t: TFunction) {
   if (!rule) return t('Not configured')
   if (rule.cost_mode === 'free') return t('Free')
   if (rule.cost_mode === 'per_request') return t('Per request')
+  if (rule.cost_mode === 'per_image') return t('Per image')
   if (rule.cost_mode === 'per_duration') return t('Per duration')
   return t('Per token')
 }

@@ -206,6 +206,10 @@ func listSatisfiedChannelsDB(group, modelName, requestPath string, filter Channe
 	}
 	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, modelName)
 	abilities = filterAbilitiesByChannelSelectFilter(abilities, filter)
+	abilities, err = filterAbilitiesByEnabledChannelStatus(abilities)
+	if err != nil {
+		return nil, err
+	}
 	if len(abilities) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
 		if normalizedModel == "" || normalizedModel == modelName {
@@ -217,6 +221,10 @@ func listSatisfiedChannelsDB(group, modelName, requestPath string, filter Channe
 		}
 		abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, modelName)
 		abilities = filterAbilitiesByChannelSelectFilter(abilities, filter)
+		abilities, err = filterAbilitiesByEnabledChannelStatus(abilities)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(abilities) == 0 {
 		return nil, nil
@@ -253,6 +261,42 @@ func listSatisfiedChannelsDB(group, modelName, requestPath string, filter Channe
 	}
 	sortSatisfiedChannels(candidates)
 	return candidates, nil
+}
+
+// filterAbilitiesByEnabledChannelStatus keeps the DB candidate path aligned
+// with the memory cache, which only indexes enabled channels. Ability rows can
+// briefly remain enabled while a channel status update is being propagated, so
+// channel status is checked explicitly here instead of relying on that cache.
+func filterAbilitiesByEnabledChannelStatus(abilities []Ability) ([]Ability, error) {
+	if len(abilities) == 0 {
+		return abilities, nil
+	}
+	channelIDs := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, ok := seen[ability.ChannelId]; ok {
+			continue
+		}
+		seen[ability.ChannelId] = struct{}{}
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+	var enabledIDs []int
+	if err := DB.Model(&Channel{}).
+		Where("id IN ? AND status = ?", channelIDs, common.ChannelStatusEnabled).
+		Pluck("id", &enabledIDs).Error; err != nil {
+		return nil, err
+	}
+	enabled := make(map[int]struct{}, len(enabledIDs))
+	for _, channelID := range enabledIDs {
+		enabled[channelID] = struct{}{}
+	}
+	filtered := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if _, ok := enabled[ability.ChannelId]; ok {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered, nil
 }
 
 func sortSatisfiedChannels(candidates []SatisfiedChannel) {

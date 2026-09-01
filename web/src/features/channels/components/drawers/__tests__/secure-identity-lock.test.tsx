@@ -148,7 +148,44 @@ const secureChannel: Channel = {
   routing_target_count: 0,
 }
 
-function createQueryClient(): QueryClientType {
+const imageChannel: Channel = {
+  id: 69,
+  type: 1,
+  key: 'sk-image-channel-key',
+  status: 1,
+  name: 'OpenAI Images',
+  weight: 10,
+  created_time: 1,
+  test_time: 1,
+  response_time: 0,
+  base_url: 'https://api.example.com',
+  other: '',
+  balance: 0,
+  balance_updated_time: 1,
+  models: 'gpt-image-1',
+  group: 'image',
+  used_quota: 0,
+  priority: 10,
+  auto_ban: 1,
+  other_info: '',
+  remark: '',
+  max_input_tokens: 0,
+  channel_info: {
+    is_multi_key: false,
+    multi_key_size: 0,
+    multi_key_polling_index: 0,
+    multi_key_mode: 'random',
+  },
+  settings: JSON.stringify({
+    image_profile: {
+      profile: 'openai_images',
+      profile_version: 1,
+    },
+  }),
+  routing_target_count: 0,
+}
+
+function createQueryClient(channel: Channel = secureChannel): QueryClientType {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -159,9 +196,9 @@ function createQueryClient(): QueryClientType {
       mutations: { retry: false },
     },
   })
-  queryClient.setQueryData(channelsQueryKeys.detail(secureChannel.id), {
+  queryClient.setQueryData(channelsQueryKeys.detail(channel.id), {
     success: true,
-    data: secureChannel,
+    data: channel,
   })
   queryClient.setQueryData(['groups'], {
     success: true,
@@ -169,7 +206,7 @@ function createQueryClient(): QueryClientType {
   })
   queryClient.setQueryData(['channel_models'], {
     success: true,
-    data: [{ id: 'video-2.0-pro' }],
+    data: [{ id: channel.models }],
   })
   queryClient.setQueryData(['prefill_groups', 'model'], {
     success: true,
@@ -178,12 +215,12 @@ function createQueryClient(): QueryClientType {
   return queryClient
 }
 
-async function mountDrawer(): Promise<{
+async function mountDrawer(channel: Channel = secureChannel): Promise<{
   root: Root
   container: { remove(): void }
   queryClient: QueryClientType
 }> {
-  const queryClient = createQueryClient()
+  const queryClient = createQueryClient(channel)
   const container = browserWindow.document.createElement('div')
   browserWindow.document.body.append(container)
   const root = createRoot(container as unknown as Container)
@@ -196,7 +233,7 @@ async function mountDrawer(): Promise<{
             <ChannelsProvider>
               <ChannelMutateDrawer
                 open
-                currentRow={secureChannel}
+                currentRow={channel}
                 onOpenChange={() => {}}
               />
             </ChannelsProvider>
@@ -258,4 +295,22 @@ test('editing a Secure channel disables its type and video group controls', asyn
     await unmountDrawer(mounted)
   }
   assert.equal(hasInvalidApiKeyDescriptionContent, false)
+})
+
+test('editing an OpenAI Images channel exposes supplier cost management', async () => {
+  const mounted = await mountDrawer(imageChannel)
+  try {
+    const button = [...browserWindow.document.querySelectorAll('button')].find(
+      (candidate) =>
+        candidate.textContent?.trim() === 'Manage supplier image costs'
+    )
+    assert.ok(button, browserWindow.document.body.innerHTML)
+    assert.equal(
+      (button as unknown as HTMLButtonElement).disabled,
+      false,
+      browserWindow.document.body.innerHTML
+    )
+  } finally {
+    await unmountDrawer(mounted)
+  }
 })

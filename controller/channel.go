@@ -664,6 +664,12 @@ func AddChannel(c *gin.Context) {
 		})
 		return
 	}
+	if addChannelRequest.Channel != nil {
+		if err := service.ClearImageCompatibility(addChannelRequest.Channel); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 
 	// 使用统一的校验函数
 	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
@@ -1103,8 +1109,24 @@ func UpdateChannel(c *gin.Context) {
 	if _, ok := requestData["setting"]; ok {
 		effectiveChannel.Setting = channel.Setting
 	}
+	if _, ok := requestData["models"]; ok {
+		effectiveChannel.Models = channel.Models
+	}
+	if _, ok := requestData["model_mapping"]; ok {
+		effectiveChannel.ModelMapping = channel.ModelMapping
+	}
 	if _, ok := requestData["settings"]; ok {
 		effectiveChannel.OtherSettings = channel.OtherSettings
+	}
+	if err := service.MergeStoredImageCompatibility(originChannel, &effectiveChannel); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if _, settingsProvided := requestData["settings"]; settingsProvided {
+		channel.OtherSettings = effectiveChannel.OtherSettings
 	}
 	if err := validateChannel(&effectiveChannel, false); err != nil {
 		c.JSON(http.StatusOK, gin.H{

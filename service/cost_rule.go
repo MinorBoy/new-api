@@ -711,7 +711,7 @@ func validateCostRuleContract(rule *model.ChannelModelCostRule, capabilities typ
 		return types.CostRuleConfigV1{}, fmt.Errorf("unsupported cost rule schema version %d", rule.SchemaVersion)
 	}
 	mode := types.CostMode(rule.CostMode)
-	if mode != types.CostModeFree && mode != types.CostModePerRequest && mode != types.CostModePerDuration && mode != types.CostModePerToken {
+	if mode != types.CostModeFree && mode != types.CostModePerRequest && mode != types.CostModePerDuration && mode != types.CostModePerToken && mode != types.CostModePerImage {
 		return types.CostRuleConfigV1{}, fmt.Errorf("unsupported cost mode %q", rule.CostMode)
 	}
 	var stored types.CostRuleConfigV1
@@ -743,6 +743,19 @@ func validateCostRuleContract(rule *model.ChannelModelCostRule, capabilities typ
 	case types.CostModePerRequest:
 		if stored.MeterSource != "" || stored.TokenMode != "" {
 			return types.CostRuleConfigV1{}, errors.New("per-request rules cannot declare meter or token modes")
+		}
+		if err := validatePositiveCostPrice(stored.UnitPrice, stored.NormalizedUSDPrices.UnitPrice); err != nil {
+			return types.CostRuleConfigV1{}, err
+		}
+	case types.CostModePerImage:
+		if stored.MeterSource != types.CostMeterValidatedRequest && stored.MeterSource != types.CostMeterUpstreamActual {
+			return types.CostRuleConfigV1{}, fmt.Errorf("unsupported image meter source %q", stored.MeterSource)
+		}
+		if stored.ChargeEvent != types.CostChargeResponseSucceeded {
+			return types.CostRuleConfigV1{}, errors.New("per-image rules require response-succeeded charge event")
+		}
+		if !containsCostMeterSource(capabilities.MeterSources, stored.MeterSource) {
+			return types.CostRuleConfigV1{}, errors.New("image meter source is not supported by the adaptor")
 		}
 		if err := validatePositiveCostPrice(stored.UnitPrice, stored.NormalizedUSDPrices.UnitPrice); err != nil {
 			return types.CostRuleConfigV1{}, err

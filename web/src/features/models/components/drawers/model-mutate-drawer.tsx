@@ -304,6 +304,8 @@ export function ModelMutateDrawer({
       'claude.thinking_adapter_enabled': true,
       'claude.thinking_adapter_budget_tokens_percentage': 0.8,
       ModelPrice: '',
+      ImageModelCatalog: '{"version":1,"models":{}}',
+      ImageRoutingPolicy: '{"version":1,"default":{"strategy":"manual"}}',
       ModelRatio: '',
       CacheRatio: '',
       CompletionRatio: '',

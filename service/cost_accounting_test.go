@@ -257,6 +257,42 @@ func TestPrepareCostAttemptIgnoresValidatedDurationCandidateForUpstreamActualRul
 	assert.JSONEq(t, `{}`, attempt.RequestMeterJSON)
 }
 
+func TestPrepareCostAttemptPersistsValidatedImageCountForPerImageRule(t *testing.T) {
+	prepareCostAttemptServiceDB(t)
+	unitPrice := "0.25"
+	config := types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &unitPrice, ChargeEvent: types.CostChargeResponseSucceeded,
+		MeterSource: types.CostMeterValidatedRequest,
+	}
+	seedActiveAttemptRule(t, types.CostModePerImage, config)
+	count := int64(3)
+	input := preparedAttemptInput()
+	input.RequestPath = "/v1/images/generations"
+	input.RequestMeter = &types.CostMeter{Source: types.CostMeterValidatedRequest, ImageCount: &count}
+
+	handle, err := PrepareCostAttempt(context.Background(), input)
+	require.NoError(t, err)
+	attempt := loadCostAttempt(t, handle.AttemptID)
+	assert.JSONEq(t, `{"source":"validated_request","image_count":3}`, attempt.RequestMeterJSON)
+
+	require.NoError(t, AuthorizeCostDispatch(context.Background(), handle))
+	require.NoError(t, RecordCostDispatchOutcome(context.Background(), handle, types.CostOutcome{
+		Status: types.CostAttemptAwaitingMeter, UpstreamAccepted: true,
+	}))
+	require.NoError(t, SettleSyncCostAttempt(context.Background(), handle, types.CostMeter{}))
+	settled := loadCostAttempt(t, handle.AttemptID)
+	assert.Equal(t, int64(750_000_000), *settled.CostNanoUSD)
+}
+
+func TestValidateCostMeterBoundsRejectsInvalidImageCount(t *testing.T) {
+	for _, count := range []*int64{int64Pointer(0), int64Pointer(-1), int64Pointer(129)} {
+		err := validateCostMeterBounds(types.CostMeter{ImageCount: count})
+		require.Error(t, err)
+	}
+}
+
 func TestRecordCostDispatchOutcomeClassifiesZeroAndAmbiguousFailures(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	seedActiveAttemptRule(t, types.CostModeFree, types.CostRuleConfigV1{ZeroCostReason: "contract"})

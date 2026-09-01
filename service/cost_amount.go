@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 )
@@ -79,6 +80,8 @@ func NormalizeCostRuleConfig(mode types.CostMode, in types.CostRuleConfigV1) (ty
 	switch mode {
 	case types.CostModePerRequest:
 		in.UnitPrice, in.NormalizedUSDPrices.UnitPrice, err = normalizePrice(in.UnitPrice, factor, "unit price")
+	case types.CostModePerImage:
+		in.UnitPrice, in.NormalizedUSDPrices.UnitPrice, err = normalizePrice(in.UnitPrice, factor, "unit price")
 	case types.CostModePerDuration:
 		in.PricePerSecond, in.NormalizedUSDPrices.PricePerSecond, err = normalizePrice(in.PricePerSecond, factor, "price per second")
 	case types.CostModePerToken:
@@ -110,6 +113,8 @@ func validateRulePriceShape(mode types.CostMode, config types.CostRuleConfigV1) 
 	case types.CostModeFree:
 		hasUnusedPrice = hasConfiguredPrice(config.UnitPrice, config.PricePerSecond, config.TotalPerMillion, config.CompletionPerMillion, config.InputPerMillion, config.OutputPerMillion)
 	case types.CostModePerRequest:
+		hasUnusedPrice = hasConfiguredPrice(config.PricePerSecond, config.TotalPerMillion, config.CompletionPerMillion, config.InputPerMillion, config.OutputPerMillion)
+	case types.CostModePerImage:
 		hasUnusedPrice = hasConfiguredPrice(config.PricePerSecond, config.TotalPerMillion, config.CompletionPerMillion, config.InputPerMillion, config.OutputPerMillion)
 	case types.CostModePerDuration:
 		hasUnusedPrice = hasConfiguredPrice(config.UnitPrice, config.TotalPerMillion, config.CompletionPerMillion, config.InputPerMillion, config.OutputPerMillion)
@@ -150,6 +155,14 @@ func CalculateAttemptCost(mode types.CostMode, config types.CostRuleConfigV1, me
 	switch mode {
 	case types.CostModePerRequest:
 		originalCost, normalizedCost, err = calculatePricePair(config.UnitPrice, config.NormalizedUSDPrices.UnitPrice, decimal.NewFromInt(1))
+	case types.CostModePerImage:
+		if meter.ImageCount == nil {
+			return "", 0, fmt.Errorf("%w: image count meter is missing", ErrInvalidCostAmount)
+		}
+		if *meter.ImageCount < 1 || *meter.ImageCount > int64(relaydto.MaxImageN) {
+			return "", 0, fmt.Errorf("%w: image count must be between 1 and %d", ErrInvalidCostAmount, relaydto.MaxImageN)
+		}
+		originalCost, normalizedCost, err = calculatePricePair(config.UnitPrice, config.NormalizedUSDPrices.UnitPrice, decimal.NewFromInt(*meter.ImageCount))
 	case types.CostModePerDuration:
 		if meter.DurationSeconds == nil {
 			return "", 0, fmt.Errorf("%w: duration meter is missing", ErrInvalidCostAmount)

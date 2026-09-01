@@ -53,6 +53,26 @@ func TestListSupplierCostCatalogProjectsAllCostModes(t *testing.T) {
 	assert.Equal(t, []string{"input_per_million", "output_per_million"}, []string{inputOutput.Prices[0].Key, inputOutput.Prices[1].Key})
 }
 
+func TestListSupplierCostCatalogProjectsPerImagePrice(t *testing.T) {
+	prepareCostCatalogServiceDB(t)
+	channel := model.Channel{Id: 7, Name: "Images", Type: 1, Key: "image-secret"}
+	require.NoError(t, model.DB.Create(&channel).Error)
+	config := validCatalogCostConfig("USD")
+	config.UnitPrice = catalogStringPointer("0.04")
+	config.MeterSource = types.CostMeterUpstreamActual
+	config.ChargeEvent = types.CostChargeResponseSucceeded
+	rule := catalogCostRule(t, channel.Id, "gpt-image-1", 1, types.CostRuleActive, types.CostModePerImage, config, "manual")
+	require.NoError(t, model.DB.Create(&rule).Error)
+
+	page, err := ListSupplierCostCatalog(CostCatalogFilter{Status: "active", Page: 1, PageSize: 25})
+	require.NoError(t, err)
+	item := findCatalogItem(t, page.Items, "gpt-image-1")
+	require.Len(t, item.Prices, 1)
+	assert.Equal(t, "unit_price", item.Prices[0].Key)
+	assert.Equal(t, "per_image", item.Prices[0].Unit)
+	assert.Equal(t, "0.04", item.Prices[0].NativeAmount)
+}
+
 func TestListSupplierCostCatalogUsesFullPerRequestPriceAndComparisonOnly(t *testing.T) {
 	prepareCostCatalogServiceDB(t)
 	seedCostCatalogServiceRows(t)

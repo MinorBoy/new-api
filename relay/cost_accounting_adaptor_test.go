@@ -56,6 +56,40 @@ func TestCostCapabilitiesExcludeUnsupportedRealtimePath(t *testing.T) {
 	assert.Empty(t, uncovered.MeterSources)
 }
 
+func TestOpenAIImagesCostCapabilitiesExposeImageMetersOnlyForCompatibleChannels(t *testing.T) {
+	for _, path := range []string{"/v1/images/generations", "/v1/images/edits"} {
+		capabilities := CostCapabilitiesForRoute(constant.ChannelTypeOpenAI, path, "")
+		assert.True(t, capabilities.CanResolveBillableModel)
+		assert.Equal(t, []types.CostChargeEvent{types.CostChargeResponseSucceeded}, capabilities.ChargeEvents)
+		assert.ElementsMatch(t, []types.CostMeterSource{
+			types.CostMeterValidatedRequest, types.CostMeterUpstreamActual,
+		}, capabilities.MeterSources)
+	}
+
+	nativeGemini := CostCapabilitiesForRoute(constant.ChannelTypeGemini, "/v1/images/generations", "")
+	assert.False(t, nativeGemini.CanResolveBillableModel)
+	assert.Empty(t, nativeGemini.MeterSources)
+}
+
+func TestOpenAIImagesNormalizeCostMeterPrefersActualCountAndFallsBackToRequest(t *testing.T) {
+	contract := openAIImagesCostContract()
+	requested := int64(3)
+	info := &relaycommon.RelayInfo{}
+	info.PriceData.AddOtherRatio("n", float64(requested))
+
+	actual, err := contract.NormalizeCostMeter(info, &dto.Usage{GeneratedImages: 2})
+	require.NoError(t, err)
+	assert.Equal(t, types.CostMeterUpstreamActual, actual.Source)
+	require.NotNil(t, actual.ImageCount)
+	assert.Equal(t, int64(2), *actual.ImageCount)
+
+	fallback, err := contract.NormalizeCostMeter(info, &dto.Usage{})
+	require.NoError(t, err)
+	assert.Equal(t, types.CostMeterValidatedRequest, fallback.Source)
+	require.NotNil(t, fallback.ImageCount)
+	assert.Equal(t, requested, *fallback.ImageCount)
+}
+
 func TestTaskCostCapabilitiesAreRegisteredPerPlatform(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -174,6 +208,17 @@ func TestPerRequestCostWaitsForProtocolSuccess(t *testing.T) {
 	assert.Equal(t, types.CostAttemptAwaitingMeter, outcome.Status)
 }
 
+func TestJsonCostContractMarksHTTPRejectionAsNotDispatched(t *testing.T) {
+	contract := jsonModelCostContract()
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadRequest} {
+		outcome := contract.ClassifyCostOutcome(&relaycommon.RelayInfo{
+			CostAttempt: &types.CostAttemptHandle{CostMode: types.CostModePerImage},
+		}, &http.Response{StatusCode: status}, nil)
+		assert.Equal(t, types.CostAttemptNotDispatched, outcome.Status)
+		assert.False(t, outcome.UpstreamAccepted)
+	}
+}
+
 func TestProviderContractCanExplicitlyConfirmNoCharge(t *testing.T) {
 	wrapped := &costAccountingAdaptor{contract: &knownNoChargeCostContract{jsonModelCostContract()}}
 	outcome := wrapped.ClassifyCostOutcome(&relaycommon.RelayInfo{}, &http.Response{StatusCode: http.StatusBadRequest}, nil)
@@ -253,6 +298,50 @@ func TestStrictCostAdaptorPersistsDispatchAuthorizationBeforeTransport(t *testin
 	_, apiErr := wrapped.DoResponse(ctx, response.(*http.Response), info)
 	require.Nil(t, apiErr)
 	assert.Equal(t, string(types.CostAttemptSettled), loadRelayCostAttempt(t, info.CostAttempt.AttemptID).Status)
+}
+
+func TestStrictPerImageCostAdaptorRechecksAndDispatchesWithFrozenImageCount(t *testing.T) {
+	fake := &costTransportAdaptor{}
+	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-image-strict", fake)
+	require.NoError(t, model.DB.Where("channel_id = ?", info.ChannelId).Delete(&model.ChannelModelCostRule{}).Error)
+
+	const variant = "gen-1024x1024-medium"
+	unitPrice := "0.0002"
+	ruleConfig, err := service.NormalizeCostRuleConfig(types.CostModePerImage, types.CostRuleConfigV1{
+		Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+		RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+		UnitPrice: &unitPrice, ChargeEvent: types.CostChargeResponseSucceeded,
+		MeterSource: types.CostMeterValidatedRequest,
+	})
+	require.NoError(t, err)
+	configJSON, err := common.Marshal(ruleConfig)
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	require.NoError(t, model.DB.Create(&model.ChannelModelCostRule{
+		ChannelID: info.ChannelId, BillableUpstreamModel: info.BillableUpstreamModel,
+		CostVariantKey: variant, Version: 1, Status: string(types.CostRuleActive),
+		CostMode: string(types.CostModePerImage), SchemaVersion: 1, ConfigJSON: string(configJSON),
+		Source: "manual", EffectiveFrom: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error)
+	service.InvalidateCostCoverage(info.ChannelId, info.BillableUpstreamModel, variant)
+
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	common.SetContextKey(ctx, constant.ContextKeyRoutingCostVariant, variant)
+	info.RequestURLPath = "/v1/images/generations"
+	info.ImageBillingSnapshot = &types.ImageBillingSnapshot{RequestedImages: 2}
+
+	response, err := wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{"model":"vendor-model","n":2}`)))
+	if err != nil {
+		var eligibilityErr *service.ProfitEligibilityError
+		if errors.As(err, &eligibilityErr) {
+			require.Failf(t, "strict image request failed profit recheck", "reason=%s", eligibilityErr.Reason)
+		}
+		require.NoError(t, err)
+	}
+	require.NotNil(t, response)
+	assert.True(t, fake.called)
+	require.NotNil(t, info.CostAttempt)
+	assert.Equal(t, types.CostModePerImage, info.CostAttempt.CostMode)
 }
 
 func TestStrictCostAdaptorRejectsSnapshotChangedBeforePrepare(t *testing.T) {

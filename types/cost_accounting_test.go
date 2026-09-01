@@ -15,9 +15,10 @@ func TestCostModesExposeCompleteContract(t *testing.T) {
 		types.CostModePerRequest,
 		types.CostModePerDuration,
 		types.CostModePerToken,
+		types.CostModePerImage,
 	}
 
-	assert.Equal(t, []types.CostMode{"free", "per_request", "per_duration", "per_token"}, modes)
+	assert.Equal(t, []types.CostMode{"free", "per_request", "per_duration", "per_token", "per_image"}, modes)
 }
 
 func TestCostAccountingModesExposeTrackingContract(t *testing.T) {
@@ -35,4 +36,13 @@ func TestCostMeterPreservesExplicitZeroAndMissingValues(t *testing.T) {
 	data, err := common.Marshal(meter)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"source":"upstream_usage","input_tokens":0}`, string(data))
+}
+
+func TestCostMeterPreservesExplicitImageCountZero(t *testing.T) {
+	zero := int64(0)
+	meter := types.CostMeter{Source: types.CostMeterValidatedRequest, ImageCount: &zero}
+
+	data, err := common.Marshal(meter)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"source":"validated_request","image_count":0}`, string(data))
 }

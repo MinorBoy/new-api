@@ -30,6 +30,10 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 		require.NoError(t, writer.WriteField("prompt", prompt))
 		require.NoError(t, writer.WriteField("stream", "true"))
 		require.NoError(t, writer.WriteField("partial_images", "3"))
+		require.NoError(t, writer.WriteField("n", "3"))
+		require.NoError(t, writer.WriteField("size", "256x256"))
+		require.NoError(t, writer.WriteField("quality", "low"))
+		require.NoError(t, writer.WriteField("response_format", "url"))
 		part, err := writer.CreateFormFile("image", "input.png")
 		require.NoError(t, err)
 		_, err = part.Write([]byte("fake image"))
@@ -47,9 +51,13 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 			RelayMode: relayconstant.RelayModeImagesEdits,
 		}
 		request := dto.ImageRequest{
-			Model:  "gpt-image-1",
-			Prompt: prompt,
-			Stream: common.GetPointer(true),
+			Model:          "vendor-image",
+			Prompt:         prompt,
+			N:              common.GetPointer(uint(1)),
+			Size:           "1024x1024",
+			Quality:        "medium",
+			ResponseFormat: "b64_json",
+			Stream:         common.GetPointer(true),
 		}
 
 		converted, err := (&Adaptor{}).ConvertImageRequest(c, info, request)
@@ -61,10 +69,14 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 		replayedRequest.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 		require.NoError(t, replayedRequest.ParseMultipartForm(32<<20))
 
-		require.Equal(t, "gpt-image-1", replayedRequest.PostForm.Get("model"))
+		require.Equal(t, "vendor-image", replayedRequest.PostForm.Get("model"))
 		require.Equal(t, prompt, replayedRequest.PostForm.Get("prompt"))
 		require.Equal(t, "true", replayedRequest.PostForm.Get("stream"))
 		require.Equal(t, "3", replayedRequest.PostForm.Get("partial_images"))
+		require.Equal(t, "1", replayedRequest.PostForm.Get("n"))
+		require.Equal(t, "1024x1024", replayedRequest.PostForm.Get("size"))
+		require.Equal(t, "medium", replayedRequest.PostForm.Get("quality"))
+		require.Equal(t, "b64_json", replayedRequest.PostForm.Get("response_format"))
 		require.Len(t, replayedRequest.MultipartForm.File["image"], 1)
 
 		file, err := replayedRequest.MultipartForm.File["image"][0].Open()

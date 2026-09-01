@@ -44,6 +44,8 @@ const defaultModelSettings: ModelSettings = {
   'grok.violation_deduction_enabled': true,
   'grok.violation_deduction_amount': 0.05,
   ModelPrice: '',
+  ImageModelCatalog: '{"version":1,"models":{}}',
+  ImageRoutingPolicy: '{"version":1,"default":{"strategy":"manual"}}',
   ModelRatio: '',
   CacheRatio: '',
   CreateCacheRatio: '',

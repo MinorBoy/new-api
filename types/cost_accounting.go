@@ -52,6 +52,7 @@ const (
 	CostModePerRequest  CostMode = "per_request"
 	CostModePerDuration CostMode = "per_duration"
 	CostModePerToken    CostMode = "per_token"
+	CostModePerImage    CostMode = "per_image"
 )
 
 type CostRuleStatus string
@@ -119,6 +120,7 @@ const (
 
 type CostMeter struct {
 	Source           CostMeterSource `json:"source"`
+	ImageCount       *int64          `json:"image_count,omitempty"`
 	DurationSeconds  *string         `json:"duration_seconds,omitempty"`
 	InputTokens      *int64          `json:"input_tokens,omitempty"`
 	OutputTokens     *int64          `json:"output_tokens,omitempty"`

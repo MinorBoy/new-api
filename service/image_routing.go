@@ -20,21 +20,30 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+var (
+	ErrNoCompatibleImageChannel = errors.New("no compatible image channel is available")
+	ErrNoEligibleImageChannel   = errors.New("no eligible image channel is available")
+)
+
 // ImageRouteCandidate is the admin-safe routing snapshot for one image
 // channel. Estimated amounts are expressed in nano-USD and are never exposed
 // to ordinary users by the relay error path.
 type ImageRouteCandidate struct {
-	ChannelID               int
-	Priority                int
-	Weight                  int
-	UpstreamModel           string
-	SKUKey                  string
-	CostKnown               bool
-	EstimatedCostNanoUSD    int64
-	EstimatedRevenueNanoUSD int64
-	RuleID                  int64
-	RuleVersion             int
-	ExclusionReason         string
+	ChannelID               int    `json:"channel_id"`
+	ChannelName             string `json:"channel_name,omitempty"`
+	Priority                int    `json:"priority"`
+	Weight                  int    `json:"weight"`
+	UpstreamModel           string `json:"upstream_model,omitempty"`
+	SKUKey                  string `json:"sku_key,omitempty"`
+	CostKnown               bool   `json:"cost_known"`
+	EstimatedCostNanoUSD    int64  `json:"estimated_cost_nano_usd,omitempty"`
+	EstimatedRevenueNanoUSD int64  `json:"estimated_revenue_nano_usd,omitempty"`
+	EstimatedCostUSD        string `json:"estimated_cost_usd,omitempty"`
+	EstimatedRevenueUSD     string `json:"estimated_revenue_usd,omitempty"`
+	RuleID                  int64  `json:"rule_id,omitempty"`
+	RuleVersion             int    `json:"rule_version,omitempty"`
+	ExclusionReason         string `json:"exclusion_reason,omitempty"`
+	EffectiveWeight         int    `json:"-"`
 }
 
 // ImageRouteDecision contains the complete candidate audit snapshot and the
@@ -45,6 +54,18 @@ type ImageRouteDecision struct {
 	Strategy   image_setting.Strategy
 	Selected   *ImageRouteCandidate
 	Candidates []ImageRouteCandidate
+}
+
+// PreviewImageRoute builds the same cost-aware decision used by dispatch, but
+// does not mutate channel state or send an upstream request. It is intended for
+// administrator previews and diagnostics.
+func PreviewImageRoute(ctx *gin.Context, group, modelName, requestPath string, request ImageRequestContext) (ImageRouteDecision, error) {
+	param := &RetryParam{Ctx: ctx, TokenGroup: group, ModelName: modelName, RequestPath: requestPath, ImageRequest: &request}
+	candidates, err := model.ListSatisfiedChannels(group, modelName, requestPath, model.ChannelSelectFilter{})
+	if err != nil {
+		return ImageRouteDecision{}, err
+	}
+	return BuildImageRouteDecision(param, group, candidates)
 }
 
 // imageRouteWeightSelector is kept injectable for deterministic routing tests.
@@ -100,6 +121,113 @@ func SelectImageRouteCandidate(candidates []ImageRouteCandidate) *ImageRouteCand
 	return selected
 }
 
+const defaultImageCostToleranceBPS = 1000
+
+// BuildCostWeightedImageRoutePool retains known-cost candidates within the
+// configured tolerance of the cheapest candidate and assigns each an
+// integer weight that combines the existing channel weight with inverse cost.
+// The returned slice is a copy and the input candidates are never modified.
+func BuildCostWeightedImageRoutePool(candidates []ImageRouteCandidate, toleranceBPS *int) []ImageRouteCandidate {
+	known := make([]ImageRouteCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.CostKnown && candidate.EstimatedCostNanoUSD >= 0 {
+			known = append(known, candidate)
+		}
+	}
+	if len(known) == 0 {
+		return []ImageRouteCandidate{}
+	}
+	tolerance := defaultImageCostToleranceBPS
+	if toleranceBPS != nil {
+		tolerance = *toleranceBPS
+		if tolerance < 0 {
+			tolerance = 0
+		}
+		if tolerance > 10000 {
+			tolerance = 10000
+		}
+	}
+	minCost := known[0].EstimatedCostNanoUSD
+	for _, candidate := range known[1:] {
+		if candidate.EstimatedCostNanoUSD < minCost {
+			minCost = candidate.EstimatedCostNanoUSD
+		}
+	}
+	upperBound := decimal.NewFromInt(minCost).
+		Mul(decimal.NewFromInt(int64(10000 + tolerance))).
+		Div(decimal.NewFromInt(10000))
+
+	pool := make([]ImageRouteCandidate, 0, len(known))
+	for _, candidate := range known {
+		cost := decimal.NewFromInt(candidate.EstimatedCostNanoUSD)
+		if cost.GreaterThan(upperBound) {
+			continue
+		}
+		candidate.EffectiveWeight = imageCostWeightedEffectiveWeight(candidate.Weight, minCost, candidate.EstimatedCostNanoUSD)
+		pool = append(pool, candidate)
+	}
+	sort.SliceStable(pool, func(i, j int) bool {
+		if pool[i].EstimatedCostNanoUSD != pool[j].EstimatedCostNanoUSD {
+			return pool[i].EstimatedCostNanoUSD < pool[j].EstimatedCostNanoUSD
+		}
+		return pool[i].ChannelID < pool[j].ChannelID
+	})
+	return pool
+}
+
+func imageCostWeightedEffectiveWeight(baseWeight int, minimumCost, candidateCost int64) int {
+	base := int64(baseWeight)
+	if base < 0 {
+		base = 0
+	}
+	if base > int64(maxInt()-10) {
+		base = int64(maxInt() - 10)
+	}
+	base += 10
+	if base < 1 {
+		base = 1
+	}
+	if minimumCost == 0 {
+		if candidateCost == 0 {
+			return int(base)
+		}
+		return 1
+	}
+	if candidateCost <= 0 {
+		return int(base)
+	}
+	// Keep six decimal places of inverse-cost precision before rounding down
+	// to an integer selector weight. Decimal avoids int64 multiplication
+	// overflow when provider costs approach the storage limit.
+	scale := decimal.NewFromInt(1_000_000)
+	factor := decimal.NewFromInt(minimumCost).Mul(scale).Div(decimal.NewFromInt(candidateCost))
+	weight := decimal.NewFromInt(base).Mul(factor).IntPart() / 1_000_000
+	if weight < 1 {
+		weight = 1
+	}
+	if weight > int64(maxInt()) {
+		return maxInt()
+	}
+	return int(weight)
+}
+
+func maxInt() int {
+	return int(^uint(0) >> 1)
+}
+
+func selectCostWeightedImageRouteCandidate(candidates []ImageRouteCandidate, toleranceBPS *int) *ImageRouteCandidate {
+	pool := BuildCostWeightedImageRoutePool(candidates, toleranceBPS)
+	if len(pool) == 0 {
+		return nil
+	}
+	weighted := make([]ImageRouteCandidate, len(pool))
+	copy(weighted, pool)
+	for index := range weighted {
+		weighted[index].Weight = weighted[index].EffectiveWeight
+	}
+	return imageRouteWeightSelector(weighted)
+}
+
 // BuildImageRouteDecision evaluates and selects the complete image candidate
 // set. It is intentionally independent from the relay dispatch loop: callers
 // can remove failed channel IDs and invoke it again, causing a full cost sort
@@ -114,7 +242,6 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 	decision := ImageRouteDecision{Strategy: policy.Strategy, Candidates: make([]ImageRouteCandidate, 0, len(candidates))}
 
 	eligible := make([]ImageRouteCandidate, 0, len(candidates))
-	eligibleSatisfied := make([]model.SatisfiedChannel, 0, len(candidates))
 	for _, satisfied := range candidates {
 		candidate := imageRouteCandidateFromSatisfied(satisfied)
 		if satisfied.Channel == nil {
@@ -139,25 +266,25 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 			continue
 		}
 		eligible = append(eligible, candidate)
-		eligibleSatisfied = append(eligibleSatisfied, satisfied)
 	}
 
 	if len(eligible) == 0 {
 		decision.Candidates = SortImageRouteCandidates(decision.Candidates)
-		return decision, errors.New("no compatible image channel is available")
+		return decision, ErrNoCompatibleImageChannel
 	}
 
-	if policy.Strategy == image_setting.StrategyManual {
+	strict := cost_setting.Runtime().Mode == types.CostAccountingStrict
+	if policy.Strategy == image_setting.StrategyManual && !strict {
 		decision.Candidates = append(decision.Candidates, eligible...)
 		decision.Candidates = SortImageRouteCandidates(decision.Candidates)
-		selected := model.SelectManualChannel(eligibleSatisfied, param.GetRetry())
+		selected := SelectManualImageRouteCandidate(eligible, 0)
 		if selected == nil {
-			return decision, errors.New("no compatible image channel is available")
+			return decision, ErrNoCompatibleImageChannel
 		}
-		decision.Selected = findImageRouteCandidate(decision.Candidates, selected.Id)
+		decision.Selected = findImageRouteCandidate(decision.Candidates, selected.ChannelID)
 		return decision, nil
 	}
-	if policy.Strategy != image_setting.StrategyLowestCost {
+	if policy.Strategy != image_setting.StrategyLowestCost && policy.Strategy != image_setting.StrategyManual && policy.Strategy != image_setting.StrategyCostWeighted {
 		return ImageRouteDecision{}, fmt.Errorf("unsupported image routing strategy %q", policy.Strategy)
 	}
 
@@ -187,11 +314,11 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 	if policy.MinimumExpectedMarginBPS != nil {
 		minimumMarginBPS = *policy.MinimumExpectedMarginBPS
 	}
-	strict := cost_setting.Runtime().Mode == types.CostAccountingStrict
 	priced := make([]ImageRouteCandidate, 0, len(eligible))
 	for index := range eligible {
 		candidate := &eligible[index]
 		candidate.EstimatedRevenueNanoUSD = revenueNanoUSD
+		candidate.EstimatedRevenueUSD = formatImageRouteUSD(revenueNanoUSD)
 		ruleKey := CostRuleCandidate{
 			ChannelID:             candidate.ChannelID,
 			BillableUpstreamModel: candidate.UpstreamModel,
@@ -213,6 +340,7 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 		costNanoUSD, known, costReason := estimateImageRouteCost(rule, resolved.N)
 		candidate.CostKnown = known
 		candidate.EstimatedCostNanoUSD = costNanoUSD
+		candidate.EstimatedCostUSD = formatImageRouteUSD(costNanoUSD)
 		if !known {
 			candidate.ExclusionReason = costReason
 			if strict {
@@ -243,22 +371,76 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 
 	decision.Candidates = SortImageRouteCandidates(decision.Candidates)
 	if len(priced) == 0 {
-		return decision, errors.New("no eligible image channel is available")
+		return decision, ErrNoEligibleImageChannel
+	}
+	if policy.Strategy == image_setting.StrategyManual {
+		selected := SelectManualImageRouteCandidate(priced, 0)
+		if selected == nil {
+			return decision, ErrNoEligibleImageChannel
+		}
+		decision.Selected = findImageRouteCandidate(decision.Candidates, selected.ChannelID)
+		return decision, nil
+	}
+	if policy.Strategy == image_setting.StrategyCostWeighted {
+		pool := BuildCostWeightedImageRoutePool(priced, policy.CostToleranceBPS)
+		if len(pool) == 0 {
+			return decision, ErrNoEligibleImageChannel
+		}
+		selected := selectCostWeightedImageRouteCandidate(priced, policy.CostToleranceBPS)
+		if selected == nil {
+			return decision, ErrNoEligibleImageChannel
+		}
+		decision.Selected = findImageRouteCandidate(decision.Candidates, selected.ChannelID)
+		return decision, nil
 	}
 	selected := SelectImageRouteCandidate(priced)
 	if selected == nil {
-		return decision, errors.New("no eligible image channel is available")
+		return decision, ErrNoEligibleImageChannel
 	}
 	decision.Selected = findImageRouteCandidate(decision.Candidates, selected.ChannelID)
 	return decision, nil
+}
+
+// SelectManualImageRouteCandidate applies the legacy priority-layer semantics
+// to the already eligible image candidates. Image retries pass the remaining
+// candidate set through this function, so they restart at the highest priority
+// instead of advancing a stale retry index to another layer.
+func SelectManualImageRouteCandidate(candidates []ImageRouteCandidate, priorityRetry int) *ImageRouteCandidate {
+	_ = priorityRetry
+	if len(candidates) == 0 {
+		return nil
+	}
+	priorities := make([]int, 0, len(candidates))
+	seen := make(map[int]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if _, exists := seen[candidate.Priority]; exists {
+			continue
+		}
+		seen[candidate.Priority] = struct{}{}
+		priorities = append(priorities, candidate.Priority)
+	}
+	sort.Slice(priorities, func(i, j int) bool { return priorities[i] > priorities[j] })
+	targetPriority := priorities[0]
+	tie := make([]ImageRouteCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Priority == targetPriority {
+			tie = append(tie, candidate)
+		}
+	}
+	return imageRouteWeightSelector(tie)
 }
 
 func imageRouteCandidateFromSatisfied(satisfied model.SatisfiedChannel) ImageRouteCandidate {
 	candidate := ImageRouteCandidate{Priority: int(satisfied.Priority), Weight: satisfied.Weight}
 	if satisfied.Channel != nil {
 		candidate.ChannelID = satisfied.Channel.Id
+		candidate.ChannelName = strings.TrimSpace(satisfied.Channel.Name)
 	}
 	return candidate
+}
+
+func formatImageRouteUSD(value int64) string {
+	return decimal.NewFromInt(value).Div(decimal.NewFromInt(1_000_000_000)).String()
 }
 
 func imageCompatibilityExclusion(channel *model.Channel, publicModel string, request ImageRequestContext, requireTest bool) string {

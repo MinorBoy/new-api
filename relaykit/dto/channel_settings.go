@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/QuantumNous/new-api/relaykit/imageprofile"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
@@ -34,6 +35,7 @@ const (
 )
 
 type ChannelOtherSettings struct {
+	ImageProfile                          *imageprofile.Binding `json:"image_profile,omitempty"`
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`

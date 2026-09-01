@@ -33,7 +33,12 @@ export interface CostAccountingApiResponse<T> {
 }
 
 export type CostAccountingMode = 'disabled' | 'tracking' | 'strict'
-export type CostMode = 'free' | 'per_request' | 'per_duration' | 'per_token'
+export type CostMode =
+  | 'free'
+  | 'per_request'
+  | 'per_image'
+  | 'per_duration'
+  | 'per_token'
 export type CostRuleStatus = 'draft' | 'active' | 'retired'
 export type CostRevenueStatus =
   | 'pending'
@@ -119,6 +124,12 @@ export type PerRequestCostRuleFormValues = PaidCostRuleFormFields & {
   unit_price: string
 }
 
+export type PerImageCostRuleFormValues = PaidCostRuleFormFields & {
+  cost_mode: 'per_image'
+  meter_source: DurationCostMeterSource
+  unit_price: string
+}
+
 export type PerDurationCostRuleFormValues = PaidCostRuleFormFields & {
   cost_mode: 'per_duration'
   meter_source: DurationCostMeterSource
@@ -154,6 +165,7 @@ export type SplitTokenCostRuleFormValues = TokenCostRuleFormFields & {
 export type CostRuleFormValues =
   | FreeCostRuleFormValues
   | PerRequestCostRuleFormValues
+  | PerImageCostRuleFormValues
   | PerDurationCostRuleFormValues
   | TotalTokenCostRuleFormValues
   | CompletionTokenCostRuleFormValues
@@ -218,6 +230,7 @@ export interface CostRuleValidationResult {
 
 export interface CostMeter {
   source: CostMeterSource | ''
+  image_count?: number
   duration_seconds?: string
   input_tokens?: number
   output_tokens?: number

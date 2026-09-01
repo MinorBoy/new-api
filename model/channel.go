@@ -1079,6 +1079,14 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if channelOtherSettings.ImageProfile != nil {
+		if !supportsOpenAIImagesChannelType(channel.Type) {
+			return fmt.Errorf("image_profile requires an OpenAI-compatible channel; channel type %d is not supported", channel.Type)
+		}
+		if err := channelOtherSettings.ImageProfile.Validate(); err != nil {
+			return err
+		}
+	}
 	if channel.Type == constant.ChannelTypeAdvancedCustom {
 		if channelOtherSettings.AdvancedCustom == nil {
 			return fmt.Errorf("advanced_custom is required")
@@ -1095,6 +1103,26 @@ func (channel *Channel) ValidateSettings() error {
 		}
 	}
 	return nil
+}
+
+func supportsOpenAIImagesChannelType(channelType int) bool {
+	switch channelType {
+	case constant.ChannelTypeOpenAI,
+		constant.ChannelTypeAzure,
+		constant.ChannelTypeOpenAIMax,
+		constant.ChannelTypeCustom,
+		constant.ChannelTypeOpenRouter,
+		constant.ChannelTypeXinference:
+		return true
+	default:
+		return false
+	}
+}
+
+// SupportsOpenAIImagesChannelType reports whether a channel can use the
+// OpenAI-compatible image adaptor and its /images endpoints.
+func SupportsOpenAIImagesChannelType(channelType int) bool {
+	return supportsOpenAIImagesChannelType(channelType)
 }
 
 func (channel *Channel) GetSetting() dto.ChannelSettings {

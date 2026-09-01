@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -20,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/ai360"
 	"github.com/QuantumNous/new-api/relay/channel/lingyiwanwu"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/imageprofile"
 
 	//"github.com/QuantumNous/new-api/relay/channel/minimax"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
@@ -103,6 +105,25 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info != nil && info.ChannelOtherSettings.ImageProfile != nil {
+		var endpoint imageprofile.Endpoint
+		switch info.RelayMode {
+		case relayconstant.RelayModeImagesGenerations:
+			endpoint = imageprofile.EndpointGenerations
+		case relayconstant.RelayModeImagesEdits:
+			endpoint = imageprofile.EndpointEdits
+		}
+		if endpoint != "" {
+			path := info.ChannelOtherSettings.ImageProfile.Path(endpoint)
+			if path == "" {
+				return "", fmt.Errorf("image profile path is not configured for endpoint %s", endpoint)
+			}
+			if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+				return path, nil
+			}
+			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, path, info.ChannelType), nil
+		}
+	}
 	if info.RelayMode == relayconstant.RelayModeRealtime {
 		if strings.HasPrefix(info.ChannelBaseUrl, "https://") {
 			baseUrl := strings.TrimPrefix(info.ChannelBaseUrl, "https://")
@@ -450,7 +471,6 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		var requestBody bytes.Buffer
 		writer := multipart.NewWriter(&requestBody)
 
-		writer.WriteField("model", request.Model)
 		// 使用已解析的 multipart 表单，避免重复解析
 		mf := c.Request.MultipartForm
 		if mf == nil {
@@ -465,14 +485,30 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 
 		// 写入所有非文件字段
 		if mf != nil {
+			controlledFields := map[string]struct{}{
+				"model": {}, "n": {}, "size": {}, "quality": {}, "response_format": {},
+			}
 			for key, values := range mf.Value {
-				if key == "model" {
+				if _, controlled := controlledFields[key]; controlled {
 					continue
 				}
 				for _, value := range values {
 					writer.WriteField(key, value)
 				}
 			}
+		}
+		writer.WriteField("model", request.Model)
+		if request.N != nil {
+			writer.WriteField("n", strconv.FormatUint(uint64(*request.N), 10))
+		}
+		if request.Size != "" {
+			writer.WriteField("size", request.Size)
+		}
+		if request.Quality != "" {
+			writer.WriteField("quality", request.Quality)
+		}
+		if request.ResponseFormat != "" {
+			writer.WriteField("response_format", request.ResponseFormat)
 		}
 
 		if mf != nil && mf.File != nil {

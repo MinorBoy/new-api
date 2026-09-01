@@ -16,17 +16,39 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
-func updateOpenAIImageCount(info *relaycommon.RelayInfo, count int64) {
-	if info == nil || !info.PriceData.UsePrice || count <= 0 || count > int64(dto.MaxImageN) {
-		return
+func updateOpenAIImageCount(info *relaycommon.RelayInfo, count int64) error {
+	if count < 1 || count > int64(dto.MaxImageN) {
+		return fmt.Errorf("upstream image count must be between 1 and %d", dto.MaxImageN)
 	}
-	info.PriceData.AddOtherRatio("n", float64(count))
+	if info == nil {
+		return nil
+	}
+	if info.PriceData.UsePrice {
+		info.PriceData.AddOtherRatio("n", float64(count))
+	}
+	return service.RecordImageSettlementCount(info, count, hosttypes.CostMeterUpstreamActual)
+}
+
+func openAIImageResponseCount(raw []byte) (int64, bool, error) {
+	data := gjson.GetBytes(raw, "data")
+	if !data.Exists() {
+		return 0, false, nil
+	}
+	if !data.IsArray() {
+		return 0, true, fmt.Errorf("upstream image response data must be an array")
+	}
+	count := data.Get("#").Int()
+	if count < 1 || count > int64(dto.MaxImageN) {
+		return 0, true, fmt.Errorf("upstream image count must be between 1 and %d", dto.MaxImageN)
+	}
+	return count, true, nil
 }
 
 func updateSeedreamGeneratedImageCount(info *relaycommon.RelayInfo, usage *dto.Usage, raw []byte) bool {
@@ -48,6 +70,9 @@ func updateSeedreamGeneratedImageCount(info *relaycommon.RelayInfo, usage *dto.U
 		if count == 0 {
 			usage.TotalTokens = 0
 		}
+	}
+	if count > 0 {
+		_ = service.RecordImageSettlementCount(info, count, hosttypes.CostMeterUpstreamActual)
 	}
 	if info == nil || !info.PriceData.UsePrice {
 		return true
@@ -145,10 +170,22 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 		recordSeedreamGeneratedImageCount(c, responseBody)
 		normalizeSeedreamUsage(&usageResp.Usage, responseBody)
 		if !updateSeedreamGeneratedImageCount(info, &usageResp.Usage, responseBody) {
-			updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+			if count, present, countErr := openAIImageResponseCount(responseBody); countErr != nil {
+				return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			} else if present {
+				if countErr := updateOpenAIImageCount(info, count); countErr != nil {
+					return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+				}
+			}
 		}
 	} else {
-		updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+		if count, present, countErr := openAIImageResponseCount(responseBody); countErr != nil {
+			return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+		} else if present {
+			if countErr := updateOpenAIImageCount(info, count); countErr != nil {
+				return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			}
+		}
 	}
 
 	// 写入新的 response body
@@ -275,10 +312,14 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 		if n, ok := info.PriceData.OtherRatios()["n"]; ok {
 			requestedN = n
 		}
-		if c.GetBool(common.KeySeedanceOfficialAPI) && !nativeGeneratedPresent && upstreamFinished {
-			updateOpenAIImageCount(info, completedImages)
-		} else if !c.GetBool(common.KeySeedanceOfficialAPI) && (upstreamFinished || float64(completedImages) > requestedN) {
-			updateOpenAIImageCount(info, completedImages)
+		if c.GetBool(common.KeySeedanceOfficialAPI) && !nativeGeneratedPresent && upstreamFinished && completedImages > 0 {
+			if err := updateOpenAIImageCount(info, completedImages); err != nil {
+				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			}
+		} else if !c.GetBool(common.KeySeedanceOfficialAPI) && completedImages > 0 && (upstreamFinished || float64(completedImages) > requestedN) {
+			if err := updateOpenAIImageCount(info, completedImages); err != nil {
+				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			}
 		}
 	}
 	return usage, nil
@@ -371,14 +412,27 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 		recordSeedreamGeneratedImageCount(c, responseBody)
 		normalizeSeedreamUsage(&usageResp.Usage, responseBody)
 		if !updateSeedreamGeneratedImageCount(info, &usageResp.Usage, responseBody) {
-			updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
+			if count, present, countErr := openAIImageResponseCount(responseBody); countErr != nil {
+				return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			} else if present {
+				if countErr := updateOpenAIImageCount(info, count); countErr != nil {
+					return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+				}
+			}
 		}
 	}
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 
-	imageCount := gjson.GetBytes(responseBody, "data.#").Int()
+	imageCount, imageCountPresent, countErr := openAIImageResponseCount(responseBody)
+	if countErr != nil {
+		return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponse, http.StatusBadGateway)
+	}
 	if !c.GetBool(common.KeySeedanceOfficialAPI) {
-		updateOpenAIImageCount(info, imageCount)
+		if imageCountPresent {
+			if err := updateOpenAIImageCount(info, imageCount); err != nil {
+				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			}
+		}
 	}
 
 	helper.SetEventStreamHeaders(c)

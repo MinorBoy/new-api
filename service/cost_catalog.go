@@ -243,6 +243,8 @@ func projectCostCatalogRow(row model.CostCatalogRow) costCatalogProjection {
 			comparison := normalized.Div(decimal.NewFromInt(15)).String()
 			projection.Item.Comparison15SEquivalentUSDPerSecond = &comparison
 		}
+	case types.CostModePerImage:
+		valid = appendCostCatalogPrice(&projection.Item, "unit_price", "per_image", config.UnitPrice, config.NormalizedUSDPrices.UnitPrice)
 	case types.CostModePerDuration:
 		valid = appendCostCatalogPrice(&projection.Item, "price_per_second", "per_second", config.PricePerSecond, config.NormalizedUSDPrices.PricePerSecond)
 	case types.CostModePerToken:

@@ -10,6 +10,8 @@
 - `/v1/*` 端点经过 `Distribute`（按 `model` 选择渠道）。
 - `/api/v3/images/generations`（Seedance/ARK 原生路径）由 `SeedanceRequestConvert` 中间件（`middleware/seedance_adapter.go:23`）改写为 `/v1/images/generations`，并额外经过 `ModelRequestRateLimit`。
 
+当 `model` 出现在全局 `ImageModelCatalog` 中时，`Distribute` 会在进入控制器前解析统一图像 SKU，并按渠道 `image_profile`、模型映射、能力覆盖、兼容性状态和成本规则选择渠道。未登记在全局目录中的旧图像模型继续使用原有渠道适配器。
+
 ## 接口端点
 
 | 方法 | 端点 | 路由位置 | 说明 |
@@ -71,7 +73,7 @@ Handler 分发链：
 
 ### 计费
 
-`GetTokenCountMeta()`（`dto/openai_image.go:134`）按 DALL-E size/quality 计算价格比率，并把生成数量 `n` 作为独立计费维度写入 `BillingRatios`。
+统一图像模型使用 `ImageModelCatalog` 的单张售价和分组倍率预扣；`n` 经过 `MaxImageN` 限制。响应解析到的实际图像数量优先用于 `per_image` 供应商成本结算，无法可靠取得时回退到已校验的请求数量。旧模型仍保留原有 `GetTokenCountMeta()` 和 `BillingRatios` 计费路径。
 
 ## 响应体
 

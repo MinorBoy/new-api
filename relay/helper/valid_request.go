@@ -402,6 +402,7 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			}
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			imageRequest.ResponseFormat = formData.Get("response_format")
 			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
 				stream, err := strconv.ParseBool(streamValue)
 				if err != nil {
@@ -409,9 +410,20 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				}
 				imageRequest.Stream = common.GetPointer(stream)
 			}
-			if imageValue := formData.Get("image"); imageValue != "" {
+			imageValue := formData.Get("image")
+			if imageValue != "" {
 				imageRequest.Image, _ = common.Marshal(imageValue)
 			}
+			imageRequest.InputImageCount = uint(len(form.File["image"]))
+			for field, files := range form.File {
+				if strings.HasPrefix(field, "image[") || field == "images" {
+					imageRequest.InputImageCount += uint(len(files))
+				}
+			}
+			if imageRequest.InputImageCount == 0 && strings.TrimSpace(imageValue) != "" {
+				imageRequest.InputImageCount = 1
+			}
+			imageRequest.HasMask = strings.TrimSpace(formData.Get("mask")) != "" || len(form.File["mask"]) > 0
 
 			if imageRequest.Model == "gpt-image-1" {
 				if imageRequest.Quality == "" {
@@ -480,9 +492,29 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		if imageRequest.N == nil || *imageRequest.N == 0 {
 			imageRequest.N = common.GetPointer(uint(1))
 		}
+		if relayMode == relayconstant.RelayModeImagesEdits {
+			imageRequest.InputImageCount = countJSONImages(imageRequest.Images)
+			imageRequest.InputImageCount += countJSONImages(imageRequest.Image)
+			imageRequest.HasMask = len(imageRequest.Mask) > 0 && string(imageRequest.Mask) != "null"
+		}
 	}
 
 	return imageRequest, nil
+}
+
+func countJSONImages(raw json.RawMessage) uint {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var values []json.RawMessage
+	if err := common.Unmarshal(raw, &values); err == nil {
+		return uint(len(values))
+	}
+	var value string
+	if err := common.Unmarshal(raw, &value); err == nil && strings.TrimSpace(value) != "" {
+		return 1
+	}
+	return 0
 }
 
 func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest, err error) {

@@ -215,6 +215,8 @@ export type ContentSettings = {
 }
 
 export type ModelSettings = {
+  ImageModelCatalog: string
+  ImageRoutingPolicy: string
   'global.pass_through_request_enabled': boolean
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
@@ -278,6 +280,8 @@ export type ModelSettings = {
 }
 
 export type BillingSettings = {
+  ImageModelCatalog: string
+  ImageRoutingPolicy: string
   QuotaForNewUser: number
   PreConsumedQuota: number
   QuotaForInviter: number

@@ -48,7 +48,7 @@ const costAccountingSearchSchema = z.object({
   catalogChannelId: z.number().int().positive().optional().catch(undefined),
   catalogModel: z.string().optional().catch(''),
   catalogCostMode: z
-    .enum(['free', 'per_request', 'per_duration', 'per_token'])
+    .enum(['free', 'per_request', 'per_image', 'per_duration', 'per_token'])
     .optional()
     .catch(undefined),
   catalogStatus: z

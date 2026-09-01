@@ -102,6 +102,23 @@ test('parses only the fields allowed by a per-request rule', () => {
   )
 })
 
+test('parses per-image supplier rules with an explicit image meter', () => {
+  assert.deepEqual(
+    parseCostRuleForm({
+      cost_mode: 'per_image',
+      ...paidDefaults,
+      meter_source: 'upstream_actual',
+      unit_price: '0.04',
+    } as unknown as CostRuleFormValues),
+    {
+      ...paidDefaults,
+      meter_source: 'upstream_actual',
+      unit_price: '0.04',
+      normalized_usd_prices: {},
+    }
+  )
+})
+
 test('rejects non-canonical or non-positive paid Decimal fields', () => {
   for (const unitPrice of ['0', '-1', '01', '1.0', '.5', '+1', '1e3', ' 1 ']) {
     assert.throws(

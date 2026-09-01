@@ -23,6 +23,7 @@ import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
+import { ImageSettingsCard } from '../models/image-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
@@ -115,6 +116,16 @@ const BILLING_SECTIONS = [
         groupDefaults={getGroupDefaults(settings)}
         toolPricesDefault={settings['tool_price_setting.prices']}
         visibleTabs={['models', 'unset-models', 'tool-prices', 'upstream-sync']}
+      />
+    ),
+  },
+  {
+    id: 'image-pricing',
+    titleKey: 'Image Models & Routing',
+    build: (settings: BillingSettings) => (
+      <ImageSettingsCard
+        catalog={settings.ImageModelCatalog}
+        routing={settings.ImageRoutingPolicy}
       />
     ),
   },

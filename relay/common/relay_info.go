@@ -161,6 +161,10 @@ type RelayInfo struct {
 
 	PriceData hosttypes.PriceData
 
+	// ImageBillingSnapshot freezes the catalog price and group multiplier for
+	// unified OpenAI Images requests. Settlement must not reread live settings.
+	ImageBillingSnapshot *hosttypes.ImageBillingSnapshot
+
 	PredictedUpstreamModel string
 	BillableUpstreamModel  string
 	// CostProfitRecheckSnapshot is captured by the strict pre-dispatch margin
@@ -168,6 +172,7 @@ type RelayInfo struct {
 	CostProfitRecheckSnapshot *hosttypes.CostProfitRecheckSnapshot
 	CostRequestID             int64
 	CostAttempt               *hosttypes.CostAttemptHandle
+	CostOutcome               *hosttypes.CostOutcome
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.
@@ -208,6 +213,12 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
 	apiType, _ := common.ChannelType2APIType(channelType)
 	upstreamModelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+	// Cost-aware image routing publishes the selected upstream model without a
+	// capability-routing audit. Preserve that identity on ChannelMeta so relay
+	// adaptors and billing see the same model before model mapping runs.
+	if routeUpstreamModel := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyRoutingUpstreamModel)); routeUpstreamModel != "" {
+		upstreamModelName = routeUpstreamModel
+	}
 	var routing *modelrouting.Audit
 	if common.GetContextKeyBool(c, constant.ContextKeyRoutingCapabilityMode) {
 		policyID := common.GetContextKeyInt(c, constant.ContextKeyRoutingPolicyID)

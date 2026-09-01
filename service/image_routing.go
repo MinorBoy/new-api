@@ -284,7 +284,7 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 		decision.Selected = findImageRouteCandidate(decision.Candidates, selected.ChannelID)
 		return decision, nil
 	}
-	if policy.Strategy != image_setting.StrategyLowestCost && policy.Strategy != image_setting.StrategyManual {
+	if policy.Strategy != image_setting.StrategyLowestCost && policy.Strategy != image_setting.StrategyManual && policy.Strategy != image_setting.StrategyCostWeighted {
 		return ImageRouteDecision{}, fmt.Errorf("unsupported image routing strategy %q", policy.Strategy)
 	}
 
@@ -375,6 +375,18 @@ func BuildImageRouteDecision(param *RetryParam, group string, candidates []model
 	}
 	if policy.Strategy == image_setting.StrategyManual {
 		selected := SelectManualImageRouteCandidate(priced, 0)
+		if selected == nil {
+			return decision, ErrNoEligibleImageChannel
+		}
+		decision.Selected = findImageRouteCandidate(decision.Candidates, selected.ChannelID)
+		return decision, nil
+	}
+	if policy.Strategy == image_setting.StrategyCostWeighted {
+		pool := BuildCostWeightedImageRoutePool(priced, policy.CostToleranceBPS)
+		if len(pool) == 0 {
+			return decision, ErrNoEligibleImageChannel
+		}
+		selected := selectCostWeightedImageRouteCandidate(priced, policy.CostToleranceBPS)
 		if selected == nil {
 			return decision, ErrNoEligibleImageChannel
 		}

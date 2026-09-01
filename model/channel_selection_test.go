@@ -88,6 +88,26 @@ func TestListSatisfiedChannelsAppliesPathAndChannelFilters(t *testing.T) {
 	}
 }
 
+func TestListSatisfiedChannelsSkipsDisabledChannelsOnDBAndCachePaths(t *testing.T) {
+	for _, memoryCacheEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory_cache_%t", memoryCacheEnabled), func(t *testing.T) {
+			prepareChannelSelectionTest(t, memoryCacheEnabled)
+
+			disabled := selectionTestChannel(16, constant.ChannelTypeOpenAI, modelrouting.Seedance20, 1000)
+			require.NoError(t, DB.Create(disabled).Error)
+			require.NoError(t, disabled.AddAbilities(DB))
+			require.NoError(t, DB.Model(&Channel{}).Where("id = ?", disabled.Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+			if memoryCacheEnabled {
+				InitChannelCache()
+			}
+
+			candidates, err := ListSatisfiedChannels("分组A", modelrouting.Seedance20, "", ChannelSelectFilter{})
+			require.NoError(t, err)
+			assert.Equal(t, []int{11, 12, 13}, satisfiedChannelIDs(candidates))
+		})
+	}
+}
+
 func TestSelectManualChannelPreservesPriorityRetryLayers(t *testing.T) {
 	highPriority := int64(100)
 	lowPriority := int64(10)

@@ -4,10 +4,41 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/QuantumNous/new-api/relaykit/imageprofile"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChannelOtherSettingsImageProfileRoundTripPreservesBinding(t *testing.T) {
+	settings := ChannelOtherSettings{
+		ImageProfile: &imageprofile.Binding{
+			Profile:        imageprofile.OpenAIImagesProfile,
+			ProfileVersion: imageprofile.OpenAIImagesVersion,
+			Paths: map[imageprofile.Endpoint]string{
+				imageprofile.EndpointGenerations: "/custom/images",
+			},
+		},
+	}
+	raw, err := kitutil.Marshal(settings)
+	require.NoError(t, err)
+	rawString := string(raw)
+	assert.Contains(t, rawString, `"image_profile"`)
+
+	var decoded ChannelOtherSettings
+	require.NoError(t, kitutil.Unmarshal(raw, &decoded))
+	require.NotNil(t, decoded.ImageProfile)
+	assert.Equal(t, settings.ImageProfile.Profile, decoded.ImageProfile.Profile)
+	assert.Equal(t, settings.ImageProfile.ProfileVersion, decoded.ImageProfile.ProfileVersion)
+	assert.Equal(t, "/custom/images", decoded.ImageProfile.Paths[imageprofile.EndpointGenerations])
+}
+
+func TestChannelOtherSettingsLegacyAndUnknownFieldsRemainCompatible(t *testing.T) {
+	var settings ChannelOtherSettings
+	require.NoError(t, kitutil.Unmarshal([]byte(`{"legacy_flag":true,"future_image_field":{"enabled":true}}`), &settings))
+	assert.Nil(t, settings.ImageProfile)
+}
 
 func TestAdvancedCustomValidateResponsesToChatConverterPath(t *testing.T) {
 	valid := &AdvancedCustomConfig{

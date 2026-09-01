@@ -124,3 +124,51 @@ test('writes a workbook and report when warnings are explicitly allowed', async 
     await fs.rm(directory, { recursive: true, force: true })
   }
 })
+
+test('supports an explicit SD-only generation scope when H3 sheets are present', async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-template-generator-sd-only-')
+  )
+  const outputPath = path.join(directory, 'template.xlsx')
+  const reportPath = path.join(directory, 'template.report.json')
+  const sourceWithH3Path = path.join(directory, 'source-with-h3.xlsx')
+  try {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.readFile(sourcePath)
+    const sourceSheet = workbook.getWorksheet('sd')
+    assert.ok(sourceSheet)
+    for (let row = 4; row <= sourceSheet.rowCount; row += 1) {
+      sourceSheet.getRow(row).getCell(1).value = null
+      sourceSheet.getRow(row).getCell(6).value = null
+    }
+    workbook.addWorksheet('h3').addRow(['渠道', '模型ID', '系列'])
+    workbook.addWorksheet('h3官价').addRow(['系列', '模型', '分辨率'])
+    await workbook.xlsx.writeFile(sourceWithH3Path)
+
+    const result = await runGenerator([
+      '--source',
+      sourceWithH3Path,
+      '--rules',
+      rulesPath,
+      '--base',
+      basePath,
+      '--output',
+      outputPath,
+      '--report',
+      reportPath,
+      '--allow-warnings',
+      '--allow-unsupported-sheets',
+    ])
+
+    assert.equal(result.hasFailures, false)
+    assert.ok(
+      result.report.issues.some(
+        (item) =>
+          item.code === 'UNSUPPORTED_SOURCE_SHEET' && item.severity === 'WARN'
+      )
+    )
+    await fs.access(outputPath)
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})

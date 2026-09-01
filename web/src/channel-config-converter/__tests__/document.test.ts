@@ -221,6 +221,66 @@ test('keeps draft cost evidence without publishing its mapping or route', async 
   )
 })
 
+test('does not block import for inactive mappings with unresolved reference contracts', async () => {
+  const bytes = await fs.readFile(fixturePath)
+  const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))
+  const cost = extracted.costRuleDrafts.find(
+    (candidate) => candidate.businessId === 'COST-4STOKEN-R128-480-DUR'
+  )
+  const mapping = extracted.modelMappings.find(
+    (candidate) => candidate.businessId === 'MAP-4STOKEN-R128-480'
+  )
+  assert.ok(cost)
+  assert.ok(mapping)
+  cost.fields['状态'] = {
+    value: 'draft',
+    formula: null,
+    formulaResult: null,
+  }
+  mapping.fields['启用'] = {
+    value: '否',
+    formula: null,
+    formulaResult: null,
+  }
+  mapping.fields['备注'] = {
+    value: '原模型=4sdance_mini431; 上游模型分组=默认',
+    formula: null,
+    formulaResult: null,
+  }
+
+  const result = await buildImportDocument({
+    extracted,
+    sourceBytes: bytes,
+    sourceFileName: 'channel-config-v1-corrected.xlsx',
+  })
+
+  assert.equal(result.hasFailures, false)
+  assert.equal(
+    result.document.issues.some(
+      (issue) => issue.code === 'ROUTE_REFERENCE_LIMITS_UNRESOLVED'
+    ),
+    false
+  )
+  assert.ok(
+    result.document.entities.cost_rule_drafts.some(
+      (draft) => draft.business_id === cost.businessId
+    )
+  )
+  assert.equal(
+    result.document.entities.model_mappings.some(
+      (candidate) => candidate.business_id === mapping.businessId
+    ),
+    false
+  )
+  assert.equal(
+    result.document.entities.route_blueprints.some(
+      (candidate) =>
+        candidate.business_id === 'route-blueprint/' + mapping.businessId
+    ),
+    false
+  )
+})
+
 test('builds explicit Seedance official token sale contracts from USD per million prices', async () => {
   const bytes = await fs.readFile(fixturePath)
   const extracted = extractWorkbook(await loadWorkbookSnapshot(bytes))

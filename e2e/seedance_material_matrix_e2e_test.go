@@ -38,6 +38,7 @@ import (
 const importedMaterialMatrixGroup = "default"
 const importedMaterialMatrixAssetBaseURL = "https://cdn.openai.com/ark-matrix"
 const importedMaterialMatrixGroupRatio = 1.25
+const importedMaterialMatrixReferenceVideoDurationSeconds = 5
 
 type importedMaterialMatrixTarget struct {
 	CaseID                             string
@@ -106,6 +107,15 @@ func TestImportedMaterialMatrixRequestReferencesRespectAggregateLimits(t *testin
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestImportedMaterialMatrixRequestReferencesRespectVideoDurationLimit(t *testing.T) {
+	got := importedMaterialMatrixApplyVideoDurationLimit(
+		modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10},
+		modelrouting.ReferenceLimits{},
+		common.GetPointer(30),
+	)
+	require.Equal(t, modelrouting.ReferenceLimits{Images: 30, Videos: 6, Audios: 10}, got)
 }
 
 type importedMaterialMatrixEnv struct {
@@ -689,6 +699,9 @@ func loadImportedMaterialMatrixTargets(t *testing.T) []importedMaterialMatrixTar
 			requestReferences := importedMaterialMatrixRequestReferences(
 				minimums, references, target.ReferenceTotalMax, target.ReferenceVideoAudioTotalMax,
 			)
+			requestReferences = importedMaterialMatrixApplyVideoDurationLimit(
+				requestReferences, minimums, target.ReferenceVideoTotalDurationSeconds,
+			)
 			require.NotEmpty(t, target.OutputResolutions, target.RouteTargetRef)
 			duration := 10
 			durations := modelrouting.DurationConstraint{
@@ -907,6 +920,24 @@ func importedMaterialMatrixRequestReferences(
 		}
 	}
 	return result
+}
+
+func importedMaterialMatrixApplyVideoDurationLimit(
+	references modelrouting.ReferenceLimits,
+	minimums modelrouting.ReferenceLimits,
+	maxDurationSeconds *int,
+) modelrouting.ReferenceLimits {
+	if maxDurationSeconds == nil || references.Videos == 0 {
+		return references
+	}
+	maxVideos := *maxDurationSeconds / importedMaterialMatrixReferenceVideoDurationSeconds
+	if maxVideos < minimums.Videos {
+		maxVideos = minimums.Videos
+	}
+	if references.Videos > maxVideos {
+		references.Videos = maxVideos
+	}
+	return references
 }
 
 func importedMaterialMatrixApplyInputMode(

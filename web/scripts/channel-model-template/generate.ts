@@ -26,6 +26,7 @@ import { writeTemplateWorkbook, type WriteTemplateResult } from './write'
 
 type GeneratorOptions = {
   allowWarnings: boolean
+  allowUnsupportedSheets: boolean
   basePath: string
   force: boolean
   outputPath: string
@@ -41,7 +42,11 @@ const VALUE_FLAGS = new Set([
   '--output',
   '--report',
 ])
-const BOOLEAN_FLAGS = new Set(['--allow-warnings', '--force'])
+const BOOLEAN_FLAGS = new Set([
+  '--allow-warnings',
+  '--allow-unsupported-sheets',
+  '--force',
+])
 
 function defaultReportPath(outputPath: string): string {
   const parsed = path.parse(outputPath)
@@ -87,6 +92,7 @@ function parseArguments(args: string[]): GeneratorOptions {
   }
   return {
     allowWarnings: booleans.has('--allow-warnings'),
+    allowUnsupportedSheets: booleans.has('--allow-unsupported-sheets'),
     basePath,
     force: booleans.has('--force'),
     outputPath,
@@ -118,13 +124,30 @@ export async function runGenerator(
   ])
   const rules = parseRules(JSON.parse(rulesFile) as unknown)
   const data = buildTemplateData(source, rules)
-  const hasWarnings = data.issues.some((item) => item.severity === 'WARN')
+  const scopedData = options.allowUnsupportedSheets
+    ? {
+        ...data,
+        issues: data.issues.map((item) =>
+          item.code === 'UNSUPPORTED_SOURCE_SHEET' && item.severity === 'FAIL'
+            ? {
+                ...item,
+                severity: 'WARN' as const,
+                suggestion:
+                  '本次显式使用 SD-only 范围；H3 数据保留在源表，未生成或发布。',
+              }
+            : item
+        ),
+      }
+    : data
+  const hasWarnings = scopedData.issues.some(
+    (item) => item.severity === 'WARN'
+  )
   const writableData =
     hasWarnings && !options.allowWarnings
       ? {
-          ...data,
+          ...scopedData,
           issues: [
-            ...data.issues,
+            ...scopedData.issues,
             {
               code: 'WARNINGS_REQUIRE_ACKNOWLEDGEMENT',
               severity: 'FAIL' as const,
@@ -135,7 +158,7 @@ export async function runGenerator(
             },
           ],
         }
-      : data
+      : scopedData
   return writeTemplateWorkbook({
     basePath: options.basePath,
     outputPath: options.outputPath,

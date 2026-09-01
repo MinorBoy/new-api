@@ -1,4 +1,0 @@
-interface:
-  display_name: "同步 Dimensio 模型目录"
-  short_description: "读取 Dimensio 模型与价格并更新表格快照"
-  default_prompt: "使用 $sync-dimensio-sd-models 读取 Dimensio /v1/models 的模型与 pricing，并更新 Google 表格快照。"

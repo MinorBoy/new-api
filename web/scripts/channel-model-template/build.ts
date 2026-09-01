@@ -64,14 +64,38 @@ function numericField(
   name: string
 ): Decimal | null {
   if (!record) return null
-  const text = field(record, name).replaceAll(/[%￥¥,]/gu, '')
+  const raw = field(record, name)
+  const isPercent = raw.includes('%')
+  const text = raw.replaceAll(/[%￥¥,]/gu, '')
   if (text === '') return null
   try {
     const value = new Decimal(text)
-    return value.isFinite() ? value : null
+    if (!value.isFinite()) return null
+    return isPercent ? value.div(100) : value
   } catch {
     return null
   }
+}
+
+function rechargeRatioField(record: SourceRecord | undefined): Decimal | null {
+  if (!record) return null
+  const raw = field(record, '充值汇率')
+  if (raw === '') return null
+  const ratio = raw.match(
+    /^\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$/u
+  )
+  if (ratio) {
+    try {
+      const numerator = new Decimal(ratio[1] ?? '')
+      const denominator = new Decimal(ratio[2] ?? '')
+      if (numerator.gt(0) && denominator.gt(0)) {
+        return denominator.div(numerator)
+      }
+    } catch {
+      return null
+    }
+  }
+  return numericField(record, '充值汇率')
 }
 
 function referenceContract(
@@ -627,18 +651,23 @@ function buildChannels(source: SourceWorkbook, rules: Rules): ChannelRow[] {
     const model = source.models.find(
       (candidate) => field(candidate, '渠道') === sourceCode
     )
+    const rechargeRatio =
+      rechargeRatioField(channel) ??
+      rechargeRatioField(model) ??
+      new Decimal(rules.defaults.rechargeRatio)
+    const feeRate =
+      numericField(channel, '手续费') ?? numericField(model, '手续费')
+    const billingMultiplier =
+      numericField(channel, '计费倍率') ?? numericField(model, '计费倍率')
     const status = model && field(model, '状态') === '正常' ? 'active' : 'draft'
     return {
       businessId,
       name: field(channel, '名称'),
       pricePage: field(channel, '链接'),
       currency: rules.defaults.currency,
-      rechargeRatio: rules.defaults.rechargeRatio,
-      feeRate: decimalString(model ? numericField(model, '手续费') : null),
-      billingMultiplier: decimalString(
-        model ? numericField(model, '计费倍率') : null,
-        '1'
-      ),
+      rechargeRatio: rechargeRatio.toFixed(),
+      feeRate: decimalString(feeRate),
+      billingMultiplier: decimalString(billingMultiplier, '1'),
       status,
       strictCostValidation: '是',
       sourceId: sourceIdForChannel(channel),
@@ -1057,11 +1086,20 @@ function buildCostsAndMappings(
           }))
         : contractIssues)
     )
-    const billingMultiplier = numericField(record, '计费倍率') ?? new Decimal(1)
-    const feeRate = numericField(record, '手续费') ?? new Decimal(0)
+    const billingMultiplier =
+      numericField(channelSource, '计费倍率') ??
+      numericField(record, '计费倍率') ??
+      new Decimal(1)
+    const feeRate =
+      numericField(channelSource, '手续费') ??
+      numericField(record, '手续费') ??
+      new Decimal(0)
     const currencyToUsd = new Decimal(rules.defaults.currencyToUsd)
     const purchaseDiscount = new Decimal(rules.defaults.purchaseDiscountRatio)
-    const rechargeRatio = new Decimal(rules.defaults.rechargeRatio)
+    const rechargeRatio =
+      rechargeRatioField(channelSource) ??
+      rechargeRatioField(record) ??
+      new Decimal(rules.defaults.rechargeRatio)
     const normalized = (native ?? new Decimal(0))
       .mul(billingMultiplier)
       .mul(purchaseDiscount)
@@ -1259,6 +1297,18 @@ export function buildTemplateData(
   rules: Rules
 ): TemplateData {
   const issues: Issue[] = []
+  const unsupportedSheets = (source.additionalSheets ?? []).filter((name) =>
+    ['h3', 'h3官价'].includes(name)
+  )
+  if (unsupportedSheets.length > 0) {
+    issues.push({
+      code: 'UNSUPPORTED_SOURCE_SHEET',
+      severity: 'FAIL',
+      message: `当前 V1 SD 模板尚未支持工作表：${unsupportedSheets.join('、')}。`,
+      suggestion:
+        '先将 H3 价格单位和素材语义映射到独立模板，再生成或发布 H3 配置。',
+    })
+  }
   const officialIndex = indexOfficialPrices(source)
   const channels = buildChannels(source, rules)
   const skus = buildSkus(source, rules, officialIndex, issues)

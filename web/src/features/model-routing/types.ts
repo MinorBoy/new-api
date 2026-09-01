@@ -23,7 +23,27 @@ export const CANONICAL_SEEDANCE_MODELS = [
   'doubao-seedance-2-0-260128',
   'doubao-seedance-2-0-fast-260128',
   'doubao-seedance-2-0-mini-260615',
+  'doubao-seedance-2-5-260628',
 ] as const
+
+export type CanonicalSeedanceModel = (typeof CANONICAL_SEEDANCE_MODELS)[number]
+
+const SEEDANCE_20_REFERENCE_LIMITS = {
+  images: 9,
+  videos: 3,
+  audios: 3,
+} as const
+const SEEDANCE_25_REFERENCE_LIMITS = {
+  images: 30,
+  videos: 10,
+  audios: 10,
+} as const
+
+export function getSeedanceReferenceLimits(model: CanonicalSeedanceModel) {
+  return model === 'doubao-seedance-2-5-260628'
+    ? SEEDANCE_25_REFERENCE_LIMITS
+    : SEEDANCE_20_REFERENCE_LIMITS
+}
 
 export const OUTPUT_RESOLUTIONS = ['480p', '720p', '1080p', '4k'] as const
 export const MAX_TASK_DURATION_SECONDS = 3600
@@ -88,14 +108,16 @@ const durationConstraintFormSchema = z
   })
 
 const referenceLimitsSchema = z.object({
-  images: z.number().int().min(0).max(9),
-  videos: z.number().int().min(0).max(3),
-  audios: z.number().int().min(0).max(3),
+  images: z.number().int().min(0).max(SEEDANCE_25_REFERENCE_LIMITS.images),
+  videos: z.number().int().min(0).max(SEEDANCE_25_REFERENCE_LIMITS.videos),
+  audios: z.number().int().min(0).max(SEEDANCE_25_REFERENCE_LIMITS.audios),
 })
 
+type ReferenceLimits = z.infer<typeof referenceLimitsSchema>
+
 type ReferenceRange = {
-  reference_minimums: z.infer<typeof referenceLimitsSchema>
-  reference_limits: z.infer<typeof referenceLimitsSchema>
+  reference_minimums: ReferenceLimits
+  reference_limits: ReferenceLimits
   reference_total_max?: number | null
   reference_video_audio_total_max?: number | null
   reference_video_total_duration_seconds?: number | null
@@ -147,6 +169,25 @@ function validateReferenceRange(value: ReferenceRange, ctx: z.RefinementCtx) {
         message: 'Aggregate reference limits conflict',
       })
     }
+  }
+}
+
+function validateSeedanceReferenceLimits(
+  model: CanonicalSeedanceModel,
+  limits: ReferenceLimits,
+  ctx: z.RefinementCtx,
+  path: Array<string | number>
+) {
+  const maximums = getSeedanceReferenceLimits(model)
+  for (const kind of ['images', 'videos', 'audios'] as const) {
+    if (limits[kind] <= maximums[kind]) {
+      continue
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: [...path, kind],
+      message: `Reference ${kind} cannot exceed ${maximums[kind]} for this model`,
+    })
   }
 }
 
@@ -220,6 +261,14 @@ export const routingPolicyFormSchema = z
         message: 'At least one routing target is required when enabled',
       })
     }
+    value.targets.forEach((target, index) => {
+      validateSeedanceReferenceLimits(
+        value.model,
+        target.reference_limits,
+        ctx,
+        ['targets', index, 'reference_limits']
+      )
+    })
   })
 
 const durationValuesApiSchema = z.object({
@@ -291,7 +340,7 @@ export const routeTargetWriteRequestSchema = routeTargetSchema
   .omit({ channel_name: true })
   .extend({ id: z.number().int().positive().optional() })
 
-export const routingPolicySchema = z.object({
+const routingPolicyApiSchema = z.object({
   id: z.number().int().positive(),
   group_name: z.string(),
   model: z.enum(CANONICAL_SEEDANCE_MODELS),
@@ -306,9 +355,32 @@ export const routingPolicySchema = z.object({
   updated_at: z.number().int(),
 })
 
-export const routingPolicyWriteRequestSchema = routingPolicySchema
+export const routingPolicySchema = routingPolicyApiSchema.superRefine(
+  (value, ctx) => {
+    value.targets.forEach((target, index) => {
+      validateSeedanceReferenceLimits(
+        value.model,
+        target.constraints.reference_limits,
+        ctx,
+        ['targets', index, 'constraints', 'reference_limits']
+      )
+    })
+  }
+)
+
+export const routingPolicyWriteRequestSchema = routingPolicyApiSchema
   .omit({ id: true, created_at: true, updated_at: true, targets: true })
   .extend({ targets: z.array(routeTargetWriteRequestSchema) })
+  .superRefine((value, ctx) => {
+    value.targets.forEach((target, index) => {
+      validateSeedanceReferenceLimits(
+        value.model,
+        target.constraints.reference_limits,
+        ctx,
+        ['targets', index, 'constraints', 'reference_limits']
+      )
+    })
+  })
 
 const apiSuccessSchema = z.object({
   success: z.literal(true),

@@ -104,7 +104,7 @@ func parseSeedanceRoutingFields(body []byte, canonicalModel string) (modelroutin
 	if !ok || common.GetJsonType(contentRaw) != "array" {
 		return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.content", "content must be an array")
 	}
-	contentFacts, contentErr := extractSeedanceContentFacts(contentRaw)
+	contentFacts, contentErr := extractSeedanceContentFacts(contentRaw, canonicalModel)
 	if contentErr != nil {
 		return modelrouting.FactsInput{}, contentErr
 	}
@@ -145,7 +145,7 @@ type seedanceRoutingContentFacts struct {
 	videoURLs       []string
 }
 
-func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFacts, *routingInputError) {
+func extractSeedanceContentFacts(raw json.RawMessage, canonicalModel string) (seedanceRoutingContentFacts, *routingInputError) {
 	var items []map[string]json.RawMessage
 	if err := common.Unmarshal(raw, &items); err != nil || len(items) == 0 {
 		return seedanceRoutingContentFacts{}, newRoutingInputError("InvalidParameter.content", "content must be a non-empty array")
@@ -223,8 +223,11 @@ func extractSeedanceContentFacts(raw json.RawMessage) (seedanceRoutingContentFac
 	if facts.texts != 1 {
 		return facts, newRoutingInputError("InvalidParameter.content", "exactly one non-empty text item is required")
 	}
-	if facts.images > 9 || facts.videos > 3 || facts.audios > 3 {
-		return facts, newRoutingInputError("InvalidParameter.content", "reference media count exceeds Seedance 2.0 limits")
+	seriesContract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+	if facts.images > seriesContract.ReferenceLimits.Images ||
+		facts.videos > seriesContract.ReferenceLimits.Videos ||
+		facts.audios > seriesContract.ReferenceLimits.Audios {
+		return facts, newRoutingInputError("InvalidParameter.content", fmt.Sprintf("reference media count exceeds Seedance %s limits", seriesContract.Series))
 	}
 	if facts.audios > 0 && facts.images == 0 && facts.videos == 0 {
 		return facts, newRoutingInputError("InvalidParameter.content", "audio input requires an image or video")

@@ -277,6 +277,29 @@ func TestExtractSeedanceRoutingInputRejectsTooManyReferenceVideos(t *testing.T) 
 	require.NotNil(t, routeErr)
 }
 
+func TestExtractSeedanceRoutingInputAcceptsSeedance25ReferenceLimits(t *testing.T) {
+	images := make([]string, 30)
+	for index := range images {
+		images[index] = `{"type":"image_url","role":"reference_image","image_url":{"url":"https://x/image.png"}}`
+	}
+	videos := make([]string, 10)
+	for index := range videos {
+		videos[index] = `{"type":"video_url","role":"reference_video","video_url":{"url":"https://x/video.mp4"}}`
+	}
+	audios := make([]string, 10)
+	for index := range audios {
+		audios[index] = `{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://x/audio.wav"}}`
+	}
+	body := routingContentBody(append([]string{`{"type":"text","text":"video"}`}, append(images, append(videos, audios...)...)...))
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", body, true)
+	input, routeErr := extractSeedanceRoutingInput(c, modelrouting.Seedance25)
+	require.Nil(t, routeErr)
+	require.NotNil(t, input)
+	assert.Equal(t, 30, input.ReferenceImages)
+	assert.Equal(t, 10, input.ReferenceVideos)
+	assert.Equal(t, 10, input.ReferenceAudios)
+}
+
 func escapeJSON(value string) string {
 	var buf strings.Builder
 	for _, r := range value {

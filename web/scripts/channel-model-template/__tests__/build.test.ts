@@ -230,6 +230,26 @@ test('maps a second-priced source row to a per-duration USD cost', () => {
   assert.equal(cost.chargeEvent, 'task_succeeded')
 })
 
+test('uses channel-level economics after the source fields move out of sd', () => {
+  const source = sourceWithOfficialPrice()
+  const model = firstSourceModel(source)
+  delete model.fields.充值汇率
+  delete model.fields.手续费
+  delete model.fields.计费倍率
+  source.channels[0].fields.充值汇率 = '1:1'
+  source.channels[0].fields.手续费 = '3%'
+  source.channels[0].fields.计费倍率 = 1.25
+
+  const data = buildTemplateData(source, rules)
+  const cost = data.costs[0]
+  assert.ok(cost)
+  assert.equal(data.channels[0]?.rechargeRatio, '1')
+  assert.equal(data.channels[0]?.feeRate, '0.03')
+  assert.equal(data.channels[0]?.billingMultiplier, '1.25')
+  assert.equal(cost.feeRate, '0.03')
+  assert.equal(cost.billingMultiplier, '1.25')
+})
+
 test('maps all latest billing modes from one unit price field', () => {
   const cases = [
     ['second', 'per_duration', 'nativePerSecond'],

@@ -594,6 +594,32 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 		}
 		return channel, result, nil
 	}
+	if param.ImageRequest != nil {
+		imageAllowed := make(map[int]struct{})
+		for channelID := range filter.AllowedChannelIDs {
+			channel, channelErr := model.GetChannelById(channelID, false)
+			if channelErr != nil {
+				continue
+			}
+			if _, eligibilityErr := EvaluateImageChannel(channel, param.ModelName, *param.ImageRequest); eligibilityErr == nil {
+				imageAllowed[channelID] = struct{}{}
+			}
+		}
+		if len(filter.AllowedChannelIDs) == 0 {
+			for _, channelID := range model.GroupModelChannelIDs(result.SourceGroup, routingModelName, param.RequestPath, model.ChannelSelectFilter{ExcludedChannelIDs: param.ExcludedChannelIDs}) {
+				channel, channelErr := model.GetChannelById(channelID, false)
+				if channelErr == nil {
+					if _, eligibilityErr := EvaluateImageChannel(channel, param.ModelName, *param.ImageRequest); eligibilityErr == nil {
+						imageAllowed[channelID] = struct{}{}
+					}
+				}
+			}
+		}
+		filter.AllowedChannelIDs = imageAllowed
+		if len(imageAllowed) == 0 {
+			return nil, result, &ChannelSelectionError{Code: relaytypes.ErrorCodeCompatibleChannelUnavailable, StatusCode: http.StatusServiceUnavailable, Err: errors.New("no compatible image channel is available")}
+		}
+	}
 	// Profit-aware candidate filter: under strict cost-accounting mode, narrow the
 	// candidate set to channels whose predicted margin meets the minimum threshold.
 	// The filter only intersects the set; it never reorders or changes priority/weight,

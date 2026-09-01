@@ -13,9 +13,10 @@ License, or (at your option) any later version.
 
 维护时优先更新原始表 `sd收录.xlsx`：
 
-1. `channel`：渠道名称、定价页面和 Base URL。
-2. `sd`：渠道模型、系列、计费方式、统一单价、结构化素材限制、状态和备注。
-3. `sd官价`：官方 SKU、系列、分辨率、帧率、尺寸和官方售价。
+1. `channel`：渠道名称、定价页面、Base URL，以及 `充值汇率`、`手续费`、`计费倍率`。
+2. `sd`：渠道模型、系列、计费方式、统一单价、结构化素材限制、状态和备注；三项渠道级财务字段不再放在此表。
+3. `sd官价`：Seedance 官方 SKU、系列、分辨率、帧率、尺寸和官方售价。
+4. `h3` / `h3官价`：H3 渠道模型和按秒官方价格；当前 V1 SD 模板只登记并阻断未实现的 H3 转换，不会静默忽略这些数据。
 
 `sd` 的供应商成本字段使用同一组新契约：`计费方式` 与 `单价 元`。`计费方式` 为 `second`、`call`、`token` 时，分别按秒、按次、按百万 Token 解释 `单价 元`；旧的 `元/秒`、`元/次`、`元/1M` 表头不再支持，不能与新字段混用。
 
@@ -27,7 +28,25 @@ License, or (at your option) any later version.
 - `计费方式 + 单价 元` 是供应商成本的唯一源表字段组合。`second`、`call`、`token` 分别决定按时长、按次和按 Token 计费，三种模式都读取 `单价 元`。
 - 是否支持视频输入只由 `参考视频数` 判定：大于 0 表示支持，等于 0 表示不支持。空值、负数或非整数属于素材合同错误，不能猜测或默认。
 - `sd` 不再支持旧价格列 `元/秒`、`元/次`、`元/1M`，也不再支持 `视频输入`。检测到旧字段或新旧字段混用时必须停止生成。
+- `充值汇率`、`手续费`、`计费倍率` 必须从 `channel` 读取；生成器兼容旧测试夹具中的回退读取，但新源表若同时在 `sd` 保留这些字段会停止生成。
 - `sd官价` 可以先收录 Seedance 2.5 官方价格；只有 `sd` 中存在同系列的有效渠道模型行时，才生成对应 SKU、售价、成本映射和活动配置。仅有官方价格不得发布或激活 2.5。
+- `h3官价` 的价格列是输入素材与输出按秒价格，不能套用 Seedance 的 Token/M 公式。V1 模板尚未定义 H3 的独立售价场景，因此检测到 `h3` 或 `h3官价` 时报告 `UNSUPPORTED_SOURCE_SHEET` 并阻止生成。
+
+### 显式 SD-only 生成
+
+当源表同时包含尚未接入 V1 模板的 `h3` / `h3官价` 工作表时，默认门禁仍会以 `UNSUPPORTED_SOURCE_SHEET (FAIL)` 阻止生成。若本轮明确只维护 SD/Seedance，可同时传入 `--allow-unsupported-sheets --allow-warnings`：
+
+```powershell
+bun run channel-model-template:generate -- `
+  --source "..\docs\new-channels\sd收录.xlsx" `
+  --rules "scripts\channel-model-template\conversion-rules.json" `
+  --base "src\channel-config-converter\__fixtures__\channel-config-v1-corrected.xlsx" `
+  --output "C:\Users\880pro\Documents\new-api\outputs\<日期>\sd-only-template.xlsx" `
+  --allow-warnings `
+  --allow-unsupported-sheets
+```
+
+该范围只会把 H3 阻断降为带明确说明的 `WARN`；H3 数据仍保留在源表，但不会进入生成模板、配置导入、发布或激活。其他真实 `FAIL` 不会被此开关降级。
 
 ## 规则文件
 

@@ -21,12 +21,14 @@ import fs from 'node:fs/promises'
 import ExcelJS from 'exceljs'
 
 export const CHANNEL_HEADERS = ['渠道', '名称', '链接', 'Base Url'] as const
+export const CHANNEL_ECONOMIC_HEADERS = ['充值汇率', '手续费', '计费倍率'] as const
+const CHANNEL_HEADER_ALIASES: Partial<
+  Record<(typeof CHANNEL_HEADERS)[number], readonly string[]>
+> = {
+  链接: ['模型数据 API URL'],
+}
 export const SD_HEADERS = [
   '渠道',
-  '充值汇率',
-  '手续费',
-  '计费倍率',
-  '付费模式',
   '模型ID',
   '系列',
   '版本',
@@ -76,6 +78,7 @@ export const OFFICIAL_PRICE_HEADERS = [
   '备注',
 ] as const
 const FORBIDDEN_SD_HEADERS = ['元/秒', '元/次', '元/1M', '视频输入'] as const
+const OPTIONAL_SHEETS = ['gpt-image官价', 'h3官价', 'h3'] as const
 
 export type SourceValue = boolean | Date | number | string | null
 
@@ -93,6 +96,7 @@ export type SourceWorkbook = {
   channels: SourceRecord[]
   models: SourceRecord[]
   officialPrices: SourceRecord[]
+  additionalSheets?: string[]
 }
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -137,13 +141,19 @@ function readHeaders(
   sheet: ExcelJS.Worksheet,
   rowNumber: number,
   headers: readonly string[],
-  name: string
+  name: string,
+  aliases: Readonly<Record<string, readonly string[]>> = {}
 ): number[] {
   const headerRow = sheet.getRow(rowNumber)
   const columns = headers.map((header) => {
     let matchedColumn = 0
+    const acceptedHeaders = new Set([header, ...(aliases[header] ?? [])])
     for (let column = 1; column <= sheet.columnCount; column += 1) {
-      if (cellText(cellValue(headerRow.getCell(column).value)) !== header) {
+      if (
+        !acceptedHeaders.has(
+          cellText(cellValue(headerRow.getCell(column).value))
+        )
+      ) {
         continue
       }
       if (matchedColumn !== 0) {
@@ -158,6 +168,22 @@ function readHeaders(
     throw new Error(`${name} header mismatch; missing=${missing.join(',')}`)
   }
   return columns
+}
+
+function readOptionalHeaders(
+  sheet: ExcelJS.Worksheet,
+  rowNumber: number,
+  headers: readonly string[]
+): number[] {
+  const headerRow = sheet.getRow(rowNumber)
+  return headers.map((header) => {
+    for (let column = 1; column <= sheet.columnCount; column += 1) {
+      if (cellText(cellValue(headerRow.getCell(column).value)) === header) {
+        return column
+      }
+    }
+    return 0
+  })
 }
 
 function readRecords(
@@ -210,7 +236,9 @@ function validateWorkbookShape(workbook: ExcelJS.Workbook): void {
   const sheetNames = workbook.worksheets.map((sheet) => sheet.name)
   const missing = REQUIRED_SHEETS.filter((name) => !sheetNames.includes(name))
   const unexpected = sheetNames.filter(
-    (name) => !(REQUIRED_SHEETS as readonly string[]).includes(name)
+    (name) =>
+      !(REQUIRED_SHEETS as readonly string[]).includes(name) &&
+      !(OPTIONAL_SHEETS as readonly string[]).includes(name)
   )
   if (missing.length > 0 || unexpected.length > 0) {
     throw new Error(
@@ -238,6 +266,7 @@ export async function readSourceWorkbook(
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(file)
   validateWorkbookShape(workbook)
+  const sheetNames = workbook.worksheets.map((sheet) => sheet.name)
 
   const channel = workbook.getWorksheet('channel')
   const models = workbook.getWorksheet('sd')
@@ -245,7 +274,27 @@ export async function readSourceWorkbook(
   if (!channel || !models || !officialPrices) {
     throw new Error('source worksheets are unavailable')
   }
-  const channelColumns = readHeaders(channel, 2, CHANNEL_HEADERS, 'channel')
+  const channelColumns = readHeaders(
+    channel,
+    2,
+    CHANNEL_HEADERS,
+    'channel',
+    CHANNEL_HEADER_ALIASES
+  )
+  const channelEconomicColumns = readOptionalHeaders(
+    channel,
+    2,
+    CHANNEL_ECONOMIC_HEADERS
+  )
+  if (
+    channelEconomicColumns.some((column) => column === 0) &&
+    channelEconomicColumns.some((column) => column !== 0)
+  ) {
+    const missing = CHANNEL_ECONOMIC_HEADERS.filter(
+      (_, index) => channelEconomicColumns[index] === 0
+    )
+    throw new Error(`channel header mismatch; missing=${missing.join(',')}`)
+  }
   const modelHeaderTexts = Array.from(
     { length: models.columnCount },
     (_, index) => cellText(cellValue(models.getRow(2).getCell(index + 1).value))
@@ -259,6 +308,16 @@ export async function readSourceWorkbook(
       `sd header mismatch; forbidden=${forbiddenHeaders.join(',')}`
     )
   }
+  if (channelEconomicColumns.every((column) => column !== 0)) {
+    const migratedHeaders = CHANNEL_ECONOMIC_HEADERS.filter((header) =>
+      modelHeaderSet.has(header)
+    )
+    if (migratedHeaders.length > 0) {
+      throw new Error(
+        `sd header mismatch; migrated=${migratedHeaders.join(',')}`
+      )
+    }
+  }
   const modelColumns = readHeaders(models, 2, SD_HEADERS, 'sd')
   const officialPriceColumns = readHeaders(
     officialPrices,
@@ -268,7 +327,7 @@ export async function readSourceWorkbook(
   )
   const modelRecords = readRecords(models, SD_HEADERS, modelColumns, 2, [
     modelColumns[0] ?? 0,
-    modelColumns[5] ?? 0,
+    modelColumns[SD_HEADERS.indexOf('模型ID')] ?? 0,
   ]).map((record) => {
     const billingMode = record.fields.计费方式 ?? null
     const { 计费方式: _ignored, ...fields } = record.fields
@@ -277,8 +336,20 @@ export async function readSourceWorkbook(
       fields: { ...fields, 计费: billingMode },
     })
   })
+  const allChannelHeaders = [
+    ...CHANNEL_HEADERS,
+    ...(channelEconomicColumns.every((column) => column !== 0)
+      ? CHANNEL_ECONOMIC_HEADERS
+      : []),
+  ] as const
+  const allChannelColumns = [
+    ...channelColumns,
+    ...(channelEconomicColumns.every((column) => column !== 0)
+      ? channelEconomicColumns
+      : []),
+  ]
   return {
-    channels: readRecords(channel, CHANNEL_HEADERS, channelColumns, 2),
+    channels: readRecords(channel, allChannelHeaders, allChannelColumns, 2),
     models: modelRecords,
     officialPrices: readRecords(
       officialPrices,
@@ -286,6 +357,9 @@ export async function readSourceWorkbook(
       officialPriceColumns,
       6
     ).map(normalizeSeries),
+    additionalSheets: sheetNames.filter((name) =>
+      (OPTIONAL_SHEETS as readonly string[]).includes(name)
+    ),
   }
 }
 

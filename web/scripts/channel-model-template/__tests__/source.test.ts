@@ -59,6 +59,93 @@ test('reads source records with original worksheet and row locations', async () 
   assert.equal(source.officialPrices[0]?.location.sheet, 'sd官价')
 })
 
+test('accepts migrated channel economics and records optional price sheets', async () => {
+  await withMutatedFixture(
+    (workbook) => {
+      const channel = workbook.getWorksheet('channel')
+      assert.ok(channel)
+      channel.getCell('E2').value = '充值汇率'
+      channel.getCell('F2').value = '手续费'
+      channel.getCell('G2').value = '计费倍率'
+      channel.getCell('E3').value = '1:1'
+      channel.getCell('F3').value = '3%'
+      channel.getCell('G3').value = 1.25
+
+      const sd = workbook.getWorksheet('sd')
+      assert.ok(sd)
+      for (const column of ['B', 'C', 'D']) {
+        sd.getCell(`${column}2`).value = null
+      }
+
+      const h3 = workbook.addWorksheet('h3')
+      h3.addRow([
+        '渠道',
+        '模型ID',
+        '系列',
+        '版本',
+        '清晰度',
+        '计费方式',
+        '单价 元',
+      ])
+      h3.addRow([2, 'lec-minimax-h3', 'h3', '标准', '768p', 'second', 0.15])
+      const h3Official = workbook.addWorksheet('h3官价')
+      h3Official.addRow([
+        '系列',
+        '模型',
+        '版本',
+        '分辨率',
+        '输入素材',
+        '素材价格 元/秒',
+        '输入素材',
+        '素材价格 元/秒',
+        '输出价格 元/秒',
+      ])
+      h3Official.addRow(['h3', 'MiniMax-H3', '标准', '768P', '视频', 0.5, '图片', 0.2, 0.5])
+    },
+    async (sourcePath) => {
+      const source = await readSourceWorkbook(sourcePath)
+      assert.equal(source.channels[0]?.fields.计费倍率, 1.25)
+      assert.equal(source.channels[0]?.fields.手续费, '3%')
+      assert.deepEqual(source.additionalSheets, ['h3', 'h3官价'])
+    }
+  )
+})
+
+test('accepts the latest channel API URL header as the canonical link field', async () => {
+  await withMutatedFixture(
+    (workbook) => {
+      const channel = workbook.getWorksheet('channel')
+      assert.ok(channel)
+      channel.getCell('C2').value = '模型数据 API URL'
+    },
+    async (sourcePath) => {
+      const source = await readSourceWorkbook(sourcePath)
+      assert.equal(
+        source.channels[0]?.fields.链接,
+        'https://clmm-mall.top/pricing'
+      )
+    }
+  )
+})
+
+test('rejects duplicate channel economics left on sd after migration', async () => {
+  await withMutatedFixture(
+    (workbook) => {
+      const channel = workbook.getWorksheet('channel')
+      assert.ok(channel)
+      channel.getCell('E2').value = '充值汇率'
+      channel.getCell('F2').value = '手续费'
+      channel.getCell('G2').value = '计费倍率'
+    },
+    async (sourcePath) => {
+      await assert.rejects(
+        () => readSourceWorkbook(sourcePath),
+        /sd header mismatch; migrated=.*充值汇率.*手续费.*计费倍率/
+      )
+    }
+  )
+})
+
 test('reads the latest series and unit-price contract and skips series-only group rows', async () => {
   const source = await readSourceWorkbook(fixturePath)
   const model = source.models[0]

@@ -50,6 +50,7 @@ import { cn } from '@/lib/utils'
 import {
   ASPECT_RATIOS,
   buildRoutingTargetName,
+  getSeedanceReferenceLimits,
   INPUT_MODES,
   MAX_TASK_DURATION_SECONDS,
   OUTPUT_RESOLUTIONS,
@@ -87,6 +88,7 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
   const { t } = useTranslation()
   const target = props.form.watch(`targets.${props.index}`)
   const model = props.form.watch('model')
+  const referenceLimitMaximums = getSeedanceReferenceLimits(model)
   const channelName = props.form.watch(
     `targets.${props.index}.channel_name` as const
   )
@@ -684,7 +686,7 @@ export function RouteTargetEditor(props: RouteTargetEditorProps) {
 
       <div className='grid gap-4 sm:grid-cols-3'>
         {(['images', 'videos', 'audios'] as const).map((kind) => {
-          const maximum = kind === 'images' ? 9 : 3
+          const maximum = referenceLimitMaximums[kind]
           return (
             <FormField
               key={kind}

@@ -983,7 +983,10 @@ export async function buildImportDocument(
         )
         const canonicalModel = field(sku, 'canonical_model', '模型')
         const referenceBounds = mappingReferenceBounds(mapping)
-        if (!referenceBounds) {
+        const costMode = field(cost, 'cost_mode', '成本模式')
+        const isActive =
+          field(cost, 'status', '状态').trim().toLowerCase() === 'active'
+        if (!referenceBounds && isActive) {
           issues.push(
             sourceIssue(
               'ROUTE_REFERENCE_LIMITS_UNRESOLVED',
@@ -994,11 +997,8 @@ export async function buildImportDocument(
           )
           continue
         }
-        const targetRef = `route-target/${mapping.businessId}`
-        const costMode = field(cost, 'cost_mode', '成本模式')
-        const isActive =
-          field(cost, 'status', '状态').trim().toLowerCase() === 'active'
-        const commonCostFields = {
+       const targetRef = `route-target/${mapping.businessId}`
+       const commonCostFields = {
           billing_multiplier: optionalDecimal(
             cost,
             'billing_multiplier',
@@ -1068,10 +1068,10 @@ export async function buildImportDocument(
           scenario: field(cost, 'scenario', '定价场景'),
           upstream_model: field(cost, 'upstream_model', '上游模型'),
         }
-        entities.cost_rule_drafts.push(
-          await authoritativeEntity(cost, source, costFields)
-        )
-        if (!isActive) continue
+       entities.cost_rule_drafts.push(
+         await authoritativeEntity(cost, source, costFields)
+       )
+        if (!referenceBounds || !isActive) continue
 
         entities.model_mappings.push(
           await authoritativeEntity(mapping, mappingSource, {

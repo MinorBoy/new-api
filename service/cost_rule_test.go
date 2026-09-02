@@ -436,6 +436,48 @@ func TestTaskOnlyChannelCostRuleLifecycleUsesTaskAdaptorCapabilities(t *testing.
 	assert.True(t, covered)
 }
 
+func TestImageCostRuleLifecycleUsesImagePathCapabilities(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	previousLookup := CostCapabilityLookup
+	CostCapabilityLookup = func(_ int, requestPath string, _ constant.TaskPlatform) types.CostCapabilities {
+		if requestPath != "/v1/images/generations" {
+			return types.CostCapabilities{}
+		}
+		return types.CostCapabilities{
+			CanResolveBillableModel: true,
+			ChargeEvents:            []types.CostChargeEvent{types.CostChargeResponseSucceeded},
+			MeterSources:            []types.CostMeterSource{types.CostMeterValidatedRequest},
+		}
+	}
+	t.Cleanup(func() { CostCapabilityLookup = previousLookup })
+
+	unitPrice := "0.020"
+	rule, err := CreateCostRuleDraft(CreateCostRuleInput{
+		ChannelID:             7,
+		BillableUpstreamModel: "vendor-model",
+		CostVariantKey:        "gen-1024x1024-medium",
+		CostMode:              types.CostModePerImage,
+		Config: types.CostRuleConfigV1{
+			Currency:              "USD",
+			BillingMultiplier:     "1",
+			PurchaseDiscountRatio: "1",
+			RechargeExchangeRatio: "1",
+			FeeRate:               "0",
+			CurrencyToUSDRate:     "1",
+			UnitPrice:             &unitPrice,
+			ChargeEvent:           types.CostChargeResponseSucceeded,
+			MeterSource:           types.CostMeterValidatedRequest,
+		},
+		RequestPath: "/v1/images/generations",
+	})
+	require.NoError(t, err)
+	_, err = ValidateCostRuleByID(rule.ID)
+	require.NoError(t, err)
+	activated, err := ActivateCostRule(rule.ID, 42)
+	require.NoError(t, err)
+	assert.Equal(t, string(types.CostRuleActive), activated.Status)
+}
+
 func validCreateCostRuleInput() CreateCostRuleInput {
 	return CreateCostRuleInput{
 		ChannelID:             7,

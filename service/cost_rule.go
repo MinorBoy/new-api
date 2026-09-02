@@ -184,7 +184,7 @@ func ActivateCostRule(id int64, adminID int) (*model.ChannelModelCostRule, error
 	if err != nil {
 		return nil, err
 	}
-	capabilities, err := lookupChannelCostCapabilities(channel.Type, "", "")
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, costRuleRequestPath(&draft), "")
 	if err != nil {
 		return nil, err
 	}
@@ -498,11 +498,18 @@ func ValidateCostRuleByID(id int64) (types.CostRuleConfigV1, error) {
 	if err != nil {
 		return types.CostRuleConfigV1{}, err
 	}
-	capabilities, err := lookupChannelCostCapabilities(channel.Type, "", "")
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, costRuleRequestPath(rule), "")
 	if err != nil {
 		return types.CostRuleConfigV1{}, err
 	}
 	return ValidateCostRuleDraft(rule, capabilities)
+}
+
+func costRuleRequestPath(rule *model.ChannelModelCostRule) string {
+	if rule != nil && types.CostMode(rule.CostMode) == types.CostModePerImage {
+		return "/v1/images/generations"
+	}
+	return ""
 }
 
 func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {

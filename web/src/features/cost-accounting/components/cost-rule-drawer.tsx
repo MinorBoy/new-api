@@ -145,6 +145,14 @@ const paidDefaults = {
 
 const relayModeVideoSubmit = 31
 
+export function costRuleRequestPath(
+  costMode: CostMode,
+  taskOnly: boolean
+): string {
+  if (costMode === 'per_image') return '/v1/images/generations'
+  return taskOnly ? '/v1/video/generations' : '/v1/chat/completions'
+}
+
 function createCostRuleFormValues(
   mode: CostMode,
   seed: CostRuleFormSeed = {}
@@ -484,6 +492,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
           cost_mode: values.cost_mode,
           config,
           note,
+          request_path: costRuleRequestPath(values.cost_mode, taskOnly),
         })
       }
       return createCostRule({
@@ -493,6 +502,7 @@ export function CostRuleDrawer(props: CostRuleDrawerProps) {
         cost_mode: values.cost_mode,
         config,
         note,
+        request_path: costRuleRequestPath(values.cost_mode, taskOnly),
       })
     },
     onSuccess: async () => {

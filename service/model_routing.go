@@ -585,7 +585,9 @@ func selectChannelForGroup(param *RetryParam, group string, priorityRetry int) (
 		if publishErr := publishImageRouteSelection(param, result, decision.Selected); publishErr != nil {
 			return nil, result, &ChannelSelectionError{Code: relaytypes.ErrorCodeRoutingPolicyError, StatusCode: http.StatusInternalServerError, Err: publishErr}
 		}
-		channel, getErr := model.GetChannelById(decision.Selected.ChannelID, false)
+		// Relay setup needs the selected channel credential. The routing preview
+		// intentionally omits keys, but the dispatch result must load the full row.
+		channel, getErr := model.GetChannelById(decision.Selected.ChannelID, true)
 		if getErr != nil || channel == nil {
 			if getErr == nil {
 				getErr = errors.New("selected image channel is unavailable")

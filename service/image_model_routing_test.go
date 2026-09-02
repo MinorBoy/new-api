@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
@@ -51,6 +52,7 @@ func TestUnifiedImageRoutingSelectsLowestCostAndPublishesIdentity(t *testing.T) 
 	require.NotNil(t, selected)
 	assert.Equal(t, "分组A", group)
 	assert.Equal(t, 12, selected.Id)
+	assert.Equal(t, "secret", selected.Key, "selected image channel must retain its upstream credential for relay setup")
 	assert.Equal(t, "expensive-image", common.GetContextKeyString(c, constant.ContextKeyRoutingUpstreamModel))
 	assert.Equal(t, "gen-1024x1024-medium", common.GetContextKeyString(c, constant.ContextKeyRoutingCostVariant))
 
@@ -134,6 +136,35 @@ func TestValidateKnownImageChannelRequiresProfileAndPublishesIdentity(t *testing
 	require.ErrorAs(t, err, &selectionErr)
 	assert.Equal(t, relaytypes.ErrorCodeCompatibleChannelUnavailable, selectionErr.Code)
 	assert.Equal(t, http.StatusServiceUnavailable, selectionErr.StatusCode)
+}
+
+func TestStrictImageProfitRecheckUsesFrozenImageRevenue(t *testing.T) {
+	prepareStrictCostRoutingServiceTest(t)
+	allowImageCostCoverageForTest(t)
+	originalCatalog := image_setting.Catalog2JSONString()
+	t.Cleanup(func() { require.NoError(t, image_setting.UpdateCatalogByJSONString(originalCatalog)) })
+	require.NoError(t, image_setting.UpdateCatalogByJSONString(testImageRoutingCatalog))
+	seedUnifiedImageChannel(t, 71, "frozen-revenue", "frozen-image")
+	seedImageCostRule(t, 71, "frozen-image", "0.008")
+
+	c := capabilitySelectionContext()
+	common.SetContextKey(c, constant.ContextKeyRoutingCostVariant, "gen-1024x1024-medium")
+	info := &relaycommon.RelayInfo{
+		UserId:                 1,
+		OriginModelName:        "gpt-image-1",
+		RequestURLPath:         "/v1/images/generations",
+		RelayMode:              relayconstant.RelayModeImagesGenerations,
+		BillableUpstreamModel:  "frozen-image",
+		PredictedUpstreamModel: "frozen-image",
+		ChannelMeta:            &relaycommon.ChannelMeta{ChannelId: 71, ChannelType: constant.ChannelTypeOpenAI},
+		ImageBillingSnapshot: &types.ImageBillingSnapshot{
+			UnitSalePriceUSD: "0.04", RequestedImages: 1, GroupRatio: "1", QuotaPerUnit: "500000",
+		},
+	}
+
+	require.NoError(t, service.RecheckSelectedChannelProfit(c, info), "strict image recheck must use the frozen image sale price")
+	require.NotNil(t, info.CostProfitRecheckSnapshot)
+	assert.Equal(t, "gen-1024x1024-medium", info.CostProfitRecheckSnapshot.CostVariantKey)
 }
 
 func allowImageCostCoverageForTest(t *testing.T) {

@@ -689,6 +689,17 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
 	if info.ImageBillingSnapshot != nil {
 		facts.ImageCount = info.ImageBillingSnapshot.RequestedImages
+		// Unified image pricing is frozen before channel selection. The generic
+		// revenue preview cannot reconstruct an image request because it does not
+		// carry the resolved SKU, so strict rechecks must use this immutable snapshot.
+		imageRevenue, imageRevenueErr := imageBillingSnapshotRevenue(info.ImageBillingSnapshot)
+		if imageRevenueErr != nil {
+			hasRevenue = false
+			revenueNanoUSD = 0
+		} else {
+			hasRevenue = imageRevenue > 0
+			revenueNanoUSD = imageRevenue
+		}
 	}
 	if strings.Contains(strings.ToLower(relaycommon.SafeRequestPath(info.RequestURLPath)), "/video") &&
 		(facts.OutputDurationSeconds <= 0 || facts.Width <= 0 || facts.Height <= 0 || facts.FrameRateNum <= 0 || facts.FrameRateDen <= 0) {
@@ -760,6 +771,24 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		reason = filterResult.Exclusions[0].Reason
 	}
 	return &ProfitEligibilityError{ChannelID: channelID, Reason: reason}
+}
+
+func imageBillingSnapshotRevenue(snapshot *types.ImageBillingSnapshot) (int64, error) {
+	if snapshot == nil {
+		return 0, errors.New("image billing snapshot is required")
+	}
+	if snapshot.RequestedImages < 1 || snapshot.RequestedImages > int64(dto.MaxImageN) {
+		return 0, fmt.Errorf("image count must be between 1 and %d", dto.MaxImageN)
+	}
+	price, err := decimal.NewFromString(strings.TrimSpace(snapshot.UnitSalePriceUSD))
+	if err != nil || price.IsNegative() {
+		return 0, errors.New("image sale price is invalid")
+	}
+	ratio, err := decimal.NewFromString(strings.TrimSpace(snapshot.GroupRatio))
+	if err != nil || ratio.IsNegative() {
+		return 0, errors.New("image group ratio is invalid")
+	}
+	return DecimalToNanoUSD(price.Mul(decimal.NewFromInt(snapshot.RequestedImages)).Mul(ratio))
 }
 
 // currentRecheckMarginThreshold reads the selected target directly from storage rather

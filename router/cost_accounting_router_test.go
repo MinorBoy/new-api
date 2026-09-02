@@ -30,6 +30,7 @@ func TestCostAccountingPermissionRoutesUseDedicatedPermissions(t *testing.T) {
 	assertCostRoute(t, http.MethodGet, "/reports/breakdown", authz.CostAccountingRead, controller.GetCostReportBreakdown)
 	assertCostRoute(t, http.MethodGet, "/reports/filter-options", authz.CostAccountingRead, controller.GetCostReportFilterOptions)
 	assertCostRoute(t, http.MethodGet, "/catalog", authz.CostAccountingRead, controller.ListSupplierCostCatalog)
+	assertCostRoute(t, http.MethodGet, "/image-pricing", authz.CostAccountingRead, controller.GetImagePricingCostSummary)
 	assertCostRoute(t, http.MethodGet, "/catalog/export", authz.CostAccountingRead, controller.ExportSupplierCostCatalog)
 	assertCostRoute(t, http.MethodGet, "/catalog/:rule_id", authz.CostAccountingRead, controller.GetSupplierCostCatalogDetail)
 	assertCostRoute(t, http.MethodGet, "/route-margin-catalog", authz.CostAccountingRead, controller.ListRouteMarginCatalog)

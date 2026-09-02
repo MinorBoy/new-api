@@ -16,15 +16,35 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ImagePricingWorkbench } from './image-pricing-workbench'
+import { api } from '@/lib/api'
 
-type ImageSettingsCardProps = {
-  catalog: string
-  routing: string
+export type ImagePricingCostItem = {
+  model: string
+  sku: string
+  known: boolean
+  minimum_cost_usd?: string
+  source_count: number
 }
 
-export function ImageSettingsCard(props: ImageSettingsCardProps) {
-  return (
-    <ImagePricingWorkbench catalog={props.catalog} routing={props.routing} />
+export type ImagePricingCostSummaryResponse = {
+  success: boolean
+  message: string
+  data: {
+    items: ImagePricingCostItem[]
+  }
+}
+
+export async function getImagePricingCostSummary(
+  models: string[]
+): Promise<ImagePricingCostSummaryResponse> {
+  const response = await api.get<ImagePricingCostSummaryResponse>(
+    '/api/cost-accounting/image-pricing',
+    { params: { model: models } }
   )
+  if (!response.data.success) {
+    throw new Error(
+      response.data.message || 'Unable to load image pricing costs'
+    )
+  }
+  return response.data
 }

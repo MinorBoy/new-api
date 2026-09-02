@@ -16,15 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ImagePricingWorkbench } from './image-pricing-workbench'
-
-type ImageSettingsCardProps = {
-  catalog: string
-  routing: string
-}
-
-export function ImageSettingsCard(props: ImageSettingsCardProps) {
-  return (
-    <ImagePricingWorkbench catalog={props.catalog} routing={props.routing} />
-  )
+export function countUnsavedImagePricingChanges(
+  edited: Record<string, string>,
+  saved: Record<string, string>
+): number {
+  return Object.keys(edited).filter((id) => edited[id] !== saved[id]).length
 }

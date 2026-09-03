@@ -2697,6 +2697,8 @@
     "Image catalog must be a JSON object": "Image catalog must be a JSON object",
     "Image compatibility test failed": "Image compatibility test failed",
     "Image compatibility test passed": "Image compatibility test passed",
+    "Default image configuration applied automatically": "Default image configuration applied automatically",
+    "Custom image configuration": "Custom image configuration",
     "Image count": "Image count",
     "SKU count": "SKU count",
     "Enabled SKUs": "Enabled SKUs",

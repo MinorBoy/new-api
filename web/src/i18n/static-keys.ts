@@ -652,6 +652,8 @@ export const STATIC_I18N_KEYS = [
   'Supplier image costs',
   'Configure per-image supplier costs for this channel and its mapped models.',
   'Manage supplier image costs',
+  'Default image configuration applied automatically',
+  'Custom image configuration',
 
   // Misc
   'Cancel',

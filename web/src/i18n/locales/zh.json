@@ -2697,6 +2697,8 @@
     "Image catalog must be a JSON object": "图像目录必须是 JSON 对象",
     "Image compatibility test failed": "图像兼容性测试失败",
     "Image compatibility test passed": "图像兼容性测试通过",
+    "Default image configuration applied automatically": "已自动填入默认图像配置",
+    "Custom image configuration": "自定义图像配置",
     "Image count": "图片数量",
     "SKU count": "SKU 数量",
     "Enabled SKUs": "已启用 SKU",

@@ -2697,6 +2697,8 @@
     "Image catalog must be a JSON object": "画像カタログは JSON オブジェクトである必要があります",
     "Image compatibility test failed": "画像互換性テストに失敗しました",
     "Image compatibility test passed": "画像互換性テストに成功しました",
+    "Default image configuration applied automatically": "デフォルトの画像設定を自動適用しました",
+    "Custom image configuration": "カスタム画像設定",
     "Image count": "画像枚数",
     "SKU count": "SKU count",
     "Enabled SKUs": "Enabled SKUs",

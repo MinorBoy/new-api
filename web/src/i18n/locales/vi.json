@@ -2697,6 +2697,8 @@
     "Image catalog must be a JSON object": "Danh mục hình ảnh phải là đối tượng JSON",
     "Image compatibility test failed": "Kiểm tra tương thích hình ảnh thất bại",
     "Image compatibility test passed": "Kiểm tra tương thích hình ảnh thành công",
+    "Default image configuration applied automatically": "Đã tự động áp dụng cấu hình hình ảnh mặc định",
+    "Custom image configuration": "Cấu hình hình ảnh tùy chỉnh",
     "Image count": "Số lượng hình ảnh",
     "SKU count": "SKU count",
     "Enabled SKUs": "Enabled SKUs",

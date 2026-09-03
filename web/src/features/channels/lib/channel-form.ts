@@ -391,6 +391,36 @@ export function getStatusOnChannelTypeChange(
 // Default Form Values
 // ============================================================================
 
+export const DEFAULT_IMAGE_PROFILE_JSON = JSON.stringify(
+  {
+    profile: 'openai_images',
+    profile_version: 1,
+    paths: {
+      generations: '/v1/images/generations',
+      edits: '/v1/images/edits',
+    },
+  },
+  null,
+  2
+)
+
+export function isEmptyImageProfile(value: string | undefined): boolean {
+  const trimmed = value?.trim() || ''
+  if (!trimmed) return true
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length === 0
+    )
+  } catch {
+    return false
+  }
+}
+
 export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
   type: 1,

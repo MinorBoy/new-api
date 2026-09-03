@@ -185,6 +185,20 @@ const imageChannel: Channel = {
   routing_target_count: 0,
 }
 
+const emptyImageChannel: Channel = {
+  ...imageChannel,
+  id: 70,
+  settings: '{}',
+}
+
+const customImageChannel: Channel = {
+  ...imageChannel,
+  id: 71,
+  settings: JSON.stringify({
+    image_profile: { profile: 'custom' },
+  }),
+}
+
 function createQueryClient(channel: Channel = secureChannel): QueryClientType {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -310,6 +324,58 @@ test('editing an OpenAI Images channel exposes supplier cost management', async 
       false,
       browserWindow.document.body.innerHTML
     )
+  } finally {
+    await unmountDrawer(mounted)
+  }
+})
+
+test('fills the default image profile when an image channel has an empty profile', async () => {
+  const mounted = await mountDrawer(emptyImageChannel)
+  try {
+    const textarea = browserWindow.document.querySelector(
+      'textarea[name="image_profile"]'
+    ) as unknown as HTMLTextAreaElement | null
+    assert.ok(textarea)
+    assert.match(textarea.value, /"profile": "openai_images"/)
+    assert.match(textarea.value, /\/v1\/images\/generations/)
+  } finally {
+    await unmountDrawer(mounted)
+  }
+})
+
+test('restores the default image profile without affecting non-image channels', async () => {
+  const mounted = await mountDrawer(customImageChannel)
+  try {
+    const textarea = browserWindow.document.querySelector(
+      'textarea[name="image_profile"]'
+    ) as unknown as HTMLTextAreaElement | null
+    assert.ok(textarea)
+    assert.match(textarea.value, /custom/)
+
+    const restoreButton = [
+      ...browserWindow.document.querySelectorAll('button'),
+    ].find(
+      (button) =>
+        button.textContent?.trim() === 'Reset to default configuration'
+    )
+    assert.ok(restoreButton)
+    await act(async () => restoreButton.click())
+    assert.match(textarea.value, /"profile": "openai_images"/)
+  } finally {
+    await unmountDrawer(mounted)
+  }
+})
+
+test('does not render an image profile reset action for non-image channels', async () => {
+  const mounted = await mountDrawer(secureChannel)
+  try {
+    const restoreButton = [
+      ...browserWindow.document.querySelectorAll('button'),
+    ].find(
+      (button) =>
+        button.textContent?.trim() === 'Reset to default configuration'
+    )
+    assert.equal(restoreButton, undefined)
   } finally {
     await unmountDrawer(mounted)
   }

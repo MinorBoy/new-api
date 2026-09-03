@@ -38,6 +38,7 @@ import {
   Plus,
   Eye,
   RefreshCw,
+  RotateCcw,
   Code,
   Route,
   Settings,
@@ -155,6 +156,7 @@ import {
 import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
+  DEFAULT_IMAGE_PROFILE_JSON,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
   channelFormSchema,
   channelsQueryKeys,
@@ -172,6 +174,7 @@ import {
   getStatusOnChannelTypeChange,
   getChannelTypeHints,
   getChannelModelOptions,
+  isEmptyImageProfile,
   OPENAI_IMAGES_CHANNEL_TYPES,
   hasModelConfigChanged,
   findMissingModelsInMapping,
@@ -686,6 +689,7 @@ export function ChannelMutateDrawer({
   const [imageCompatibilityResult, setImageCompatibilityResult] =
     useState<ImageCompatibilityTestResult | null>(null)
   const [imageCostDrawerOpen, setImageCostDrawerOpen] = useState(false)
+  const [imageProfileAutoFilled, setImageProfileAutoFilled] = useState(false)
 
   const isEditing = Boolean(currentRow)
   const channelId = currentRow?.id ?? null
@@ -814,6 +818,18 @@ export function ChannelMutateDrawer({
     'upstream_model_update_ignored_models'
   )
   const currentImageProfile = form.watch('image_profile')
+  const applyDefaultImageProfileIfEmpty = useCallback(() => {
+    const type = form.getValues('type')
+    if (!OPENAI_IMAGES_CHANNEL_TYPES.has(type)) return false
+    if (!isEmptyImageProfile(form.getValues('image_profile'))) return false
+
+    form.setValue('image_profile', DEFAULT_IMAGE_PROFILE_JSON, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    setImageProfileAutoFilled(true)
+    return true
+  }, [form])
   const canReadCostAccounting = hasPermission(
     currentUser,
     ADMIN_PERMISSION_RESOURCES.COST_ACCOUNTING,
@@ -1374,6 +1390,9 @@ export function ChannelMutateDrawer({
     if (isEditing && channelData?.data) {
       const defaults = transformChannelToFormDefaults(channelData.data)
       form.reset(defaults)
+      if (!applyDefaultImageProfileIfEmpty()) {
+        setImageProfileAutoFilled(false)
+      }
       setAdvancedSettingsOpen(
         readAdvancedSettingsPreference() || hasAdvancedSettingsValues(defaults)
       )
@@ -1393,12 +1412,21 @@ export function ChannelMutateDrawer({
             }
           : CHANNEL_FORM_DEFAULT_VALUES
       )
+      if (!applyDefaultImageProfileIfEmpty()) {
+        setImageProfileAutoFilled(false)
+      }
       setAdvancedSettingsOpen(false)
       initialModelsRef.current = []
       initialModelMappingRef.current = ''
       initialStatusCodeMappingRef.current = ''
     }
-  }, [isEditing, channelData, form, initialDisabled])
+  }, [
+    applyDefaultImageProfileIfEmpty,
+    isEditing,
+    channelData,
+    form,
+    initialDisabled,
+  ])
 
   // Handle type change - set default values for specific types
   useEffect(() => {
@@ -1412,7 +1440,12 @@ export function ChannelMutateDrawer({
       form.setValue('base_url', nextBaseUrl)
     }
 
+    if (!OPENAI_IMAGES_CHANNEL_TYPES.has(currentType)) {
+      setImageProfileAutoFilled(false)
+    }
     if (isEditing) return // Don't auto-set creation defaults when editing
+
+    applyDefaultImageProfileIfEmpty()
 
     // Type 45 (VolcEngine) - set default base_url
     if (currentType === 45) {
@@ -1429,7 +1462,7 @@ export function ChannelMutateDrawer({
         form.setValue('other', 'v2.1')
       }
     }
-  }, [currentType, isEditing, form])
+  }, [applyDefaultImageProfileIfEmpty, currentType, isEditing, form])
 
   useEffect(() => {
     if (currentType !== 45 || currentBaseUrl !== 'doubao-coding-plan') return
@@ -2011,6 +2044,7 @@ export function ChannelMutateDrawer({
         setExpandedEditorNavItemId(undefined)
         setAdvancedSettingsOpen(false)
         setClipboardConnectionInfo(null)
+        setImageProfileAutoFilled(false)
       }
     },
     [onOpenChange, form, initialDisabled]
@@ -4510,7 +4544,10 @@ export function ChannelMutateDrawer({
                                       <FormControl>
                                         <JsonCodeEditor
                                           value={field.value || ''}
-                                          onChange={field.onChange}
+                                          onChange={(value) => {
+                                            field.onChange(value)
+                                            setImageProfileAutoFilled(false)
+                                          }}
                                           name={field.name}
                                           onBlur={field.onBlur}
                                           textareaRef={field.ref}
@@ -4518,16 +4555,61 @@ export function ChannelMutateDrawer({
                                             sensitiveLocked || isSubmitting
                                           }
                                           placeholder={t(
-                                            'Example: {"profile":"openai_images","profile_version":1,"paths":{"generations":"/v1/images/generations","edits":"/v1/images/edits"}}'
+                                            'Bind this channel to the built-in OpenAI Images protocol. Capability overrides are optional.'
                                           )}
+                                          toolbarActions={
+                                            <Button
+                                              type='button'
+                                              variant='ghost'
+                                              size='sm'
+                                              className='h-6 px-2 text-xs'
+                                              onClick={() => {
+                                                form.setValue(
+                                                  'image_profile',
+                                                  DEFAULT_IMAGE_PROFILE_JSON,
+                                                  {
+                                                    shouldDirty: true,
+                                                    shouldValidate: true,
+                                                  }
+                                                )
+                                                setImageProfileAutoFilled(false)
+                                              }}
+                                              disabled={
+                                                sensitiveLocked || isSubmitting
+                                              }
+                                            >
+                                              <RotateCcw
+                                                className='mr-1 h-3.5 w-3.5'
+                                                aria-hidden='true'
+                                              />
+                                              {t(
+                                                'Reset to default configuration'
+                                              )}
+                                            </Button>
+                                          }
                                           heightClassName='h-44 min-h-44 max-h-44'
                                         />
                                       </FormControl>
-                                      <FormDescription>
-                                        {t(
-                                          'Bind this channel to the built-in OpenAI Images protocol. Capability overrides are optional.'
+                                      <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
+                                        <FormDescription>
+                                          {t(
+                                            'Bind this channel to the built-in OpenAI Images protocol. Capability overrides are optional.'
+                                          )}
+                                        </FormDescription>
+                                        {imageProfileAutoFilled && (
+                                          <span className='text-muted-foreground text-xs'>
+                                            {t(
+                                              'Default image configuration applied automatically'
+                                            )}
+                                          </span>
                                         )}
-                                      </FormDescription>
+                                        {!imageProfileAutoFilled &&
+                                          currentImageProfile?.trim() && (
+                                            <span className='text-muted-foreground text-xs'>
+                                              {t('Custom image configuration')}
+                                            </span>
+                                          )}
+                                      </div>
                                       <FormMessage />
                                     </FormItem>
                                   )}

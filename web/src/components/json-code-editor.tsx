@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -55,6 +56,7 @@ export type JsonCodeEditorProps = Omit<
   heightClassName?: string
   placeholder?: string
   ariaLabel?: string
+  toolbarActions?: ReactNode
   'data-form-root'?: string
 }
 
@@ -68,6 +70,7 @@ export function JsonCodeEditor({
   heightClassName = 'h-56 min-h-56 max-h-56',
   placeholder,
   ariaLabel,
+  toolbarActions,
   className,
   id,
   'aria-describedby': ariaDescribedBy,
@@ -294,6 +297,7 @@ export function JsonCodeEditor({
             )}
             {statusMessage}
           </span>
+          {toolbarActions}
           <Button
             type='button'
             variant='ghost'

@@ -177,4 +177,23 @@ describe('JsonCodeEditor component', () => {
 
     await unmountEditor(rendered)
   })
+
+  test('renders an optional toolbar action', async () => {
+    const rendered = await renderEditor({
+      value: '{}',
+      onChange: () => undefined,
+      toolbarActions: (
+        <button type='button' disabled>
+          Restore
+        </button>
+      ),
+    })
+    const button = [...rendered.container.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent === 'Restore'
+    )
+
+    assert.ok(button)
+    assert.equal(button.disabled, true)
+    await unmountEditor(rendered)
+  })
 })

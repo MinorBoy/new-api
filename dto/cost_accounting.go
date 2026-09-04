@@ -31,6 +31,20 @@ type CostRuleUpdateRequest struct {
 	TaskPlatform constant.TaskPlatform  `json:"task_platform,omitempty"`
 }
 
+type ImageCostMatrixEntryRequest struct {
+	CostVariantKey string `json:"cost_variant_key" binding:"required"`
+	UnitPrice      string `json:"unit_price"`
+}
+
+type ImageCostMatrixRequest struct {
+	ChannelID             int                           `json:"channel_id" binding:"required"`
+	BillableUpstreamModel string                        `json:"billable_upstream_model" binding:"required"`
+	Endpoint              string                        `json:"endpoint,omitempty"`
+	Entries               []ImageCostMatrixEntryRequest `json:"entries" binding:"required,min=1"`
+	Activate              bool                          `json:"activate"`
+	Note                  string                        `json:"note,omitempty"`
+}
+
 type CostRuleResponse struct {
 	ID                    int64                  `json:"id"`
 	ChannelID             int                    `json:"channel_id"`

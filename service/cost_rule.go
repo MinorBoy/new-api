@@ -40,6 +40,23 @@ type UpdateCostRuleInput struct {
 	TaskPlatform constant.TaskPlatform
 }
 
+// ImageCostMatrixEntry is one resolution-tier and quality supplier price.
+// Matrix keys are intentionally limited to the stable image SKU contract.
+type ImageCostMatrixEntry struct {
+	CostVariantKey string
+	UnitPrice      string
+}
+
+type ImageCostMatrixInput struct {
+	ChannelID             int
+	BillableUpstreamModel string
+	Endpoint              string
+	Entries               []ImageCostMatrixEntry
+	AdminID               int
+	Activate              bool
+	Note                  string
+}
+
 type PredictedCoverageInput struct {
 	ChannelID              int
 	PredictedUpstreamModel string
@@ -119,6 +136,161 @@ func CreateCostRuleDraft(input CreateCostRuleInput) (*model.ChannelModelCostRule
 		}
 	}
 	return nil, createErr
+}
+
+// UpsertImageCostMatrix creates or updates image per-image cost drafts in one
+// transaction. When Activate is set, every prepared draft is promoted before
+// the transaction commits, so a partial matrix can never become active.
+func UpsertImageCostMatrix(input ImageCostMatrixInput) ([]model.ChannelModelCostRule, error) {
+	if input.ChannelID <= 0 || strings.TrimSpace(input.BillableUpstreamModel) == "" {
+		return nil, errors.New("image cost matrix channel and billable model are required")
+	}
+	if len(input.Entries) == 0 {
+		return nil, errors.New("image cost matrix entries are required")
+	}
+	channel, err := model.GetChannelById(input.ChannelID, false)
+	if err != nil {
+		return nil, fmt.Errorf("load cost rule channel: %w", err)
+	}
+	endpoint := strings.ToLower(strings.TrimSpace(input.Endpoint))
+	if endpoint == "" {
+		endpoint = "generations"
+	}
+	if endpoint != "generations" && endpoint != "edits" {
+		return nil, fmt.Errorf("unsupported image cost matrix endpoint %q", input.Endpoint)
+	}
+	capabilities, err := lookupChannelCostCapabilities(channel.Type, "/v1/images/"+endpoint, "")
+	if err != nil {
+		return nil, err
+	}
+
+	type preparedEntry struct {
+		key    string
+		config string
+	}
+	prepared := make([]preparedEntry, 0, len(input.Entries))
+	seen := make(map[string]struct{}, len(input.Entries))
+	for _, entry := range input.Entries {
+		key, err := normalizeImageCostMatrixKey(entry.CostVariantKey)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[key]; exists {
+			return nil, fmt.Errorf("duplicate image cost matrix variant %q", key)
+		}
+		prefix := "gen"
+		if endpoint == "edits" {
+			prefix = "edit"
+		}
+		if !strings.HasPrefix(key, prefix+"-") {
+			return nil, fmt.Errorf("image cost matrix variant %q does not match endpoint %s", key, endpoint)
+		}
+		seen[key] = struct{}{}
+		price := strings.TrimSpace(entry.UnitPrice)
+		if price == "" {
+			continue
+		}
+		unitPrice := price
+		config := types.CostRuleConfigV1{
+			Currency: "USD", BillingMultiplier: "1", PurchaseDiscountRatio: "1",
+			RechargeExchangeRatio: "1", FeeRate: "0", CurrencyToUSDRate: "1",
+			UnitPrice: &unitPrice, ChargeEvent: types.CostChargeResponseSucceeded,
+			MeterSource: types.CostMeterValidatedRequest,
+		}
+		normalized, err := NormalizeCostRuleConfig(types.CostModePerImage, config)
+		if err != nil {
+			return nil, fmt.Errorf("image cost matrix %s: %w", key, err)
+		}
+		candidate := &model.ChannelModelCostRule{
+			ChannelID: input.ChannelID, BillableUpstreamModel: strings.TrimSpace(input.BillableUpstreamModel),
+			CostVariantKey: key, Status: string(types.CostRuleDraft), CostMode: string(types.CostModePerImage),
+			SchemaVersion: 1, Source: "manual", Note: strings.TrimSpace(input.Note), CreatedBy: input.AdminID,
+		}
+		encoded, err := common.Marshal(normalized)
+		if err != nil {
+			return nil, err
+		}
+		candidate.ConfigJSON = string(encoded)
+		if _, err := validateCostRuleContract(candidate, capabilities); err != nil {
+			return nil, fmt.Errorf("image cost matrix %s: %w", key, err)
+		}
+		prepared = append(prepared, preparedEntry{key: key, config: candidate.ConfigJSON})
+	}
+	if len(prepared) == 0 {
+		return nil, errors.New("image cost matrix has no prices")
+	}
+
+	result := make([]model.ChannelModelCostRule, 0, len(prepared))
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		now := common.GetTimestamp()
+		for _, entry := range prepared {
+			var rules []model.ChannelModelCostRule
+			if err := tx.Where("channel_id = ? AND billable_upstream_model = ? AND cost_variant_key = ?", input.ChannelID, input.BillableUpstreamModel, entry.key).
+				Order("version DESC").Find(&rules).Error; err != nil {
+				return err
+			}
+			var draft *model.ChannelModelCostRule
+			for index := range rules {
+				if rules[index].Status == string(types.CostRuleDraft) {
+					draft = &rules[index]
+					break
+				}
+			}
+			if draft != nil {
+				updated := tx.Model(&model.ChannelModelCostRule{}).Where("id = ? AND status = ?", draft.ID, types.CostRuleDraft).Updates(map[string]any{"config_json": entry.config, "note": strings.TrimSpace(input.Note), "updated_at": now})
+				if updated.Error != nil || updated.RowsAffected != 1 {
+					if updated.Error != nil {
+						return updated.Error
+					}
+					return model.ErrCostRuleStateConflict
+				}
+				if err := tx.First(draft, draft.ID).Error; err != nil {
+					return err
+				}
+			} else {
+				version := 1
+				if len(rules) > 0 {
+					version = rules[0].Version + 1
+				}
+				draft = &model.ChannelModelCostRule{ChannelID: input.ChannelID, BillableUpstreamModel: strings.TrimSpace(input.BillableUpstreamModel), CostVariantKey: entry.key, Version: version, Status: string(types.CostRuleDraft), CostMode: string(types.CostModePerImage), SchemaVersion: 1, ConfigJSON: entry.config, Source: "manual", Note: strings.TrimSpace(input.Note), CreatedBy: input.AdminID, CreatedAt: now, UpdatedAt: now}
+				if err := tx.Create(draft).Error; err != nil {
+					return err
+				}
+			}
+			if input.Activate {
+				activated, err := model.ActivateChannelModelCostRuleWithTx(tx, draft.ID, input.AdminID, now, func(locked *model.ChannelModelCostRule) error {
+					_, validationErr := validateCostRuleContract(locked, capabilities)
+					return validationErr
+				})
+				if err != nil {
+					return err
+				}
+				result = append(result, *activated)
+			} else {
+				result = append(result, *draft)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, rule := range result {
+		InvalidateCostCoverage(rule.ChannelID, rule.BillableUpstreamModel, rule.CostVariantKey)
+	}
+	return result, nil
+}
+
+func normalizeImageCostMatrixKey(raw string) (string, error) {
+	key, err := types.NormalizeCostVariantKey(raw)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(key, "-")
+	if len(parts) != 3 || (parts[0] != "gen" && parts[0] != "edit") || (parts[1] != "1k" && parts[1] != "2k" && parts[1] != "4k") || (parts[2] != "low" && parts[2] != "medium" && parts[2] != "high") {
+		return "", fmt.Errorf("invalid image cost matrix variant %q", raw)
+	}
+	return key, nil
 }
 
 func UpdateCostRuleDraft(id int64, input UpdateCostRuleInput) (*model.ChannelModelCostRule, error) {

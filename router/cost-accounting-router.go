@@ -31,6 +31,7 @@ var costAccountingPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/route-margin-catalog/export", permission: authz.CostAccountingRead, handler: controller.ExportRouteMarginCatalog},
 	{method: http.MethodGet, path: "/rules", permission: authz.CostAccountingRead, handler: controller.ListCostRules},
 	{method: http.MethodPost, path: "/rules", permission: authz.CostAccountingWrite, handler: controller.CreateCostRule},
+	{method: http.MethodPost, path: "/rules/image-matrix", permission: authz.CostAccountingWrite, handler: controller.UpsertImageCostMatrix},
 	{method: http.MethodPut, path: "/rules/:id", permission: authz.CostAccountingWrite, handler: controller.UpdateCostRule},
 	{method: http.MethodPost, path: "/rules/:id/validate", permission: authz.CostAccountingWrite, handler: controller.ValidateCostRule},
 	{method: http.MethodPost, path: "/rules/:id/activate", permission: authz.CostAccountingWrite, handler: controller.ActivateCostRule},

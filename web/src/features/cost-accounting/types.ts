@@ -212,6 +212,20 @@ export interface CostRuleWriteRequest {
   task_platform?: 'suno' | 'mj'
 }
 
+export interface ImageCostMatrixEntryRequest {
+  cost_variant_key: string
+  unit_price: string
+}
+
+export interface ImageCostMatrixRequest {
+  channel_id: number
+  billable_upstream_model: string
+  endpoint?: 'generations' | 'edits'
+  entries: ImageCostMatrixEntryRequest[]
+  activate?: boolean
+  note?: string
+}
+
 export type CostRuleUpdateRequest = Omit<
   CostRuleWriteRequest,
   'channel_id' | 'billable_upstream_model' | 'cost_variant_key'

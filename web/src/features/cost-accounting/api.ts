@@ -42,6 +42,7 @@ import type {
   CostRuleUpdateRequest,
   CostRuleValidationResult,
   CostRuleWriteRequest,
+  ImageCostMatrixRequest,
   ReconcileCostAttemptRequest,
   ReconcileCostRevenueRequest,
   RouteMarginCatalogPage,
@@ -118,6 +119,16 @@ export async function createCostRule(
 ): Promise<CostAccountingApiResponse<CostRule>> {
   const response = await api.post<CostAccountingApiResponse<CostRule>>(
     `${COST_ACCOUNTING_PATH}/rules`,
+    request
+  )
+  return response.data
+}
+
+export async function upsertImageCostMatrix(
+  request: ImageCostMatrixRequest
+): Promise<CostAccountingApiResponse<CostRule[]>> {
+  const response = await api.post<CostAccountingApiResponse<CostRule[]>>(
+    `${COST_ACCOUNTING_PATH}/rules/image-matrix`,
     request
   )
   return response.data

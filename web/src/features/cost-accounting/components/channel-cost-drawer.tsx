@@ -82,6 +82,7 @@ import {
 } from '@/lib/admin-permissions'
 import dayjs from '@/lib/dayjs'
 import { useAuthStore } from '@/stores/auth-store'
+import { useSystemOptions } from '@/features/system-settings/hooks/use-system-options'
 
 import type { Channel } from '../../channels/types'
 import { getPricing } from '../../pricing/api'
@@ -102,6 +103,7 @@ import {
 import type { CostCoverageItem, CostRule } from '../types'
 import { CostRuleDrawer } from './cost-rule-drawer'
 import { CoveragePanel } from './coverage-panel'
+import { ImageCostMatrix } from './image-cost-matrix'
 
 type ChannelCostDrawerProps = {
   open: boolean
@@ -269,6 +271,53 @@ function ruleStatusLabel(rule: CostRule, t: TFunction) {
   return t('Retired')
 }
 
+type ImageCatalogModelSummary = {
+  profile?: string
+  profile_version?: number
+  endpoints?: Record<string, { capability?: { enabled?: boolean } }>
+}
+
+function unifiedImageModels(channel: Channel, rawCatalog: string | undefined) {
+  if (!rawCatalog) return []
+  let catalog: { models?: Record<string, ImageCatalogModelSummary> }
+  try {
+    catalog = JSON.parse(rawCatalog) as { models?: Record<string, ImageCatalogModelSummary> }
+  } catch {
+    return []
+  }
+  const mapping: Record<string, string> = {}
+  try {
+    const parsed = channel.model_mapping ? JSON.parse(channel.model_mapping) : {}
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === 'string') mapping[key] = value
+      }
+    }
+  } catch {
+    return []
+  }
+  const models = channel.models
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean)
+  const seen = new Set<string>()
+  return models.flatMap((publicModel) => {
+    const entry = catalog.models?.[publicModel]
+    if (!entry || entry.profile !== 'openai_images' || entry.profile_version !== 1) return []
+    const billableModel = mapping[publicModel]?.trim() || publicModel
+    return Object.entries(entry.endpoints ?? {})
+      .filter(([, endpoint]) => endpoint.capability?.enabled !== false)
+      .filter(([endpoint]) => endpoint === 'generations' || endpoint === 'edits')
+      .filter(([endpoint]) => {
+        const key = `${billableModel}|${endpoint}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .map(([endpoint]) => ({ publicModel, billableModel, endpoint: endpoint as 'generations' | 'edits' }))
+  })
+}
+
 export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -311,6 +360,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
     enabled: props.open && channelID > 0 && canRead,
     staleTime: 5 * 60 * 1000,
   })
+  const systemOptionsQuery = useSystemOptions()
 
   const invalidateCostQueries = async () => {
     await Promise.all([
@@ -363,13 +413,17 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   const rules = rulesQuery.data?.data ?? []
   const coverage = coverageQuery.data?.data ?? []
   const rows = buildChannelCostRows(rules, coverage)
+  const imageMatrices = unifiedImageModels(
+    props.channel ?? ({ models: '', model_mapping: '' } as Channel),
+    systemOptionsQuery.data?.data?.find((option) => option.key === 'ImageModelCatalog')?.value
+  )
   const history = rows.find(
     (row) =>
       row.billableModel === historyTarget?.billableModel &&
       row.costVariantKey === historyTarget?.costVariantKey
   )
   const isLoading =
-    rulesQuery.isLoading || coverageQuery.isLoading || pricingQuery.isLoading
+    rulesQuery.isLoading || coverageQuery.isLoading || pricingQuery.isLoading || systemOptionsQuery.isLoading
   const error = rulesQuery.error ?? coverageQuery.error ?? pricingQuery.error
 
   const retry = async () => {
@@ -377,6 +431,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
       rulesQuery.refetch(),
       coverageQuery.refetch(),
       pricingQuery.refetch(),
+      systemOptionsQuery.refetch(),
     ])
   }
 
@@ -461,6 +516,20 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                   />
                 </div>
                 <CoveragePanel items={coverage} />
+
+                {imageMatrices.map((matrix) => (
+                  <ImageCostMatrix
+                    key={`${matrix.billableModel}|${matrix.endpoint}`}
+                    channelID={channelID}
+                    billableModel={matrix.billableModel}
+                    endpoint={matrix.endpoint}
+                    rules={rules.filter(
+                      (rule) => rule.billable_upstream_model === matrix.billableModel
+                    )}
+                    canWrite={canWrite}
+                    onSaved={invalidateCostQueries}
+                  />
+                ))}
 
                 {rows.length === 0 ? (
                   <Empty className='min-h-56'>

@@ -128,6 +128,34 @@ func CreateCostRule(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": response})
 }
 
+func UpsertImageCostMatrix(c *gin.Context) {
+	var request dto.ImageCostMatrixRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	entries := make([]service.ImageCostMatrixEntry, 0, len(request.Entries))
+	for _, entry := range request.Entries {
+		entries = append(entries, service.ImageCostMatrixEntry{CostVariantKey: entry.CostVariantKey, UnitPrice: entry.UnitPrice})
+	}
+	rules, err := service.UpsertImageCostMatrix(service.ImageCostMatrixInput{
+		ChannelID: request.ChannelID, BillableUpstreamModel: request.BillableUpstreamModel,
+		Endpoint: request.Endpoint,
+		Entries:  entries, AdminID: c.GetInt("id"), Activate: request.Activate, Note: request.Note,
+	})
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	responses, err := costRuleResponses(rules)
+	if err != nil {
+		writeCostAccountingError(c, err)
+		return
+	}
+	recordManageAudit(c, "cost_accounting.image_matrix_upsert", map[string]interface{}{"channel_id": request.ChannelID, "model": request.BillableUpstreamModel, "count": len(responses), "activate": request.Activate})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": responses})
+}
+
 func UpdateCostRule(c *gin.Context) {
 	id, ok := costAccountingID(c)
 	if !ok {

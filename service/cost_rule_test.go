@@ -478,6 +478,61 @@ func TestImageCostRuleLifecycleUsesImagePathCapabilities(t *testing.T) {
 	assert.Equal(t, string(types.CostRuleActive), activated.Status)
 }
 
+func TestUpsertImageCostMatrixPublishesEveryEntryAtomically(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+
+	rules, err := UpsertImageCostMatrix(ImageCostMatrixInput{
+		ChannelID:             7,
+		BillableUpstreamModel: "vendor-image",
+		AdminID:               42,
+		Activate:              true,
+		Entries: []ImageCostMatrixEntry{
+			{CostVariantKey: "gen-1k-low", UnitPrice: "0.008"},
+			{CostVariantKey: "gen-4k-high", UnitPrice: "0.024"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	for _, rule := range rules {
+		assert.Equal(t, string(types.CostRuleActive), rule.Status)
+		assert.Equal(t, string(types.CostModePerImage), rule.CostMode)
+	}
+
+	var activeCount int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).
+		Where("channel_id = ? AND billable_upstream_model = ? AND status = ?", 7, "vendor-image", types.CostRuleActive).
+		Count(&activeCount).Error)
+	assert.Equal(t, int64(2), activeCount)
+}
+
+func TestUpsertImageCostMatrixRejectsInvalidEntryWithoutWriting(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+
+	_, err := UpsertImageCostMatrix(ImageCostMatrixInput{
+		ChannelID:             7,
+		BillableUpstreamModel: "vendor-image",
+		Entries: []ImageCostMatrixEntry{
+			{CostVariantKey: "gen-1k-low", UnitPrice: "0.008"},
+			{CostVariantKey: "gen-2k-medium", UnitPrice: "-1"},
+		},
+	})
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Count(&count).Error)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestUpsertImageCostMatrixRejectsVariantFromAnotherEndpoint(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+
+	_, err := UpsertImageCostMatrix(ImageCostMatrixInput{
+		ChannelID: 7, BillableUpstreamModel: "vendor-image", Endpoint: "generations",
+		Entries: []ImageCostMatrixEntry{{CostVariantKey: "edit-1k-low", UnitPrice: "0.008"}},
+	})
+	require.Error(t, err)
+}
+
 func validCreateCostRuleInput() CreateCostRuleInput {
 	return CreateCostRuleInput{
 		ChannelID:             7,

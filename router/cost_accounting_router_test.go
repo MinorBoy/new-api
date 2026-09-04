@@ -15,6 +15,7 @@ func TestCostAccountingPermissionRoutesUseDedicatedPermissions(t *testing.T) {
 	assertCostRoute(t, http.MethodPut, "/settings", authz.CostAccountingWrite, controller.UpdateCostAccountingSettings)
 	assertCostRoute(t, http.MethodGet, "/rules", authz.CostAccountingRead, controller.ListCostRules)
 	assertCostRoute(t, http.MethodPost, "/rules", authz.CostAccountingWrite, controller.CreateCostRule)
+	assertCostRoute(t, http.MethodPost, "/rules/image-matrix", authz.CostAccountingWrite, controller.UpsertImageCostMatrix)
 	assertCostRoute(t, http.MethodPut, "/rules/:id", authz.CostAccountingWrite, controller.UpdateCostRule)
 	assertCostRoute(t, http.MethodPost, "/rules/:id/validate", authz.CostAccountingWrite, controller.ValidateCostRule)
 	assertCostRoute(t, http.MethodPost, "/rules/:id/activate", authz.CostAccountingWrite, controller.ActivateCostRule)

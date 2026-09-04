@@ -341,12 +341,20 @@ func mergeImageCompatibility(stored, submitted *model.Channel) error {
 			}
 		}
 	}
-	submittedBinding.Compatibility = retained
-	encoded, err := common.Marshal(submittedBinding)
+	var submittedBindingRaw map[string]json.RawMessage
+	if err := common.Unmarshal(rawBinding, &submittedBindingRaw); err != nil {
+		return err
+	}
+	encodedCompatibility, err := common.Marshal(retained)
 	if err != nil {
 		return err
 	}
-	submittedRaw["image_profile"] = encoded
+	submittedBindingRaw["compatibility"] = encodedCompatibility
+	encodedBinding, err := common.Marshal(submittedBindingRaw)
+	if err != nil {
+		return err
+	}
+	submittedRaw["image_profile"] = encodedBinding
 	settings, err := common.Marshal(submittedRaw)
 	if err != nil {
 		return err

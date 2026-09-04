@@ -111,6 +111,26 @@ func TestMergeStoredImageCompatibilityInvalidatesChangedMapping(t *testing.T) {
 	assert.NotContains(t, submitted.OtherSettings, "valid")
 }
 
+func TestMergeStoredImageCompatibilityPreservesExplicitEmptyCapabilityMatrix(t *testing.T) {
+	submitted := &model.Channel{
+		Id:            1,
+		Type:          constant.ChannelTypeOpenAI,
+		Models:        "gpt-image-2",
+		OtherSettings: `{"image_profile":{"profile":"openai_images","profile_version":1,"capability_overrides":{"gpt-image-2":{"resolution_tiers":[],"qualities":[],"resolution_qualities":[]}}}}`,
+	}
+
+	require.NoError(t, MergeStoredImageCompatibility(nil, submitted))
+	settings := submitted.GetOtherSettings()
+	require.NotNil(t, settings.ImageProfile)
+	capabilities := settings.ImageProfile.CapabilityOverrides["gpt-image-2"]
+	assert.NotNil(t, capabilities.ResolutionTiers)
+	assert.NotNil(t, capabilities.Qualities)
+	assert.NotNil(t, capabilities.ResolutionQualities)
+	assert.Empty(t, capabilities.ResolutionTiers)
+	assert.Empty(t, capabilities.Qualities)
+	assert.Empty(t, capabilities.ResolutionQualities)
+}
+
 func TestRunImageCompatibilityTestVerifiesMappedModelAndResponse(t *testing.T) {
 	require.NoError(t, image_setting.UpdateCatalogByJSONString(`{"version":1,"models":{"gpt-image-1":{"profile":"openai_images","profile_version":1,"endpoints":{"generations":{"capability":{"enabled":true,"sizes":["1024x1024"],"qualities":["medium"],"response_formats":["b64_json"],"max_n":1},"default_size":"1024x1024","default_quality":"medium","default_response_format":"b64_json"}},"skus":{"gen-1024x1024-medium":{"endpoint":"generations","size":"1024x1024","quality":"medium","unit":"image","sale_price_usd":"0.1"}}}}}`))
 	var receivedModel string

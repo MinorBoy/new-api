@@ -4,6 +4,7 @@ package image_setting
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,6 +18,18 @@ import (
 const (
 	CatalogOptionKey = "ImageModelCatalog"
 	CatalogVersion   = 1
+
+	ResolutionTier1K ResolutionTier = "1k"
+	ResolutionTier2K ResolutionTier = "2k"
+	ResolutionTier4K ResolutionTier = "4k"
+)
+
+type ResolutionTier string
+
+const (
+	max1KPixels uint64 = 1024 * 1024
+	max2KPixels uint64 = 2048 * 2048
+	max4KPixels uint64 = 2880 * 2880
 )
 
 type Catalog struct {
@@ -40,6 +53,7 @@ type EndpointCatalog struct {
 
 type SKU struct {
 	Endpoint     imageprofile.Endpoint `json:"endpoint"`
+	Tier         string                `json:"tier,omitempty"`
 	Size         string                `json:"size"`
 	Quality      string                `json:"quality"`
 	Unit         string                `json:"unit"`
@@ -56,6 +70,7 @@ type Selection struct {
 type ResolvedSKU struct {
 	CatalogVersion                                             int
 	Model, SKUKey, Size, Quality, ResponseFormat, SalePriceUSD string
+	Tier                                                       ResolutionTier
 	Endpoint                                                   imageprofile.Endpoint
 	N, InputImages                                             uint
 	HasMask                                                    bool
@@ -134,8 +149,15 @@ func validateEndpointCatalog(model string, endpoint imageprofile.Endpoint, value
 	if capability.SupportsMask && !profile.SupportsMask {
 		return fmt.Errorf("image model catalog model %q endpoint %q cannot enable mask support", model, endpoint)
 	}
-	if err := validateUniqueOptions("sizes", capability.Sizes); err != nil {
-		return fmt.Errorf("image model catalog model %q endpoint %q: %w", model, endpoint, err)
+	if len(capability.ResolutionTiers) > 0 {
+		if err := validateResolutionTiers(capability.ResolutionTiers); err != nil {
+			return fmt.Errorf("image model catalog model %q endpoint %q: %w", model, endpoint, err)
+		}
+	}
+	if len(capability.Sizes) > 0 {
+		if err := validateUniqueOptions("sizes", capability.Sizes); err != nil {
+			return fmt.Errorf("image model catalog model %q endpoint %q: %w", model, endpoint, err)
+		}
 	}
 	if err := validateUniqueOptions("qualities", capability.Qualities); err != nil {
 		return fmt.Errorf("image model catalog model %q endpoint %q: %w", model, endpoint, err)
@@ -144,7 +166,7 @@ func validateEndpointCatalog(model string, endpoint imageprofile.Endpoint, value
 		return fmt.Errorf("image model catalog model %q endpoint %q: %w", model, endpoint, err)
 	}
 	if capability.Enabled {
-		if !contains(capability.Sizes, value.DefaultSize) {
+		if len(capability.Sizes) > 0 && value.DefaultSize != "" && !strings.EqualFold(value.DefaultSize, "auto") && !contains(capability.Sizes, value.DefaultSize) {
 			return fmt.Errorf("image model catalog model %q endpoint %q default_size must be supported", model, endpoint)
 		}
 		if !contains(capability.Qualities, value.DefaultQuality) {
@@ -153,6 +175,21 @@ func validateEndpointCatalog(model string, endpoint imageprofile.Endpoint, value
 		if !contains(capability.ResponseFormats, value.DefaultResponseFormat) {
 			return fmt.Errorf("image model catalog model %q endpoint %q default_response_format must be supported", model, endpoint)
 		}
+	}
+	return nil
+}
+
+func validateResolutionTiers(values []string) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		tier := strings.ToLower(strings.TrimSpace(value))
+		if !isResolutionTier(ResolutionTier(tier)) {
+			return fmt.Errorf("resolution_tiers must contain only 1k, 2k, or 4k")
+		}
+		if _, exists := seen[tier]; exists {
+			return fmt.Errorf("resolution_tiers contains duplicate value %q", value)
+		}
+		seen[tier] = struct{}{}
 	}
 	return nil
 }
@@ -173,20 +210,35 @@ func validateSKUs(modelName string, model ModelEntry) error {
 		if sku.Unit != "image" {
 			return fmt.Errorf("image model catalog model %q SKU %q unit must be image", modelName, key)
 		}
-		if strings.TrimSpace(sku.Size) == "" || !contains(endpointCatalog.Capability.Sizes, sku.Size) {
-			return fmt.Errorf("image model catalog model %q SKU %q has unsupported size", modelName, key)
-		}
 		if strings.TrimSpace(sku.Quality) == "" || !contains(endpointCatalog.Capability.Qualities, sku.Quality) {
 			return fmt.Errorf("image model catalog model %q SKU %q has unsupported quality", modelName, key)
 		}
-		expectedKey := BuildSKUKey(sku.Endpoint, sku.Size, sku.Quality)
-		if key != expectedKey {
-			return fmt.Errorf("image model catalog model %q SKU %q must be named %q", modelName, key, expectedKey)
+		skuTier := strings.TrimSpace(sku.Tier)
+		if skuTier == "" {
+			skuTier = string(tierFromSKUKey(key))
+		}
+		if skuTier != "" {
+			if !isResolutionTier(ResolutionTier(skuTier)) {
+				return fmt.Errorf("image model catalog %q SKU %q has invalid resolution tier %q", modelName, key, skuTier)
+			}
+			expectedKey := BuildTierSKUKey(sku.Endpoint, ResolutionTier(skuTier), sku.Quality)
+			if key != expectedKey {
+				return fmt.Errorf("image model catalog model %q SKU %q must be named %q", modelName, key, expectedKey)
+			}
+		} else {
+			if strings.TrimSpace(sku.Size) == "" || (len(endpointCatalog.Capability.Sizes) > 0 && !contains(endpointCatalog.Capability.Sizes, sku.Size)) {
+				return fmt.Errorf("image model catalog model %q SKU %q has unsupported size", modelName, key)
+			}
+			expectedKey := BuildSKUKey(sku.Endpoint, sku.Size, sku.Quality)
+			if key != expectedKey {
+				return fmt.Errorf("image model catalog model %q SKU %q must be named %q", modelName, key, expectedKey)
+			}
 		}
 		if err := validateSalePrice(sku.SalePriceUSD); err != nil {
 			return fmt.Errorf("image model catalog model %q SKU %q: %w", modelName, key, err)
 		}
-		if sku.Size == endpointCatalog.DefaultSize && sku.Quality == endpointCatalog.DefaultQuality {
+		defaultTier, _, _ := ResolveResolutionTier(endpointCatalog.DefaultSize)
+		if (skuTier != "" && ResolutionTier(skuTier) == defaultTier || skuTier == "" && sku.Size == endpointCatalog.DefaultSize) && sku.Quality == endpointCatalog.DefaultQuality {
 			defaultSKUSeen[sku.Endpoint] = true
 		}
 	}
@@ -196,6 +248,22 @@ func validateSKUs(modelName string, model ModelEntry) error {
 		}
 	}
 	return nil
+}
+
+func isResolutionTier(tier ResolutionTier) bool {
+	return tier == ResolutionTier1K || tier == ResolutionTier2K || tier == ResolutionTier4K
+}
+
+func tierFromSKUKey(key string) ResolutionTier {
+	parts := strings.Split(strings.TrimSpace(key), "-")
+	if len(parts) != 3 {
+		return ""
+	}
+	tier := ResolutionTier(parts[1])
+	if !isResolutionTier(tier) {
+		return ""
+	}
+	return tier
 }
 
 func validateUniqueOptions(name string, values []string) error {
@@ -234,6 +302,94 @@ func BuildSKUKey(endpoint imageprofile.Endpoint, size, quality string) string {
 		prefix = "edit"
 	}
 	return fmt.Sprintf("%s-%s-%s", prefix, strings.TrimSpace(size), strings.TrimSpace(quality))
+}
+
+// ResolveResolutionTier classifies a concrete image size by total pixel count.
+// Empty and auto sizes use the 1K billing tier while retaining an empty
+// normalized size so callers can apply their existing upstream default.
+func ResolveResolutionTier(size string) (ResolutionTier, string, error) {
+	normalized := strings.TrimSpace(size)
+	if normalized == "" || strings.EqualFold(normalized, "auto") {
+		return ResolutionTier1K, "", nil
+	}
+	parts := strings.Split(strings.ToLower(normalized), "x")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("image size %q must use widthxheight format", size)
+	}
+	width, err := parsePositiveDimension(parts[0])
+	if err != nil {
+		return "", "", fmt.Errorf("image size %q has invalid width", size)
+	}
+	height, err := parsePositiveDimension(parts[1])
+	if err != nil {
+		return "", "", fmt.Errorf("image size %q has invalid height", size)
+	}
+	if width > math.MaxUint64/height {
+		return "", "", fmt.Errorf("image size %q exceeds supported pixel range", size)
+	}
+	pixels := width * height
+	switch {
+	case pixels <= max1KPixels:
+		return ResolutionTier1K, normalized, nil
+	case pixels <= max2KPixels:
+		return ResolutionTier2K, normalized, nil
+	case pixels <= max4KPixels:
+		return ResolutionTier4K, normalized, nil
+	default:
+		return "", "", fmt.Errorf("image size %q exceeds the 4k pixel limit", size)
+	}
+}
+
+// ResolveLegacyResolutionTier maps a previously stored concrete-size SKU to
+// a billing tier. Legacy catalogs may contain sizes above the current 4K
+// request limit (for example 4096x4096); those entries are retained as the
+// historical 4K price while new requests are still validated by
+// ResolveResolutionTier.
+func ResolveLegacyResolutionTier(size string) (ResolutionTier, string, error) {
+	tier, normalized, err := ResolveResolutionTier(size)
+	if err == nil {
+		return tier, normalized, nil
+	}
+	normalized = strings.TrimSpace(size)
+	parts := strings.Split(strings.ToLower(normalized), "x")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", err
+	}
+	width, widthErr := parsePositiveDimension(parts[0])
+	height, heightErr := parsePositiveDimension(parts[1])
+	if widthErr != nil || heightErr != nil || width > math.MaxUint64/height {
+		return "", "", err
+	}
+	return ResolutionTier4K, normalized, nil
+}
+
+func parsePositiveDimension(value string) (uint64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, errors.New("dimension is empty")
+	}
+	var parsed uint64
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return 0, errors.New("dimension is not a positive integer")
+		}
+		if parsed > (math.MaxUint64-uint64(digit-'0'))/10 {
+			return 0, errors.New("dimension overflows uint64")
+		}
+		parsed = parsed*10 + uint64(digit-'0')
+	}
+	if parsed == 0 {
+		return 0, errors.New("dimension must be positive")
+	}
+	return parsed, nil
+}
+
+func BuildTierSKUKey(endpoint imageprofile.Endpoint, tier ResolutionTier, quality string) string {
+	prefix := "gen"
+	if endpoint == imageprofile.EndpointEdits {
+		prefix = "edit"
+	}
+	return fmt.Sprintf("%s-%s-%s", prefix, strings.TrimSpace(string(tier)), strings.TrimSpace(quality))
 }
 
 func UpdateCatalogByJSONString(raw string) error {
@@ -285,10 +441,15 @@ func Resolve(selection Selection) (ResolvedSKU, error) {
 	if !ok || !endpointCatalog.Capability.Enabled {
 		return ResolvedSKU{}, fmt.Errorf("image model %q does not support endpoint %q", modelName, selection.Endpoint)
 	}
-	size := strings.TrimSpace(selection.Size)
-	if size == "" {
-		size = endpointCatalog.DefaultSize
+	sizeInput := strings.TrimSpace(selection.Size)
+	tier, normalizedSize, err := ResolveResolutionTier(sizeInput)
+	if err != nil {
+		return ResolvedSKU{}, err
 	}
+	size := normalizedSize
+	// Missing and auto sizes are billing sentinels for the 1K tier. They must
+	// never inherit a concrete catalog default because that would charge and
+	// route the request as a different resolution.
 	quality := strings.TrimSpace(selection.Quality)
 	// The legacy OpenAI image validator fills an omitted gpt-image quality
 	// with "auto". Treat that compatibility sentinel as an omitted value when
@@ -303,9 +464,6 @@ func Resolve(selection Selection) (ResolvedSKU, error) {
 	responseFormat := strings.TrimSpace(selection.ResponseFormat)
 	if responseFormat == "" {
 		responseFormat = endpointCatalog.DefaultResponseFormat
-	}
-	if !contains(endpointCatalog.Capability.Sizes, size) {
-		return ResolvedSKU{}, fmt.Errorf("image size %q is not supported for model %q endpoint %q", size, modelName, selection.Endpoint)
 	}
 	if !contains(endpointCatalog.Capability.Qualities, quality) {
 		return ResolvedSKU{}, fmt.Errorf("image quality %q is not supported for model %q endpoint %q", quality, modelName, selection.Endpoint)
@@ -326,15 +484,39 @@ func Resolve(selection Selection) (ResolvedSKU, error) {
 	if selection.HasMask && !capability.SupportsMask {
 		return ResolvedSKU{}, fmt.Errorf("image model %q endpoint %q does not support mask", modelName, selection.Endpoint)
 	}
-	skuKey := BuildSKUKey(selection.Endpoint, size, quality)
+	skuKey := BuildTierSKUKey(selection.Endpoint, tier, quality)
 	sku, ok := model.SKUs[skuKey]
 	if !ok || sku.Endpoint != selection.Endpoint {
-		return ResolvedSKU{}, fmt.Errorf("image SKU %q is not configured for model %q", skuKey, modelName)
+		// Keep existing catalogs usable until their concrete-size rules are
+		// migrated. New catalogs always resolve the tier key above.
+		legacyKey := BuildSKUKey(selection.Endpoint, size, quality)
+		if size == "" {
+			// A legacy catalog may use default_size=auto, so there is no
+			// concrete key to construct. Find the first legacy SKU in the
+			// requested tier instead of treating auto as a literal size.
+			for candidateKey, candidate := range model.SKUs {
+				if candidate.Endpoint != selection.Endpoint || candidate.Quality != quality {
+					continue
+				}
+				candidateTier, _, candidateErr := ResolveResolutionTier(candidate.Size)
+				if candidateErr == nil && candidateTier == tier {
+					legacyKey, sku, ok = candidateKey, candidate, true
+					break
+				}
+			}
+		} else {
+			sku, ok = model.SKUs[legacyKey]
+		}
+		if !ok || sku.Endpoint != selection.Endpoint {
+			return ResolvedSKU{}, fmt.Errorf("image SKU %q is not configured for model %q", skuKey, modelName)
+		}
+		skuKey = legacyKey
 	}
 	return ResolvedSKU{
 		CatalogVersion: catalog.Version,
 		Model:          modelName,
 		SKUKey:         skuKey,
+		Tier:           tier,
 		Size:           size,
 		Quality:        quality,
 		ResponseFormat: responseFormat,
@@ -357,6 +539,8 @@ func cloneCatalog(catalog Catalog) Catalog {
 		}
 		for endpoint, endpointCatalog := range model.Endpoints {
 			capability := endpointCatalog.Capability
+			capability.ResolutionTiers = append([]string(nil), capability.ResolutionTiers...)
+			capability.ResolutionQualities = append([]string(nil), capability.ResolutionQualities...)
 			capability.Sizes = append([]string(nil), capability.Sizes...)
 			capability.Qualities = append([]string(nil), capability.Qualities...)
 			capability.ResponseFormats = append([]string(nil), capability.ResponseFormats...)

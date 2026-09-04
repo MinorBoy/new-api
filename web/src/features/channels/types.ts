@@ -123,6 +123,8 @@ export interface ImageProfileBinding {
 export interface ImageModelCapabilities {
   generations?: boolean
   edits?: boolean
+  resolution_tiers?: string[]
+  resolution_qualities?: string[]
   sizes?: string[]
   qualities?: string[]
   response_formats?: string[]
@@ -130,6 +132,11 @@ export interface ImageModelCapabilities {
   max_input_images?: number
   supports_mask?: boolean
 }
+
+export const IMAGE_RESOLUTION_TIERS = ['1k', '2k', '4k'] as const
+export const IMAGE_QUALITY_TIERS = ['low', 'medium', 'high'] as const
+export type ImageResolutionTier = (typeof IMAGE_RESOLUTION_TIERS)[number]
+export type ImageQualityTier = (typeof IMAGE_QUALITY_TIERS)[number]
 
 export interface ImageCompatibility {
   status: 'untested' | 'passed' | 'failed'

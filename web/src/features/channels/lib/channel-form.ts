@@ -24,7 +24,12 @@ import {
   ERROR_MESSAGES,
   MODEL_FETCHABLE_TYPES,
 } from '../constants'
-import type { Channel } from '../types'
+import {
+  type Channel,
+  IMAGE_QUALITY_TIERS,
+  IMAGE_RESOLUTION_TIERS,
+  type ImageModelCapabilities,
+} from '../types'
 import {
   CHANNEL_TYPE_ADVANCED_CUSTOM,
   advancedCustomConfigUsesRelativeUpstreamPath,
@@ -419,6 +424,71 @@ export function isEmptyImageProfile(value: string | undefined): boolean {
   } catch {
     return false
   }
+}
+
+export function readImageCapabilityMatrix(
+  value: string | undefined,
+  model: string
+): Record<string, boolean> {
+  const matrix: Record<string, boolean> = {}
+  for (const tier of IMAGE_RESOLUTION_TIERS) {
+    for (const quality of IMAGE_QUALITY_TIERS) matrix[`${tier}:${quality}`] = true
+  }
+  if (!value?.trim()) return matrix
+  try {
+    const binding = JSON.parse(value) as { capability_overrides?: Record<string, ImageModelCapabilities> }
+    const capability = binding.capability_overrides?.[model]
+    if (!capability) return matrix
+    if (capability.resolution_qualities) {
+      for (const key of Object.keys(matrix)) matrix[key] = false
+      for (const combination of capability.resolution_qualities) {
+        if (combination in matrix) matrix[combination] = true
+      }
+      return matrix
+    }
+    const tiers = capability.resolution_tiers?.length
+      ? capability.resolution_tiers
+      : IMAGE_RESOLUTION_TIERS
+    const qualities = capability.qualities?.length
+      ? capability.qualities
+      : IMAGE_QUALITY_TIERS
+    for (const tier of tiers) {
+      for (const quality of qualities) {
+        const key = `${tier}:${quality}`
+        if (key in matrix) matrix[key] = true
+      }
+    }
+  } catch {
+    return matrix
+  }
+  return matrix
+}
+
+export function writeImageCapabilityMatrix(
+  value: string | undefined,
+  model: string,
+  matrix: Record<string, boolean>
+): string {
+  let binding: Record<string, unknown> = {}
+  try {
+    const parsed = value?.trim() ? JSON.parse(value) : {}
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) binding = parsed as Record<string, unknown>
+  } catch {
+    binding = {}
+  }
+  const overrides = (binding.capability_overrides && typeof binding.capability_overrides === 'object'
+    ? binding.capability_overrides
+    : {}) as Record<string, ImageModelCapabilities>
+  const selected = Object.entries(matrix).filter(([, enabled]) => enabled).map(([key]) => key)
+  const current = overrides[model] ?? {}
+  overrides[model] = {
+    ...current,
+    resolution_tiers: [...new Set(selected.map((key) => key.split(':')[0]))],
+    qualities: [...new Set(selected.map((key) => key.split(':')[1]))],
+    resolution_qualities: selected,
+  }
+  binding.capability_overrides = overrides
+  return JSON.stringify(binding, null, 2)
 }
 
 export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {

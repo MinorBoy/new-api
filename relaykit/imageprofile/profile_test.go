@@ -33,7 +33,7 @@ func TestOpenAIImagesProfileBindingValidate(t *testing.T) {
 		CapabilityOverrides: map[string]ModelCapabilities{
 			"gpt-image-1": {
 				Generations:     true,
-				Sizes:           []string{"1024x1024"},
+				ResolutionTiers: []string{"1k", "4k"},
 				Qualities:       []string{"medium"},
 				ResponseFormats: []string{"url", "b64_json"},
 				MaxN:            1,
@@ -64,6 +64,7 @@ func TestOpenAIImagesProfileBindingValidate(t *testing.T) {
 		{name: "userinfo in path", binding: Binding{Profile: OpenAIImagesProfile, ProfileVersion: OpenAIImagesVersion, Paths: map[Endpoint]string{EndpointGenerations: "https://user:pass@example.com/images"}}, want: "userinfo"},
 		{name: "fragment in path", binding: Binding{Profile: OpenAIImagesProfile, ProfileVersion: OpenAIImagesVersion, Paths: map[Endpoint]string{EndpointGenerations: "https://example.com/images#fragment"}}, want: "fragment"},
 		{name: "duplicate size", binding: Binding{Profile: OpenAIImagesProfile, ProfileVersion: OpenAIImagesVersion, CapabilityOverrides: map[string]ModelCapabilities{"gpt-image-1": {Sizes: []string{"1024x1024", "1024x1024"}, MaxN: 1}}}, want: "sizes"},
+		{name: "invalid resolution tier", binding: Binding{Profile: OpenAIImagesProfile, ProfileVersion: OpenAIImagesVersion, CapabilityOverrides: map[string]ModelCapabilities{"gpt-image-1": {ResolutionTiers: []string{"8k"}}}}, want: "resolution_tiers"},
 		{name: "invalid max n", binding: Binding{Profile: OpenAIImagesProfile, ProfileVersion: OpenAIImagesVersion, CapabilityOverrides: map[string]ModelCapabilities{"gpt-image-1": {MaxN: 129}}}, want: "max_n"},
 		{name: "unknown compatibility status", binding: Binding{Profile: OpenAIImagesProfile, ProfileVersion: OpenAIImagesVersion, Compatibility: map[string]Compatibility{"gpt-image-1:generations": {Status: "unknown"}}}, want: "status"},
 	}

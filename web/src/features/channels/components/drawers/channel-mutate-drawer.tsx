@@ -73,6 +73,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Form,
   FormControl,
@@ -175,6 +176,8 @@ import {
   getChannelTypeHints,
   getChannelModelOptions,
   isEmptyImageProfile,
+  readImageCapabilityMatrix,
+  writeImageCapabilityMatrix,
   OPENAI_IMAGES_CHANNEL_TYPES,
   hasModelConfigChanged,
   findMissingModelsInMapping,
@@ -192,10 +195,12 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
-import type {
-  Channel,
-  ImageCompatibilityEndpoint,
-  ImageCompatibilityTestResult,
+import {
+  IMAGE_QUALITY_TIERS,
+  IMAGE_RESOLUTION_TIERS,
+  type Channel,
+  type ImageCompatibilityEndpoint,
+  type ImageCompatibilityTestResult,
 } from '../../types'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
@@ -985,6 +990,31 @@ export function ChannelMutateDrawer({
   const currentModelsArray = useMemo(
     () => parseModelsString(currentModels),
     [currentModels]
+  )
+  const imageCapabilityMatrices = useMemo(
+    () =>
+      Object.fromEntries(
+        currentModelsArray.map((model) => [
+          model,
+          readImageCapabilityMatrix(currentImageProfile, model),
+        ])
+      ) as Record<string, Record<string, boolean>>,
+    [currentImageProfile, currentModelsArray]
+  )
+  const setImageCapabilityMatrix = useCallback(
+    (model: string, next: Record<string, boolean>) => {
+      if (!model) return
+      form.setValue(
+        'image_profile',
+        writeImageCapabilityMatrix(
+          currentImageProfile,
+          model,
+          next
+        ),
+        { shouldDirty: true, shouldValidate: true }
+      )
+    },
+    [currentImageProfile, form]
   )
 
   useEffect(() => {
@@ -4614,6 +4644,123 @@ export function ChannelMutateDrawer({
                                     </FormItem>
                                   )}
                                 />
+                                {currentModelsArray.map((model) => {
+                                  const imageCapabilityMatrix =
+                                    imageCapabilityMatrices[model] ?? {}
+                                  return (
+                                    <div
+                                      key={model}
+                                      className='space-y-2 rounded-md border p-3'
+                                    >
+                                      <div className='flex flex-wrap items-center justify-between gap-2'>
+                                        <div>
+                                          <div className='text-sm font-medium'>
+                                            {t('Image capability matrix')}
+                                          </div>
+                                          <p className='text-muted-foreground text-xs'>
+                                            {t(
+                                              'Select the supported resolution and quality combinations for {{model}}.',
+                                              { model }
+                                            )}
+                                          </p>
+                                        </div>
+                                        <Badge variant='outline'>{model}</Badge>
+                                      </div>
+                                      <div className='overflow-x-auto'>
+                                        <table className='w-full min-w-[28rem] text-sm'>
+                                          <thead>
+                                            <tr className='border-b text-left'>
+                                              <th className='px-2 py-2'>
+                                                {t('Resolution tier')}
+                                              </th>
+                                              {IMAGE_QUALITY_TIERS.map((quality) => (
+                                                <th key={quality} className='px-2 py-2'>
+                                                  {quality}
+                                                </th>
+                                              ))}
+                                              <th className='px-2 py-2'>
+                                                {t('All qualities')}
+                                              </th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {IMAGE_RESOLUTION_TIERS.map((tier) => {
+                                              const allSelected = IMAGE_QUALITY_TIERS.every(
+                                                (quality) =>
+                                                  imageCapabilityMatrix[
+                                                    `${tier}:${quality}`
+                                                  ]
+                                              )
+                                              return (
+                                                <tr
+                                                  key={tier}
+                                                  className='border-b last:border-0'
+                                                >
+                                                  <td className='px-2 py-2 font-mono'>
+                                                    {tier.toUpperCase()}
+                                                  </td>
+                                                  {IMAGE_QUALITY_TIERS.map((quality) => {
+                                                    const key = `${tier}:${quality}`
+                                                    return (
+                                                      <td key={key} className='px-2 py-2'>
+                                                        <label className='flex items-center gap-2'>
+                                                          <Checkbox
+                                                            checked={Boolean(
+                                                              imageCapabilityMatrix[key]
+                                                            )}
+                                                            onCheckedChange={(checked) =>
+                                                              setImageCapabilityMatrix(model, {
+                                                                ...imageCapabilityMatrix,
+                                                                [key]: checked === true,
+                                                              })
+                                                            }
+                                                            disabled={
+                                                              sensitiveLocked || isSubmitting
+                                                            }
+                                                          />
+                                                          <span className='capitalize'>
+                                                            {quality}
+                                                          </span>
+                                                        </label>
+                                                      </td>
+                                                    )
+                                                  })}
+                                                  <td className='px-2 py-2'>
+                                                    <Button
+                                                      type='button'
+                                                      size='sm'
+                                                      variant={
+                                                        allSelected ? 'secondary' : 'outline'
+                                                      }
+                                                      onClick={() =>
+                                                        setImageCapabilityMatrix(model, {
+                                                          ...imageCapabilityMatrix,
+                                                          ...Object.fromEntries(
+                                                            IMAGE_QUALITY_TIERS.map((quality) => [
+                                                              `${tier}:${quality}`,
+                                                              !allSelected,
+                                                            ])
+                                                          ),
+                                                        })
+                                                      }
+                                                      disabled={
+                                                        sensitiveLocked || isSubmitting
+                                                      }
+                                                    >
+                                                      {allSelected
+                                                        ? t('Clear')
+                                                        : t('Select all')}
+                                                    </Button>
+                                                  </td>
+                                                </tr>
+                                              )
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                                 {isEditing && canReadCostAccounting && (
                                   <div className='border-border/60 flex flex-wrap items-center justify-between gap-3 border-t pt-3'>
                                     <div className='min-w-0 space-y-0.5'>

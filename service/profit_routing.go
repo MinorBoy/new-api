@@ -689,6 +689,8 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
 	if info.ImageBillingSnapshot != nil {
 		facts.ImageCount = info.ImageBillingSnapshot.RequestedImages
+	}
+	if info.ImageBillingSnapshot != nil && strings.TrimSpace(info.ImageBillingSnapshot.UnitSalePriceUSD) != "" {
 		// Unified image pricing is frozen before channel selection. The generic
 		// revenue preview cannot reconstruct an image request because it does not
 		// carry the resolved SKU, so strict rechecks must use this immutable snapshot.

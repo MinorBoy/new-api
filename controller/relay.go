@@ -139,6 +139,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	if relayFormat == types.RelayFormatOpenAIImage {
 		if imageRequest, ok := request.(*dto.ImageRequest); ok && service.HasImageModel(imageRequest.Model) {
+			originalSize := imageRequest.Size
 			imageContext, imageErr := service.ResolveImageRequest(imageRequest, relayInfo.RelayMode)
 			if imageErr != nil {
 				newAPIError = types.NewErrorWithStatusCode(imageErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -146,7 +147,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			// Keep the normalized values on the request so the converter and the
 			// pricing metadata see the same SKU defaults.
-			imageRequest.Size = imageContext.Resolved.Size
+			// Keep an omitted size omitted so each provider can apply its own
+			// default. `auto` is a billing sentinel and must not be sent as a
+			// concrete upstream size.
+			if strings.EqualFold(strings.TrimSpace(originalSize), "auto") {
+				imageRequest.Size = ""
+			} else {
+				imageRequest.Size = originalSize
+			}
 			imageRequest.Quality = imageContext.Resolved.Quality
 			imageRequest.ResponseFormat = imageContext.Resolved.ResponseFormat
 			imageRequest.N = common.GetPointer(imageContext.Resolved.N)

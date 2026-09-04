@@ -20,7 +20,8 @@ func TestResolveImageRequestUsesCatalogDefaultsAndInputContract(t *testing.T) {
 	request := &dto.ImageRequest{Model: "gpt-image-1", Prompt: "a cat", N: pointer(uint(2))}
 	context, err := ResolveImageRequest(request, relayconstant.RelayModeImagesGenerations)
 	require.NoError(t, err)
-	assert.Equal(t, "1024x1024", context.Resolved.Size)
+	assert.Empty(t, context.Resolved.Size)
+	assert.Equal(t, image_setting.ResolutionTier1K, context.Resolved.Tier)
 	assert.Equal(t, "medium", context.Resolved.Quality)
 	assert.Equal(t, uint(2), context.Resolved.N)
 	assert.Equal(t, "gen-1024x1024-medium", context.Resolved.SKUKey)
@@ -39,9 +40,9 @@ func TestEvaluateImageChannelRequiresBindingAndRespectsMappingAndCapabilities(t 
 	require.ErrorContains(t, err, "no image profile")
 
 	mapping := `{"public-image":"vendor-image"}`
-	withBinding := &model.Channel{Id: 2, Type: appconstant.ChannelTypeOpenAI, Models: "public-image", ModelMapping: &mapping, OtherSettings: `{"image_profile":{"profile":"openai_images","profile_version":1,"capability_overrides":{"public-image":{"sizes":["512x512"]}}}}`}
+	withBinding := &model.Channel{Id: 2, Type: appconstant.ChannelTypeOpenAI, Models: "public-image", ModelMapping: &mapping, OtherSettings: `{"image_profile":{"profile":"openai_images","profile_version":1,"capability_overrides":{"public-image":{"resolution_qualities":["2k:medium"]}}}}`}
 	_, err = EvaluateImageChannel(withBinding, "public-image", request)
-	require.ErrorContains(t, err, "size")
+	require.ErrorContains(t, err, "resolution and quality combination")
 
 	withBinding.OtherSettings = `{"image_profile":{"profile":"openai_images","profile_version":1}}`
 	eligibility, err := EvaluateImageChannel(withBinding, "public-image", request)
@@ -60,6 +61,38 @@ func TestEvaluateImageChannelHonorsExplicitEndpointDisable(t *testing.T) {
 	channel := &model.Channel{Id: 3, Type: appconstant.ChannelTypeOpenAI, Models: "public-image", ModelMapping: &mapping, OtherSettings: `{"image_profile":{"profile":"openai_images","profile_version":1,"capability_overrides":{"public-image":{"edits":false}}}}`}
 	_, err = EvaluateImageChannel(channel, "public-image", request)
 	require.ErrorContains(t, err, "edits capability is disabled")
+}
+
+func TestEvaluateImageChannelMatchesResolutionTierInsteadOfConcreteSize(t *testing.T) {
+	raw := `{"version":1,"models":{"public-image":{"profile":"openai_images","profile_version":1,"endpoints":{"generations":{"capability":{"enabled":true,"qualities":["low","medium","high"],"response_formats":["b64_json"],"max_n":2},"default_size":"auto","default_quality":"high","default_response_format":"b64_json"}},"skus":{"gen-1k-high":{"endpoint":"generations","tier":"1k","quality":"high","unit":"image","sale_price_usd":"0.02"},"gen-2k-high":{"endpoint":"generations","tier":"2k","quality":"high","unit":"image","sale_price_usd":"0.04"}}}}}`
+	original := image_setting.Catalog2JSONString()
+	t.Cleanup(func() { require.NoError(t, image_setting.UpdateCatalogByJSONString(original)) })
+	require.NoError(t, image_setting.UpdateCatalogByJSONString(raw))
+	request, err := ResolveImageRequest(&dto.ImageRequest{Model: "public-image", Prompt: "x", Size: "1500x1500", Quality: "high", N: pointer(uint(1))}, relayconstant.RelayModeImagesGenerations)
+	require.NoError(t, err)
+	mapping := `{"public-image":"vendor-image"}`
+	channel := &model.Channel{Id: 4, Type: appconstant.ChannelTypeOpenAI, Models: "public-image", ModelMapping: &mapping, OtherSettings: "{\"image_profile\":{\"profile\":\"openai_images\",\"profile_version\":1,\"capability_overrides\":{\"public-image\":{\"resolution_tiers\":[\"2k\"],\"qualities\":[\"high\"]}}}}"}
+	eligibility, err := EvaluateImageChannel(channel, "public-image", request)
+	require.NoError(t, err)
+	assert.Equal(t, "gen-2k-high", eligibility.CostVariantKey)
+
+	channel.OtherSettings = "{\"image_profile\":{\"profile\":\"openai_images\",\"profile_version\":1,\"capability_overrides\":{\"public-image\":{\"resolution_tiers\":[\"1k\"],\"qualities\":[\"high\"]}}}}"
+	_, err = EvaluateImageChannel(channel, "public-image", request)
+	require.ErrorContains(t, err, "resolution tier")
+}
+
+func TestEvaluateImageChannelTreatsExplicitEmptyResolutionMatrixAsNoSupport(t *testing.T) {
+	raw := `{"version":1,"models":{"public-image":{"profile":"openai_images","profile_version":1,"endpoints":{"generations":{"capability":{"enabled":true,"qualities":["medium"],"response_formats":["b64_json"],"max_n":1},"default_size":"auto","default_quality":"medium","default_response_format":"b64_json"}},"skus":{"gen-1k-medium":{"endpoint":"generations","tier":"1k","quality":"medium","unit":"image","sale_price_usd":"0.02"}}}}}`
+	original := image_setting.Catalog2JSONString()
+	t.Cleanup(func() { require.NoError(t, image_setting.UpdateCatalogByJSONString(original)) })
+	require.NoError(t, image_setting.UpdateCatalogByJSONString(raw))
+	request, err := ResolveImageRequest(&dto.ImageRequest{Model: "public-image", Prompt: "x", N: pointer(uint(1))}, relayconstant.RelayModeImagesGenerations)
+	require.NoError(t, err)
+	mapping := `{"public-image":"vendor-image"}`
+	channel := &model.Channel{Id: 5, Type: appconstant.ChannelTypeOpenAI, Models: "public-image", ModelMapping: &mapping, OtherSettings: `{"image_profile":{"profile":"openai_images","profile_version":1,"capability_overrides":{"public-image":{"resolution_qualities":[]}}}}`}
+	_, err = EvaluateImageChannel(channel, "public-image", request)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "resolution and quality combination")
 }
 
 func pointer(value uint) *uint { return &value }

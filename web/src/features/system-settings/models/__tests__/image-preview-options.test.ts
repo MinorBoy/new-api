@@ -38,7 +38,7 @@ test('preview options follow the configured catalog and routing groups', () => {
   })
 })
 
-test('preview selection resets unsupported values after model or endpoint changes', () => {
+test('preview selection preserves arbitrary sizes after model or endpoint changes', () => {
   const selection = normalizeImagePreviewSelection(
     {
       group: 'missing',
@@ -57,7 +57,7 @@ test('preview selection resets unsupported values after model or endpoint change
     group: 'default',
     model: 'gpt-image-1',
     endpoint: 'generations',
-    size: '1024x1024',
+    size: 'missing',
     quality: 'medium',
     response_format: 'b64_json',
     n: 1,
@@ -76,6 +76,23 @@ test('endpoint options come from the selected model and endpoint', () => {
     qualities: ['medium'],
     responseFormats: ['b64_json'],
   })
+})
+
+test('preview keeps arbitrary concrete sizes instead of enforcing a whitelist', () => {
+  const selection = normalizeImagePreviewSelection(
+    {
+      group: 'default',
+      model: 'gpt-image-1',
+      endpoint: 'generations',
+      size: '1234x800',
+      quality: 'medium',
+      response_format: 'b64_json',
+      n: 1,
+    },
+    catalog,
+    '{}'
+  )
+  assert.equal(selection.size, '1234x800')
 })
 
 test('image routing policy accepts cost weighted tolerance', () => {

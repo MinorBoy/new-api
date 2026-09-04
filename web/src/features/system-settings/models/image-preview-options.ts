@@ -153,7 +153,6 @@ export function normalizeImagePreviewSelection(
     ? selection.endpoint
     : (endpoints[0] ?? '')
   const capability = endpointMap[endpoint]?.capability
-  const sizes = stringOptions(capability?.sizes)
   const qualities = stringOptions(capability?.qualities)
   const responseFormats = stringOptions(capability?.response_formats)
   const n =
@@ -167,7 +166,10 @@ export function normalizeImagePreviewSelection(
       : 'default',
     model,
     endpoint,
-    size: sizes.includes(selection.size) ? selection.size : (sizes[0] ?? ''),
+    // Size is deliberately free-form: providers may support arbitrary aspect
+    // ratios. Empty and auto are normalized by the backend to the 1K billing
+    // tier, while a concrete value is preserved for upstream forwarding.
+    size: selection.size?.trim() || 'auto',
     quality: qualities.includes(selection.quality)
       ? selection.quality
       : (qualities[0] ?? ''),

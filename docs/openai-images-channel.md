@@ -13,7 +13,7 @@
 
 ## 全局图像目录
 
-在「系统设置 → 计费 → Image Models & Routing」维护目录。目录必须是版本为 `1` 的 JSON 对象；每个启用端点至少配置一个默认 SKU。价格使用非负十进制定点字符串，单位始终是单张图：
+在「系统设置 → 计费 → Image Models & Routing」维护目录。目录必须是版本为 `1` 的 JSON 对象；每个启用端点至少配置一个默认 SKU。价格使用非负十进制定点字符串，单位始终是单张图。管理端会固定展示 `1k/2k/4k × low/medium/high` 九宫格，未配置的格子可直接填写售价并保存：
 
 ```json
 {
@@ -26,20 +26,20 @@
         "generations": {
           "capability": {
             "enabled": true,
-            "sizes": ["1024x1024"],
-            "qualities": ["medium"],
+            "resolution_tiers": ["1k", "2k", "4k"],
+            "qualities": ["low", "medium", "high"],
             "response_formats": ["b64_json"],
             "max_n": 4
           },
-          "default_size": "1024x1024",
+          "default_size": "auto",
           "default_quality": "medium",
           "default_response_format": "b64_json"
         }
       },
       "skus": {
-        "gen-1024x1024-medium": {
+        "gen-1k-medium": {
           "endpoint": "generations",
-          "size": "1024x1024",
+          "tier": "1k",
           "quality": "medium",
           "unit": "image",
           "sale_price_usd": "0.040000"
@@ -51,6 +51,10 @@
 ```
 
 `n` 会在请求校验时限制在 `1..128`，并按实际生成数量结算。修改目录后，使用旧目录合同哈希的渠道兼容性状态会被视为过期，需要重新测试。
+
+分辨率档位按请求 `size` 的总像素数计算，不维护具体尺寸白名单：`1k <= 1024×1024`，`2k <= 2048×2048`，`4k <= 2880×2880`。省略 `size` 或传 `size=auto` 时按 `1k` 路由和计费，具体 `widthxheight` 原样转发给上游。
+
+兼容旧目录时，历史具体尺寸 SKU 仍可读取；迁移到档位 SKU 前，如果同一渠道、上游模型、端点和质量映射出不同成本，迁移会报告冲突且不会覆盖任何成本。
 
 ## 渠道配置
 
@@ -84,7 +88,7 @@
 为每个渠道的映射后模型和 SKU 创建成本规则：
 
 - 成本模式选择 `per_image`；`UnitPrice` 表示单张图供应商成本。
-- `cost_variant_key` 必须使用目录生成的 SKU，例如 `gen-1024x1024-medium` 或 `edit-1024x1024-high`。
+- `cost_variant_key` 必须使用目录生成的档位 SKU，例如 `gen-1k-medium` 或 `edit-4k-high`。
 - 图像规则使用 `response_succeeded` 结算事件和 `validated_request` 或 `upstream_actual` 计量源。
 - 成本规则必须校验并激活后，严格成本模式才会将其用于路由。
 

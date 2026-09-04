@@ -425,10 +425,8 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			}
 			imageRequest.HasMask = strings.TrimSpace(formData.Get("mask")) != "" || len(form.File["mask"]) > 0
 
-			if imageRequest.Model == "gpt-image-1" {
-				if imageRequest.Quality == "" {
-					imageRequest.Quality = "standard"
-				}
+			if imageRequest.Model == "gpt-image-1" && imageRequest.Quality == "" {
+				imageRequest.Quality = "auto"
 			}
 			if imageRequest.N == nil || *imageRequest.N == 0 {
 				imageRequest.N = common.GetPointer(uint(1))

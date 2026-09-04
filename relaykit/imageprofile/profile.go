@@ -24,13 +24,15 @@ const (
 )
 
 type Capability struct {
-	Enabled         bool     `json:"enabled"`
-	Sizes           []string `json:"sizes,omitempty"`
-	Qualities       []string `json:"qualities,omitempty"`
-	ResponseFormats []string `json:"response_formats,omitempty"`
-	MaxN            uint     `json:"max_n"`
-	MaxInputImages  uint     `json:"max_input_images"`
-	SupportsMask    bool     `json:"supports_mask"`
+	Enabled             bool     `json:"enabled"`
+	ResolutionTiers     []string `json:"resolution_tiers,omitempty"`
+	ResolutionQualities []string `json:"resolution_qualities,omitempty"`
+	Sizes               []string `json:"sizes,omitempty"`
+	Qualities           []string `json:"qualities,omitempty"`
+	ResponseFormats     []string `json:"response_formats,omitempty"`
+	MaxN                uint     `json:"max_n"`
+	MaxInputImages      uint     `json:"max_input_images"`
+	SupportsMask        bool     `json:"supports_mask"`
 }
 
 type Profile struct {
@@ -41,14 +43,16 @@ type Profile struct {
 }
 
 type ModelCapabilities struct {
-	Generations     bool     `json:"generations,omitempty"`
-	Edits           bool     `json:"edits,omitempty"`
-	Sizes           []string `json:"sizes,omitempty"`
-	Qualities       []string `json:"qualities,omitempty"`
-	ResponseFormats []string `json:"response_formats,omitempty"`
-	MaxN            uint     `json:"max_n,omitempty"`
-	MaxInputImages  uint     `json:"max_input_images,omitempty"`
-	SupportsMask    bool     `json:"supports_mask,omitempty"`
+	Generations         bool     `json:"generations,omitempty"`
+	Edits               bool     `json:"edits,omitempty"`
+	ResolutionTiers     []string `json:"resolution_tiers,omitempty"`
+	ResolutionQualities []string `json:"resolution_qualities,omitempty"`
+	Sizes               []string `json:"sizes,omitempty"`
+	Qualities           []string `json:"qualities,omitempty"`
+	ResponseFormats     []string `json:"response_formats,omitempty"`
+	MaxN                uint     `json:"max_n,omitempty"`
+	MaxInputImages      uint     `json:"max_input_images,omitempty"`
+	SupportsMask        bool     `json:"supports_mask,omitempty"`
 
 	// Presence bits preserve the distinction between an omitted optional
 	// override and an explicit false/zero value after JSON decoding.
@@ -147,14 +151,14 @@ var profiles = map[string]Profile{
 		Capabilities: map[Endpoint]Capability{
 			EndpointGenerations: {
 				Enabled:         true,
-				Sizes:           []string{"256x256", "512x512", "1024x1024", "1536x1024", "1024x1536"},
+				ResolutionTiers: []string{"1k", "2k", "4k"},
 				Qualities:       []string{"low", "medium", "high"},
 				ResponseFormats: []string{"url", "b64_json"},
 				MaxN:            MaxImageN,
 			},
 			EndpointEdits: {
 				Enabled:         true,
-				Sizes:           []string{"256x256", "512x512", "1024x1024", "1536x1024", "1024x1536"},
+				ResolutionTiers: []string{"1k", "2k", "4k"},
 				Qualities:       []string{"low", "medium", "high"},
 				ResponseFormats: []string{"url", "b64_json"},
 				MaxN:            MaxImageN,
@@ -239,7 +243,7 @@ func (c ModelCapabilities) validate() error {
 		return fmt.Errorf("max_input_images must be between 0 and 16")
 	}
 	for field, values := range map[string][]string{
-		"sizes": c.Sizes, "qualities": c.Qualities, "response_formats": c.ResponseFormats,
+		"resolution_tiers": c.ResolutionTiers, "resolution_qualities": c.ResolutionQualities, "sizes": c.Sizes, "qualities": c.Qualities, "response_formats": c.ResponseFormats,
 	} {
 		seen := make(map[string]struct{}, len(values))
 		for _, value := range values {
@@ -253,7 +257,28 @@ func (c ModelCapabilities) validate() error {
 			seen[value] = struct{}{}
 		}
 	}
+	for _, tier := range c.ResolutionTiers {
+		switch strings.ToLower(strings.TrimSpace(tier)) {
+		case "1k", "2k", "4k":
+		default:
+			return fmt.Errorf("resolution_tiers must contain only 1k, 2k, or 4k")
+		}
+	}
+	for _, combination := range c.ResolutionQualities {
+		parts := strings.Split(strings.ToLower(strings.TrimSpace(combination)), ":")
+		if len(parts) != 2 || !isResolutionTier(parts[0]) || !isImageQuality(parts[1]) {
+			return fmt.Errorf("resolution_qualities must contain tier:quality pairs")
+		}
+	}
 	return nil
+}
+
+func isResolutionTier(value string) bool {
+	return value == "1k" || value == "2k" || value == "4k"
+}
+
+func isImageQuality(value string) bool {
+	return value == "low" || value == "medium" || value == "high"
 }
 
 func validatePath(raw string) error {
@@ -304,6 +329,8 @@ func clonePaths(paths map[Endpoint]string) map[Endpoint]string {
 func cloneCapabilities(capabilities map[Endpoint]Capability) map[Endpoint]Capability {
 	clone := make(map[Endpoint]Capability, len(capabilities))
 	for endpoint, capability := range capabilities {
+		capability.ResolutionTiers = append([]string(nil), capability.ResolutionTiers...)
+		capability.ResolutionQualities = append([]string(nil), capability.ResolutionQualities...)
 		capability.Sizes = append([]string(nil), capability.Sizes...)
 		capability.Qualities = append([]string(nil), capability.Qualities...)
 		capability.ResponseFormats = append([]string(nil), capability.ResponseFormats...)

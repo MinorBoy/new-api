@@ -347,6 +347,16 @@ func InitResources() error {
 		}
 	}
 	model.InitOptionMap()
+	if common.IsMasterNode {
+		migration, migrationErr := service.MigrateImageCatalogAtStartup()
+		if migrationErr != nil {
+			common.SysError("failed to migrate legacy image catalog: " + migrationErr.Error())
+		} else if len(migration.Conflicts) > 0 || len(migration.Errors) > 0 {
+			common.SysLog(fmt.Sprintf("legacy image catalog migration skipped: %d conflict(s), %d error(s)", len(migration.Conflicts), len(migration.Errors)))
+		} else if migration.CatalogChanged {
+			common.SysLog(fmt.Sprintf("legacy image catalog migrated: %d canonical cost rule(s) created", migration.CostRulesCreated))
+		}
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

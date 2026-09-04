@@ -117,9 +117,18 @@ func EvaluateImageChannel(channel *model.Channel, publicModel string, request Im
 		if override.EditsSet() && !override.Edits && request.Resolved.Endpoint == imageprofile.EndpointEdits {
 			return ImageChannelEligibility{}, errors.New("channel edits capability is disabled")
 		}
-		if len(override.Sizes) > 0 && !contains(override.Sizes, request.Resolved.Size) {
-			return ImageChannelEligibility{}, errors.New("channel image size is not supported")
+		if len(override.ResolutionTiers) > 0 && !contains(override.ResolutionTiers, string(request.Resolved.Tier)) {
+			return ImageChannelEligibility{}, errors.New("channel image resolution tier is not supported")
 		}
+		if override.ResolutionQualities != nil {
+			combination := string(request.Resolved.Tier) + ":" + request.Resolved.Quality
+			if !contains(override.ResolutionQualities, combination) {
+				return ImageChannelEligibility{}, errors.New("channel image resolution and quality combination is not supported")
+			}
+		}
+		// Concrete sizes are intentionally not a channel capability dimension.
+		// Keep the legacy JSON field readable, but ignore it so arbitrary aspect
+		// ratios can be forwarded to upstream providers.
 		if len(override.Qualities) > 0 && !contains(override.Qualities, request.Resolved.Quality) {
 			return ImageChannelEligibility{}, errors.New("channel image quality is not supported")
 		}

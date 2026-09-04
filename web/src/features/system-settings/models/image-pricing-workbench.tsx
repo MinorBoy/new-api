@@ -222,9 +222,9 @@ export function ImagePricingWorkbench(props: ImagePricingWorkbenchProps) {
 
   const savePrices = async () => {
     const errors: Record<string, string> = {}
-    for (const row of parsedRows) {
-      const error = validateSalePrice(editedPrices[row.id] ?? row.salePriceUSD)
-      if (error) errors[row.id] = error
+    for (const [id, value] of Object.entries(editedPrices)) {
+      const error = validateSalePrice(value)
+      if (error) errors[id] = error
     }
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors)
@@ -348,7 +348,7 @@ export function ImagePricingWorkbench(props: ImagePricingWorkbenchProps) {
                 {[
                   t('Model'),
                   t('Endpoint'),
-                  t('Size'),
+                  t('Resolution tier'),
                   t('Quality'),
                   t('Upstream cost'),
                   t('Sale price'),
@@ -369,7 +369,7 @@ export function ImagePricingWorkbench(props: ImagePricingWorkbenchProps) {
                   <tr key={row.id} className='border-b last:border-0'>
                     <td className='px-3 py-2 font-medium'>{row.model}</td>
                     <td className='px-3 py-2'>{row.endpoint}</td>
-                    <td className='px-3 py-2'>{row.size}</td>
+                    <td className='px-3 py-2 font-mono'>{row.tier || '-'}</td>
                     <td className='px-3 py-2'>{row.quality}</td>
                     <td className='px-3 py-2'>
                       {row.upstreamCostUSD
@@ -402,6 +402,11 @@ export function ImagePricingWorkbench(props: ImagePricingWorkbenchProps) {
                           }
                         }}
                       />
+                      {!row.configured && !error && (
+                        <span className='text-muted-foreground block text-xs'>
+                          {t('Not configured')}
+                        </span>
+                      )}
                       {error && (
                         <span className='text-destructive text-xs'>
                           {t(error)}
@@ -537,22 +542,17 @@ export function ImagePricingWorkbench(props: ImagePricingWorkbenchProps) {
               </label>
               <label className='flex flex-col gap-1 text-sm'>
                 <span>{t('Size')}</span>
-                <NativeSelect
+                <Input
                   aria-label={t('Size')}
                   value={previewSelection.size}
+                  placeholder={t('auto or widthxheight')}
                   onChange={(event) =>
                     setPreviewSelection((current) => ({
                       ...current,
                       size: event.target.value,
                     }))
                   }
-                >
-                  {endpointOptions.sizes.map((size) => (
-                    <NativeSelectOption key={size} value={size}>
-                      {size}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                />
               </label>
               <label className='flex flex-col gap-1 text-sm'>
                 <span>{t('Quality')}</span>

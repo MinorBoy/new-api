@@ -42,6 +42,7 @@ import {
 } from '../api'
 import { CHANNEL_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import type { ChannelTestResponse, CopyChannelParams } from '../types'
+import { formatGroups } from './channel-form'
 
 // ============================================================================
 // Query Keys
@@ -54,6 +55,10 @@ export const channelsQueryKeys = {
     [...channelsQueryKeys.lists(), params] as const,
   details: () => [...channelsQueryKeys.all, 'detail'] as const,
   detail: (id: number) => [...channelsQueryKeys.details(), id] as const,
+}
+
+export function normalizeChannelGroups(groups: string[]): string[] {
+  return [...new Set(groups.map((group) => group.trim()).filter(Boolean))]
 }
 
 function getChannelTestResponseTime(
@@ -229,6 +234,41 @@ export async function handleUpdateChannelField(
   } catch {
     toast.error(i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
   }
+}
+
+/**
+ * Save a channel's user-group memberships from the inline table editor.
+ * Returns whether the server accepted the update so the cell can roll back
+ * its optimistic display when the request fails.
+ */
+export async function handleUpdateChannelGroups(
+  id: number,
+  groups: string[],
+  queryClient?: QueryClient
+): Promise<boolean> {
+  const normalizedGroups = normalizeChannelGroups(groups)
+  if (normalizedGroups.length === 0) {
+    toast.error(i18next.t(ERROR_MESSAGES.REQUIRED_GROUP))
+    return false
+  }
+
+  try {
+    const response = await updateChannel(id, {
+      group: formatGroups(normalizedGroups),
+    })
+    if (response.success) {
+      await queryClient?.invalidateQueries({
+        queryKey: channelsQueryKeys.lists(),
+      })
+      return true
+    }
+
+    toast.error(response.message || i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
+  } catch {
+    toast.error(i18next.t(ERROR_MESSAGES.UPDATE_FAILED))
+  }
+
+  return false
 }
 
 /**

@@ -1259,7 +1259,12 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
-	err = channel.Update()
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := channel.UpdateWithTx(tx); err != nil {
+			return err
+		}
+		return service.SyncImageCostRulesForChannelWithTx(tx, &effectiveChannel, c.GetInt("id"))
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return

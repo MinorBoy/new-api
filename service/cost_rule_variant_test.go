@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
@@ -123,6 +124,48 @@ func TestCheckAuthoritativeCostCoverageEvaluatesActiveVariants(t *testing.T) {
 	}
 	assert.NotContains(t, coveredByVariant, string(types.DefaultCostVariantKey))
 	assert.True(t, coveredByVariant["480p"])
+}
+
+func TestCheckAuthoritativeCostCoverageUsesImagePathForImageVariants(t *testing.T) {
+	prepareCostRuleServiceDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
+	require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM abilities").Error)
+	})
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "default", Model: "vendor-image", ChannelId: 7, Enabled: true,
+	}).Error)
+
+	previousLookup := CostCapabilityLookup
+	CostCapabilityLookup = func(_ int, requestPath string, _ constant.TaskPlatform) types.CostCapabilities {
+		if requestPath != "/v1/images/generations" {
+			return types.CostCapabilities{CanResolveBillableModel: true}
+		}
+		return types.CostCapabilities{
+			CanResolveBillableModel: true,
+			ChargeEvents:            []types.CostChargeEvent{types.CostChargeResponseSucceeded},
+			MeterSources:            []types.CostMeterSource{types.CostMeterValidatedRequest, types.CostMeterUpstreamActual},
+		}
+	}
+	t.Cleanup(func() { CostCapabilityLookup = previousLookup })
+
+	_, err := UpsertImageCostMatrix(ImageCostMatrixInput{
+		ChannelID:             7,
+		BillableUpstreamModel: "vendor-image",
+		Activate:              true,
+		Entries: []ImageCostMatrixEntry{{
+			CostVariantKey: "gen-1k-medium",
+			UnitPrice:      "0.020",
+		}},
+	})
+	require.NoError(t, err)
+
+	results, err := CheckAuthoritativeCostCoverage()
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "gen-1k-medium", results[0].CostVariantKey)
+	assert.True(t, results[0].Covered)
 }
 
 func TestCheckAuthoritativeCostCoverageRequiresDefaultWithoutVariantRules(t *testing.T) {

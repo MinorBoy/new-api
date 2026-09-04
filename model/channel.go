@@ -582,6 +582,18 @@ func (channel *Channel) Insert() error {
 }
 
 func (channel *Channel) Update() error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return channel.UpdateWithTx(tx)
+	})
+}
+
+// UpdateWithTx persists a channel and refreshes its ability rows in the caller's
+// transaction. Callers that also update related records can use this method to
+// keep those changes atomic with the channel update.
+func (channel *Channel) UpdateWithTx(tx *gorm.DB) error {
+	if tx == nil {
+		return errors.New("channel update transaction is required")
+	}
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
 		var keyStr string
@@ -589,7 +601,8 @@ func (channel *Channel) Update() error {
 			keyStr = channel.Key
 		} else {
 			// If key is not provided, read the existing key from the database
-			if existing, err := GetChannelById(channel.Id, true); err == nil {
+			var existing Channel
+			if err := tx.First(&existing, "id = ?", channel.Id).Error; err == nil {
 				keyStr = existing.Key
 			}
 		}
@@ -621,12 +634,14 @@ func (channel *Channel) Update() error {
 		}
 	}
 	var err error
-	err = DB.Model(channel).Updates(channel).Error
+	err = tx.Model(channel).Updates(channel).Error
 	if err != nil {
 		return err
 	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
+	if err = tx.First(channel, "id = ?", channel.Id).Error; err != nil {
+		return err
+	}
+	err = channel.UpdateAbilities(tx)
 	return err
 }
 

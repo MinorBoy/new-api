@@ -684,6 +684,18 @@ func costRuleRequestPath(rule *model.ChannelModelCostRule) string {
 	return ""
 }
 
+func costVariantRequestPath(variant string) string {
+	variant = strings.ToLower(strings.TrimSpace(variant))
+	switch {
+	case strings.HasPrefix(variant, "gen-"):
+		return "/v1/images/generations"
+	case strings.HasPrefix(variant, "edit-"):
+		return "/v1/images/edits"
+	default:
+		return ""
+	}
+}
+
 func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 	abilities, err := model.GetAllEnableAbilityWithChannels()
 	if err != nil {
@@ -800,6 +812,7 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 				ChannelID:              ability.ChannelId,
 				PredictedUpstreamModel: predictedModel,
 				CostVariantKey:         variant,
+				RequestPath:            costVariantRequestPath(variant),
 				Authoritative:          true,
 			})
 			if err != nil {
@@ -832,6 +845,7 @@ func CheckAuthoritativeCostCoverage() ([]CostCoverageResult, error) {
 			ChannelID:              target.ChannelID,
 			PredictedUpstreamModel: target.UpstreamModel,
 			CostVariantKey:         variant,
+			RequestPath:            costVariantRequestPath(variant),
 			Authoritative:          true,
 		})
 		if err != nil {

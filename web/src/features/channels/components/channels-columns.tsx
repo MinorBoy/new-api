@@ -22,14 +22,16 @@ import { useNavigate } from '@tanstack/react-router'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   ListOrdered,
+  LoaderCircle,
   Route,
   Shuffle,
   SlidersHorizontal,
 } from 'lucide-react'
-import { useState, useMemo, useContext, useEffect } from 'react'
+import { useState, useMemo, useContext, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -37,11 +39,27 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { BadgeListCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { ProviderBadge } from '@/components/provider-badge'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import {
+  StatusBadge,
+  StatusBadgeList,
+  type StatusBadgeProps,
+} from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { TruncatedText } from '@/components/truncated-text'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import {
   Tooltip,
   TooltipContent,
@@ -55,10 +73,14 @@ import {
   getCurrencyLabel,
 } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
-import { truncateText } from '@/lib/utils'
+import { cn, truncateText } from '@/lib/utils'
 
 import { getCodexUsage } from '../api'
-import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
+import {
+  CHANNEL_STATUS_CONFIG,
+  ERROR_MESSAGES,
+  MODEL_FETCHABLE_TYPES,
+} from '../constants'
 import {
   formatRelativeTime,
   formatResponseTime,
@@ -72,9 +94,11 @@ import {
   parseGroupsList,
   parseChannelSettings,
   handleUpdateChannelField,
+  handleUpdateChannelGroups,
   handleUpdateTagField,
   handleUpdateChannelBalance,
   createChannelFieldUpdateScheduler,
+  formatGroups,
   isTagAggregateRow,
   type TagRow,
 } from '../lib'
@@ -89,6 +113,11 @@ import {
   type CodexUsageDialogData,
 } from './dialogs/codex-usage-dialog'
 import { NumericSpinnerInput } from './numeric-spinner-input'
+
+type ChannelGroupOption = {
+  label: string
+  value: string
+}
 
 function parseIonetMeta(otherInfo: string | null | undefined): null | {
   source?: string
@@ -379,6 +408,209 @@ function TagWeightCell({ channel }: { channel: TagRow }) {
 const MAX_INLINE_BALANCE_CHARS = 8
 const SENSITIVE_MASK = '••••'
 
+function ChannelGroupDisplay({
+  groups,
+  sensitiveVisible,
+}: {
+  groups: string[]
+  sensitiveVisible: boolean
+}) {
+  return (
+    <StatusBadgeList
+      items={groups}
+      max={2}
+      className='-ml-1.5'
+      renderItem={(group) => (
+        <GroupBadge
+          key={group}
+          group={group}
+          label={sensitiveVisible ? undefined : SENSITIVE_MASK}
+          size='sm'
+        />
+      )}
+    />
+  )
+}
+
+function ChannelGroupCell({
+  channel,
+  options,
+  sensitiveVisible,
+}: {
+  channel: Channel
+  options: ChannelGroupOption[]
+  sensitiveVisible: boolean
+}) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const groupsFromChannel = useMemo(
+    () => parseGroupsList(channel.group),
+    [channel.group]
+  )
+  const [open, setOpen] = useState(false)
+  const [searchValue, setSearchValue] = useState('')
+  const [selectedGroups, setSelectedGroups] = useState(groupsFromChannel)
+  const [isSaving, setIsSaving] = useState(false)
+  const committedGroupsRef = useRef(groupsFromChannel)
+  const savingRef = useRef(false)
+
+  useEffect(() => {
+    if (open || isSaving) return
+    committedGroupsRef.current = groupsFromChannel
+    setSelectedGroups(groupsFromChannel)
+  }, [groupsFromChannel, isSaving, open])
+
+  const availableOptions = useMemo(() => {
+    const optionMap = new Map<string, ChannelGroupOption>()
+    for (const option of options) {
+      const value = option.value.trim()
+      if (value && !optionMap.has(value)) {
+        optionMap.set(value, { value, label: option.label })
+      }
+    }
+    for (const group of groupsFromChannel) {
+      if (!optionMap.has(group)) {
+        optionMap.set(group, { value: group, label: group })
+      }
+    }
+    return [...optionMap.values()].map((option) => ({
+      ...option,
+      label: sensitiveVisible ? option.label : SENSITIVE_MASK,
+    }))
+  }, [groupsFromChannel, options, sensitiveVisible])
+
+  const filteredOptions = useMemo(() => {
+    const search = searchValue.trim().toLowerCase()
+    if (!search) return availableOptions
+    return availableOptions.filter(
+      (option) =>
+        option.value.toLowerCase().includes(search) ||
+        option.label.toLowerCase().includes(search)
+    )
+  }, [availableOptions, searchValue])
+
+  const saveGroups = async (nextGroups: string[]) => {
+    if (savingRef.current) return
+    const previousGroups = committedGroupsRef.current
+    if (formatGroups(nextGroups) === formatGroups(previousGroups)) {
+      return
+    }
+
+    savingRef.current = true
+    setIsSaving(true)
+    try {
+      const saved = await handleUpdateChannelGroups(
+        channel.id,
+        nextGroups,
+        queryClient
+      )
+      if (saved) {
+        committedGroupsRef.current = nextGroups
+      } else {
+        setSelectedGroups(previousGroups)
+      }
+    } finally {
+      savingRef.current = false
+      setIsSaving(false)
+    }
+  }
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (isSaving) return
+    if (nextOpen) {
+      const current = committedGroupsRef.current
+      setSelectedGroups(current)
+      setSearchValue('')
+      setOpen(true)
+      return
+    }
+    setOpen(false)
+    setSearchValue('')
+  }
+
+  const handleToggleGroup = (group: string) => {
+    if (isSaving || savingRef.current) return
+    const nextGroups = selectedGroups.includes(group)
+      ? selectedGroups.filter((value) => value !== group)
+      : [...selectedGroups, group]
+    if (nextGroups.length === 0) {
+      toast.error(t(ERROR_MESSAGES.REQUIRED_GROUP))
+      return
+    }
+    setSelectedGroups(nextGroups)
+    void saveGroups(nextGroups)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        render={
+          <button
+            type='button'
+            disabled={isSaving}
+            aria-label={t('Groups')}
+            aria-busy={isSaving}
+            title={t('Groups')}
+            className='hover:bg-muted/50 focus-visible:ring-ring flex min-h-7 w-full min-w-0 items-center rounded-sm px-1.5 py-0.5 text-left transition-colors outline-none focus-visible:ring-2 disabled:cursor-wait disabled:opacity-70'
+          />
+        }
+      >
+        <ChannelGroupDisplay
+          groups={selectedGroups}
+          sensitiveVisible={sensitiveVisible}
+        />
+        {isSaving && (
+          <LoaderCircle
+            className='text-muted-foreground ml-1 size-3.5 shrink-0 animate-spin'
+            aria-label={t('Saving...')}
+          />
+        )}
+      </PopoverTrigger>
+      <PopoverContent
+        align='start'
+        className='w-[var(--anchor-width)] min-w-[200px] overflow-hidden rounded-xl p-0 shadow-lg'
+        onWheel={(event) => event.stopPropagation()}
+        onTouchMove={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={t('Search...')}
+            value={searchValue}
+            onValueChange={setSearchValue}
+            disabled={isSaving}
+          />
+          <CommandList className='max-h-[300px]'>
+            <CommandEmpty>{t('No group found.')}</CommandEmpty>
+            {filteredOptions.map((option) => {
+              const selected = selectedGroups.includes(option.value)
+              return (
+                <CommandItem
+                  key={option.value}
+                  value={option.value}
+                  disabled={isSaving}
+                  onSelect={() => handleToggleGroup(option.value)}
+                  className='gap-2 rounded-lg px-2 py-1.5'
+                >
+                  <Check
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      selected ? 'opacity-100' : 'opacity-0'
+                    )}
+                  />
+                  <span className='min-w-0 flex-1'>
+                    <GroupBadge group={option.value} label={option.label} />
+                  </span>
+                </CommandItem>
+              )
+            })}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /**
  * Balance cell component with click to update
  */
@@ -603,6 +835,7 @@ function BalanceCell({ channel }: { channel: Channel }) {
 export function useChannelsColumns(
   options: {
     enableSelection?: boolean
+    groupOptions?: ChannelGroupOption[]
   } = {}
 ): ColumnDef<Channel>[] {
   const { t, i18n } = useTranslation()
@@ -1077,18 +1310,22 @@ export function useChannelsColumns(
         header: t('Groups'),
         meta: { mobileHidden: true },
         cell: ({ row }) => {
-          const group = row.getValue('group') as string
-          const groupArray = parseGroupsList(group)
+          const channel = row.original
+          if (isTagAggregateRow(channel)) {
+            const groupArray = parseGroupsList(channel.group)
+            return (
+              <ChannelGroupDisplay
+                groups={groupArray}
+                sensitiveVisible={sensitiveVisible}
+              />
+            )
+          }
+
           return (
-            <BadgeListCell
-              items={groupArray.map((g) => (
-                <GroupBadge
-                  key={g}
-                  group={g}
-                  label={sensitiveVisible ? undefined : SENSITIVE_MASK}
-                  size='sm'
-                />
-              ))}
+            <ChannelGroupCell
+              channel={channel}
+              options={options.groupOptions ?? []}
+              sensitiveVisible={sensitiveVisible}
             />
           )
         },
@@ -1243,6 +1480,6 @@ export function useChannelsColumns(
         meta: { pinned: 'right' as const },
       },
     ],
-    [enableSelection, t, locale, sensitiveVisible]
+    [enableSelection, t, locale, sensitiveVisible, options.groupOptions]
   )
 }

@@ -497,27 +497,57 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	info.ApiKey = cacheGetChannel.Key
 	adaptor.Init(info)
 	disablePollingSleep := cacheGetChannel.GetOtherSettings().DisableTaskPollingSleep
-	for i, taskId := range taskIds {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := updateVideoSingleTask(ctx, adaptor, cacheGetChannel, taskId, taskM); err != nil {
-			publicTaskID := "[unknown]"
-			if task := taskM[taskId]; task != nil {
-				publicTaskID = task.TaskID
-			}
-			logger.LogError(ctx, fmt.Sprintf("Failed to update video task %s: %s", publicTaskID, sanitizeTaskPollingText(err.Error(), taskId)))
-		}
-		if disablePollingSleep || i == len(taskIds)-1 {
-			continue
-		}
 
-		// sleep 1 second between tasks for this channel only.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(1 * time.Second):
+	// 渠道内有界并发轮询：串行逐任务轮询时单轮耗时 = 任务数 × 1 秒，未完成任务
+	// 堆积后会远超 15 秒调度周期，完成检测延迟随之线性放大。把任务等宽分块，
+	// 每个分块仍逐任务轮询并保留 1 秒间隔（除非渠道关闭了间隔），渠道上游请求
+	// 速率上限从 1 次/秒提升到并发数次/秒，单轮耗时降为 ceil(任务数/并发数) 秒。
+	workers := constant.TaskPollingConcurrency
+	if workers > len(taskIds) {
+		workers = len(taskIds)
+	}
+	chunkSize := (len(taskIds) + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		start := w * chunkSize
+		end := start + chunkSize
+		if end > len(taskIds) {
+			end = len(taskIds)
 		}
+		if start >= end {
+			break
+		}
+		shard := taskIds[start:end]
+		wg.Add(1)
+		gopool.Go(func() {
+			defer wg.Done()
+			for i, taskId := range shard {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := updateVideoSingleTask(ctx, adaptor, cacheGetChannel, taskId, taskM); err != nil {
+					publicTaskID := "[unknown]"
+					if task := taskM[taskId]; task != nil {
+						publicTaskID = task.TaskID
+					}
+					logger.LogError(ctx, fmt.Sprintf("Failed to update video task %s: %s", publicTaskID, sanitizeTaskPollingText(err.Error(), taskId)))
+				}
+				if disablePollingSleep || i == len(shard)-1 {
+					continue
+				}
+
+				// sleep 1 second between tasks for this channel only.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	return nil
 }

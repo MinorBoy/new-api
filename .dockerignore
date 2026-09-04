@@ -20,4 +20,7 @@ docs
 .gocache
 /web/node_modules
 /web/dist
+node_modules
+stress/results
+stress/secrets.json
 !THIRD-PARTY-LICENSES.md

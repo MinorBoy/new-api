@@ -922,8 +922,17 @@ func TestUpdateVideoSingleTaskDirectInProgressIgnoresCompletedAt(t *testing.T) {
 	assert.JSONEq(t, string(body), string(task.Data))
 }
 
+// setTaskPollingConcurrency 固定渠道内轮询并发数，测试结束还原。
+func setTaskPollingConcurrency(t *testing.T, workers int) {
+	t.Helper()
+	previous := constant.TaskPollingConcurrency
+	constant.TaskPollingConcurrency = workers
+	t.Cleanup(func() { constant.TaskPollingConcurrency = previous })
+}
+
 func TestUpdateVideoTasksDefaultSleepWaitsBetweenTasks(t *testing.T) {
 	truncate(t)
+	setTaskPollingConcurrency(t, 1)
 
 	const channelID = 101
 	seedTaskPollingChannel(t, channelID, false)
@@ -954,6 +963,7 @@ func TestUpdateVideoTasksDefaultSleepWaitsBetweenTasks(t *testing.T) {
 
 func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
 	truncate(t)
+	setTaskPollingConcurrency(t, 1)
 
 	const channelID = 102
 	seedTaskPollingChannel(t, channelID, true)
@@ -984,6 +994,7 @@ func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
 
 func TestUpdateVideoTasksDefaultSleepDoesNotBlockOtherChannels(t *testing.T) {
 	truncate(t)
+	setTaskPollingConcurrency(t, 1)
 
 	const firstChannelID = 201
 	const secondChannelID = 202
@@ -1024,6 +1035,7 @@ func TestUpdateVideoTasksDefaultSleepDoesNotBlockOtherChannels(t *testing.T) {
 
 func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	truncate(t)
+	setTaskPollingConcurrency(t, 1)
 
 	const slowChannelID = 251
 	const fastChannelID = 252
@@ -1091,6 +1103,7 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 
 func TestUpdateVideoTasksMixedChannelSleepSettings(t *testing.T) {
 	truncate(t)
+	setTaskPollingConcurrency(t, 1)
 
 	const sleepyChannelID = 301
 	const fastChannelID = 302
@@ -1127,6 +1140,47 @@ func TestUpdateVideoTasksMixedChannelSleepSettings(t *testing.T) {
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.ElementsMatch(t, []string{"upstream_sleepy_1", "upstream_fast_1", "upstream_fast_2"}, adaptor.fetchedTaskIDs())
+}
+
+func TestUpdateVideoTasksConcurrentWorkersDrainChannelWithinShortWindow(t *testing.T) {
+	truncate(t)
+	setTaskPollingConcurrency(t, 2)
+
+	const channelID = 111
+	seedTaskPollingChannel(t, channelID, false)
+	taskIDs := make([]string, 0, 6)
+	taskMap := make(map[string]*model.Task, 6)
+	for i := 1; i <= 6; i++ {
+		task := seedPollingTask(t, channelID, fmt.Sprintf("task_public_conc_%d", i), fmt.Sprintf("upstream_conc_%d", i))
+		taskIDs = append(taskIDs, task.GetUpstreamTaskID())
+		taskMap[task.GetUpstreamTaskID()] = task
+	}
+
+	adaptor := &taskPollingFetchAdaptor{}
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	// 串行模式下 6 个任务带 1 秒间隔必然超出 3 秒窗口；并发分块后每个任务
+	// 应恰好被处理一次，且整轮在窗口内完成（分块不得重叠或遗漏）。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := UpdateVideoTasks(ctx, constant.TaskPlatform("kling"), map[int][]string{
+		channelID: taskIDs,
+	}, taskMap)
+
+	require.NoError(t, err)
+	assert.Equal(t, 6, adaptor.fetchCount())
+
+	fetched := adaptor.fetchedTaskIDs()
+	counts := make(map[string]int, len(fetched))
+	for _, id := range fetched {
+		counts[id]++
+	}
+	for _, id := range taskIDs {
+		assert.Equal(t, 1, counts[id], "task %s should be fetched exactly once", id)
+	}
 }
 
 func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {

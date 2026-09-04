@@ -198,6 +198,16 @@ func initConstantEnv() {
 	constant.TaskQueryLimit = GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
 	// 异步任务超时时间（分钟），超过此时间未完成的任务将被标记为失败并退款。0 表示禁用。
 	constant.TaskTimeoutMinutes = GetEnvOrDefault("TASK_TIMEOUT_MINUTES", 1440)
+	// 同一渠道异步任务的轮询并发数。串行轮询时单轮耗时随未完成任务数线性增长
+	// （每任务间隔 1 秒），任务堆积会持续放大终态检测延迟；并发分片后单轮
+	// 耗时降为 ceil(任务数/并发数) 秒。并发分片仍保留任务间 1 秒间隔，
+	// 渠道上游请求速率上限相应提高到并发数次/秒。
+	constant.TaskPollingConcurrency = GetEnvOrDefault("TASK_POLLING_CONCURRENCY", 8)
+	if constant.TaskPollingConcurrency < 1 {
+		constant.TaskPollingConcurrency = 1
+	} else if constant.TaskPollingConcurrency > 64 {
+		constant.TaskPollingConcurrency = 64
+	}
 
 	soraPatchStr := GetEnvOrDefaultString("TASK_PRICE_PATCH", "")
 	if soraPatchStr != "" {

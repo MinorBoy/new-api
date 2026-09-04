@@ -30,7 +30,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -75,6 +75,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useSystemOptions } from '@/features/system-settings/hooks/use-system-options'
+import {
+  flattenImagePricingCatalog,
+  formatImagePrice,
+} from '@/features/system-settings/models/image-pricing-catalog'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -82,16 +87,8 @@ import {
 } from '@/lib/admin-permissions'
 import dayjs from '@/lib/dayjs'
 import { useAuthStore } from '@/stores/auth-store'
-import { useSystemOptions } from '@/features/system-settings/hooks/use-system-options'
 
 import type { Channel } from '../../channels/types'
-import { getPricing } from '../../pricing/api'
-import {
-  formatDurationPrice,
-  formatPrice,
-  formatRequestPrice,
-} from '../../pricing/lib/price'
-import type { PricingData, PricingModel } from '../../pricing/types'
 import {
   activateCostRule,
   costAccountingQueryKeys,
@@ -196,35 +193,42 @@ function buildChannelCostRows(
   )
 }
 
-function formatPricingModel(model: PricingModel, t: TFunction): string {
-  if (model.billing_mode === 'per_duration' && model.duration_price) {
-    const unit =
-      model.duration_price.unit === 'second' ? t('Per second') : t('Per minute')
-    return `${formatDurationPrice(model)} · ${unit}`
+function buildImageSalePriceMap(
+  rawCatalog: string | undefined
+): Map<string, string> {
+  if (!rawCatalog) return new Map()
+  try {
+    const prices = new Map<string, string>()
+    for (const row of flattenImagePricingCatalog(rawCatalog)) {
+      const salePrice = row.salePriceUSD.trim()
+      if (!salePrice) continue
+      prices.set(`${row.model}\u0000${row.skuKey}`, salePrice)
+      if (row.legacySkuKey) {
+        prices.set(`${row.model}\u0000${row.legacySkuKey}`, salePrice)
+      }
+    }
+    return prices
+  } catch {
+    return new Map()
   }
-  if (model.quota_type === 1) {
-    return `${formatRequestPrice(model)} · ${t('Per request')}`
-  }
-  return `${t('Input')}: ${formatPrice(model, 'input', 'M')} · ${t(
-    'Output'
-  )}: ${formatPrice(model, 'output', 'M')} · ${t('Per 1M tokens')}`
 }
 
-function officialPrice(
+function salePrice(
   row: ChannelCostRow,
-  pricing: PricingData | undefined,
+  prices: Map<string, string>,
   unavailable: string,
   t: TFunction
 ): string {
-  const pricingByModel = new Map(
-    (pricing?.data ?? []).map((model) => [model.model_name, model])
-  )
-  const prices = new Set<string>()
-  for (const originModel of row.originModels) {
-    const model = pricingByModel.get(originModel)
-    if (model) prices.add(formatPricingModel(model, t))
+  const originModels =
+    row.originModels.length > 0 ? row.originModels : [row.billableModel]
+  const salePrices = new Set<string>()
+  for (const originModel of originModels) {
+    const price = prices.get(`${originModel}\u0000${row.costVariantKey}`)
+    if (price) {
+      salePrices.add(`$${formatImagePrice(price)} · ${t('Per image')}`)
+    }
   }
-  return prices.size > 0 ? [...prices].join(' · ') : unavailable
+  return salePrices.size > 0 ? [...salePrices].join(' · ') : unavailable
 }
 
 function rulePrice(
@@ -281,13 +285,17 @@ function unifiedImageModels(channel: Channel, rawCatalog: string | undefined) {
   if (!rawCatalog) return []
   let catalog: { models?: Record<string, ImageCatalogModelSummary> }
   try {
-    catalog = JSON.parse(rawCatalog) as { models?: Record<string, ImageCatalogModelSummary> }
+    catalog = JSON.parse(rawCatalog) as {
+      models?: Record<string, ImageCatalogModelSummary>
+    }
   } catch {
     return []
   }
   const mapping: Record<string, string> = {}
   try {
-    const parsed = channel.model_mapping ? JSON.parse(channel.model_mapping) : {}
+    const parsed = channel.model_mapping
+      ? JSON.parse(channel.model_mapping)
+      : {}
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       for (const [key, value] of Object.entries(parsed)) {
         if (typeof value === 'string') mapping[key] = value
@@ -303,18 +311,30 @@ function unifiedImageModels(channel: Channel, rawCatalog: string | undefined) {
   const seen = new Set<string>()
   return models.flatMap((publicModel) => {
     const entry = catalog.models?.[publicModel]
-    if (!entry || entry.profile !== 'openai_images' || entry.profile_version !== 1) return []
+    if (
+      !entry ||
+      entry.profile !== 'openai_images' ||
+      entry.profile_version !== 1
+    ) {
+      return []
+    }
     const billableModel = mapping[publicModel]?.trim() || publicModel
     return Object.entries(entry.endpoints ?? {})
       .filter(([, endpoint]) => endpoint.capability?.enabled !== false)
-      .filter(([endpoint]) => endpoint === 'generations' || endpoint === 'edits')
+      .filter(
+        ([endpoint]) => endpoint === 'generations' || endpoint === 'edits'
+      )
       .filter(([endpoint]) => {
         const key = `${billableModel}|${endpoint}`
         if (seen.has(key)) return false
         seen.add(key)
         return true
       })
-      .map(([endpoint]) => ({ publicModel, billableModel, endpoint: endpoint as 'generations' | 'edits' }))
+      .map(([endpoint]) => ({
+        publicModel,
+        billableModel,
+        endpoint: endpoint as 'generations' | 'edits',
+      }))
   })
 }
 
@@ -353,12 +373,6 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
     queryKey: costAccountingQueryKeys.coverage(costRuleListParams),
     queryFn: () => getCostCoverage(costRuleListParams),
     enabled: props.open && channelID > 0 && canRead,
-  })
-  const pricingQuery = useQuery({
-    queryKey: ['pricing'],
-    queryFn: getPricing,
-    enabled: props.open && channelID > 0 && canRead,
-    staleTime: 5 * 60 * 1000,
   })
   const systemOptionsQuery = useSystemOptions()
 
@@ -413,9 +427,16 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
   const rules = rulesQuery.data?.data ?? []
   const coverage = coverageQuery.data?.data ?? []
   const rows = buildChannelCostRows(rules, coverage)
+  const imageCatalog = systemOptionsQuery.data?.data?.find(
+    (option) => option.key === 'ImageModelCatalog'
+  )?.value
   const imageMatrices = unifiedImageModels(
     props.channel ?? ({ models: '', model_mapping: '' } as Channel),
-    systemOptionsQuery.data?.data?.find((option) => option.key === 'ImageModelCatalog')?.value
+    imageCatalog
+  )
+  const imageSalePrices = useMemo(
+    () => buildImageSalePriceMap(imageCatalog),
+    [imageCatalog]
   )
   const history = rows.find(
     (row) =>
@@ -423,14 +444,15 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
       row.costVariantKey === historyTarget?.costVariantKey
   )
   const isLoading =
-    rulesQuery.isLoading || coverageQuery.isLoading || pricingQuery.isLoading || systemOptionsQuery.isLoading
-  const error = rulesQuery.error ?? coverageQuery.error ?? pricingQuery.error
+    rulesQuery.isLoading ||
+    coverageQuery.isLoading ||
+    systemOptionsQuery.isLoading
+  const error = rulesQuery.error ?? coverageQuery.error
 
   const retry = async () => {
     await Promise.all([
       rulesQuery.refetch(),
       coverageQuery.refetch(),
-      pricingQuery.refetch(),
       systemOptionsQuery.refetch(),
     ])
   }
@@ -524,7 +546,8 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                     billableModel={matrix.billableModel}
                     endpoint={matrix.endpoint}
                     rules={rules.filter(
-                      (rule) => rule.billable_upstream_model === matrix.billableModel
+                      (rule) =>
+                        rule.billable_upstream_model === matrix.billableModel
                     )}
                     canWrite={canWrite}
                     onSaved={invalidateCostQueries}
@@ -553,7 +576,7 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                           <TableHead>{t('Billable upstream model')}</TableHead>
                           <TableHead>{t('Cost variant')}</TableHead>
                           <TableHead>{t('Client models')}</TableHead>
-                          <TableHead>{t('Official price')}</TableHead>
+                          <TableHead>{t('Sale price')}</TableHead>
                           <TableHead>{t('Rule')}</TableHead>
                           <TableHead>{t('Supplier price')}</TableHead>
                           <TableHead>{t('Normalized USD price')}</TableHead>
@@ -588,9 +611,9 @@ export function ChannelCostDrawer(props: ChannelCostDrawerProps) {
                                   : t('No enabled mapping')}
                               </TableCell>
                               <TableCell className='max-w-56 whitespace-normal'>
-                                {officialPrice(
+                                {salePrice(
                                   row,
-                                  pricingQuery.data,
+                                  imageSalePrices,
                                   t('Unavailable'),
                                   t
                                 )}

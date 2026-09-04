@@ -129,6 +129,34 @@ const channel: Channel = {
   routing_target_count: 0,
 }
 
+const imageCatalog = JSON.stringify({
+  version: 1,
+  models: {
+    'client-image': {
+      profile: 'openai_images',
+      profile_version: 1,
+      endpoints: {
+        generations: {
+          capability: {
+            enabled: true,
+            resolution_tiers: ['1k', '2k', '4k'],
+            qualities: ['low', 'medium', 'high'],
+          },
+        },
+      },
+      skus: {
+        'gen-1k-high': {
+          endpoint: 'generations',
+          tier: '1k',
+          quality: 'high',
+          unit: 'image',
+          sale_price_usd: '0.03',
+        },
+      },
+    },
+  },
+})
+
 const activeRule: CostRule = {
   id: 11,
   channel_id: 7,
@@ -203,24 +231,10 @@ function createQueryClient(): QueryClient {
       ],
     }
   )
-  queryClient.setQueryData(['pricing'], {
+  queryClient.setQueryData(['system-options'], {
     success: true,
-    data: [
-      {
-        id: 1,
-        model_name: 'client-model',
-        quota_type: 1,
-        model_ratio: 0,
-        completion_ratio: 1,
-        model_price: 0.5,
-        enable_groups: ['default'],
-      },
-    ],
-    vendors: [],
-    group_ratio: { default: 1 },
-    usable_group: { default: { desc: 'Default', ratio: 1 } },
-    supported_endpoint: {},
-    auto_groups: [],
+    message: '',
+    data: [{ key: 'ImageModelCatalog', value: '{"version":1,"models":{}}' }],
   })
   return queryClient
 }
@@ -281,7 +295,7 @@ function responseFor<T>(
   }
 }
 
-test('shows mapped models, official price, active rule, normalized price, and coverage', async () => {
+test('shows mapped models, sale price, active rule, normalized price, and coverage', async () => {
   const mounted = await mount(
     <ChannelCostDrawer open channel={channel} onOpenChange={() => {}} />
   )
@@ -290,7 +304,9 @@ test('shows mapped models, official price, active rule, normalized price, and co
     assert.match(text, /Primary OpenAI/)
     assert.match(text, /vendor-model/)
     assert.match(text, /client-model/)
-    assert.match(text, /\$0\.5/)
+    assert.match(text, /Sale price/)
+    assert.match(text, /Unavailable/)
+    assert.doesNotMatch(text, /Official price/)
     assert.match(text, /0\.12/)
     assert.match(text, /Active/)
     assert.match(text, /Covered/)
@@ -299,6 +315,68 @@ test('shows mapped models, official price, active rule, normalized price, and co
         'button[aria-label="Show version history"]'
       )
     )
+  } finally {
+    await unmount(mounted)
+  }
+})
+
+test('shows the image SKU sale price instead of the legacy model price', async () => {
+  const imageChannel: Channel = {
+    ...channel,
+    id: 8,
+    name: 'Image Channel',
+    models: 'client-image',
+    model_mapping: '{"client-image":"vendor-image"}',
+  }
+  const imageRule: CostRule = {
+    ...activeRule,
+    channel_id: imageChannel.id,
+    billable_upstream_model: 'vendor-image',
+    cost_variant_key: 'gen-1k-high',
+    cost_mode: 'per_image',
+    config: {
+      ...activeRule.config,
+      unit_price: '0.01',
+      normalized_usd_prices: { unit_price: '0.01' },
+    },
+  }
+  const queryClient = createBaseQueryClient()
+  queryClient.setQueryData(
+    costAccountingQueryKeys.ruleList({ channel_id: imageChannel.id }),
+    { success: true, message: '', data: [imageRule] }
+  )
+  queryClient.setQueryData(
+    costAccountingQueryKeys.coverage({ channel_id: imageChannel.id }),
+    {
+      success: true,
+      message: '',
+      data: [
+        {
+          channel_id: imageChannel.id,
+          origin_model: 'client-image',
+          predicted_upstream_model: 'vendor-image',
+          cost_variant_key: 'gen-1k-high',
+          covered: true,
+        },
+      ],
+    }
+  )
+  queryClient.setQueryData(['system-options'], {
+    success: true,
+    message: '',
+    data: [{ key: 'ImageModelCatalog', value: imageCatalog }],
+  })
+
+  const mounted = await mount(
+    <ChannelCostDrawer open channel={imageChannel} onOpenChange={() => {}} />,
+    queryClient
+  )
+  try {
+    const text = browserWindow.document.body.textContent ?? ''
+    assert.match(text, /Sale price/)
+    assert.match(text, /\$0\.03/)
+    assert.doesNotMatch(text, /Official price/)
+    assert.doesNotMatch(text, /\$0\.5/)
   } finally {
     await unmount(mounted)
   }
@@ -646,14 +724,10 @@ test('shows a stable empty state when no mappings or rules exist', async () => {
     costAccountingQueryKeys.coverage({ channel_id: channel.id }),
     { success: true, message: '', data: [] }
   )
-  queryClient.setQueryData(['pricing'], {
+  queryClient.setQueryData(['system-options'], {
     success: true,
-    data: [],
-    vendors: [],
-    group_ratio: {},
-    usable_group: {},
-    supported_endpoint: {},
-    auto_groups: [],
+    message: '',
+    data: [{ key: 'ImageModelCatalog', value: '{"version":1,"models":{}}' }],
   })
 
   const mounted = await mount(
@@ -718,10 +792,6 @@ test('uses fixed-height skeleton rows while cost queries are pending', async () 
       queryFn: pending,
     })
     .catch(() => {})
-  void queryClient
-    .fetchQuery({ queryKey: ['pricing'], queryFn: pending })
-    .catch(() => {})
-
   const mounted = await mount(
     <ChannelCostDrawer open channel={channel} onOpenChange={() => {}} />,
     queryClient

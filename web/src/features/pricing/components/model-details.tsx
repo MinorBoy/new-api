@@ -60,7 +60,6 @@ import {
 } from '@/features/performance-metrics/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
@@ -91,6 +90,7 @@ import type {
   TokenUnit,
 } from '../types'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
+import { ImagePriceMatrix } from './image-price-matrix'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
@@ -627,29 +627,13 @@ function PriceSection(props: {
     return (
       <section>
         <SectionTitle>{t('Resolution')}</SectionTitle>
-        <div className='grid gap-2 sm:grid-cols-3'>
-          {imagePriceGroups.map((group) => (
-            <div key={group.tier} className='bg-muted/20 rounded-lg border p-3'>
-              <div className='text-muted-foreground text-xs font-medium uppercase'>
-                {group.tier}
-              </div>
-              <div className='mt-2 space-y-1'>
-                {group.prices.map((price) => (
-                  <div key={price.quality} className='flex items-baseline justify-between gap-2 text-xs'>
-                    <span className='text-muted-foreground'>{t(price.quality)}</span>
-                    <span className='text-foreground font-mono font-semibold tabular-nums'>
-                      {formatImagePrice(
-                        price.priceUSD,
-                        props.showRechargePrice,
-                        props.priceRate,
-                        props.usdExchangeRate
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className='bg-muted/30 rounded-lg px-3 py-2.5'>
+          <ImagePriceMatrix
+            groups={imagePriceGroups}
+            showRechargePrice={props.showRechargePrice}
+            priceRate={props.priceRate}
+            usdExchangeRate={props.usdExchangeRate}
+          />
         </div>
       </section>
     )
@@ -859,18 +843,6 @@ function PriceSection(props: {
   )
 }
 
-function formatImagePrice(
-  priceUSD: number,
-  showRechargePrice: boolean,
-  priceRate: number,
-  usdExchangeRate: number
-): string {
-  return formatBillingCurrencyFromUSD(
-    showRechargePrice ? (priceUSD * priceRate) / usdExchangeRate : priceUSD,
-    { digitsLarge: 4, digitsSmall: 4, abbreviate: false }
-  )
-}
-
 // ----------------------------------------------------------------------------
 // Auto group chain (used inside group pricing section)
 // ----------------------------------------------------------------------------
@@ -965,13 +937,6 @@ function GroupPricingSection(props: {
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
   const thClass =
     'text-muted-foreground py-2 text-[10px] font-medium tracking-wider uppercase'
-  const imageQualities = [
-    ...new Set(
-      imagePriceGroups.flatMap((group) =>
-        group.prices.map((price) => price.quality)
-      )
-    ),
-  ]
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
@@ -1015,55 +980,18 @@ function GroupPricingSection(props: {
       <section>
         <SectionTitle>{t('Pricing by Group')}</SectionTitle>
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
-        <div className='space-y-3'>
-          {availableGroups.map((group) => {
-            const ratio = getConfiguredGroupRatio(props.groupRatio, group)
-            return (
-              <div key={group} className='overflow-hidden rounded-lg border'>
-                <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
-                  <GroupBadge group={group} size='sm' />
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    {ratio}x
-                  </span>
-                </div>
-                <StaticDataTable
-                  className='rounded-none border-0'
-                  tableClassName='text-sm'
-                  headerRowClassName='hover:bg-transparent'
-                  data={imagePriceGroups}
-                  getRowKey={(priceGroup) => `${group}-${priceGroup.tier}`}
-                  columns={[
-                    {
-                      id: 'tier',
-                      header: t('Resolution'),
-                      className: thClass,
-                      cellClassName: 'text-muted-foreground py-2.5',
-                      cell: (priceGroup) => priceGroup.tier.toUpperCase(),
-                    },
-                    ...imageQualities.map((quality) => ({
-                      id: quality,
-                      header: t(quality),
-                      className: `${thClass} text-right`,
-                      cellClassName: 'py-2.5 text-right font-mono',
-                      cell: (priceGroup: (typeof imagePriceGroups)[number]) => {
-                        const matched = priceGroup.prices.find(
-                          (item) => item.quality === quality
-                        )
-                        return matched
-                          ? formatImagePrice(
-                              matched.priceUSD * ratio,
-                              showRechargePrice,
-                              props.priceRate,
-                              props.usdExchangeRate
-                            )
-                          : '-'
-                      },
-                    })),
-                  ]}
-                />
-              </div>
-            )
-          })}
+        <div className='space-y-2'>
+          {availableGroups.map((group) => (
+            <div
+              key={group}
+              className='flex items-center justify-between gap-3 rounded-lg border px-3 py-2'
+            >
+              <GroupBadge group={group} size='sm' />
+              <span className='text-muted-foreground font-mono text-xs'>
+                {getConfiguredGroupRatio(props.groupRatio, group)}x
+              </span>
+            </div>
+          ))}
         </div>
       </section>
     )

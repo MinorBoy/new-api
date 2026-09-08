@@ -21,7 +21,6 @@ import { memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +42,7 @@ import {
 } from '../lib/price'
 import { groupImagePrices } from '../lib/image-pricing'
 import type { PricingModel, TokenUnit } from '../types'
+import { ImagePriceMatrix } from './image-price-matrix'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 
@@ -110,6 +110,19 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     copyToClipboard(props.model.model_name || '')
   }
 
+  const imagePriceMatrix =
+    isImageModel && imagePriceGroups.length > 0 ? (
+      <div className='bg-muted/30 mt-2.5 rounded-lg px-3 py-2.5 sm:mt-3.5'>
+        <ImagePriceMatrix
+          groups={imagePriceGroups}
+          ratio={imageGroupRatio}
+          showRechargePrice={showRechargePrice}
+          priceRate={priceRate}
+          usdExchangeRate={usdExchangeRate}
+        />
+      </div>
+    ) : null
+
   let priceSummary: ReactNode
   if (isDurationMode) {
     priceSummary = (
@@ -162,32 +175,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       )
     }
   } else if (isImageModel) {
-    priceSummary = (
-      <div className='flex min-w-0 flex-wrap gap-x-2 gap-y-1'>
-        {imagePriceGroups.map((group) => (
-          <span
-            key={group.tier}
-            className='text-muted-foreground min-w-0 max-w-full break-words'
-          >
-            {group.tier.toUpperCase()}{' '}
-            <span className='text-foreground font-mono font-semibold break-words'>
-              {group.prices.map((price, index) => (
-                <span key={price.quality}>
-                  {index > 0 ? ' / ' : ''}
-                  {t(price.quality)}:{' '}
-                  {formatBillingCurrencyFromImageUSD(
-                    price.priceUSD * imageGroupRatio,
-                    showRechargePrice,
-                    priceRate,
-                    usdExchangeRate
-                  )}
-                </span>
-              ))}
-            </span>
-          </span>
-        ))}
-      </div>
-    )
+    priceSummary = null
   } else if (isTokenBased) {
     priceSummary = (
       <>
@@ -301,6 +289,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </div>
       </div>
 
+      {/* Image tier price matrix */}
+      {imagePriceMatrix}
+
       {/* Description */}
       <p className='text-muted-foreground mt-2 line-clamp-1 flex-1 text-[13px] leading-relaxed sm:mt-4 sm:line-clamp-2 sm:min-h-[2.5rem]'>
         {props.model.description || t('No description available.')}
@@ -339,15 +330,3 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     </div>
   )
 })
-
-function formatBillingCurrencyFromImageUSD(
-  priceUSD: number,
-  showRechargePrice: boolean,
-  priceRate: number,
-  usdExchangeRate: number
-): string {
-  return formatBillingCurrencyFromUSD(
-    showRechargePrice ? (priceUSD * priceRate) / usdExchangeRate : priceUSD,
-    { digitsLarge: 4, digitsSmall: 4, abbreviate: false }
-  )
-}

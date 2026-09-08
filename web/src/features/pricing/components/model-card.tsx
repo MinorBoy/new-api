@@ -167,10 +167,10 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         {imagePriceGroups.map((group) => (
           <span
             key={group.tier}
-            className='text-muted-foreground whitespace-nowrap'
+            className='text-muted-foreground min-w-0 max-w-full break-words'
           >
             {group.tier.toUpperCase()}{' '}
-            <span className='text-foreground font-mono font-semibold'>
+            <span className='text-foreground font-mono font-semibold break-words'>
               {group.prices.map((price, index) => (
                 <span key={price.quality}>
                   {index > 0 ? ' / ' : ''}
@@ -271,7 +271,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               </span>
             )}
           </div>
-          <div className='min-w-0'>
+          <div className='min-w-0 flex-1'>
             <h3 className='text-foreground truncate font-mono text-[15px] leading-tight font-bold'>
               {props.model.model_name}
             </h3>

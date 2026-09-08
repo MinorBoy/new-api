@@ -77,6 +77,13 @@ export type PricingModel = {
   input_modalities?: Modality[]
   output_modalities?: Modality[]
   capabilities?: ModelCapability[]
+  image_prices?: ImagePrice[]
+}
+
+export type ImagePrice = {
+  tier: string
+  quality: string
+  price_usd: string
 }
 
 /** Input/output modalities supported by a model. */

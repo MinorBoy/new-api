@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"sync"
@@ -9,8 +10,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/imageprofile"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/image_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 )
@@ -38,6 +41,15 @@ type Pricing struct {
 	DurationPrice          *types.DurationPrice      `json:"duration_price,omitempty"`
 	SeedanceTokenPrice     *types.SeedanceTokenPrice `json:"seedance_token_price,omitempty"`
 	PricingVersion         string                    `json:"pricing_version,omitempty"`
+	ImagePrices            []ImagePrice              `json:"image_prices,omitempty"`
+}
+
+// ImagePrice is the public sale price for one image SKU. Prices remain strings
+// to preserve the exact decimal configured by the administrator.
+type ImagePrice struct {
+	Tier     string `json:"tier"`
+	Quality  string `json:"quality"`
+	PriceUSD string `json:"price_usd"`
 }
 
 type PricingVendor struct {
@@ -357,11 +369,13 @@ func updatePricing() {
 	}
 
 	pricingMap = make([]Pricing, 0)
+	imageCatalog := image_setting.Snapshot()
 	for model, groups := range modelGroupsMap {
 		pricing := Pricing{
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+			ImagePrices:            imagePricingFromCatalog(imageCatalog, model),
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）
@@ -439,6 +453,53 @@ func updatePricing() {
 	modelEnableGroupsLock.Unlock()
 
 	lastGetPricingTime = time.Now()
+}
+
+func imagePricingFromCatalog(catalog image_setting.Catalog, modelName string) []ImagePrice {
+	entry, ok := catalog.Models[modelName]
+	if !ok {
+		return nil
+	}
+	prices := make([]ImagePrice, 0, len(entry.SKUs))
+	for _, sku := range entry.SKUs {
+		if sku.Endpoint != imageprofile.EndpointGenerations || sku.Tier == "" || sku.Quality == "" || sku.SalePriceUSD == "" {
+			continue
+		}
+		prices = append(prices, ImagePrice{Tier: sku.Tier, Quality: sku.Quality, PriceUSD: sku.SalePriceUSD})
+	}
+	sort.Slice(prices, func(i, j int) bool {
+		if prices[i].Tier != prices[j].Tier {
+			return imageTierOrder(prices[i].Tier) < imageTierOrder(prices[j].Tier)
+		}
+		return imageQualityOrder(prices[i].Quality) < imageQualityOrder(prices[j].Quality)
+	})
+	return prices
+}
+
+func imageTierOrder(tier string) int {
+	switch tier {
+	case "1k":
+		return 1
+	case "2k":
+		return 2
+	case "4k":
+		return 3
+	default:
+		return 99
+	}
+}
+
+func imageQualityOrder(quality string) int {
+	switch quality {
+	case "low":
+		return 1
+	case "medium":
+		return 2
+	case "high":
+		return 3
+	default:
+		return 99
+	}
 }
 
 // GetSupportedEndpointMap 返回全局端点到路径的映射

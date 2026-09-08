@@ -21,6 +21,7 @@ import { memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
@@ -40,6 +41,7 @@ import {
   formatPrice,
   formatRequestPrice,
 } from '../lib/price'
+import { groupImagePrices } from '../lib/image-pricing'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
@@ -88,6 +90,13 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         ),
       })
     : null
+
+  const imagePriceGroups = groupImagePrices(props.model.image_prices)
+  const isImageModel = imagePriceGroups.length > 0
+  const imageGroupRatio = getDynamicDisplayGroupRatio(
+    props.model,
+    props.selectedGroup
+  )
 
   const primaryGroup = groups[0]
   const bottomTags = [...endpoints.slice(0, 2), ...tags.slice(0, 2)]
@@ -152,6 +161,33 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </span>
       )
     }
+  } else if (isImageModel) {
+    priceSummary = (
+      <div className='flex min-w-0 flex-wrap gap-x-2 gap-y-1'>
+        {imagePriceGroups.map((group) => (
+          <span
+            key={group.tier}
+            className='text-muted-foreground whitespace-nowrap'
+          >
+            {group.tier.toUpperCase()}{' '}
+            <span className='text-foreground font-mono font-semibold'>
+              {group.prices.map((price, index) => (
+                <span key={price.quality}>
+                  {index > 0 ? ' / ' : ''}
+                  {t(price.quality)}:{' '}
+                  {formatBillingCurrencyFromImageUSD(
+                    price.priceUSD * imageGroupRatio,
+                    showRechargePrice,
+                    priceRate,
+                    usdExchangeRate
+                  )}
+                </span>
+              ))}
+            </span>
+          </span>
+        ))}
+      </div>
+    )
   } else if (isTokenBased) {
     priceSummary = (
       <>
@@ -303,3 +339,15 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     </div>
   )
 })
+
+function formatBillingCurrencyFromImageUSD(
+  priceUSD: number,
+  showRechargePrice: boolean,
+  priceRate: number,
+  usdExchangeRate: number
+): string {
+  return formatBillingCurrencyFromUSD(
+    showRechargePrice ? (priceUSD * priceRate) / usdExchangeRate : priceUSD,
+    { digitsLarge: 4, digitsSmall: 4, abbreviate: false }
+  )
+}

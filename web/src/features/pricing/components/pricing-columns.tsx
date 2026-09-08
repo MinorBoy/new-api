@@ -27,6 +27,7 @@ import {
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import {
@@ -34,6 +35,7 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import { groupImagePrices } from '../lib/image-pricing'
 import {
   getDurationPriceRule,
   isDurationPricingMode,
@@ -119,6 +121,27 @@ export function usePricingColumns(
       ),
       cell: ({ row }) => {
         const model = row.original
+        const imagePriceGroups = groupImagePrices(model.image_prices)
+        if (imagePriceGroups.length > 0) {
+          const ratio = getDynamicDisplayGroupRatio(model, selectedGroup)
+          return (
+            <div className='max-w-full min-w-0 space-y-0.5'>
+              {imagePriceGroups.map((group) => (
+                <div key={group.tier} className='whitespace-nowrap'>
+                  <span className='text-muted-foreground text-xs'>
+                    {group.tier.toUpperCase()}:
+                  </span>{' '}
+                  {group.prices.map((price, index) => (
+                    <span key={price.quality} className='font-mono text-xs tabular-nums'>
+                      {index > 0 ? ' / ' : ''}
+                      {price.quality} {formatImagePrice(price.priceUSD * ratio, showRechargePrice, priceRate, usdExchangeRate)}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )
+        }
         if (isDurationPricingMode(model)) {
           const durationPrice = getDurationPriceRule(model)
           return (
@@ -437,4 +460,16 @@ export function usePricingColumns(
       enableSorting: false,
     },
   ]
+}
+
+function formatImagePrice(
+  priceUSD: number,
+  showRechargePrice: boolean,
+  priceRate: number,
+  usdExchangeRate: number
+): string {
+  return formatBillingCurrencyFromUSD(
+    showRechargePrice ? (priceUSD * priceRate) / usdExchangeRate : priceUSD,
+    { digitsLarge: 4, digitsSmall: 4, abbreviate: false }
+  )
 }

@@ -322,6 +322,7 @@ func updateOptionMap(key string, value string) (err error) {
 		if err := image_setting.UpdateCatalogByJSONString(value); err != nil {
 			return err
 		}
+		InvalidatePricingCache()
 		common.OptionMapRWMutex.Lock()
 		common.OptionMap[key] = value
 		common.OptionMapRWMutex.Unlock()

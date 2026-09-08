@@ -60,6 +60,7 @@ import {
 } from '@/features/performance-metrics/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
@@ -70,6 +71,7 @@ import {
   isDynamicPricingModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import { groupImagePrices } from '../lib/image-pricing'
 import {
   getAvailableGroups,
   getConfiguredGroupRatio,
@@ -590,6 +592,7 @@ function PriceSection(props: {
   const isDurationMode = isDurationPricingMode(props.model)
   const durationPrice = getDurationPriceRule(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
+  const imagePriceGroups = groupImagePrices(props.model.image_prices)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
 
   if (isDurationMode) {
@@ -615,6 +618,38 @@ function PriceSection(props: {
               </span>
             ) : null}
           </span>
+        </div>
+      </section>
+    )
+  }
+
+  if (imagePriceGroups.length > 0) {
+    return (
+      <section>
+        <SectionTitle>{t('Resolution')}</SectionTitle>
+        <div className='grid gap-2 sm:grid-cols-3'>
+          {imagePriceGroups.map((group) => (
+            <div key={group.tier} className='bg-muted/20 rounded-lg border p-3'>
+              <div className='text-muted-foreground text-xs font-medium uppercase'>
+                {group.tier}
+              </div>
+              <div className='mt-2 space-y-1'>
+                {group.prices.map((price) => (
+                  <div key={price.quality} className='flex items-baseline justify-between gap-2 text-xs'>
+                    <span className='text-muted-foreground'>{t(price.quality)}</span>
+                    <span className='text-foreground font-mono font-semibold tabular-nums'>
+                      {formatImagePrice(
+                        price.priceUSD,
+                        props.showRechargePrice,
+                        props.priceRate,
+                        props.usdExchangeRate
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
     )
@@ -824,6 +859,18 @@ function PriceSection(props: {
   )
 }
 
+function formatImagePrice(
+  priceUSD: number,
+  showRechargePrice: boolean,
+  priceRate: number,
+  usdExchangeRate: number
+): string {
+  return formatBillingCurrencyFromUSD(
+    showRechargePrice ? (priceUSD * priceRate) / usdExchangeRate : priceUSD,
+    { digitsLarge: 4, digitsSmall: 4, abbreviate: false }
+  )
+}
+
 // ----------------------------------------------------------------------------
 // Auto group chain (used inside group pricing section)
 // ----------------------------------------------------------------------------
@@ -914,7 +961,17 @@ function GroupPricingSection(props: {
   const isDurationMode = isDurationPricingMode(props.model)
   const durationPrice = getDurationPriceRule(props.model)
   const isTokenBased = isTokenBasedModel(props.model)
+  const imagePriceGroups = groupImagePrices(props.model.image_prices)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
+  const thClass =
+    'text-muted-foreground py-2 text-[10px] font-medium tracking-wider uppercase'
+  const imageQualities = [
+    ...new Set(
+      imagePriceGroups.flatMap((group) =>
+        group.prices.map((price) => price.quality)
+      )
+    ),
+  ]
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
@@ -953,8 +1010,64 @@ function GroupPricingSection(props: {
     )
   }
 
-  const thClass =
-    'text-muted-foreground py-2 text-[10px] font-medium tracking-wider uppercase'
+  if (imagePriceGroups.length > 0) {
+    return (
+      <section>
+        <SectionTitle>{t('Pricing by Group')}</SectionTitle>
+        <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
+        <div className='space-y-3'>
+          {availableGroups.map((group) => {
+            const ratio = getConfiguredGroupRatio(props.groupRatio, group)
+            return (
+              <div key={group} className='overflow-hidden rounded-lg border'>
+                <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
+                  <GroupBadge group={group} size='sm' />
+                  <span className='text-muted-foreground font-mono text-xs'>
+                    {ratio}x
+                  </span>
+                </div>
+                <StaticDataTable
+                  className='rounded-none border-0'
+                  tableClassName='text-sm'
+                  headerRowClassName='hover:bg-transparent'
+                  data={imagePriceGroups}
+                  getRowKey={(priceGroup) => `${group}-${priceGroup.tier}`}
+                  columns={[
+                    {
+                      id: 'tier',
+                      header: t('Resolution'),
+                      className: thClass,
+                      cellClassName: 'text-muted-foreground py-2.5',
+                      cell: (priceGroup) => priceGroup.tier.toUpperCase(),
+                    },
+                    ...imageQualities.map((quality) => ({
+                      id: quality,
+                      header: t(quality),
+                      className: `${thClass} text-right`,
+                      cellClassName: 'py-2.5 text-right font-mono',
+                      cell: (priceGroup: (typeof imagePriceGroups)[number]) => {
+                        const matched = priceGroup.prices.find(
+                          (item) => item.quality === quality
+                        )
+                        return matched
+                          ? formatImagePrice(
+                              matched.priceUSD * ratio,
+                              showRechargePrice,
+                              props.priceRate,
+                              props.usdExchangeRate
+                            )
+                          : '-'
+                      },
+                    })),
+                  ]}
+                />
+              </div>
+            )
+          })}
+        </div>
+      </section>
+    )
+  }
 
   if (isDynamicPricingModel(props.model)) {
     const dynamicTiers = getDynamicPricingTiers(props.model)

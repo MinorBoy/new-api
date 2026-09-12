@@ -94,10 +94,7 @@ function mikotoLineRef(entity: ExtractedEntity): string {
   return upstreamModel === 'sora-v3-pro' ? 'mikoto-sora' : 'mikoto-sd'
 }
 
-function lineRefFor(
-  channelCode: string,
-  entity: ExtractedEntity
-): string {
+function lineRefFor(channelCode: string, entity: ExtractedEntity): string {
   if (channelCode === 'CH-SECURE') {
     const lineRef = secureLineRef(entity)
     if (!lineRef) {
@@ -171,10 +168,7 @@ function scenarioCostContract(entity: ExtractedEntity): string {
           : []
   const headers = [...SCENARIO_COST_COMMON_HEADERS, ...priceHeaders]
   return JSON.stringify(
-    headers.map((header) => [
-      header,
-      scenarioCostContractValue(entity, header),
-    ])
+    headers.map((header) => [header, scenarioCostContractValue(entity, header)])
   )
 }
 

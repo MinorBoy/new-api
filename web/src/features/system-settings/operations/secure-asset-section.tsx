@@ -1,11 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-*/
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Images } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -71,17 +63,32 @@ export function SecureAssetSection() {
   const channels = settingsQuery.data.data.channels
   return (
     <SettingsSection title={t('Secure role assets')}>
-      <SettingsForm onSubmit={(event) => { event.preventDefault(); saveMutation.mutate(channelID) }}>
+      <SettingsForm
+        onSubmit={(event) => {
+          event.preventDefault()
+          saveMutation.mutate(channelID)
+        }}
+      >
         <SettingsPageFormActions
           onSave={() => saveMutation.mutate(channelID)}
           isSaving={saveMutation.isPending}
-          isSaveDisabled={channelID <= 0 || !settingsQuery.data.data.channels.some((channel) => channel.id === channelID)}
+          isSaveDisabled={
+            channelID <= 0 ||
+            !settingsQuery.data.data.channels.some(
+              (channel) => channel.id === channelID
+            )
+          }
           saveLabel='Save Secure asset settings'
         />
         <div className='flex items-start gap-3 rounded-lg border p-4'>
-          <Images className='text-muted-foreground mt-0.5 size-4' aria-hidden='true' />
+          <Images
+            className='text-muted-foreground mt-0.5 size-4'
+            aria-hidden='true'
+          />
           <div className='min-w-0 flex-1 space-y-2'>
-            <Label htmlFor='secure-asset-channel'>{t('Default Secure enterprise channel')}</Label>
+            <Label htmlFor='secure-asset-channel'>
+              {t('Default Secure enterprise channel')}
+            </Label>
             <select
               id='secure-asset-channel'
               aria-label={t('Secure asset channel')}
@@ -90,7 +97,9 @@ export function SecureAssetSection() {
               onChange={(event) => setChannelID(Number(event.target.value))}
               disabled={saveMutation.isPending}
             >
-              <option value=''>{t('Select a Secure enterprise channel')}</option>
+              <option value=''>
+                {t('Select a Secure enterprise channel')}
+              </option>
               {channels.map((channel) => (
                 <option key={channel.id} value={channel.id}>
                   {channel.name || `#${channel.id}`}
@@ -98,7 +107,9 @@ export function SecureAssetSection() {
               ))}
             </select>
             <p className='text-muted-foreground text-xs'>
-              {t('Role assets use the channel and API key selected when they are created.')}
+              {t(
+                'Role assets use the channel and API key selected when they are created.'
+              )}
             </p>
           </div>
         </div>

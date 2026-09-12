@@ -31,7 +31,11 @@ export function groupImagePrices(
   const grouped = new Map<string, ImagePriceGroup>()
   for (const item of prices ?? []) {
     const priceUSD = Number(item.price_usd)
-    if (!tierOrder.includes(item.tier) || !qualityOrder.includes(item.quality) || !Number.isFinite(priceUSD)) {
+    if (
+      !tierOrder.includes(item.tier) ||
+      !qualityOrder.includes(item.quality) ||
+      !Number.isFinite(priceUSD)
+    ) {
       continue
     }
     const group = grouped.get(item.tier) ?? { tier: item.tier, prices: [] }
@@ -43,7 +47,8 @@ export function groupImagePrices(
     .map((group) => ({
       ...group,
       prices: group.prices.sort(
-        (a, b) => qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality)
+        (a, b) =>
+          qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality)
       ),
     }))
 }

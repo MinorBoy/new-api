@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -72,8 +54,8 @@ import { MultiSelect } from '@/components/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Combobox } from '@/components/ui/combobox'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Form,
   FormControl,
@@ -1006,11 +988,7 @@ export function ChannelMutateDrawer({
       if (!model) return
       form.setValue(
         'image_profile',
-        writeImageCapabilityMatrix(
-          currentImageProfile,
-          model,
-          next
-        ),
+        writeImageCapabilityMatrix(currentImageProfile, model, next),
         { shouldDirty: true, shouldValidate: true }
       )
     },
@@ -1471,6 +1449,12 @@ export function ChannelMutateDrawer({
     }
 
     if (!OPENAI_IMAGES_CHANNEL_TYPES.has(currentType)) {
+      if (!isEmptyImageProfile(form.getValues('image_profile'))) {
+        form.setValue('image_profile', '', {
+          shouldDirty: true,
+          shouldValidate: true,
+        })
+      }
       setImageProfileAutoFilled(false)
     }
     if (isEditing) return // Don't auto-set creation defaults when editing
@@ -4673,88 +4657,119 @@ export function ChannelMutateDrawer({
                                               <th className='px-2 py-2'>
                                                 {t('Resolution tier')}
                                               </th>
-                                              {IMAGE_QUALITY_TIERS.map((quality) => (
-                                                <th key={quality} className='px-2 py-2'>
-                                                  {quality}
-                                                </th>
-                                              ))}
+                                              {IMAGE_QUALITY_TIERS.map(
+                                                (quality) => (
+                                                  <th
+                                                    key={quality}
+                                                    className='px-2 py-2'
+                                                  >
+                                                    {quality}
+                                                  </th>
+                                                )
+                                              )}
                                               <th className='px-2 py-2'>
                                                 {t('All qualities')}
                                               </th>
                                             </tr>
                                           </thead>
                                           <tbody>
-                                            {IMAGE_RESOLUTION_TIERS.map((tier) => {
-                                              const allSelected = IMAGE_QUALITY_TIERS.every(
-                                                (quality) =>
-                                                  imageCapabilityMatrix[
-                                                    `${tier}:${quality}`
-                                                  ]
-                                              )
-                                              return (
-                                                <tr
-                                                  key={tier}
-                                                  className='border-b last:border-0'
-                                                >
-                                                  <td className='px-2 py-2 font-mono'>
-                                                    {tier.toUpperCase()}
-                                                  </td>
-                                                  {IMAGE_QUALITY_TIERS.map((quality) => {
-                                                    const key = `${tier}:${quality}`
-                                                    return (
-                                                      <td key={key} className='px-2 py-2'>
-                                                        <label className='flex items-center gap-2'>
-                                                          <Checkbox
-                                                            checked={Boolean(
-                                                              imageCapabilityMatrix[key]
-                                                            )}
-                                                            onCheckedChange={(checked) =>
-                                                              setImageCapabilityMatrix(model, {
-                                                                ...imageCapabilityMatrix,
-                                                                [key]: checked === true,
-                                                              })
+                                            {IMAGE_RESOLUTION_TIERS.map(
+                                              (tier) => {
+                                                const allSelected =
+                                                  IMAGE_QUALITY_TIERS.every(
+                                                    (quality) =>
+                                                      imageCapabilityMatrix[
+                                                        `${tier}:${quality}`
+                                                      ]
+                                                  )
+                                                return (
+                                                  <tr
+                                                    key={tier}
+                                                    className='border-b last:border-0'
+                                                  >
+                                                    <td className='px-2 py-2 font-mono'>
+                                                      {tier.toUpperCase()}
+                                                    </td>
+                                                    {IMAGE_QUALITY_TIERS.map(
+                                                      (quality) => {
+                                                        const key = `${tier}:${quality}`
+                                                        return (
+                                                          <td
+                                                            key={key}
+                                                            className='px-2 py-2'
+                                                          >
+                                                            <label className='flex items-center gap-2'>
+                                                              <Checkbox
+                                                                checked={Boolean(
+                                                                  imageCapabilityMatrix[
+                                                                    key
+                                                                  ]
+                                                                )}
+                                                                onCheckedChange={(
+                                                                  checked
+                                                                ) =>
+                                                                  setImageCapabilityMatrix(
+                                                                    model,
+                                                                    {
+                                                                      ...imageCapabilityMatrix,
+                                                                      [key]:
+                                                                        checked ===
+                                                                        true,
+                                                                    }
+                                                                  )
+                                                                }
+                                                                disabled={
+                                                                  sensitiveLocked ||
+                                                                  isSubmitting
+                                                                }
+                                                              />
+                                                              <span className='capitalize'>
+                                                                {quality}
+                                                              </span>
+                                                            </label>
+                                                          </td>
+                                                        )
+                                                      }
+                                                    )}
+                                                    <td className='px-2 py-2'>
+                                                      <Button
+                                                        type='button'
+                                                        size='sm'
+                                                        variant={
+                                                          allSelected
+                                                            ? 'secondary'
+                                                            : 'outline'
+                                                        }
+                                                        onClick={() =>
+                                                          setImageCapabilityMatrix(
+                                                            model,
+                                                            {
+                                                              ...imageCapabilityMatrix,
+                                                              ...Object.fromEntries(
+                                                                IMAGE_QUALITY_TIERS.map(
+                                                                  (quality) => [
+                                                                    `${tier}:${quality}`,
+                                                                    !allSelected,
+                                                                  ]
+                                                                )
+                                                              ),
                                                             }
-                                                            disabled={
-                                                              sensitiveLocked || isSubmitting
-                                                            }
-                                                          />
-                                                          <span className='capitalize'>
-                                                            {quality}
-                                                          </span>
-                                                        </label>
-                                                      </td>
-                                                    )
-                                                  })}
-                                                  <td className='px-2 py-2'>
-                                                    <Button
-                                                      type='button'
-                                                      size='sm'
-                                                      variant={
-                                                        allSelected ? 'secondary' : 'outline'
-                                                      }
-                                                      onClick={() =>
-                                                        setImageCapabilityMatrix(model, {
-                                                          ...imageCapabilityMatrix,
-                                                          ...Object.fromEntries(
-                                                            IMAGE_QUALITY_TIERS.map((quality) => [
-                                                              `${tier}:${quality}`,
-                                                              !allSelected,
-                                                            ])
-                                                          ),
-                                                        })
-                                                      }
-                                                      disabled={
-                                                        sensitiveLocked || isSubmitting
-                                                      }
-                                                    >
-                                                      {allSelected
-                                                        ? t('Clear')
-                                                        : t('Select all')}
-                                                    </Button>
-                                                  </td>
-                                                </tr>
-                                              )
-                                            })}
+                                                          )
+                                                        }
+                                                        disabled={
+                                                          sensitiveLocked ||
+                                                          isSubmitting
+                                                        }
+                                                      >
+                                                        {allSelected
+                                                          ? t('Clear')
+                                                          : t('Select all')}
+                                                      </Button>
+                                                    </td>
+                                                  </tr>
+                                                )
+                                              }
+                                            )}
                                           </tbody>
                                         </table>
                                       </div>

@@ -24,6 +24,8 @@ services:
       ERROR_LOG_ENABLED: "true"
       BATCH_UPDATE_ENABLED: "true"
       NODE_NAME: new-api-local-node
+      # 本地栈所有宿主机流量在容器里都是网关 IP，共享 CriticalRateLimit 桶；调高避免仪表盘请求耗尽登录额度
+      CRITICAL_RATE_LIMIT: "100"
       SESSION_SECRET: "${SESSION_SECRET:-}"
       VIDEO_METADATA_SERVICE_URL: http://video-metadata:8090
       VIDEO_METADATA_SERVICE_TOKEN: "${VIDEO_METADATA_SERVICE_TOKEN:-local-video-metadata-secret}"

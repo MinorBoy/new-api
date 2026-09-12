@@ -1,11 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-*/
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -210,10 +202,7 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           code = String(caught.code)
         }
       }
-      if (
-        code === 'STALE_BASE_VERSION' ||
-        code === 'PUBLISH_LINE_UNBOUND'
-      ) {
+      if (code === 'STALE_BASE_VERSION' || code === 'PUBLISH_LINE_UNBOUND') {
         setForcedStep('routing_diff')
       }
       if (code === 'ACTIVATION_CACHE_REFRESH_PENDING') {
@@ -419,9 +408,7 @@ export function ConfigImportWizard(props: ConfigImportWizardProps) {
           batch={batch}
           canPublish={state.canPublish}
           isPublishing={isBusy}
-          onBack={
-            state.canGoBack ? () => setReviewStep('pricing') : undefined
-          }
+          onBack={state.canGoBack ? () => setReviewStep('pricing') : undefined}
           onPublish={async () => {
             const mutation =
               props.onPublish ??

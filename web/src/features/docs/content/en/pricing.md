@@ -18,11 +18,11 @@ Some upstreams support **prompt caching** (e.g. OpenAI GPT-5 family cache reads,
 
 The input tokens of a request are split into three parts, each billed at a different ratio:
 
-| Token type | Description | Billing ratio |
-|---|---|---|
-| **Cache read** (cached_tokens) | Input tokens served from the upstream cache, e.g. repeated system prompts or long document prefixes | **Cache-read ratio** (cache_ratio), typically far below the input ratio (e.g. 0.5) |
-| **Cache creation** | Tokens additionally billed when first writing the cache (supported by some upstreams, e.g. Anthropic) | **Cache-creation ratio** (create_cache_ratio), typically slightly above the input ratio (e.g. 1.25) |
-| **Uncached input** | Regular input tokens that did not hit the cache | Normal **input ratio** |
+| Token type                     | Description                                                                                           | Billing ratio                                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Cache read** (cached_tokens) | Input tokens served from the upstream cache, e.g. repeated system prompts or long document prefixes   | **Cache-read ratio** (cache_ratio), typically far below the input ratio (e.g. 0.5)                  |
+| **Cache creation**             | Tokens additionally billed when first writing the cache (supported by some upstreams, e.g. Anthropic) | **Cache-creation ratio** (create_cache_ratio), typically slightly above the input ratio (e.g. 1.25) |
+| **Uncached input**             | Regular input tokens that did not hit the cache                                                       | Normal **input ratio**                                                                              |
 
 > Ratio meaning: at a 0.5 cache-read ratio, cached tokens are billed at 50% of the normal input price.
 

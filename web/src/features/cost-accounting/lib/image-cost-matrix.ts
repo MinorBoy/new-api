@@ -30,7 +30,11 @@ export function buildImageCostMatrix(
   for (const rule of rules) {
     if (rule.cost_mode !== 'per_image') continue
     const current = byKey.get(rule.cost_variant_key)
-    if (!current || (rule.status === 'draft' && current.status !== 'draft') || rule.version > current.version) {
+    if (
+      !current ||
+      (rule.status === 'draft' && current.status !== 'draft') ||
+      rule.version > current.version
+    ) {
       byKey.set(rule.cost_variant_key, rule)
     }
   }
@@ -43,7 +47,9 @@ export function buildImageCostMatrix(
         tier,
         quality,
         unitPrice:
-          rule?.config.unit_price ?? rule?.config.normalized_usd_prices.unit_price ?? '',
+          rule?.config.unit_price ??
+          rule?.config.normalized_usd_prices.unit_price ??
+          '',
         rule,
       }
     })

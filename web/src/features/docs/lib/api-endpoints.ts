@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import type { ApiEndpoint } from '../types'
 
 /**
@@ -35,23 +17,86 @@ export const apiEndpoints: ApiEndpoint[] = [
     protocol: 'gateway',
     category: 'video',
     title: { en: 'Role Asset Create', zh: '角色素材创建' },
-    summary: { en: 'Create a public image role asset bound to Secure enterprise.', zh: '创建绑定 Secure 企业渠道的公网图片角色素材。' },
+    summary: {
+      en: 'Create a public image role asset bound to Secure enterprise.',
+      zh: '创建绑定 Secure 企业渠道的公网图片角色素材。',
+    },
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'type', type: 'string', required: 'yes', description: { en: 'Must be image.', zh: '必须为 image。' } },
-      { name: 'url', type: 'string', required: 'yes', description: { en: 'Public HTTP(S) image URL.', zh: '公网 HTTP(S) 图片 URL。' } },
-      { name: 'Idempotency-Key (header)', type: 'string', required: 'no', description: { en: 'Recommended unique retry key.', zh: '建议提供用于重试的唯一键。' } },
+      {
+        name: 'type',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Must be image.', zh: '必须为 image。' },
+      },
+      {
+        name: 'url',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Public HTTP(S) image URL.',
+          zh: '公网 HTTP(S) 图片 URL。',
+        },
+      },
+      {
+        name: 'Idempotency-Key (header)',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Recommended unique retry key.',
+          zh: '建议提供用于重试的唯一键。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Project asset ID, asset-*.', zh: '项目素材 ID，格式为 asset-*。' } },
-      { name: 'status', type: 'string', required: 'yes', description: { en: 'processing, active, failed, or unknown.', zh: 'processing、active、failed 或 unknown。' } },
-      { name: 'reference', type: 'string', required: 'conditional', description: { en: 'asset:// reference when active.', zh: '素材 active 时返回 asset:// 引用。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Project asset ID, asset-*.',
+          zh: '项目素材 ID，格式为 asset-*。',
+        },
+      },
+      {
+        name: 'status',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'processing, active, failed, or unknown.',
+          zh: 'processing、active、failed 或 unknown。',
+        },
+      },
+      {
+        name: 'reference',
+        type: 'string',
+        required: 'conditional',
+        description: {
+          en: 'asset:// reference when active.',
+          zh: '素材 active 时返回 asset:// 引用。',
+        },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid URL or type.', zh: 'URL 或类型无效。' } },
-      { status: 503, description: { en: 'Secure asset channel unavailable.', zh: 'Secure 素材渠道不可用。' } },
-      { status: 502, description: { en: 'Secure upstream request failed.', zh: 'Secure 上游请求失败。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid URL or type.', zh: 'URL 或类型无效。' },
+      },
+      {
+        status: 503,
+        description: {
+          en: 'Secure asset channel unavailable.',
+          zh: 'Secure 素材渠道不可用。',
+        },
+      },
+      {
+        status: 502,
+        description: {
+          en: 'Secure upstream request failed.',
+          zh: 'Secure 上游请求失败。',
+        },
+      },
     ],
     codeSamples: [],
   },
@@ -62,12 +107,37 @@ export const apiEndpoints: ApiEndpoint[] = [
     protocol: 'gateway',
     category: 'video',
     title: { en: 'Role Asset Query', zh: '角色素材查询' },
-    summary: { en: 'Query a project role asset and refresh its Secure status.', zh: '查询项目角色素材并刷新 Secure 状态。' },
+    summary: {
+      en: 'Query a project role asset and refresh its Secure status.',
+      zh: '查询项目角色素材并刷新 Secure 状态。',
+    },
     auth: 'Bearer Token',
     contentType: 'application/json',
-    requestParams: [{ name: 'asset_id (path)', type: 'string', required: 'yes', description: { en: 'Project asset ID.', zh: '项目素材 ID。' } }],
-    responseParams: [{ name: 'status', type: 'string', required: 'yes', description: { en: 'Current asset status.', zh: '当前素材状态。' } }],
-    errorCodes: [{ status: 404, description: { en: 'Asset not found for this user.', zh: '素材不存在或不属于当前用户。' } }],
+    requestParams: [
+      {
+        name: 'asset_id (path)',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Project asset ID.', zh: '项目素材 ID。' },
+      },
+    ],
+    responseParams: [
+      {
+        name: 'status',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Current asset status.', zh: '当前素材状态。' },
+      },
+    ],
+    errorCodes: [
+      {
+        status: 404,
+        description: {
+          en: 'Asset not found for this user.',
+          zh: '素材不存在或不属于当前用户。',
+        },
+      },
+    ],
     codeSamples: [],
   },
   {
@@ -84,32 +154,181 @@ export const apiEndpoints: ApiEndpoint[] = [
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Model name to call.', zh: '要调用的模型名称。' } },
-      { name: 'messages', type: 'object[]', required: 'yes', description: { en: 'Message list; supports text and multimodal content per model.', zh: '消息列表；不同模型支持文本、图片、音频等多种模态。' } },
-      { name: 'messages[].role', type: 'string', required: 'yes', description: { en: 'system / user / assistant / tool.', zh: 'system / user / assistant / tool。' } },
-      { name: 'messages[].content', type: 'string | object[]', required: 'yes', description: { en: 'Message content. Plain text or an array of content blocks for multimodal input.', zh: '消息内容。纯文本或多模态内容块数组。' } },
-      { name: 'stream', type: 'boolean | null', required: 'no', description: { en: 'Enable SSE streaming. Ends with data: [DONE].', zh: '是否启用 SSE 流式返回，以 data: [DONE] 结束。' } },
-      { name: 'stream_options.include_usage', type: 'boolean | null', required: 'no', description: { en: 'Return token usage stats in the streaming response.', zh: '流式响应中是否返回 token 用量统计。' } },
-      { name: 'temperature', type: 'number | null', required: 'no', description: { en: 'Sampling temperature.', zh: '采样温度。' } },
-      { name: 'max_tokens', type: 'integer | null', required: 'no', description: { en: 'Maximum output tokens.', zh: '最大输出 token 数。' } },
-      { name: 'tools', type: 'object[] | null', required: 'no', description: { en: 'Function-calling tool definitions.', zh: '函数调用工具定义。' } },
-      { name: 'response_format', type: 'object | null', required: 'no', description: { en: 'Output format control, e.g. { "type": "json_object" }.', zh: '输出格式控制，例如 { "type": "json_object" }。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Model name to call.', zh: '要调用的模型名称。' },
+      },
+      {
+        name: 'messages',
+        type: 'object[]',
+        required: 'yes',
+        description: {
+          en: 'Message list; supports text and multimodal content per model.',
+          zh: '消息列表；不同模型支持文本、图片、音频等多种模态。',
+        },
+      },
+      {
+        name: 'messages[].role',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'system / user / assistant / tool.',
+          zh: 'system / user / assistant / tool。',
+        },
+      },
+      {
+        name: 'messages[].content',
+        type: 'string | object[]',
+        required: 'yes',
+        description: {
+          en: 'Message content. Plain text or an array of content blocks for multimodal input.',
+          zh: '消息内容。纯文本或多模态内容块数组。',
+        },
+      },
+      {
+        name: 'stream',
+        type: 'boolean | null',
+        required: 'no',
+        description: {
+          en: 'Enable SSE streaming. Ends with data: [DONE].',
+          zh: '是否启用 SSE 流式返回，以 data: [DONE] 结束。',
+        },
+      },
+      {
+        name: 'stream_options.include_usage',
+        type: 'boolean | null',
+        required: 'no',
+        description: {
+          en: 'Return token usage stats in the streaming response.',
+          zh: '流式响应中是否返回 token 用量统计。',
+        },
+      },
+      {
+        name: 'temperature',
+        type: 'number | null',
+        required: 'no',
+        description: { en: 'Sampling temperature.', zh: '采样温度。' },
+      },
+      {
+        name: 'max_tokens',
+        type: 'integer | null',
+        required: 'no',
+        description: {
+          en: 'Maximum output tokens.',
+          zh: '最大输出 token 数。',
+        },
+      },
+      {
+        name: 'tools',
+        type: 'object[] | null',
+        required: 'no',
+        description: {
+          en: 'Function-calling tool definitions.',
+          zh: '函数调用工具定义。',
+        },
+      },
+      {
+        name: 'response_format',
+        type: 'object | null',
+        required: 'no',
+        description: {
+          en: 'Output format control, e.g. { "type": "json_object" }.',
+          zh: '输出格式控制，例如 { "type": "json_object" }。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Response ID.', zh: '响应 ID。' } },
-      { name: 'object', type: 'string', required: 'yes', description: { en: 'Usually chat.completion.', zh: '通常为 chat.completion。' } },
-      { name: 'model', type: 'string', required: 'no', description: { en: 'Model name used for the response.', zh: '实际响应的模型名称。' } },
-      { name: 'choices', type: 'object[]', required: 'yes', description: { en: 'Model output candidates.', zh: '模型输出候选。' } },
-      { name: 'choices[].message.content', type: 'string | null', required: 'yes', description: { en: 'Assistant reply text (non-streaming).', zh: '助手回复文本（非流式）。' } },
-      { name: 'choices[].finish_reason', type: 'string | null', required: 'no', description: { en: 'Stop reason: stop, length, tool_calls, etc.', zh: '停止原因：stop、length、tool_calls 等。' } },
-      { name: 'usage.prompt_tokens', type: 'integer', required: 'no', description: { en: 'Input token count.', zh: '输入 token 数。' } },
-      { name: 'usage.completion_tokens', type: 'integer', required: 'no', description: { en: 'Output token count.', zh: '输出 token 数。' } },
-      { name: 'usage.total_tokens', type: 'integer', required: 'no', description: { en: 'Total token count.', zh: '总 token 数。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Response ID.', zh: '响应 ID。' },
+      },
+      {
+        name: 'object',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Usually chat.completion.',
+          zh: '通常为 chat.completion。',
+        },
+      },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Model name used for the response.',
+          zh: '实际响应的模型名称。',
+        },
+      },
+      {
+        name: 'choices',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Model output candidates.', zh: '模型输出候选。' },
+      },
+      {
+        name: 'choices[].message.content',
+        type: 'string | null',
+        required: 'yes',
+        description: {
+          en: 'Assistant reply text (non-streaming).',
+          zh: '助手回复文本（非流式）。',
+        },
+      },
+      {
+        name: 'choices[].finish_reason',
+        type: 'string | null',
+        required: 'no',
+        description: {
+          en: 'Stop reason: stop, length, tool_calls, etc.',
+          zh: '停止原因：stop、length、tool_calls 等。',
+        },
+      },
+      {
+        name: 'usage.prompt_tokens',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Input token count.', zh: '输入 token 数。' },
+      },
+      {
+        name: 'usage.completion_tokens',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Output token count.', zh: '输出 token 数。' },
+      },
+      {
+        name: 'usage.total_tokens',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Total token count.', zh: '总 token 数。' },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Bad request — malformed parameters or unsupported field.', zh: '参数格式错误或模型不支持该字段。' } },
-      { status: 401, description: { en: 'Unauthorized — API key invalid or missing.', zh: 'API Key 无效或未提供。' } },
-      { status: 429, description: { en: 'Rate limited or insufficient quota.', zh: '触发限流或额度不足。' } },
+      {
+        status: 400,
+        description: {
+          en: 'Bad request — malformed parameters or unsupported field.',
+          zh: '参数格式错误或模型不支持该字段。',
+        },
+      },
+      {
+        status: 401,
+        description: {
+          en: 'Unauthorized — API key invalid or missing.',
+          zh: 'API Key 无效或未提供。',
+        },
+      },
+      {
+        status: 429,
+        description: {
+          en: 'Rate limited or insufficient quota.',
+          zh: '触发限流或额度不足。',
+        },
+      },
     ],
     codeSamples: [
       {
@@ -174,26 +393,117 @@ console.log(resp.choices[0].message.content);`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Claude model name.', zh: 'Claude 模型名称。' } },
-      { name: 'messages', type: 'object[]', required: 'yes', description: { en: 'Message list with role and content.', zh: '消息列表，含 role 与 content。' } },
-      { name: 'max_tokens', type: 'integer', required: 'yes', description: { en: 'Maximum output tokens.', zh: '最大输出 token 数。' } },
-      { name: 'system', type: 'string | object[]', required: 'no', description: { en: 'System prompt.', zh: '系统提示词。' } },
-      { name: 'stream', type: 'boolean', required: 'no', description: { en: 'Enable SSE streaming.', zh: '是否启用流式返回。' } },
-      { name: 'temperature', type: 'number', required: 'no', description: { en: 'Sampling temperature (0–1).', zh: '采样温度（0–1）。' } },
-      { name: 'tools', type: 'object[]', required: 'no', description: { en: 'Tool definitions for function calling.', zh: '函数调用工具定义。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Claude model name.', zh: 'Claude 模型名称。' },
+      },
+      {
+        name: 'messages',
+        type: 'object[]',
+        required: 'yes',
+        description: {
+          en: 'Message list with role and content.',
+          zh: '消息列表，含 role 与 content。',
+        },
+      },
+      {
+        name: 'max_tokens',
+        type: 'integer',
+        required: 'yes',
+        description: {
+          en: 'Maximum output tokens.',
+          zh: '最大输出 token 数。',
+        },
+      },
+      {
+        name: 'system',
+        type: 'string | object[]',
+        required: 'no',
+        description: { en: 'System prompt.', zh: '系统提示词。' },
+      },
+      {
+        name: 'stream',
+        type: 'boolean',
+        required: 'no',
+        description: { en: 'Enable SSE streaming.', zh: '是否启用流式返回。' },
+      },
+      {
+        name: 'temperature',
+        type: 'number',
+        required: 'no',
+        description: {
+          en: 'Sampling temperature (0–1).',
+          zh: '采样温度（0–1）。',
+        },
+      },
+      {
+        name: 'tools',
+        type: 'object[]',
+        required: 'no',
+        description: {
+          en: 'Tool definitions for function calling.',
+          zh: '函数调用工具定义。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Message ID.', zh: '消息 ID。' } },
-      { name: 'type', type: 'string', required: 'yes', description: { en: 'Usually message.', zh: '通常为 message。' } },
-      { name: 'role', type: 'string', required: 'yes', description: { en: 'Always assistant.', zh: '始终为 assistant。' } },
-      { name: 'content', type: 'object[]', required: 'yes', description: { en: 'Content blocks (text/tool_use).', zh: '内容块（text/tool_use）。' } },
-      { name: 'stop_reason', type: 'string | null', required: 'no', description: { en: 'Why generation stopped.', zh: '停止生成的原因。' } },
-      { name: 'usage.input_tokens', type: 'integer', required: 'no', description: { en: 'Input token count.', zh: '输入 token 数。' } },
-      { name: 'usage.output_tokens', type: 'integer', required: 'no', description: { en: 'Output token count.', zh: '输出 token 数。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Message ID.', zh: '消息 ID。' },
+      },
+      {
+        name: 'type',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Usually message.', zh: '通常为 message。' },
+      },
+      {
+        name: 'role',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Always assistant.', zh: '始终为 assistant。' },
+      },
+      {
+        name: 'content',
+        type: 'object[]',
+        required: 'yes',
+        description: {
+          en: 'Content blocks (text/tool_use).',
+          zh: '内容块（text/tool_use）。',
+        },
+      },
+      {
+        name: 'stop_reason',
+        type: 'string | null',
+        required: 'no',
+        description: { en: 'Why generation stopped.', zh: '停止生成的原因。' },
+      },
+      {
+        name: 'usage.input_tokens',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Input token count.', zh: '输入 token 数。' },
+      },
+      {
+        name: 'usage.output_tokens',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Output token count.', zh: '输出 token 数。' },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid request body.', zh: '请求体无效。' } },
-      { status: 401, description: { en: 'Invalid API key.', zh: 'API Key 无效。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid request body.', zh: '请求体无效。' },
+      },
+      {
+        status: 401,
+        description: { en: 'Invalid API key.', zh: 'API Key 无效。' },
+      },
     ],
     codeSamples: [
       {
@@ -244,19 +554,68 @@ print(message.content[0].text)`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Model name.', zh: '模型名称。' } },
-      { name: 'input', type: 'string | object[]', required: 'yes', description: { en: 'Input text or content blocks.', zh: '输入文本或内容块。' } },
-      { name: 'instructions', type: 'string', required: 'no', description: { en: 'System instructions.', zh: '系统指令。' } },
-      { name: 'stream', type: 'boolean', required: 'no', description: { en: 'Enable streaming.', zh: '是否流式返回。' } },
-      { name: 'previous_response_id', type: 'string', required: 'no', description: { en: 'Chain to a previous response.', zh: '关联上一次响应以实现多轮。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Model name.', zh: '模型名称。' },
+      },
+      {
+        name: 'input',
+        type: 'string | object[]',
+        required: 'yes',
+        description: {
+          en: 'Input text or content blocks.',
+          zh: '输入文本或内容块。',
+        },
+      },
+      {
+        name: 'instructions',
+        type: 'string',
+        required: 'no',
+        description: { en: 'System instructions.', zh: '系统指令。' },
+      },
+      {
+        name: 'stream',
+        type: 'boolean',
+        required: 'no',
+        description: { en: 'Enable streaming.', zh: '是否流式返回。' },
+      },
+      {
+        name: 'previous_response_id',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Chain to a previous response.',
+          zh: '关联上一次响应以实现多轮。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Response ID.', zh: '响应 ID。' } },
-      { name: 'output', type: 'object[]', required: 'yes', description: { en: 'Output content items.', zh: '输出内容项。' } },
-      { name: 'usage', type: 'object', required: 'no', description: { en: 'Token usage stats.', zh: 'token 用量统计。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Response ID.', zh: '响应 ID。' },
+      },
+      {
+        name: 'output',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Output content items.', zh: '输出内容项。' },
+      },
+      {
+        name: 'usage',
+        type: 'object',
+        required: 'no',
+        description: { en: 'Token usage stats.', zh: 'token 用量统计。' },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid request.', zh: '请求无效。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid request.', zh: '请求无效。' },
+      },
       { status: 401, description: { en: 'Unauthorized.', zh: '未授权。' } },
     ],
     codeSamples: [
@@ -288,16 +647,62 @@ print(message.content[0].text)`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Embedding model name.', zh: '向量模型名称。' } },
-      { name: 'input', type: 'string | string[]', required: 'yes', description: { en: 'Text to embed.', zh: '要向量化的文本。' } },
-      { name: 'encoding_format', type: 'string', required: 'no', description: { en: 'float (default) or base64.', zh: 'float（默认）或 base64。' } },
-      { name: 'dimensions', type: 'integer', required: 'no', description: { en: 'Output dimensions (supported models).', zh: '输出维度（部分模型支持）。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Embedding model name.', zh: '向量模型名称。' },
+      },
+      {
+        name: 'input',
+        type: 'string | string[]',
+        required: 'yes',
+        description: { en: 'Text to embed.', zh: '要向量化的文本。' },
+      },
+      {
+        name: 'encoding_format',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'float (default) or base64.',
+          zh: 'float（默认）或 base64。',
+        },
+      },
+      {
+        name: 'dimensions',
+        type: 'integer',
+        required: 'no',
+        description: {
+          en: 'Output dimensions (supported models).',
+          zh: '输出维度（部分模型支持）。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'object', type: 'string', required: 'yes', description: { en: 'Usually list.', zh: '通常为 list。' } },
-      { name: 'data', type: 'object[]', required: 'yes', description: { en: 'Embedding vectors.', zh: '向量数据。' } },
-      { name: 'data[].embedding', type: 'number[]', required: 'yes', description: { en: 'The embedding vector.', zh: '向量数组。' } },
-      { name: 'usage.prompt_tokens', type: 'integer', required: 'no', description: { en: 'Input token count.', zh: '输入 token 数。' } },
+      {
+        name: 'object',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Usually list.', zh: '通常为 list。' },
+      },
+      {
+        name: 'data',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Embedding vectors.', zh: '向量数据。' },
+      },
+      {
+        name: 'data[].embedding',
+        type: 'number[]',
+        required: 'yes',
+        description: { en: 'The embedding vector.', zh: '向量数组。' },
+      },
+      {
+        name: 'usage.prompt_tokens',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Input token count.', zh: '输入 token 数。' },
+      },
     ],
     errorCodes: [
       { status: 400, description: { en: 'Invalid input.', zh: '输入无效。' } },
@@ -345,20 +750,80 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Image model name.', zh: '图像模型名称。' } },
-      { name: 'prompt', type: 'string', required: 'yes', description: { en: 'Text description of the image.', zh: '图像的文本描述。' } },
-      { name: 'n', type: 'integer', required: 'no', description: { en: 'Number of images (1–10).', zh: '生成数量（1–10）。' } },
-      { name: 'size', type: 'string', required: 'no', description: { en: 'e.g. 1024x1024.', zh: '如 1024x1024。' } },
-      { name: 'response_format', type: 'string', required: 'no', description: { en: 'url or b64_json.', zh: 'url 或 b64_json。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Image model name.', zh: '图像模型名称。' },
+      },
+      {
+        name: 'prompt',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Text description of the image.',
+          zh: '图像的文本描述。',
+        },
+      },
+      {
+        name: 'n',
+        type: 'integer',
+        required: 'no',
+        description: {
+          en: 'Number of images (1–10).',
+          zh: '生成数量（1–10）。',
+        },
+      },
+      {
+        name: 'size',
+        type: 'string',
+        required: 'no',
+        description: { en: 'e.g. 1024x1024.', zh: '如 1024x1024。' },
+      },
+      {
+        name: 'response_format',
+        type: 'string',
+        required: 'no',
+        description: { en: 'url or b64_json.', zh: 'url 或 b64_json。' },
+      },
     ],
     responseParams: [
-      { name: 'created', type: 'integer', required: 'no', description: { en: 'Unix timestamp.', zh: 'Unix 时间戳。' } },
-      { name: 'data', type: 'object[]', required: 'yes', description: { en: 'Generated images.', zh: '生成的图像。' } },
-      { name: 'data[].url', type: 'string', required: 'conditional', description: { en: 'Image URL (when response_format=url).', zh: '图像 URL（response_format=url 时）。' } },
-      { name: 'data[].b64_json', type: 'string', required: 'conditional', description: { en: 'Base64 image (when response_format=b64_json).', zh: 'Base64 图像（response_format=b64_json 时）。' } },
+      {
+        name: 'created',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Unix timestamp.', zh: 'Unix 时间戳。' },
+      },
+      {
+        name: 'data',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Generated images.', zh: '生成的图像。' },
+      },
+      {
+        name: 'data[].url',
+        type: 'string',
+        required: 'conditional',
+        description: {
+          en: 'Image URL (when response_format=url).',
+          zh: '图像 URL（response_format=url 时）。',
+        },
+      },
+      {
+        name: 'data[].b64_json',
+        type: 'string',
+        required: 'conditional',
+        description: {
+          en: 'Base64 image (when response_format=b64_json).',
+          zh: 'Base64 图像（response_format=b64_json 时）。',
+        },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid parameters.', zh: '参数无效。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid parameters.', zh: '参数无效。' },
+      },
       { status: 401, description: { en: 'Unauthorized.', zh: '未授权。' } },
     ],
     codeSamples: [
@@ -392,17 +857,56 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'multipart/form-data',
     requestParams: [
-      { name: 'image', type: 'file', required: 'yes', description: { en: 'Original image to edit.', zh: '要编辑的原始图像。' } },
-      { name: 'prompt', type: 'string', required: 'yes', description: { en: 'Edit instruction.', zh: '编辑指令。' } },
-      { name: 'mask', type: 'file', required: 'no', description: { en: 'Mask marking editable regions.', zh: '标记可编辑区域的蒙版。' } },
-      { name: 'model', type: 'string', required: 'no', description: { en: 'Image model name.', zh: '图像模型名称。' } },
-      { name: 'n', type: 'integer', required: 'no', description: { en: 'Number of results.', zh: '结果数量。' } },
+      {
+        name: 'image',
+        type: 'file',
+        required: 'yes',
+        description: {
+          en: 'Original image to edit.',
+          zh: '要编辑的原始图像。',
+        },
+      },
+      {
+        name: 'prompt',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Edit instruction.', zh: '编辑指令。' },
+      },
+      {
+        name: 'mask',
+        type: 'file',
+        required: 'no',
+        description: {
+          en: 'Mask marking editable regions.',
+          zh: '标记可编辑区域的蒙版。',
+        },
+      },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'no',
+        description: { en: 'Image model name.', zh: '图像模型名称。' },
+      },
+      {
+        name: 'n',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Number of results.', zh: '结果数量。' },
+      },
     ],
     responseParams: [
-      { name: 'data', type: 'object[]', required: 'yes', description: { en: 'Edited images.', zh: '编辑后的图像。' } },
+      {
+        name: 'data',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Edited images.', zh: '编辑后的图像。' },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid image or prompt.', zh: '图像或指令无效。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid image or prompt.', zh: '图像或指令无效。' },
+      },
     ],
     codeSamples: [
       {
@@ -430,16 +934,53 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'multipart/form-data',
     requestParams: [
-      { name: 'file', type: 'file', required: 'yes', description: { en: 'Audio file to transcribe.', zh: '要转写的音频文件。' } },
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Transcription model.', zh: '转写模型。' } },
-      { name: 'language', type: 'string', required: 'no', description: { en: 'ISO-639-1 language code.', zh: 'ISO-639-1 语言代码。' } },
-      { name: 'response_format', type: 'string', required: 'no', description: { en: 'json, text, srt, vtt.', zh: 'json、text、srt、vtt。' } },
+      {
+        name: 'file',
+        type: 'file',
+        required: 'yes',
+        description: {
+          en: 'Audio file to transcribe.',
+          zh: '要转写的音频文件。',
+        },
+      },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Transcription model.', zh: '转写模型。' },
+      },
+      {
+        name: 'language',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'ISO-639-1 language code.',
+          zh: 'ISO-639-1 语言代码。',
+        },
+      },
+      {
+        name: 'response_format',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'json, text, srt, vtt.',
+          zh: 'json、text、srt、vtt。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'text', type: 'string', required: 'yes', description: { en: 'Transcribed text.', zh: '转写文本。' } },
+      {
+        name: 'text',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Transcribed text.', zh: '转写文本。' },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid audio file.', zh: '音频文件无效。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid audio file.', zh: '音频文件无效。' },
+      },
     ],
     codeSamples: [
       {
@@ -467,13 +1008,41 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'TTS model name.', zh: 'TTS 模型名称。' } },
-      { name: 'input', type: 'string', required: 'yes', description: { en: 'Text to synthesize.', zh: '要合成的文本。' } },
-      { name: 'voice', type: 'string', required: 'yes', description: { en: 'Voice name.', zh: '音色名称。' } },
-      { name: 'response_format', type: 'string', required: 'no', description: { en: 'mp3, opus, aac, flac.', zh: 'mp3、opus、aac、flac。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'TTS model name.', zh: 'TTS 模型名称。' },
+      },
+      {
+        name: 'input',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Text to synthesize.', zh: '要合成的文本。' },
+      },
+      {
+        name: 'voice',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Voice name.', zh: '音色名称。' },
+      },
+      {
+        name: 'response_format',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'mp3, opus, aac, flac.',
+          zh: 'mp3、opus、aac、flac。',
+        },
+      },
     ],
     responseParams: [
-      { name: '(binary)', type: 'audio stream', required: 'yes', description: { en: 'Audio binary data.', zh: '音频二进制数据。' } },
+      {
+        name: '(binary)',
+        type: 'audio stream',
+        required: 'yes',
+        description: { en: 'Audio binary data.', zh: '音频二进制数据。' },
+      },
     ],
     errorCodes: [
       { status: 400, description: { en: 'Invalid input.', zh: '输入无效。' } },
@@ -508,17 +1077,56 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Video model name.', zh: '视频模型名称。' } },
-      { name: 'prompt', type: 'string', required: 'yes', description: { en: 'Generation prompt.', zh: '生成提示词。' } },
-      { name: 'image', type: 'string', required: 'no', description: { en: 'Reference image URL (image-to-video).', zh: '参考图 URL（图生视频）。' } },
-      { name: 'duration', type: 'integer', required: 'no', description: { en: 'Video duration in seconds.', zh: '视频时长（秒）。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Video model name.', zh: '视频模型名称。' },
+      },
+      {
+        name: 'prompt',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Generation prompt.', zh: '生成提示词。' },
+      },
+      {
+        name: 'image',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Reference image URL (image-to-video).',
+          zh: '参考图 URL（图生视频）。',
+        },
+      },
+      {
+        name: 'duration',
+        type: 'integer',
+        required: 'no',
+        description: {
+          en: 'Video duration in seconds.',
+          zh: '视频时长（秒）。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Task ID for polling.', zh: '任务 ID，用于轮询。' } },
-      { name: 'status', type: 'string', required: 'yes', description: { en: 'Task status.', zh: '任务状态。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Task ID for polling.', zh: '任务 ID，用于轮询。' },
+      },
+      {
+        name: 'status',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Task status.', zh: '任务状态。' },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'Invalid parameters.', zh: '参数无效。' } },
+      {
+        status: 400,
+        description: { en: 'Invalid parameters.', zh: '参数无效。' },
+      },
       { status: 429, description: { en: 'Rate limited.', zh: '触发限流。' } },
     ],
     codeSamples: [
@@ -550,14 +1158,47 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Rerank model name.', zh: '重排模型名称。' } },
-      { name: 'query', type: 'string', required: 'yes', description: { en: 'Search query.', zh: '搜索查询。' } },
-      { name: 'documents', type: 'string[]', required: 'yes', description: { en: 'Documents to rerank.', zh: '待重排的文档。' } },
-      { name: 'top_n', type: 'integer', required: 'no', description: { en: 'Number of top results.', zh: '返回前 N 条。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Rerank model name.', zh: '重排模型名称。' },
+      },
+      {
+        name: 'query',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Search query.', zh: '搜索查询。' },
+      },
+      {
+        name: 'documents',
+        type: 'string[]',
+        required: 'yes',
+        description: { en: 'Documents to rerank.', zh: '待重排的文档。' },
+      },
+      {
+        name: 'top_n',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Number of top results.', zh: '返回前 N 条。' },
+      },
     ],
     responseParams: [
-      { name: 'results', type: 'object[]', required: 'yes', description: { en: 'Reranked results with scores.', zh: '重排序结果及分数。' } },
-      { name: 'results[].relevance_score', type: 'number', required: 'yes', description: { en: 'Relevance score.', zh: '相关性分数。' } },
+      {
+        name: 'results',
+        type: 'object[]',
+        required: 'yes',
+        description: {
+          en: 'Reranked results with scores.',
+          zh: '重排序结果及分数。',
+        },
+      },
+      {
+        name: 'results[].relevance_score',
+        type: 'number',
+        required: 'yes',
+        description: { en: 'Relevance score.', zh: '相关性分数。' },
+      },
     ],
     errorCodes: [
       { status: 400, description: { en: 'Invalid input.', zh: '输入无效。' } },
@@ -592,12 +1233,32 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'input', type: 'string | string[]', required: 'yes', description: { en: 'Text to moderate.', zh: '要审核的文本。' } },
-      { name: 'model', type: 'string', required: 'no', description: { en: 'Moderation model.', zh: '审核模型。' } },
+      {
+        name: 'input',
+        type: 'string | string[]',
+        required: 'yes',
+        description: { en: 'Text to moderate.', zh: '要审核的文本。' },
+      },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'no',
+        description: { en: 'Moderation model.', zh: '审核模型。' },
+      },
     ],
     responseParams: [
-      { name: 'results', type: 'object[]', required: 'yes', description: { en: 'Moderation results.', zh: '审核结果。' } },
-      { name: 'results[].flagged', type: 'boolean', required: 'yes', description: { en: 'Whether flagged.', zh: '是否被标记。' } },
+      {
+        name: 'results',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Moderation results.', zh: '审核结果。' },
+      },
+      {
+        name: 'results[].flagged',
+        type: 'boolean',
+        required: 'yes',
+        description: { en: 'Whether flagged.', zh: '是否被标记。' },
+      },
     ],
     errorCodes: [
       { status: 400, description: { en: 'Invalid input.', zh: '输入无效。' } },
@@ -629,10 +1290,30 @@ print(resp.data[0].embedding[:8])`,
     contentType: 'application/json',
     requestParams: [],
     responseParams: [
-      { name: 'object', type: 'string', required: 'yes', description: { en: 'Usually list.', zh: '通常为 list。' } },
-      { name: 'data', type: 'object[]', required: 'yes', description: { en: 'Model list.', zh: '模型列表。' } },
-      { name: 'data[].id', type: 'string', required: 'yes', description: { en: 'Model name.', zh: '模型名称。' } },
-      { name: 'data[].owned_by', type: 'string', required: 'no', description: { en: 'Owner.', zh: '所有者。' } },
+      {
+        name: 'object',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Usually list.', zh: '通常为 list。' },
+      },
+      {
+        name: 'data',
+        type: 'object[]',
+        required: 'yes',
+        description: { en: 'Model list.', zh: '模型列表。' },
+      },
+      {
+        name: 'data[].id',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Model name.', zh: '模型名称。' },
+      },
+      {
+        name: 'data[].owned_by',
+        type: 'string',
+        required: 'no',
+        description: { en: 'Owner.', zh: '所有者。' },
+      },
     ],
     errorCodes: [
       { status: 401, description: { en: 'Unauthorized.', zh: '未授权。' } },
@@ -661,29 +1342,157 @@ print(resp.data[0].embedding[:8])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'model', type: 'string', required: 'yes', description: { en: 'Seedance model name.', zh: 'Seedance 模型名称。' } },
-      { name: 'content', type: 'object[]', required: 'yes', description: { en: 'Content blocks: text prompts, image/video/audio references.', zh: '内容块：文本提示词、图片/视频/音频引用。' } },
-      { name: 'content[].type', type: 'string', required: 'yes', description: { en: 'Block type: text, image_url, video_url, audio_url.', zh: '内容块类型：text、image_url、video_url、audio_url。' } },
-      { name: 'content[].text', type: 'string', required: 'conditional', description: { en: 'Text prompt (when type=text).', zh: '文本提示词（type=text 时）。' } },
-      { name: 'content[].image_url', type: 'object', required: 'conditional', description: { en: 'Reference image URL object (when type=image_url).', zh: '参考图 URL 对象（type=image_url 时）。' } },
-      { name: 'resolution', type: 'string', required: 'no', description: { en: 'Output resolution, e.g. 720p, 1080p.', zh: '输出分辨率，如 720p、1080p。' } },
-      { name: 'ratio', type: 'string', required: 'no', description: { en: 'Aspect ratio, e.g. 16:9, 9:16.', zh: '画面比例，如 16:9、9:16。' } },
-      { name: 'duration', type: 'integer', required: 'no', description: { en: 'Video duration in seconds.', zh: '视频时长（秒）。' } },
-      { name: 'frames', type: 'integer', required: 'no', description: { en: 'Total frame count.', zh: '总帧数。' } },
-      { name: 'seed', type: 'integer', required: 'no', description: { en: 'Random seed for reproducibility.', zh: '随机种子，用于结果复现。' } },
-      { name: 'service_tier', type: 'string', required: 'no', description: { en: 'Service tier.', zh: '服务等级。' } },
-      { name: 'generate_audio', type: 'boolean', required: 'no', description: { en: 'Whether to generate audio.', zh: '是否生成音频。' } },
-      { name: 'watermark', type: 'boolean', required: 'no', description: { en: 'Whether to add watermark.', zh: '是否添加水印。' } },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Seedance model name.', zh: 'Seedance 模型名称。' },
+      },
+      {
+        name: 'content',
+        type: 'object[]',
+        required: 'yes',
+        description: {
+          en: 'Content blocks: text prompts, image/video/audio references.',
+          zh: '内容块：文本提示词、图片/视频/音频引用。',
+        },
+      },
+      {
+        name: 'content[].type',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Block type: text, image_url, video_url, audio_url.',
+          zh: '内容块类型：text、image_url、video_url、audio_url。',
+        },
+      },
+      {
+        name: 'content[].text',
+        type: 'string',
+        required: 'conditional',
+        description: {
+          en: 'Text prompt (when type=text).',
+          zh: '文本提示词（type=text 时）。',
+        },
+      },
+      {
+        name: 'content[].image_url',
+        type: 'object',
+        required: 'conditional',
+        description: {
+          en: 'Reference image URL object (when type=image_url).',
+          zh: '参考图 URL 对象（type=image_url 时）。',
+        },
+      },
+      {
+        name: 'resolution',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Output resolution, e.g. 720p, 1080p.',
+          zh: '输出分辨率，如 720p、1080p。',
+        },
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Aspect ratio, e.g. 16:9, 9:16.',
+          zh: '画面比例，如 16:9、9:16。',
+        },
+      },
+      {
+        name: 'duration',
+        type: 'integer',
+        required: 'no',
+        description: {
+          en: 'Video duration in seconds.',
+          zh: '视频时长（秒）。',
+        },
+      },
+      {
+        name: 'frames',
+        type: 'integer',
+        required: 'no',
+        description: { en: 'Total frame count.', zh: '总帧数。' },
+      },
+      {
+        name: 'seed',
+        type: 'integer',
+        required: 'no',
+        description: {
+          en: 'Random seed for reproducibility.',
+          zh: '随机种子，用于结果复现。',
+        },
+      },
+      {
+        name: 'service_tier',
+        type: 'string',
+        required: 'no',
+        description: { en: 'Service tier.', zh: '服务等级。' },
+      },
+      {
+        name: 'generate_audio',
+        type: 'boolean',
+        required: 'no',
+        description: { en: 'Whether to generate audio.', zh: '是否生成音频。' },
+      },
+      {
+        name: 'watermark',
+        type: 'boolean',
+        required: 'no',
+        description: { en: 'Whether to add watermark.', zh: '是否添加水印。' },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Task ID for polling.', zh: '任务 ID，用于轮询查询。' } },
-      { name: 'model', type: 'string', required: 'no', description: { en: 'Model name.', zh: '模型名称。' } },
-      { name: 'status', type: 'string', required: 'no', description: { en: 'Task status: queued, running, succeeded, failed.', zh: '任务状态：queued、running、succeeded、failed。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Task ID for polling.',
+          zh: '任务 ID，用于轮询查询。',
+        },
+      },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'no',
+        description: { en: 'Model name.', zh: '模型名称。' },
+      },
+      {
+        name: 'status',
+        type: 'string',
+        required: 'no',
+        description: {
+          en: 'Task status: queued, running, succeeded, failed.',
+          zh: '任务状态：queued、running、succeeded、failed。',
+        },
+      },
     ],
     errorCodes: [
-      { status: 400, description: { en: 'InvalidParameter — malformed request body or missing model/content.', zh: '参数无效——请求体格式错误或缺少 model/content。' } },
-      { status: 401, description: { en: 'Unauthorized — API key invalid or missing.', zh: '未授权——API Key 无效或未提供。' } },
-      { status: 429, description: { en: 'Rate limited or insufficient quota.', zh: '触发限流或额度不足。' } },
+      {
+        status: 400,
+        description: {
+          en: 'InvalidParameter — malformed request body or missing model/content.',
+          zh: '参数无效——请求体格式错误或缺少 model/content。',
+        },
+      },
+      {
+        status: 401,
+        description: {
+          en: 'Unauthorized — API key invalid or missing.',
+          zh: '未授权——API Key 无效或未提供。',
+        },
+      },
+      {
+        status: 429,
+        description: {
+          en: 'Rate limited or insufficient quota.',
+          zh: '触发限流或额度不足。',
+        },
+      },
     ],
     codeSamples: [
       {
@@ -741,19 +1550,75 @@ print(resp.json()["id"])`,
     auth: 'Bearer Token',
     contentType: 'application/json',
     requestParams: [
-      { name: 'task_id (path)', type: 'string', required: 'yes', description: { en: 'Task ID returned by the create endpoint.', zh: '创建接口返回的任务 ID。' } },
+      {
+        name: 'task_id (path)',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'Task ID returned by the create endpoint.',
+          zh: '创建接口返回的任务 ID。',
+        },
+      },
     ],
     responseParams: [
-      { name: 'id', type: 'string', required: 'yes', description: { en: 'Task ID.', zh: '任务 ID。' } },
-      { name: 'status', type: 'string', required: 'yes', description: { en: 'succeeded, running, failed.', zh: 'succeeded、running、failed。' } },
-      { name: 'model', type: 'string', required: 'no', description: { en: 'Model name.', zh: '模型名称。' } },
-      { name: 'content', type: 'object[]', required: 'conditional', description: { en: 'Output content (video URL) when succeeded.', zh: '成功时输出的内容（视频 URL）。' } },
-      { name: 'usage', type: 'object', required: 'no', description: { en: 'Token / duration usage.', zh: 'token / 时长用量。' } },
-      { name: 'error', type: 'object', required: 'conditional', description: { en: 'Error detail when failed.', zh: '失败时的错误详情。' } },
+      {
+        name: 'id',
+        type: 'string',
+        required: 'yes',
+        description: { en: 'Task ID.', zh: '任务 ID。' },
+      },
+      {
+        name: 'status',
+        type: 'string',
+        required: 'yes',
+        description: {
+          en: 'succeeded, running, failed.',
+          zh: 'succeeded、running、failed。',
+        },
+      },
+      {
+        name: 'model',
+        type: 'string',
+        required: 'no',
+        description: { en: 'Model name.', zh: '模型名称。' },
+      },
+      {
+        name: 'content',
+        type: 'object[]',
+        required: 'conditional',
+        description: {
+          en: 'Output content (video URL) when succeeded.',
+          zh: '成功时输出的内容（视频 URL）。',
+        },
+      },
+      {
+        name: 'usage',
+        type: 'object',
+        required: 'no',
+        description: {
+          en: 'Token / duration usage.',
+          zh: 'token / 时长用量。',
+        },
+      },
+      {
+        name: 'error',
+        type: 'object',
+        required: 'conditional',
+        description: {
+          en: 'Error detail when failed.',
+          zh: '失败时的错误详情。',
+        },
+      },
     ],
     errorCodes: [
       { status: 401, description: { en: 'Unauthorized.', zh: '未授权。' } },
-      { status: 404, description: { en: 'task_not_exist — unknown task ID.', zh: 'task_not_exist——任务 ID 不存在。' } },
+      {
+        status: 404,
+        description: {
+          en: 'task_not_exist — unknown task ID.',
+          zh: 'task_not_exist——任务 ID 不存在。',
+        },
+      },
     ],
     codeSamples: [
       {

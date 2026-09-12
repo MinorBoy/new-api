@@ -23,9 +23,7 @@ const policySchema = z
 const routingPolicySchema = z.object({
   version: z.literal(1),
   default: policySchema,
-  groups: z
-    .record(z.string(), z.record(z.string(), policySchema))
-    .optional(),
+  groups: z.record(z.string(), z.record(z.string(), policySchema)).optional(),
 })
 
 export function parseImageRoutingPolicy(value: string): unknown {

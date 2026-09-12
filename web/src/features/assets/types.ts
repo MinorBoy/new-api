@@ -1,4 +1,9 @@
-export type AssetStatus = 'pending' | 'processing' | 'active' | 'failed' | 'unknown'
+export type AssetStatus =
+  | 'pending'
+  | 'processing'
+  | 'active'
+  | 'failed'
+  | 'unknown'
 
 export type Asset = {
   id: string

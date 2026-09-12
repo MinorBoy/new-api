@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -28,9 +10,9 @@ import {
 import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { StaticDataTable } from '@/components/data-table/static/static-data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
 import {
   sideDrawerContentClassName,
@@ -428,27 +410,22 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         )
       )
 
-      const specialMap = safeJsonParse<
-        Record<string, Record<string, string>>
-      >(groupSpecialUsableGroup, { fallback: {}, silent: true })
+      const specialMap = safeJsonParse<Record<string, Record<string, string>>>(
+        groupSpecialUsableGroup,
+        { fallback: {}, silent: true }
+      )
       delete specialMap[groupName]
       for (const rules of Object.values(specialMap)) {
         delete rules[groupName]
         delete rules[`+:${groupName}`]
         delete rules[`-:${groupName}`]
       }
-      onChange(
-        'GroupSpecialUsableGroup',
-        JSON.stringify(specialMap, null, 2)
-      )
+      onChange('GroupSpecialUsableGroup', JSON.stringify(specialMap, null, 2))
 
       try {
         const profiles = parseGroupRoutingProfiles(groupRoutingRequirements)
         delete profiles[groupName]
-        onChange(
-          'GroupRoutingRequirements',
-          JSON.stringify(profiles, null, 2)
-        )
+        onChange('GroupRoutingRequirements', JSON.stringify(profiles, null, 2))
       } catch {
         // Invalid JSON remains visible in JSON mode instead of being overwritten.
       }

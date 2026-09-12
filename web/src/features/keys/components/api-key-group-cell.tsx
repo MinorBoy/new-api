@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { Check, ChevronDown } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -41,18 +23,15 @@ import { cn } from '@/lib/utils'
 import { updateApiKeyGroup } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import type { ApiKey } from '../types'
-import { useApiKeys } from './api-keys-provider'
 import type { ApiKeyGroupOption } from './api-key-group-combobox'
+import { useApiKeys } from './api-keys-provider'
 
 type ApiKeyGroupCellProps = {
   apiKey: ApiKey
   groupRatios: Record<string, number>
 }
 
-export function ApiKeyGroupCell({
-  apiKey,
-  groupRatios,
-}: ApiKeyGroupCellProps) {
+export function ApiKeyGroupCell({ apiKey, groupRatios }: ApiKeyGroupCellProps) {
   const { t } = useTranslation()
   const { triggerRefresh } = useApiKeys()
   const [open, setOpen] = useState(false)
@@ -104,9 +83,7 @@ export function ApiKeyGroupCell({
         toast.success(t('Group updated'))
         triggerRefresh()
       } else {
-        toast.error(
-          result.message || t(ERROR_MESSAGES.UPDATE_FAILED)
-        )
+        toast.error(result.message || t(ERROR_MESSAGES.UPDATE_FAILED))
       }
     } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))

@@ -1,27 +1,9 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
 
-import { MethodBadge } from './method-badge'
 import type { ApiEndpoint } from '../types'
+import { MethodBadge } from './method-badge'
 
 /**
  * The endpoint info card shown at the top of each detail page: a key/value
@@ -30,10 +12,18 @@ import type { ApiEndpoint } from '../types'
  */
 export function EndpointInfoCard({ endpoint }: { endpoint: ApiEndpoint }) {
   const { t } = useTranslation()
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://<your-domain>'
+  const baseUrl =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://<your-domain>'
   const fullUrl = `${baseUrl}${endpoint.path}`
 
-  const rows: Array<{ label: string; value: string; mono?: boolean; copyable?: boolean }> = [
+  const rows: Array<{
+    label: string
+    value: string
+    mono?: boolean
+    copyable?: boolean
+  }> = [
     { label: t('Method'), value: endpoint.method, mono: true },
     { label: t('Path'), value: endpoint.path, mono: true, copyable: true },
     { label: t('Full URL'), value: fullUrl, mono: true, copyable: true },

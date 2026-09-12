@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import type { Table as TanstackTable } from '@tanstack/react-table'
@@ -53,8 +35,8 @@ import {
   ERROR_MESSAGES,
 } from '../constants'
 import type { ApiKey, TokenUsageMap } from '../types'
-import { ApiKeyCell, UnlimitedQuotaBadge } from './api-keys-cells'
 import { ApiAddressBar } from './api-address-bar'
+import { ApiKeyCell, UnlimitedQuotaBadge } from './api-keys-cells'
 import { useApiKeysColumns } from './api-keys-columns'
 import { useApiKeys } from './api-keys-provider'
 import { DataTableBulkActions } from './data-table-bulk-actions'
@@ -118,14 +100,14 @@ function UsageRow({
     return (
       <div className='flex items-center justify-between gap-2 text-xs'>
         <span className='text-muted-foreground'>{t('Usage')}</span>
-        <span className='tabular-nums text-muted-foreground'>
+        <span className='text-muted-foreground tabular-nums'>
           {t('Today')}{' '}
-          <span className='font-medium text-foreground'>
+          <span className='text-foreground font-medium'>
             {formatQuota(usage.today)}
           </span>
           <span className='px-1'>·</span>
           {t('Last 30 days')}{' '}
-          <span className='font-medium text-foreground'>
+          <span className='text-foreground font-medium'>
             {formatQuota(usage.thirty_days)}
           </span>
         </span>
@@ -240,7 +222,11 @@ export function ApiKeysMobileList({
               )}
             </div>
 
-            <UsageRow apiKeyId={apiKey.id} usageMap={usageMap} variant='inline' />
+            <UsageRow
+              apiKeyId={apiKey.id}
+              usageMap={usageMap}
+              variant='inline'
+            />
           </div>
         )
       })}

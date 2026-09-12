@@ -1,26 +1,8 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { useState, type ReactNode } from 'react'
 
-import { DocsCodeBlock } from '../components/docs-code-block'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+import { DocsCodeBlock } from '../components/docs-code-block'
 import type { CodeTab } from './code-tabs-meta'
 
 /**
@@ -37,7 +19,13 @@ export function CodeTabs({ tabs }: { tabs: CodeTab[] }): ReactNode {
 
   if (tabs.length === 1) {
     const tab = tabs[0]
-    return <DocsCodeBlock code={tab.code} language={tab.highlight} label={tab.label} />
+    return (
+      <DocsCodeBlock
+        code={tab.code}
+        language={tab.highlight}
+        label={tab.label}
+      />
+    )
   }
 
   return (
@@ -51,7 +39,11 @@ export function CodeTabs({ tabs }: { tabs: CodeTab[] }): ReactNode {
       </TabsList>
       {tabs.map((tab) => (
         <TabsContent key={tab.lang} value={tab.lang}>
-          <DocsCodeBlock code={tab.code} language={tab.highlight} label={tab.label} />
+          <DocsCodeBlock
+            code={tab.code}
+            language={tab.highlight}
+            label={tab.label}
+          />
         </TabsContent>
       ))}
     </Tabs>

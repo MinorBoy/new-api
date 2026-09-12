@@ -997,8 +997,8 @@ export async function buildImportDocument(
           )
           continue
         }
-       const targetRef = `route-target/${mapping.businessId}`
-       const commonCostFields = {
+        const targetRef = `route-target/${mapping.businessId}`
+        const commonCostFields = {
           billing_multiplier: optionalDecimal(
             cost,
             'billing_multiplier',
@@ -1068,9 +1068,9 @@ export async function buildImportDocument(
           scenario: field(cost, 'scenario', '定价场景'),
           upstream_model: field(cost, 'upstream_model', '上游模型'),
         }
-       entities.cost_rule_drafts.push(
-         await authoritativeEntity(cost, source, costFields)
-       )
+        entities.cost_rule_drafts.push(
+          await authoritativeEntity(cost, source, costFields)
+        )
         if (!referenceBounds || !isActive) continue
 
         entities.model_mappings.push(

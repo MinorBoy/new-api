@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { z } from 'zod'
 
 import {
@@ -38,6 +20,7 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import { OPENAI_IMAGES_CHANNEL_TYPES } from './channel-type-config'
 import { SECURE_CHANNEL_TYPE } from './secure-video-group'
 
 // ============================================================================
@@ -432,11 +415,14 @@ export function readImageCapabilityMatrix(
 ): Record<string, boolean> {
   const matrix: Record<string, boolean> = {}
   for (const tier of IMAGE_RESOLUTION_TIERS) {
-    for (const quality of IMAGE_QUALITY_TIERS) matrix[`${tier}:${quality}`] = true
+    for (const quality of IMAGE_QUALITY_TIERS)
+      matrix[`${tier}:${quality}`] = true
   }
   if (!value?.trim()) return matrix
   try {
-    const binding = JSON.parse(value) as { capability_overrides?: Record<string, ImageModelCapabilities> }
+    const binding = JSON.parse(value) as {
+      capability_overrides?: Record<string, ImageModelCapabilities>
+    }
     const capability = binding.capability_overrides?.[model]
     if (!capability) return matrix
     if (capability.resolution_qualities) {
@@ -472,14 +458,20 @@ export function writeImageCapabilityMatrix(
   let binding: Record<string, unknown> = {}
   try {
     const parsed = value?.trim() ? JSON.parse(value) : {}
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) binding = parsed as Record<string, unknown>
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      binding = parsed as Record<string, unknown>
   } catch {
     binding = {}
   }
-  const overrides = (binding.capability_overrides && typeof binding.capability_overrides === 'object'
-    ? binding.capability_overrides
-    : {}) as Record<string, ImageModelCapabilities>
-  const selected = Object.entries(matrix).filter(([, enabled]) => enabled).map(([key]) => key)
+  const overrides = (
+    binding.capability_overrides &&
+    typeof binding.capability_overrides === 'object'
+      ? binding.capability_overrides
+      : {}
+  ) as Record<string, ImageModelCapabilities>
+  const selected = Object.entries(matrix)
+    .filter(([, enabled]) => enabled)
+    .map(([key]) => key)
   const current = overrides[model] ?? {}
   overrides[model] = {
     ...current,
@@ -735,11 +727,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.vertex_key_type
   }
 
-  if (formData.image_profile?.trim()) {
-    try {
-      settingsObj.image_profile = JSON.parse(formData.image_profile)
-    } catch {
-      // Schema validation reports malformed JSON before submission.
+  if (OPENAI_IMAGES_CHANNEL_TYPES.has(formData.type)) {
+    if (formData.image_profile?.trim()) {
+      try {
+        settingsObj.image_profile = JSON.parse(formData.image_profile)
+      } catch {
+        // Schema validation reports malformed JSON before submission.
+      }
+    } else {
+      delete settingsObj.image_profile
     }
   } else {
     delete settingsObj.image_profile

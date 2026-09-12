@@ -1,17 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Check, Save } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Input } from '@/components/ui/input'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 import { upsertImageCostMatrix } from '../api'
-import type { CostRule } from '../types'
 import {
   buildImageCostMatrix,
   IMAGE_COST_QUALITIES,
@@ -19,6 +25,7 @@ import {
   type ImageCostQuality,
   type ImageCostTier,
 } from '../lib/image-cost-matrix'
+import type { CostRule } from '../types'
 
 type ImageCostMatrixProps = {
   channelID: number
@@ -45,7 +52,9 @@ export function ImageCostMatrix(props: ImageCostMatrixProps) {
   const [activate, setActivate] = useState(true)
 
   useEffect(() => {
-    const next = Object.fromEntries(cells.map((cell) => [cell.key, cell.unitPrice]))
+    const next = Object.fromEntries(
+      cells.map((cell) => [cell.key, cell.unitPrice])
+    )
     setPrices(next)
     setInitialPrices(next)
   }, [cells])
@@ -53,9 +62,14 @@ export function ImageCostMatrix(props: ImageCostMatrixProps) {
   const saveMutation = useMutation({
     mutationFn: () => {
       const entries = cells
-        .filter((cell) => prices[cell.key]?.trim() !== initialPrices[cell.key]?.trim())
+        .filter(
+          (cell) => prices[cell.key]?.trim() !== initialPrices[cell.key]?.trim()
+        )
         .filter((cell) => prices[cell.key]?.trim() !== '')
-        .map((cell) => ({ cost_variant_key: cell.key, unit_price: prices[cell.key].trim() }))
+        .map((cell) => ({
+          cost_variant_key: cell.key,
+          unit_price: prices[cell.key].trim(),
+        }))
       if (entries.length === 0) throw new Error(t('No image cost changes'))
       return upsertImageCostMatrix({
         channel_id: props.channelID,
@@ -68,10 +82,18 @@ export function ImageCostMatrix(props: ImageCostMatrixProps) {
     onSuccess: async () => {
       setInitialPrices({ ...prices })
       await props.onSaved()
-      toast.success(t(activate ? 'Image costs saved and activated' : 'Image cost drafts saved'))
+      toast.success(
+        t(
+          activate
+            ? 'Image costs saved and activated'
+            : 'Image cost drafts saved'
+        )
+      )
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : t('Failed to save image costs'))
+      toast.error(
+        error instanceof Error ? error.message : t('Failed to save image costs')
+      )
     },
   })
 
@@ -85,15 +107,22 @@ export function ImageCostMatrix(props: ImageCostMatrixProps) {
     <section className='flex flex-col gap-3 rounded-md border p-4'>
       <div className='flex flex-wrap items-start justify-between gap-3'>
         <div>
-          <h3 className='text-sm font-semibold'>{t('Image supplier cost matrix')}</h3>
+          <h3 className='text-sm font-semibold'>
+            {t('Image supplier cost matrix')}
+          </h3>
           <p className='text-muted-foreground text-xs'>
-            {props.billableModel} · {props.endpoint === 'edits' ? t('Edits') : t('Generations')} · {t('USD per image')}
+            {props.billableModel} ·{' '}
+            {props.endpoint === 'edits' ? t('Edits') : t('Generations')} ·{' '}
+            {t('USD per image')}
           </p>
         </div>
         {props.canWrite ? (
           <div className='flex items-center gap-3'>
             <label className='text-muted-foreground flex items-center gap-2 text-xs'>
-              <Checkbox checked={activate} onCheckedChange={(checked) => setActivate(checked === true)} />
+              <Checkbox
+                checked={activate}
+                onCheckedChange={(checked) => setActivate(checked === true)}
+              />
               {t('Activate after saving')}
             </label>
             <Button
@@ -135,14 +164,28 @@ export function ImageCostMatrix(props: ImageCostMatrixProps) {
                           value={prices[cell.key] ?? ''}
                           disabled={!props.canWrite || saveMutation.isPending}
                           onChange={(event) =>
-                            setPrices((current) => ({ ...current, [cell.key]: event.target.value }))
+                            setPrices((current) => ({
+                              ...current,
+                              [cell.key]: event.target.value,
+                            }))
                           }
                         />
                         <div className='flex items-center gap-1 text-[11px]'>
-                          <Badge variant={cell.rule?.status === 'active' ? 'default' : 'secondary'}>
+                          <Badge
+                            variant={
+                              cell.rule?.status === 'active'
+                                ? 'default'
+                                : 'secondary'
+                            }
+                          >
                             {ruleStatus(cell.rule, t)}
                           </Badge>
-                          {cell.rule ? <Check className='text-emerald-600 size-3' aria-hidden='true' /> : null}
+                          {cell.rule ? (
+                            <Check
+                              className='size-3 text-emerald-600'
+                              aria-hidden='true'
+                            />
+                          ) : null}
                         </div>
                       </div>
                     </TableCell>
@@ -154,7 +197,9 @@ export function ImageCostMatrix(props: ImageCostMatrixProps) {
         </Table>
       </div>
       <p className='text-muted-foreground text-xs'>
-        {t('Leave a cell unchanged to keep its current rule. Empty new cells are ignored.')}
+        {t(
+          'Leave a cell unchanged to keep its current rule. Empty new cells are ignored.'
+        )}
       </p>
     </section>
   )

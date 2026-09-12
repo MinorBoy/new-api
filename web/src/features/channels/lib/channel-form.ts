@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import {
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_SUB2_API,
   CHANNEL_STATUS,
   ERROR_MESSAGES,
   MODEL_FETCHABLE_TYPES,
@@ -262,7 +263,9 @@ export const channelFormSchema = z
       })
     }
     if (
-      [3, 8, 36, 45, CHANNEL_TYPE_NEW_API].includes(data.type) &&
+      [3, 8, 36, 45, CHANNEL_TYPE_NEW_API, CHANNEL_TYPE_SUB2_API].includes(
+        data.type
+      ) &&
       !data.base_url?.trim()
     ) {
       addRequiredIssue(
@@ -303,7 +306,10 @@ export const channelFormSchema = z
       }
     }
 
-    if ([3, 18, 21, 39, 41, 49].includes(data.type) && !data.other?.trim()) {
+    if (
+      [3, 18, 21, 39, 41, 49, CHANNEL_TYPE_NEW_API].includes(data.type) &&
+      !data.other?.trim()
+    ) {
       addRequiredIssue(
         ctx,
         'other',

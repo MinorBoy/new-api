@@ -126,6 +126,8 @@ import {
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
+  CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_SUB2_API,
   CHANNEL_STATUS,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
@@ -1105,8 +1107,17 @@ export function ChannelMutateDrawer({
   )
   const advancedHaveErrors =
     hasAdvancedSettingsErrors(formErrors) || Boolean(formErrors.advanced_custom)
-  const providerRequiresBaseUrl = [3, 8, 36, 45].includes(currentType)
-  const providerRequiresOther = [3, 18, 21, 39, 41, 49].includes(currentType)
+  const providerRequiresBaseUrl = [
+    3,
+    8,
+    36,
+    45,
+    CHANNEL_TYPE_SUB2_API,
+    60,
+  ].includes(currentType)
+  const providerRequiresOther = [3, 18, 21, 39, 41, 49, CHANNEL_TYPE_NEW_API].includes(
+    currentType
+  )
   const identityComplete = Boolean(currentName?.trim() && currentType > 0)
   const credentialsComplete = Boolean(
     (isEditing || currentKey?.trim()) &&
@@ -3043,6 +3054,32 @@ export function ChannelMutateDrawer({
                                     </FormControl>
                                     <FormDescription>
                                       {t('Enter the Coze agent ID')}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            )}
+
+                            {/* New API (type 60) upstream user identifier */}
+                            {currentType === CHANNEL_TYPE_NEW_API && (
+                              <FormField
+                                control={form.control}
+                                name='other'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>{t('Upstream User ID *')}</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        inputMode='numeric'
+                                        placeholder='42'
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t(
+                                        'Used as the New-Api-User header when querying upstream balance'
+                                      )}
                                     </FormDescription>
                                     <FormMessage />
                                   </FormItem>

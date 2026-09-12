@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -118,6 +119,26 @@ type OpenRouterCreditResponse struct {
 	Data struct {
 		TotalCredits float64 `json:"total_credits"`
 		TotalUsage   float64 `json:"total_usage"`
+	} `json:"data"`
+}
+
+type sub2APIUsageResponse struct {
+	Remaining *float64 `json:"remaining"`
+	Quota     *struct {
+		Remaining *float64 `json:"remaining"`
+	} `json:"quota"`
+	Balance  *float64 `json:"balance"`
+	IsActive *bool    `json:"is_active"`
+	IsValid  *bool    `json:"isValid"`
+}
+
+type newAPIUserSelfResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    *struct {
+		Group     string  `json:"group"`
+		Quota     float64 `json:"quota"`
+		UsedQuota float64 `json:"used_quota"`
 	} `json:"data"`
 }
 
@@ -356,6 +377,83 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	return availableBalanceUsd, nil
 }
 
+func updateChannelSub2APIBalance(channel *model.Channel) (float64, error) {
+	url := fmt.Sprintf("%s/v1/usage", strings.TrimRight(channel.GetBaseURL(), "/"))
+	body, err := GetResponseBody(http.MethodGet, url, channel, GetAuthHeader(channel.Key))
+	if err != nil {
+		return 0, err
+	}
+	var response sub2APIUsageResponse
+	if err := common.Unmarshal(body, &response); err != nil {
+		return 0, err
+	}
+	if response.IsActive != nil && !*response.IsActive {
+		return 0, errors.New("上游账户未激活")
+	}
+	if response.IsValid != nil && !*response.IsValid {
+		return 0, errors.New("上游账户无效")
+	}
+	var balance *float64
+	if response.Remaining != nil {
+		balance = response.Remaining
+	} else if response.Quota != nil && response.Quota.Remaining != nil {
+		balance = response.Quota.Remaining
+	} else {
+		balance = response.Balance
+	}
+	if balance == nil {
+		return 0, errors.New("上游余额响应缺少 remaining")
+	}
+	channel.UpdateBalance(*balance)
+	return *balance, nil
+}
+
+func newAPIUserID(channel *model.Channel) string {
+	value := strings.TrimSpace(channel.Other)
+	if value == "" {
+		return ""
+	}
+	var config map[string]any
+	if common.UnmarshalJsonStr(value, &config) == nil {
+		for _, key := range []string{"user_id", "userId"} {
+			if id, ok := config[key]; ok {
+				return strings.TrimSpace(fmt.Sprint(id))
+			}
+		}
+	}
+	return value
+}
+
+func updateChannelNewAPIBalance(channel *model.Channel) (float64, error) {
+	userID := newAPIUserID(channel)
+	if userID == "" {
+		return 0, errors.New("New API 渠道缺少上游用户 ID")
+	}
+	url := fmt.Sprintf("%s/api/user/self", strings.TrimRight(channel.GetBaseURL(), "/"))
+	headers := GetAuthHeader(channel.Key)
+	headers.Set("Content-Type", "application/json")
+	headers.Set("User-Agent", "cc-switch/1.0")
+	headers.Set("New-Api-User", userID)
+	body, err := GetResponseBody(http.MethodGet, url, channel, headers)
+	if err != nil {
+		return 0, err
+	}
+	var response newAPIUserSelfResponse
+	if err := common.Unmarshal(body, &response); err != nil {
+		return 0, err
+	}
+	if !response.Success || response.Data == nil {
+		message := strings.TrimSpace(response.Message)
+		if message == "" {
+			message = "查询失败"
+		}
+		return 0, errors.New(message)
+	}
+	balance := response.Data.Quota / 500000
+	channel.UpdateBalance(balance)
+	return balance, nil
+}
+
 func updateChannelBalance(channel *model.Channel) (float64, error) {
 	baseURL := constant.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() == "" {
@@ -386,6 +484,10 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 		return updateChannelOpenRouterBalance(channel)
 	case constant.ChannelTypeMoonshot:
 		return updateChannelMoonshotBalance(channel)
+	case constant.ChannelTypeSub2API:
+		return updateChannelSub2APIBalance(channel)
+	case constant.ChannelTypeNewAPI:
+		return updateChannelNewAPIBalance(channel)
 	default:
 		return 0, errors.New("尚未实现")
 	}

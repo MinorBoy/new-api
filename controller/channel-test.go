@@ -446,6 +446,16 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 	}
 
+	// 与 relay handler 保持一致：strict 成本核算下，DoRequest 前必须确认计费上游模型，
+	// 否则测试请求会被 costAccountingAdaptor 以 ErrCostIdentityUnconfirmed 拒绝。
+	if err := relay.ConfirmCostIdentity(adaptor, info, jsonData); err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeConvertRequestFailed),
+		}
+	}
+
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
 	resp, err := adaptor.DoRequest(c, info, requestBody)

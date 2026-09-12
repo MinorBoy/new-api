@@ -384,7 +384,8 @@ type ProfitChannelFilterInput struct {
 	// MetadataState, when non-nil, is asked to resolve input reference video durations
 	// before any token-priced candidate is evaluated. It is nil for requests without
 	// reference videos.
-	MetadataState *ProfitRoutingRequestState
+	MetadataState             *ProfitRoutingRequestState
+	AllowModelPricingFallback bool
 }
 
 // ProfitChannelFilterResult is the filtered candidate set plus admin-only diagnostics
@@ -483,10 +484,6 @@ func evaluateCandidateProfit(
 		EstimatedRevenueNanoUSD:  input.RevenueNanoUSD,
 		MinimumExpectedMarginBPS: threshold,
 	}
-	if !input.HasRevenue || input.RevenueNanoUSD <= 0 {
-		exclusion.Reason = ProfitReasonRevenueUnknown
-		return exclusion
-	}
 	predictedModel := strings.TrimSpace(candidate.PredictedUpstreamModel)
 	if predictedModel == "" {
 		exclusion.Reason = ProfitReasonCostRuleMissing
@@ -498,7 +495,18 @@ func evaluateCandidateProfit(
 	}
 	rule := rules[CostRuleCandidate{ChannelID: candidate.ChannelID, BillableUpstreamModel: predictedModel, CostVariantKey: candidateVariant}]
 	if rule == nil {
+		if input.AllowModelPricingFallback {
+			return exclusion
+		}
+		if !input.HasRevenue || input.RevenueNanoUSD <= 0 {
+			exclusion.Reason = ProfitReasonRevenueUnknown
+			return exclusion
+		}
 		exclusion.Reason = ProfitReasonCostRuleMissing
+		return exclusion
+	}
+	if !input.HasRevenue || input.RevenueNanoUSD <= 0 {
+		exclusion.Reason = ProfitReasonRevenueUnknown
 		return exclusion
 	}
 	exclusion.RuleID = rule.ID
@@ -668,6 +676,7 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 		return &ProfitEligibilityError{Reason: ProfitReasonCalculationError}
 	}
 	info.CostProfitRecheckSnapshot = nil
+	info.UseModelPricingFallback = false
 	billableModel := strings.TrimSpace(info.BillableUpstreamModel)
 	channelID := info.ChannelId
 	if billableModel == "" || channelID <= 0 {
@@ -685,7 +694,6 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	if group == "" {
 		group = info.TokenGroup
 	}
-
 	facts, revenueNanoUSD, hasRevenue := recheckFacts(c, ctx, info, group)
 	if info.ImageBillingSnapshot != nil {
 		facts.ImageCount = info.ImageBillingSnapshot.RequestedImages
@@ -727,6 +735,14 @@ func RecheckSelectedChannelProfit(c *gin.Context, info *relaycommon.RelayInfo) e
 	if err != nil {
 		common.SysError(fmt.Sprintf("profit recheck active rule lookup failed: %s", err.Error()))
 		return &ProfitEligibilityError{ChannelID: channelID, Reason: ProfitReasonCalculationError}
+	}
+	modelName := info.OriginModelName
+	if strings.TrimSpace(modelName) == "" {
+		modelName = billableModel
+	}
+	if IsModelPricingTextRequest(info.RequestURLPath, modelName, "") && len(rules) == 0 {
+		info.UseModelPricingFallback = true
+		return nil
 	}
 	// Resolve any input reference video metadata so per-token candidates price with the
 	// authoritative input duration. The URLs are read from the request context's

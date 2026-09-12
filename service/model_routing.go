@@ -250,13 +250,14 @@ func applyProfitFilter(param *RetryParam, group string, result groupRoutingResul
 	}
 
 	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
-		Ctx:             param.Ctx,
-		Facts:           facts,
-		RevenueNanoUSD:  revenueNanoUSD,
-		HasRevenue:      hasRevenue,
-		GlobalMarginBPS: cost_setting.Runtime().MinimumExpectedMarginBPS,
-		Candidates:      candidates,
-		MetadataState:   param.ProfitRoutingState(),
+		Ctx:                       param.Ctx,
+		Facts:                     facts,
+		RevenueNanoUSD:            revenueNanoUSD,
+		HasRevenue:                hasRevenue,
+		GlobalMarginBPS:           cost_setting.Runtime().MinimumExpectedMarginBPS,
+		Candidates:                candidates,
+		MetadataState:             param.ProfitRoutingState(),
+		AllowModelPricingFallback: IsModelPricingTextRequest(param.RequestPath, param.ModelName, ""),
 	}, rules)
 
 	if filterResult.InvalidMedia {
@@ -532,13 +533,14 @@ func knownChannelPassesProfitFilter(param *RetryParam, group string, result grou
 		return false, nil
 	}
 	filterResult := FilterProfitEligibleChannels(ProfitChannelFilterInput{
-		Ctx:             param.Ctx,
-		Facts:           facts,
-		RevenueNanoUSD:  revenueNanoUSD,
-		HasRevenue:      hasRevenue,
-		GlobalMarginBPS: cost_setting.Runtime().MinimumExpectedMarginBPS,
-		Candidates:      []ProfitRoutingCandidate{candidate},
-		MetadataState:   param.ProfitRoutingState(),
+		Ctx:                       param.Ctx,
+		Facts:                     facts,
+		RevenueNanoUSD:            revenueNanoUSD,
+		HasRevenue:                hasRevenue,
+		GlobalMarginBPS:           cost_setting.Runtime().MinimumExpectedMarginBPS,
+		Candidates:                []ProfitRoutingCandidate{candidate},
+		MetadataState:             param.ProfitRoutingState(),
+		AllowModelPricingFallback: IsModelPricingTextRequest(param.RequestPath, param.ModelName, ""),
 	}, rules)
 	if filterResult.InvalidMedia {
 		return false, &ChannelSelectionError{
@@ -845,6 +847,7 @@ func CheckSelectedChannelCostCoverage(param *RetryParam, channel *model.Channel,
 
 	input := PredictedCoverageInput{
 		ChannelID:              channel.Id,
+		OriginModelName:        param.ModelName,
 		PredictedUpstreamModel: predictedModel,
 		CostVariantKey:         selectedCostVariantKey(param.Ctx),
 		RequestPath:            param.RequestPath,
@@ -856,6 +859,9 @@ func CheckSelectedChannelCostCoverage(param *RetryParam, channel *model.Channel,
 	covered, err := CheckPredictedCostCoverage(input)
 	if err != nil || covered {
 		return covered, err
+	}
+	if fallback, fallbackErr := CanFallbackToModelPricing(input); fallbackErr != nil || fallback {
+		return fallback, fallbackErr
 	}
 	if param.costCoverageMisses == nil {
 		param.costCoverageMisses = make(map[int]PredictedCoverageInput)

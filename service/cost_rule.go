@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/seedancepricing"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
@@ -59,6 +60,7 @@ type ImageCostMatrixInput struct {
 
 type PredictedCoverageInput struct {
 	ChannelID              int
+	OriginModelName        string
 	PredictedUpstreamModel string
 	CostVariantKey         string
 	RequestPath            string
@@ -592,6 +594,60 @@ func CheckPredictedCostCoverage(input PredictedCoverageInput) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// IsModelPricingTextRoute identifies synchronous text-generation protocols that
+// use ModelRatio/ModelPrice when no supplier cost rule exists. Task platforms,
+// images, embeddings, audio and asynchronous task endpoints stay on the strict
+// supplier-cost contract.
+func IsModelPricingTextRoute(requestPath string, taskPlatform constant.TaskPlatform) bool {
+	if strings.TrimSpace(string(taskPlatform)) != "" {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSpace(strings.SplitN(requestPath, "?", 2)[0]))
+	switch {
+	case strings.HasPrefix(path, "/v1/chat/completions"):
+		return true
+	case strings.HasPrefix(path, "/v1/completions"):
+		return true
+	case strings.HasPrefix(path, "/v1/responses") && !strings.HasPrefix(path, "/v1/responses/compact"):
+		return true
+	case strings.HasPrefix(path, "/v1/messages"):
+		return true
+	case strings.HasPrefix(path, "/v1beta/models/") || strings.HasPrefix(path, "/v1/models/"):
+		return strings.Contains(path, ":generatecontent") ||
+			strings.Contains(path, ":streamgeneratecontent") ||
+			strings.Contains(path, ":generatemessage")
+	default:
+		return false
+	}
+}
+
+// IsModelPricingTextRequest applies the model-level guard to the protocol check.
+// Seedance is a video contract even when a compatibility endpoint carries the
+// request over a text-shaped path.
+func IsModelPricingTextRequest(requestPath, modelName string, taskPlatform constant.TaskPlatform) bool {
+	return IsModelPricingTextRoute(requestPath, taskPlatform) && seedancepricing.Family(modelName) == ""
+}
+
+// CanFallbackToModelPricing reports whether a text route has no active supplier
+// rule. Existing rules, including invalid contracts, must not be bypassed.
+func CanFallbackToModelPricing(input PredictedCoverageInput) (bool, error) {
+	modelName := strings.TrimSpace(input.OriginModelName)
+	if modelName == "" {
+		modelName = strings.TrimSpace(input.PredictedUpstreamModel)
+	}
+	if !IsModelPricingTextRequest(input.RequestPath, modelName, input.TaskPlatform) {
+		return false, nil
+	}
+	_, err := ActiveCostRule(input.ChannelID, input.PredictedUpstreamModel, input.CostVariantKey, input.Authoritative)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // InvalidateCostCoverage drops cached active cost rules. Each selector argument

@@ -316,6 +316,32 @@ func TestCheckPredictedCostCoverageUsesPathCapabilityContract(t *testing.T) {
 	assert.True(t, covered)
 }
 
+func TestIsModelPricingTextRouteSeparatesTextFromSupplierCostRoutes(t *testing.T) {
+	tests := []struct {
+		path     string
+		platform constant.TaskPlatform
+		fallback bool
+	}{
+		{path: "/v1/chat/completions?stream=true", fallback: true},
+		{path: "/v1/completions", fallback: true},
+		{path: "/v1/responses", fallback: true},
+		{path: "/v1/messages", fallback: true},
+		{path: "/v1beta/models/gemini:generateContent", fallback: true},
+		{path: "/v1/images/generations", fallback: false},
+		{path: "/v1/video/generations", fallback: false},
+		{path: "/v1/chat/completions", platform: constant.TaskPlatform("video"), fallback: false},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.fallback, IsModelPricingTextRoute(tt.path, tt.platform), tt.path)
+	}
+}
+
+func TestIsModelPricingTextRequestKeepsSeedanceOnSupplierCostContract(t *testing.T) {
+	assert.True(t, IsModelPricingTextRequest("/v1/chat/completions", "deepseek-v4.1-flash", ""))
+	assert.False(t, IsModelPricingTextRequest("/v1/chat/completions", "doubao-seedance-2-0-260128", ""))
+}
+
 func TestCheckPredictedCostCoverageRejectsInconsistentPathContracts(t *testing.T) {
 	prepareCostRuleServiceDB(t)
 	rule := costRuleWithConfig(t, types.CostModePerRequest, normalizedPerRequestConfig(t, "0.2"))

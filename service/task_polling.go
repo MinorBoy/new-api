@@ -503,6 +503,9 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	// 每个分块仍逐任务轮询并保留 1 秒间隔（除非渠道关闭了间隔），渠道上游请求
 	// 速率上限从 1 次/秒提升到并发数次/秒，单轮耗时降为 ceil(任务数/并发数) 秒。
 	workers := constant.TaskPollingConcurrency
+	if workers < 1 {
+		workers = 1
+	}
 	if workers > len(taskIds) {
 		workers = len(taskIds)
 	}

@@ -264,6 +264,39 @@ func TestFilterProfitEligibleChannelsAllowsTokenPricingWithoutReferenceVideo(t *
 	assert.Empty(t, result.Exclusions)
 }
 
+func TestFilterProfitEligibleChannelsAllowsConfiguredTextPricingWithoutSupplierRule(t *testing.T) {
+	candidate := ProfitRoutingCandidate{
+		ChannelID:              7,
+		PredictedUpstreamModel: "deepseek-v4.1-flash",
+		CostVariantKey:         string(types.DefaultCostVariantKey),
+	}
+	result := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		RevenueNanoUSD:            nano("10"),
+		HasRevenue:                true,
+		Candidates:                []ProfitRoutingCandidate{candidate},
+		AllowModelPricingFallback: true,
+	}, nil)
+
+	assert.Contains(t, result.AllowedChannelIDs, candidate.ChannelID)
+	assert.Empty(t, result.Exclusions)
+}
+
+func TestFilterProfitEligibleChannelsStillRejectsMissingRuleWithoutTextFallback(t *testing.T) {
+	candidate := ProfitRoutingCandidate{
+		ChannelID:              7,
+		PredictedUpstreamModel: "seedance-2.0",
+		CostVariantKey:         string(types.DefaultCostVariantKey),
+	}
+	result := FilterProfitEligibleChannels(ProfitChannelFilterInput{
+		RevenueNanoUSD: nano("10"), HasRevenue: true,
+		Candidates: []ProfitRoutingCandidate{candidate},
+	}, nil)
+
+	assert.NotContains(t, result.AllowedChannelIDs, candidate.ChannelID)
+	require.Len(t, result.Exclusions, 1)
+	assert.Equal(t, ProfitReasonCostRuleMissing, result.Exclusions[0].Reason)
+}
+
 func TestFilterProfitEligibleChannelsMetadataUnavailableExcludesOnlyTokenCandidates(t *testing.T) {
 	facts, err := EstimateProfitRoutingFacts("720p", 5, 0)
 	require.NoError(t, err)

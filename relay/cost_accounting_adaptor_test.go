@@ -56,6 +56,15 @@ func TestCostCapabilitiesExcludeUnsupportedRealtimePath(t *testing.T) {
 	assert.Empty(t, uncovered.MeterSources)
 }
 
+func TestJSONModelCostContractCoversMultiProtocolAggregatorChannels(t *testing.T) {
+	for _, channelType := range []int{constant.ChannelTypeSub2API, constant.ChannelTypeNewAPI} {
+		capabilities := CostCapabilitiesForRoute(channelType, "/v1/chat/completions", "")
+		assert.True(t, capabilities.CanResolveBillableModel, "channel type %d", channelType)
+		assert.Contains(t, capabilities.ChargeEvents, types.CostChargeResponseSucceeded, "channel type %d", channelType)
+		assert.Contains(t, capabilities.MeterSources, types.CostMeterUpstreamUsage, "channel type %d", channelType)
+	}
+}
+
 func TestOpenAIImagesCostCapabilitiesExposeImageMetersOnlyForCompatibleChannels(t *testing.T) {
 	for _, path := range []string{"/v1/images/generations", "/v1/images/edits"} {
 		capabilities := CostCapabilitiesForRoute(constant.ChannelTypeOpenAI, path, "")
@@ -415,6 +424,39 @@ func TestInFlightCostAttemptSettlesAfterModeDisabled(t *testing.T) {
 	require.NoError(t, model.DB.First(&request, info.CostRequestID).Error)
 	require.NotNil(t, request.WinningAttemptID)
 	assert.Equal(t, info.CostAttempt.AttemptID, *request.WinningAttemptID)
+}
+
+func TestStrictTextModelPricingFallbackSkipsSupplierCostAttempt(t *testing.T) {
+	fake := &costTransportAdaptor{}
+	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-model-pricing-fallback", fake)
+	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	service.InvalidateCostCoverage(info.ChannelId, info.BillableUpstreamModel, "")
+
+	response, err := wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{"model":"vendor-model"}`)))
+
+	require.NoError(t, err)
+	assert.NotNil(t, response)
+	assert.True(t, fake.called)
+	assert.True(t, info.UseModelPricingFallback)
+	assert.Nil(t, info.CostAttempt)
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.CostAccountingRequest{}).Where("request_id = ?", info.RequestId).Count(&requestCount).Error)
+	assert.Zero(t, requestCount)
+}
+
+func TestStrictVideoRequestWithoutSupplierRuleDoesNotUseModelPricingFallback(t *testing.T) {
+	fake := &costTransportAdaptor{}
+	wrapped, ctx, info := prepareStrictPerRequestCostRelay(t, "relay-video-no-cost-rule", fake)
+	require.NoError(t, model.DB.Exec("DELETE FROM channel_model_cost_rules").Error)
+	service.InvalidateCostCoverage(info.ChannelId, info.BillableUpstreamModel, "")
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	info.RequestURLPath = "/v1/video/generations"
+
+	_, err := wrapped.DoRequest(ctx, info, bytes.NewReader([]byte(`{"model":"vendor-model"}`)))
+
+	require.Error(t, err)
+	assert.False(t, fake.called)
+	assert.Nil(t, info.CostAttempt)
 }
 
 func prepareStrictPerRequestCostRelay(t *testing.T, requestID string, fake *costTransportAdaptor) (*costAccountingAdaptor, *gin.Context, *relaycommon.RelayInfo) {

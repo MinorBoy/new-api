@@ -117,7 +117,7 @@ func TestPrepareCostAttemptUsesExplicitVariantWithoutProfitSnapshot(t *testing.T
 	assert.Equal(t, "720p", attempt.CostVariantKey)
 }
 
-func TestRecheckSelectedChannelProfitDoesNotFallbackAcrossCostVariants(t *testing.T) {
+func TestRecheckSelectedChannelProfitUsesTextPricingWhenSupplierRuleIsMissing(t *testing.T) {
 	prepareCostAttemptServiceDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.RouteTarget{}))
 	require.NoError(t, model.DB.Exec("DELETE FROM route_targets").Error)
@@ -137,10 +137,8 @@ func TestRecheckSelectedChannelProfitDoesNotFallbackAcrossCostVariants(t *testin
 	setProfitRecheckRevenue(t)
 	err := RecheckSelectedChannelProfit(c, info)
 
-	require.ErrorIs(t, err, ErrProfitEligibility)
-	var eligibilityErr *ProfitEligibilityError
-	require.ErrorAs(t, err, &eligibilityErr)
-	assert.Equal(t, ProfitReasonCostRuleMissing, eligibilityErr.Reason)
+	require.NoError(t, err)
+	assert.True(t, info.UseModelPricingFallback)
 	assert.Nil(t, info.CostProfitRecheckSnapshot)
 }
 

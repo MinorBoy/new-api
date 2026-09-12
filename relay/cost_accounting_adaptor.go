@@ -59,6 +59,9 @@ func (a *costAccountingAdaptor) DoRequest(c *gin.Context, info *relaycommon.Rela
 		if err := service.RecheckSelectedChannelProfit(c, info); err != nil {
 			return nil, relaytypes.NewError(err, relaytypes.ErrorCodeDoRequestFailed)
 		}
+		if info.UseModelPricingFallback {
+			return a.Adaptor.DoRequest(c, info, requestBody)
+		}
 	}
 
 	billingSource := strings.TrimSpace(info.BillingSource)
@@ -567,7 +570,8 @@ func isOpenAIImagesChannelType(channelType int) bool {
 
 func costContractForAPIType(apiType int) channel.CostAccountingAdaptor {
 	switch apiType {
-	case constant.APITypeOpenAI, constant.APITypeAnthropic, constant.APITypeGemini, constant.APITypeOpenRouter:
+	case constant.APITypeOpenAI, constant.APITypeAnthropic, constant.APITypeGemini, constant.APITypeOpenRouter,
+		constant.APITypeSub2API, constant.APITypeNewAPI:
 		return jsonModelCostContract()
 	case constant.APITypePaLM, constant.APITypeBaidu, constant.APITypeZhipu, constant.APITypeAli,
 		constant.APITypeXunfei, constant.APITypeTencent, constant.APITypeZhipuV4, constant.APITypeOllama,

@@ -170,9 +170,12 @@ type RelayInfo struct {
 	// CostProfitRecheckSnapshot is captured by the strict pre-dispatch margin
 	// gate and consumed by cost-attempt preparation before dispatch.
 	CostProfitRecheckSnapshot *hosttypes.CostProfitRecheckSnapshot
-	CostRequestID             int64
-	CostAttempt               *hosttypes.CostAttemptHandle
-	CostOutcome               *hosttypes.CostOutcome
+	// UseModelPricingFallback means strict text billing found no active supplier
+	// rule and should use the normal ModelRatio/ModelPrice billing path.
+	UseModelPricingFallback bool
+	CostRequestID           int64
+	CostAttempt             *hosttypes.CostAttemptHandle
+	CostOutcome             *hosttypes.CostOutcome
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.

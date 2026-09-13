@@ -132,8 +132,14 @@ describe('image pricing catalog helpers', () => {
     }
     const rows = flattenImagePricingCatalog(tiered)
     assert.equal(rows.length, 9)
-    assert.equal(rows.find((row) => row.skuKey === 'gen-1k-medium')?.configured, true)
-    assert.equal(rows.find((row) => row.skuKey === 'gen-4k-high')?.configured, false)
+    assert.equal(
+      rows.find((row) => row.skuKey === 'gen-1k-medium')?.configured,
+      true
+    )
+    assert.equal(
+      rows.find((row) => row.skuKey === 'gen-4k-high')?.configured,
+      false
+    )
   })
 
   test('adds a missing tier SKU and advertises its capability', () => {
@@ -155,8 +161,14 @@ describe('image pricing catalog helpers', () => {
     )
     const model = updated.models.image
     assert.equal(model.skus?.['gen-4k-high']?.tier, '4k')
-    assert.deepEqual(model.endpoints?.generations?.capability?.resolution_tiers, ['4k'])
-    assert.deepEqual(model.endpoints?.generations?.capability?.qualities, ['medium', 'high'])
+    assert.deepEqual(
+      model.endpoints?.generations?.capability?.resolution_tiers,
+      ['4k']
+    )
+    assert.deepEqual(model.endpoints?.generations?.capability?.qualities, [
+      'medium',
+      'high',
+    ])
   })
 
   test('keeps legacy endpoints out of the tiered grid', () => {
@@ -169,7 +181,11 @@ describe('image pricing catalog helpers', () => {
               capability: { enabled: true, qualities: ['medium'] },
             },
             edits: {
-              capability: { enabled: true, sizes: ['1024x1024'], qualities: ['medium'] },
+              capability: {
+                enabled: true,
+                sizes: ['1024x1024'],
+                qualities: ['medium'],
+              },
             },
           },
           skus: {
@@ -199,5 +215,113 @@ describe('image pricing catalog helpers', () => {
       true
     )
   })
+})
 
+describe('Image 2.5 pricing catalog', () => {
+  test('expands each configured model into an independent nine-cell matrix', () => {
+    const rows = flattenImagePricingCatalog({
+      version: 1,
+      models: Object.fromEntries(
+        ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].map(
+          (model) => [
+            model,
+            {
+              profile: 'openai_images',
+              profile_version: 1,
+              endpoints: {
+                generations: {
+                  capability: {
+                    enabled: true,
+                    resolution_tiers: ['1k', '2k', '4k'],
+                    qualities: ['low', 'medium', 'high'],
+                    response_formats: ['b64_json'],
+                    max_n: 4,
+                  },
+                },
+              },
+              skus: {
+                'gen-1k-medium': {
+                  endpoint: 'generations',
+                  tier: '1k',
+                  quality: 'medium',
+                  unit: 'image',
+                  sale_price_usd: '0.03',
+                },
+              },
+            },
+          ]
+        )
+      ),
+    })
+
+    assert.equal(rows.length, 27)
+    for (const model of [
+      'gpt-image-2',
+      'gpt-image-2.5-flare',
+      'gpt-image-2.5-sunburst',
+    ]) {
+      const modelRows = rows.filter((row) => row.model === model)
+      assert.equal(modelRows.length, 9)
+      assert.ok(modelRows.some((row) => row.id === `${model}|gen-4k-high`))
+    }
+  })
+
+  test('updates one Image 2.5 price without changing the other models', () => {
+    const catalog = {
+      version: 1,
+      models: {
+        'gpt-image-2': {
+          skus: {
+            'gen-1k-medium': {
+              endpoint: 'generations',
+              tier: '1k',
+              quality: 'medium',
+              unit: 'image',
+              sale_price_usd: '0.03',
+            },
+          },
+        },
+        'gpt-image-2.5-flare': {
+          skus: {
+            'gen-1k-medium': {
+              endpoint: 'generations',
+              tier: '1k',
+              quality: 'medium',
+              unit: 'image',
+              sale_price_usd: '0.04',
+            },
+          },
+        },
+        'gpt-image-2.5-sunburst': {
+          skus: {
+            'gen-1k-medium': {
+              endpoint: 'generations',
+              tier: '1k',
+              quality: 'medium',
+              unit: 'image',
+              sale_price_usd: '0.05',
+            },
+          },
+        },
+      },
+    }
+    const updated = updateCatalogSalePrices(catalog, {
+      'gpt-image-2.5-flare|gen-2k-high': '0.12',
+    })
+
+    assert.equal(
+      updated.models['gpt-image-2.5-flare'].skus?.['gen-2k-high']
+        ?.sale_price_usd,
+      '0.12'
+    )
+    assert.equal(
+      updated.models['gpt-image-2.5-sunburst'].skus?.['gen-1k-medium']
+        ?.sale_price_usd,
+      '0.05'
+    )
+    assert.equal(
+      updated.models['gpt-image-2'].skus?.['gen-1k-medium']?.sale_price_usd,
+      '0.03'
+    )
+  })
 })

@@ -24,6 +24,14 @@ const (
 	ResolutionTier4K ResolutionTier = "4k"
 )
 
+// OpenAIImage25Models are models sharing the OpenAI Images tier-quality
+// matrix. They are kept as independent catalog entries for pricing and
+// channel capability configuration.
+var OpenAIImage25Models = [...]string{
+	"gpt-image-2.5-flare",
+	"gpt-image-2.5-sunburst",
+}
+
 type ResolutionTier string
 
 const (
@@ -421,6 +429,25 @@ func Snapshot() Catalog {
 	return cloneCatalog(currentCatalog)
 }
 
+// EnsureOpenAIImage25Models adds missing Image 2.5 entries by deep-cloning
+// the configured gpt-image-2 entry. Existing entries are never overwritten.
+func EnsureOpenAIImage25Models(catalog Catalog) (Catalog, bool) {
+	updated := cloneCatalog(catalog)
+	source, ok := updated.Models["gpt-image-2"]
+	if !ok {
+		return updated, false
+	}
+	changed := false
+	for _, modelName := range OpenAIImage25Models {
+		if _, exists := updated.Models[modelName]; exists {
+			continue
+		}
+		updated.Models[modelName] = cloneModelEntry(source)
+		changed = true
+	}
+	return updated, changed
+}
+
 func Resolve(selection Selection) (ResolvedSKU, error) {
 	modelName := strings.TrimSpace(selection.Model)
 	if modelName == "" {
@@ -531,28 +558,32 @@ func Resolve(selection Selection) (ResolvedSKU, error) {
 func cloneCatalog(catalog Catalog) Catalog {
 	clone := Catalog{Version: catalog.Version, Models: make(map[string]ModelEntry, len(catalog.Models))}
 	for modelName, model := range catalog.Models {
-		entry := ModelEntry{
-			Profile:        model.Profile,
-			ProfileVersion: model.ProfileVersion,
-			Endpoints:      make(map[imageprofile.Endpoint]EndpointCatalog, len(model.Endpoints)),
-			SKUs:           make(map[string]SKU, len(model.SKUs)),
-		}
-		for endpoint, endpointCatalog := range model.Endpoints {
-			capability := endpointCatalog.Capability
-			capability.ResolutionTiers = append([]string(nil), capability.ResolutionTiers...)
-			capability.ResolutionQualities = append([]string(nil), capability.ResolutionQualities...)
-			capability.Sizes = append([]string(nil), capability.Sizes...)
-			capability.Qualities = append([]string(nil), capability.Qualities...)
-			capability.ResponseFormats = append([]string(nil), capability.ResponseFormats...)
-			endpointCatalog.Capability = capability
-			entry.Endpoints[endpoint] = endpointCatalog
-		}
-		for key, sku := range model.SKUs {
-			entry.SKUs[key] = sku
-		}
-		clone.Models[modelName] = entry
+		clone.Models[modelName] = cloneModelEntry(model)
 	}
 	return clone
+}
+
+func cloneModelEntry(model ModelEntry) ModelEntry {
+	entry := ModelEntry{
+		Profile:        model.Profile,
+		ProfileVersion: model.ProfileVersion,
+		Endpoints:      make(map[imageprofile.Endpoint]EndpointCatalog, len(model.Endpoints)),
+		SKUs:           make(map[string]SKU, len(model.SKUs)),
+	}
+	for endpoint, endpointCatalog := range model.Endpoints {
+		capability := endpointCatalog.Capability
+		capability.ResolutionTiers = append([]string(nil), capability.ResolutionTiers...)
+		capability.ResolutionQualities = append([]string(nil), capability.ResolutionQualities...)
+		capability.Sizes = append([]string(nil), capability.Sizes...)
+		capability.Qualities = append([]string(nil), capability.Qualities...)
+		capability.ResponseFormats = append([]string(nil), capability.ResponseFormats...)
+		endpointCatalog.Capability = capability
+		entry.Endpoints[endpoint] = endpointCatalog
+	}
+	for key, sku := range model.SKUs {
+		entry.SKUs[key] = sku
+	}
+	return entry
 }
 
 func contains(values []string, target string) bool {

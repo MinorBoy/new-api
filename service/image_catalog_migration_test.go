@@ -105,6 +105,13 @@ func TestMigrateImageCatalogAtStartupCopiesCostsAndIsIdempotent(t *testing.T) {
 	assert.Contains(t, snapshot.Models["gpt-image-2"].SKUs, "gen-1k-medium")
 	assert.Contains(t, snapshot.Models["gpt-image-2"].SKUs, "gen-4k-medium")
 	assert.Empty(t, snapshot.Models["gpt-image-2"].SKUs["gen-4k-medium"].Size)
+	for _, modelName := range image_setting.OpenAIImage25Models {
+		modelEntry, ok := snapshot.Models[modelName]
+		require.True(t, ok)
+		assert.Equal(t, imageprofile.OpenAIImagesProfile, modelEntry.Profile)
+		assert.Len(t, modelEntry.SKUs, 2)
+		assert.Equal(t, "0.08", modelEntry.SKUs["gen-4k-medium"].SalePriceUSD)
+	}
 	var migratedRules []model.ChannelModelCostRule
 	require.NoError(t, db.Where("channel_id = ? AND billable_upstream_model = ? AND cost_variant_key IN ?", 41, "vendor-image", []string{"gen-1k-medium", "gen-4k-medium"}).Find(&migratedRules).Error)
 	assert.Len(t, migratedRules, 2)

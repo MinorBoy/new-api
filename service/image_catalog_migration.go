@@ -105,13 +105,15 @@ func MigrateImageCatalogAtStartup() (ImageCatalogStartupMigrationResult, error) 
 	if err != nil {
 		return result, err
 	}
+	ensuredCatalog, modelsChanged := image_setting.EnsureOpenAIImage25Models(migrated.Catalog)
+	migrated.Catalog = ensuredCatalog
 	result.Conflicts = append(result.Conflicts, migrated.Conflicts...)
 	result.Errors = append(result.Errors, migrated.Errors...)
 	if len(result.Conflicts) > 0 || len(result.Errors) > 0 {
 		return result, nil
 	}
 	legacyToTier := imageCatalogLegacySKUMap(original, migrated.Catalog)
-	if len(legacyToTier) == 0 {
+	if len(legacyToTier) == 0 && !modelsChanged {
 		return result, nil
 	}
 

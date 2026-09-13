@@ -15,22 +15,30 @@ test.describe('image pricing workbench', () => {
     )
 
     await page.goto('/system-settings/billing/image-pricing')
-    await expect(page.getByText('gpt-image-2')).toBeVisible()
+    for (const model of [
+      'gpt-image-2',
+      'gpt-image-2.5-flare',
+      'gpt-image-2.5-sunburst',
+    ]) {
+      await expect(page.getByText(model, { exact: true })).toBeVisible()
+    }
 
     const price = page.getByRole('textbox', {
-      name: 'gpt-image-2 gen-1024x1024-medium sale price',
+      name: 'gpt-image-2.5-flare gen-1k-medium sale price',
     })
     const original = await price.inputValue()
     await price.fill('0.035')
     await expect(page.getByText(/Unsaved changes:\s*1/)).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Save changes' })).toBeEnabled()
+    await expect(
+      page.getByRole('button', { name: 'Save changes' })
+    ).toBeEnabled()
     await page.getByRole('button', { name: 'Save changes' }).click()
     await expect(price).toHaveValue('0.035')
 
     await page.reload()
     await expect(
       page.getByRole('textbox', {
-        name: 'gpt-image-2 gen-1024x1024-medium sale price',
+        name: 'gpt-image-2.5-flare gen-1k-medium sale price',
       })
     ).toHaveValue('0.035')
 

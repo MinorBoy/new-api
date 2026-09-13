@@ -10,7 +10,9 @@
 - `/v1/*` 端点经过 `Distribute`（按 `model` 选择渠道）。
 - `/api/v3/images/generations`（Seedance/ARK 原生路径）由 `SeedanceRequestConvert` 中间件（`middleware/seedance_adapter.go:23`）改写为 `/v1/images/generations`，并额外经过 `ModelRequestRateLimit`。
 
-当 `model` 出现在全局 `ImageModelCatalog` 中时，`Distribute` 会在进入控制器前解析统一图像 SKU，并按渠道 `image_profile`、模型映射、能力覆盖、兼容性状态和成本规则选择渠道。未登记在全局目录中的旧图像模型继续使用原有渠道适配器。
+当 `model` 出现在全局 `ImageModelCatalog` 中时，`Distribute` 会在进入控制器前解析统一图像 SKU，并按渠道 `image_profile`、模型映射、能力覆盖、兼容性状态和成本规则选择渠道。`gpt-image-2`、`gpt-image-2.5-flare` 与 `gpt-image-2.5-sunburst` 是可独立配置的 OpenAI Images 公共模型；三个模型分别维护渠道能力、供应商成本和用户售价。未登记在全局目录中的旧图像模型继续使用原有渠道适配器。
+
+这三个模型使用相同的九种计费组合：`1k/2k/4k × low/medium/high`。请求中的具体 `size` 按总像素归档到分辨率档位，省略 `size` 或传 `auto` 统一按 1K 档计费和路由；具体尺寸不会被公共目录白名单拦截，而是原样转发给上游。新增模型如果是从现有 `gpt-image-2` 目录自动补齐的，售价只是初始副本，供应商成本规则仍需按渠道和 SKU 单独配置。
 
 ## 接口端点
 

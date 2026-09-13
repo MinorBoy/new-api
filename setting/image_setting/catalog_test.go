@@ -81,6 +81,82 @@ func TestCatalogUpdateResolveAndSnapshot(t *testing.T) {
 	assert.NotEmpty(t, Snapshot().Models["gpt-image-1"].Endpoints[imageprofile.EndpointGenerations].Capability.Sizes)
 }
 
+func TestEnsureOpenAIImage25ModelsClonesExistingImage2Matrix(t *testing.T) {
+	entry := ModelEntry{
+		Profile:        imageprofile.OpenAIImagesProfile,
+		ProfileVersion: imageprofile.OpenAIImagesVersion,
+		Endpoints: map[imageprofile.Endpoint]EndpointCatalog{
+			imageprofile.EndpointGenerations: {
+				Capability: imageprofile.Capability{
+					Enabled:         true,
+					ResolutionTiers: []string{"1k", "2k", "4k"},
+					Qualities:       []string{"low", "medium", "high"},
+					ResponseFormats: []string{"b64_json"},
+					MaxN:            4,
+				},
+				DefaultSize:           "auto",
+				DefaultQuality:        "medium",
+				DefaultResponseFormat: "b64_json",
+			},
+		},
+		SKUs: map[string]SKU{
+			"gen-1k-low":    {Endpoint: imageprofile.EndpointGenerations, Tier: "1k", Quality: "low", Unit: "image", SalePriceUSD: "0.05"},
+			"gen-1k-medium": {Endpoint: imageprofile.EndpointGenerations, Tier: "1k", Quality: "medium", Unit: "image", SalePriceUSD: "0.05"},
+			"gen-1k-high":   {Endpoint: imageprofile.EndpointGenerations, Tier: "1k", Quality: "high", Unit: "image", SalePriceUSD: "0.05"},
+			"gen-2k-low":    {Endpoint: imageprofile.EndpointGenerations, Tier: "2k", Quality: "low", Unit: "image", SalePriceUSD: "0.1"},
+			"gen-2k-medium": {Endpoint: imageprofile.EndpointGenerations, Tier: "2k", Quality: "medium", Unit: "image", SalePriceUSD: "0.1"},
+			"gen-2k-high":   {Endpoint: imageprofile.EndpointGenerations, Tier: "2k", Quality: "high", Unit: "image", SalePriceUSD: "0.1"},
+			"gen-4k-low":    {Endpoint: imageprofile.EndpointGenerations, Tier: "4k", Quality: "low", Unit: "image", SalePriceUSD: "0.2"},
+			"gen-4k-medium": {Endpoint: imageprofile.EndpointGenerations, Tier: "4k", Quality: "medium", Unit: "image", SalePriceUSD: "0.2"},
+			"gen-4k-high":   {Endpoint: imageprofile.EndpointGenerations, Tier: "4k", Quality: "high", Unit: "image", SalePriceUSD: "0.2"},
+		},
+	}
+	catalog := Catalog{Version: CatalogVersion, Models: map[string]ModelEntry{"gpt-image-2": entry}}
+
+	updated, changed := EnsureOpenAIImage25Models(catalog)
+	require.True(t, changed)
+	for _, modelName := range OpenAIImage25Models {
+		model, ok := updated.Models[modelName]
+		require.True(t, ok)
+		require.Len(t, model.SKUs, 9)
+		assert.Equal(t, "0.2", model.SKUs["gen-4k-high"].SalePriceUSD)
+	}
+
+	updated.Models[OpenAIImage25Models[0]].SKUs["gen-1k-low"] = SKU{}
+	assert.Equal(t, "0.05", updated.Models[OpenAIImage25Models[1]].SKUs["gen-1k-low"].SalePriceUSD)
+	assert.Equal(t, "0.05", catalog.Models["gpt-image-2"].SKUs["gen-1k-low"].SalePriceUSD)
+
+	_, changed = EnsureOpenAIImage25Models(updated)
+	assert.False(t, changed)
+}
+
+func TestEnsureOpenAIImage25ModelsPreservesExistingIndependentEntry(t *testing.T) {
+	source := ModelEntry{
+		Profile:        imageprofile.OpenAIImagesProfile,
+		ProfileVersion: imageprofile.OpenAIImagesVersion,
+		Endpoints: map[imageprofile.Endpoint]EndpointCatalog{
+			imageprofile.EndpointGenerations: {
+				Capability:     imageprofile.Capability{Enabled: true, Qualities: []string{"medium"}, ResponseFormats: []string{"b64_json"}, MaxN: 1},
+				DefaultQuality: "medium", DefaultResponseFormat: "b64_json",
+			},
+		},
+		SKUs: map[string]SKU{
+			"gen-1k-medium": {Endpoint: imageprofile.EndpointGenerations, Tier: "1k", Quality: "medium", Unit: "image", SalePriceUSD: "0.03"},
+		},
+	}
+	customFlare := cloneModelEntry(source)
+	customFlare.SKUs["gen-1k-medium"] = SKU{Endpoint: imageprofile.EndpointGenerations, Tier: "1k", Quality: "medium", Unit: "image", SalePriceUSD: "0.99"}
+	catalog := Catalog{Version: CatalogVersion, Models: map[string]ModelEntry{
+		"gpt-image-2":          source,
+		OpenAIImage25Models[0]: customFlare,
+	}}
+
+	updated, changed := EnsureOpenAIImage25Models(catalog)
+	require.True(t, changed)
+	assert.Equal(t, "0.99", updated.Models[OpenAIImage25Models[0]].SKUs["gen-1k-medium"].SalePriceUSD)
+	assert.Equal(t, "0.03", updated.Models[OpenAIImage25Models[1]].SKUs["gen-1k-medium"].SalePriceUSD)
+}
+
 func TestResolveUsesTierSKUForArbitraryImageSize(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, UpdateCatalogByJSONString(`{"version":1,"models":{}}`)) })
 	raw := `{"version":1,"models":{"gpt-image-2":{"profile":"openai_images","profile_version":1,"endpoints":{"generations":{"capability":{"enabled":true,"qualities":["low","medium","high"],"response_formats":["b64_json"],"max_n":4},"default_size":"auto","default_quality":"medium","default_response_format":"b64_json"}},"skus":{"gen-1k-medium":{"endpoint":"generations","tier":"1k","quality":"medium","unit":"image","sale_price_usd":"0.02"},"gen-2k-high":{"endpoint":"generations","tier":"2k","quality":"high","unit":"image","sale_price_usd":"0.04"},"gen-4k-high":{"endpoint":"generations","tier":"4k","quality":"high","unit":"image","sale_price_usd":"0.08"}}}}}`

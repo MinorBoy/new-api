@@ -85,3 +85,12 @@ _codex_sheet_work/
 **/__test__/
 **/__tests__/
 stress/
+*.tsv
+*.sql
+options-*.json
+*.pricing.*.json
+*.pricing.json
+*.pricing*.json
+*.pricing*.html
+docs/acceptance/*.md
+

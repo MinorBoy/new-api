@@ -33,7 +33,7 @@ import { getCommonHeaders } from "@/lib/api";
 import type { ApiKey } from "@/features/keys/types";
 
 const studioUrl =
-  import.meta.env.VITE_FLYREQ_STUDIO_URL || "http://localhost:3001";
+  import.meta.env.VITE_FLYREQ_STUDIO_URL || "http://127.0.0.1:3001";
 
 type StudioProvider = {
   type: "image" | "video" | "text";
@@ -147,7 +147,9 @@ export async function openFlyreqStudioWithPreparation(
   try {
     popup.location.href = await prepareUrl();
   } catch (error) {
-    popup.close();
+    // Keep the reserved tab on the already-open studio shell. Closing it after
+    // a transient API/configuration failure leaves users with an empty tab and
+    // makes recovery impossible without reopening the sidebar item.
     console.error("Failed to prepare FlyReq Studio configuration", error);
   }
 }

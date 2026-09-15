@@ -1,65 +1,66 @@
-import type { LinkProps } from '@tanstack/react-router'
-import type { TFunction } from 'i18next'
+import type { LinkProps } from "@tanstack/react-router";
+import type { TFunction } from "i18next";
 
 /**
  * Base navigation item type
  */
 type BaseNavItem = {
-  title: string
-  badge?: string
-  icon?: React.ElementType
-  activeUrls?: (LinkProps['to'] | (string & {}))[]
-  configUrls?: (LinkProps['to'] | (string & {}))[]
+  title: string;
+  badge?: string;
+  icon?: React.ElementType;
+  activeUrls?: (LinkProps["to"] | (string & {}))[];
+  configUrls?: (LinkProps["to"] | (string & {}))[];
   /**
    * Minimum role required to see this item in the sidebar. When set, the item
    * is hidden for users whose role is below this threshold (see
    * `useSidebarView`). Route-level guards still enforce access independently.
    */
-  requiredRole?: number
+  requiredRole?: number;
   /** Fine-grained administrator permission required to see this item. */
-  requiredPermission?: { resource: string; action: string }
-}
+  requiredPermission?: { resource: string; action: string };
+  onClick?: () => void;
+};
 
 /**
  * Navigation link type - single link item
  */
 export type NavLink = BaseNavItem & {
-  url: LinkProps['to'] | (string & {})
-  items?: never
-  type?: never
-}
+  url: LinkProps["to"] | (string & {});
+  items?: never;
+  type?: never;
+};
 
 /**
  * Navigation collapsible type - collapsible navigation with sub-items
  */
 export type NavCollapsible = BaseNavItem & {
-  items: (BaseNavItem & { url: LinkProps['to'] | (string & {}) })[]
-  url?: never
-  type?: never
-}
+  items: (BaseNavItem & { url: LinkProps["to"] | (string & {}) })[];
+  url?: never;
+  type?: never;
+};
 
 /**
  * Dynamic chat presets type - dynamically loaded chat preset list from API
  */
 export type NavChatPresets = BaseNavItem & {
-  type: 'chat-presets'
-  url?: never
-  items?: never
-}
+  type: "chat-presets";
+  url?: never;
+  items?: never;
+};
 
 /**
  * Navigation item union type
  */
-export type NavItem = NavCollapsible | NavLink | NavChatPresets
+export type NavItem = NavCollapsible | NavLink | NavChatPresets;
 
 /**
  * Navigation group type - a group of navigation items in sidebar
  */
 export type NavGroup = {
-  id?: string
-  title: string
-  items: NavItem[]
-}
+  id?: string;
+  title: string;
+  items: NavItem[];
+};
 
 /**
  * Root sidebar data type
@@ -68,37 +69,37 @@ export type NavGroup = {
  * application navigation (chat, dashboard, admin, etc).
  */
 export type SidebarData = {
-  navGroups: NavGroup[]
-}
+  navGroups: NavGroup[];
+};
 
 /**
  * Top navigation link type
  */
 export type TopNavLink = {
-  title: string
-  href: string
-  isActive?: boolean
-  disabled?: boolean
-  requiresAuth?: boolean
-  external?: boolean
+  title: string;
+  href: string;
+  isActive?: boolean;
+  disabled?: boolean;
+  requiresAuth?: boolean;
+  external?: boolean;
   /**
    * Open an in-app route path in a new browser tab. Unlike `external` (which
    * targets a different origin), this keeps the same-origin SPA path but
    * bypasses client-side routing to launch a fresh tab — used for the docs
    * platform so it opens beside the console.
    */
-  openInNewTab?: boolean
-}
+  openInNewTab?: boolean;
+};
 
 /**
  * Back-navigation descriptor for a nested sidebar view
  */
 export type SidebarViewParent = {
   /** Destination URL for the back button */
-  to: LinkProps['to'] | (string & {})
+  to: LinkProps["to"] | (string & {});
   /** Visible label, e.g. "Back to Dashboard" — already localized */
-  label: string
-}
+  label: string;
+};
 
 /**
  * Nested sidebar view configuration
@@ -110,14 +111,14 @@ export type SidebarViewParent = {
  */
 export type SidebarView = {
   /** Stable identifier (also drives transition animation keys) */
-  id: string
+  id: string;
   /** Path matcher that activates this view */
-  pathPattern: RegExp
+  pathPattern: RegExp;
   /** Back-navigation descriptor; required for nested views */
-  parent: SidebarViewParent
+  parent: SidebarViewParent;
   /** Nav group builder, called per render with the active translator */
-  getNavGroups: (t: TFunction) => NavGroup[]
-}
+  getNavGroups: (t: TFunction) => NavGroup[];
+};
 
 /**
  * Resolved sidebar view returned by `useSidebarView()`
@@ -127,7 +128,7 @@ export type SidebarView = {
  */
 export type ResolvedSidebarView = {
   /** Animation/identity key — falls back to a sentinel for the root view */
-  key: string
-  view: SidebarView | null
-  navGroups: NavGroup[]
-}
+  key: string;
+  view: SidebarView | null;
+  navGroups: NavGroup[];
+};

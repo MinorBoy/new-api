@@ -43,6 +43,7 @@ export const STATIC_I18N_KEYS = [
   'Per Request',
   'All Types',
   'Chat',
+  'Creative Studio',
   'Response',
   'Anthropic',
   'Gemini',

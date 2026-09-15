@@ -5,6 +5,25 @@
 name: new-api-local
 
 services:
+  flyreq-image-studio:
+    build:
+      context: C:/Users/880pro/Documents/flyreq-image-studio
+      dockerfile: Dockerfile
+    image: flyreq-image-studio:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FLYREQ_STUDIO_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      FLYREQ_BASE_URL_REWRITE_MAP: '{"http://localhost:3000":"http://new-api:3000","http://127.0.0.1:3000":"http://new-api:3000"}'
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/flyreq:/app/backend/data
+      - ./logs/flyreq:/app/backend/logs
+    depends_on:
+      new-api:
+        condition: service_healthy
+
   new-api:
     build:
       context: .

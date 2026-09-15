@@ -17,6 +17,9 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
+	// 工作台等跨域前端需要访问用户模型与密钥接口；统一 API 路由必须先写入 CORS 响应头，
+	// 即使后续鉴权中间件返回 401/403 也要让浏览器能够读取错误响应。
+	apiRouter.Use(middleware.CORS())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
 	{
 		apiRouter.GET("/setup", controller.GetSetup)

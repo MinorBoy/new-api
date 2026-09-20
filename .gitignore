@@ -93,4 +93,5 @@ options-*.json
 *.pricing*.json
 *.pricing*.html
 docs/acceptance/*.md
-
+.zcodeignore
+.zcode*

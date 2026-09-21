@@ -25,6 +25,7 @@ import type { UsageLog } from '../data/schema'
 import { parseLogOther } from '../lib/format'
 import { getLogTypeConfig, isTimingLogType } from '../lib/utils'
 import type { LogCategory } from '../types'
+import { EndpointCell } from './endpoint-cell'
 import { StreamTpsCell, TimingMetricsCell } from './timing-metrics-cell'
 import { TokensCell } from './tokens-cell'
 import { useUsageLogsContext } from './usage-logs-provider'
@@ -275,6 +276,11 @@ function CommonLogsCard<TData>({
           cell={cells.get('token_name')}
           valueClassName='[&_.flex-col]:max-w-none [&_.flex-col>*:not(:first-child)]:text-[11px] [&_.flex-col>*:not(:first-child)]:leading-none'
         />
+        {rowData && cells.has('endpoint') ? (
+          <div className='bg-muted/20 col-span-2 min-w-0 rounded-md px-2 py-1.5'>
+            <EndpointCell log={rowData} />
+          </div>
+        ) : null}
         {rowData ? (
           <MobileStreamTimingField log={rowData} />
         ) : (

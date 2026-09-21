@@ -123,11 +123,13 @@ func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other
 	if ctx != nil && ctx.Request != nil && ctx.Request.URL != nil {
 		if path := ctx.Request.URL.Path; path != "" {
 			other["request_path"] = path
-			return
 		}
 	}
-	if relayInfo != nil && relayInfo.RequestURLPath != "" {
+	if _, ok := other["request_path"]; !ok && relayInfo != nil && relayInfo.RequestURLPath != "" {
 		other["request_path"] = relaycommon.SafeRequestPath(relayInfo.RequestURLPath)
+	}
+	if relayInfo != nil && relayInfo.UpstreamRequestPath != "" {
+		other["upstream_request_path"] = relayInfo.UpstreamRequestPath
 	}
 }
 

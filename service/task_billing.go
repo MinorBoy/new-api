@@ -50,6 +50,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other := make(map[string]interface{})
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
+	if info.UpstreamRequestPath != "" {
+		other["upstream_request_path"] = info.UpstreamRequestPath
+	}
 	if info.PriceData.BillingMode != billing_setting.BillingModePerDuration &&
 		info.PriceData.BillingMode != billing_setting.BillingModeSeedanceTokens {
 		other["model_price"] = info.PriceData.ModelPrice

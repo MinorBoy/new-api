@@ -40,6 +40,7 @@ import {
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
+import { EndpointCell } from '../endpoint-cell'
 import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
@@ -301,6 +302,13 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       size: 180,
     },
   ]
+
+  const endpointColumn: ColumnDef<UsageLog> = {
+    id: 'endpoint',
+    header: t('Endpoint'),
+    cell: ({ row }) => <EndpointCell log={row.original} />,
+    size: 240,
+  }
 
   if (isAdmin) {
     columns.push(
@@ -601,6 +609,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       },
       meta: { mobileTitle: true },
     },
+    ...(isAdmin ? [endpointColumn] : []),
     {
       accessorKey: 'is_stream',
       header: t('Stream'),

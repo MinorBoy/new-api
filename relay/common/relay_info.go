@@ -102,6 +102,7 @@ type RelayInfo struct {
 	OriginModelName        string
 	RequestURLPath         string
 	InboundRequestPath     string
+	UpstreamRequestPath    string
 	RequestHeaders         map[string]string
 	ShouldIncludeUsage     bool
 	DisablePing            bool // 是否禁止向下游发送自定义 Ping

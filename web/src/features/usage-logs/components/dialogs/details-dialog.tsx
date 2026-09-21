@@ -548,8 +548,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
               <div className='min-w-0 space-y-1 pr-6'>
                 {other?.request_path && (
                   <DetailRow
-                    label={t('Path')}
+                    label={t('Inbound')}
                     value={other.request_path}
+                    mono
+                  />
+                )}
+                {other?.upstream_request_path && (
+                  <DetailRow
+                    label={t('Upstream')}
+                    value={other.upstream_request_path}
                     mono
                   />
                 )}

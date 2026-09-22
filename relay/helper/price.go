@@ -370,6 +370,11 @@ func HasModelBillingConfig(modelName string) bool {
 		durationPrice, ok := billing_setting.GetDurationPrice(modelName)
 		return ok && durationPrice.Validate(relaycommon.MaxTaskDurationSeconds) == nil
 	}
+	// Unified OpenAI Images models are billed through catalog SKUs instead of
+	// flat prices or ratios; a catalog entry is a complete billing config.
+	if image_setting.HasBillableModel(modelName) {
+		return true
+	}
 	if _, ok := ratio_setting.GetModelPrice(modelName, false); ok {
 		return true
 	}

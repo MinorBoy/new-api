@@ -11,6 +11,7 @@ import (
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/image_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -385,4 +386,23 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	require.Equal(t, "QuotaFromFloat", clamp.Op)
 	require.Equal(t, common.QuotaClampOverflow, clamp.Kind)
 	require.Nil(t, info.Billing)
+}
+
+func TestHasModelBillingConfigAcceptsCatalogSKUPricing(t *testing.T) {
+	restore := image_setting.Snapshot()
+	t.Cleanup(func() {
+		encoded, err := common.Marshal(restore)
+		require.NoError(t, err)
+		require.NoError(t, image_setting.UpdateCatalogByJSONString(string(encoded)))
+	})
+	// A model priced only through the image catalog (no flat price or ratio)
+	// must still count as fully configured, otherwise /v1/models hides it.
+	require.NoError(t, image_setting.UpdateCatalogByJSONString(`{"version":1,"models":{
+		"gpt-image-2.5-flare":{"profile":"openai_images","profile_version":1,
+			"endpoints":{"generations":{"capability":{"enabled":true,"qualities":["medium"],"response_formats":["b64_json"],"max_n":1},"default_size":"1024x1024","default_quality":"medium","default_response_format":"b64_json"}},
+			"skus":{"gen-1k-medium":{"endpoint":"generations","tier":"1k","quality":"medium","unit":"image","sale_price_usd":"0.05"}}}
+	}}`))
+
+	assert.True(t, HasModelBillingConfig("gpt-image-2.5-flare"))
+	assert.False(t, HasModelBillingConfig("gpt-image-3.0"))
 }

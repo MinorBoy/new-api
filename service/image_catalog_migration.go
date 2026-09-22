@@ -105,7 +105,15 @@ func MigrateImageCatalogAtStartup() (ImageCatalogStartupMigrationResult, error) 
 	if err != nil {
 		return result, err
 	}
-	ensuredCatalog, modelsChanged := image_setting.EnsureOpenAIImage25Models(migrated.Catalog)
+	// Seed catalog entries for image models advertised by enabled image
+	// channels but missing from the catalog. A failed channel lookup only
+	// skips seeding (logged); it must not block the tier migration itself.
+	missingByProfile, seedErr := missingImageModelsByProfile(migrated.Catalog)
+	if seedErr != nil {
+		common.SysError("image catalog seeding skipped, channel lookup failed: " + seedErr.Error())
+		missingByProfile = nil
+	}
+	ensuredCatalog, modelsChanged := image_setting.EnsureMissingProfileModels(migrated.Catalog, missingByProfile)
 	migrated.Catalog = ensuredCatalog
 	result.Conflicts = append(result.Conflicts, migrated.Conflicts...)
 	result.Errors = append(result.Errors, migrated.Errors...)
@@ -400,4 +408,49 @@ func cloneImageCatalog(catalog image_setting.Catalog) image_setting.Catalog {
 		clone.Models[name] = clonedEntry
 	}
 	return clone
+}
+
+// missingImageModelsByProfile returns image models advertised by enabled
+// channels with an image profile binding but missing from the catalog,
+// grouped by profile. Only profiles that already have a catalog entry are
+// considered, because seeding clones a sibling entry of the same profile.
+func missingImageModelsByProfile(catalog image_setting.Catalog) (map[string][]string, error) {
+	var channels []model.Channel
+	if err := model.DB.Where("status = ?", common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]struct{})
+	for _, entry := range catalog.Models {
+		profiles[entry.Profile] = struct{}{}
+	}
+	missing := make(map[string][]string)
+	seen := make(map[string]struct{})
+	for _, channel := range channels {
+		binding := channel.GetOtherSettings().ImageProfile
+		if binding == nil {
+			continue
+		}
+		if _, ok := profiles[binding.Profile]; !ok {
+			continue
+		}
+		for _, name := range channel.GetModels() {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, exists := catalog.Models[name]; exists {
+				continue
+			}
+			key := binding.Profile + "\x00" + name
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			missing[binding.Profile] = append(missing[binding.Profile], name)
+		}
+	}
+	for profile := range missing {
+		sort.Strings(missing[profile])
+	}
+	return missing, nil
 }

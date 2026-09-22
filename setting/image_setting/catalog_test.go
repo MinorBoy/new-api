@@ -81,7 +81,7 @@ func TestCatalogUpdateResolveAndSnapshot(t *testing.T) {
 	assert.NotEmpty(t, Snapshot().Models["gpt-image-1"].Endpoints[imageprofile.EndpointGenerations].Capability.Sizes)
 }
 
-func TestEnsureOpenAIImage25ModelsClonesExistingImage2Matrix(t *testing.T) {
+func TestEnsureMissingProfileModelsClonesExistingImage2Matrix(t *testing.T) {
 	entry := ModelEntry{
 		Profile:        imageprofile.OpenAIImagesProfile,
 		ProfileVersion: imageprofile.OpenAIImagesVersion,
@@ -112,25 +112,31 @@ func TestEnsureOpenAIImage25ModelsClonesExistingImage2Matrix(t *testing.T) {
 		},
 	}
 	catalog := Catalog{Version: CatalogVersion, Models: map[string]ModelEntry{"gpt-image-2": entry}}
+	siblings := []string{"gpt-image-2.5-flare", "gpt-image-3.0"}
 
-	updated, changed := EnsureOpenAIImage25Models(catalog)
+	updated, changed := EnsureMissingProfileModels(catalog, map[string][]string{imageprofile.OpenAIImagesProfile: siblings})
 	require.True(t, changed)
-	for _, modelName := range OpenAIImage25Models {
+	for _, modelName := range siblings {
 		model, ok := updated.Models[modelName]
 		require.True(t, ok)
-		require.Len(t, model.SKUs, 9)
+		require.Len(t, model.SKUs, 18)
 		assert.Equal(t, "0.2", model.SKUs["gen-4k-high"].SalePriceUSD)
+		assert.Equal(t, "0.2", model.SKUs["edit-4k-high"].SalePriceUSD)
+		edits, ok := model.Endpoints[imageprofile.EndpointEdits]
+		require.True(t, ok)
+		assert.True(t, edits.Capability.Enabled)
+		assert.GreaterOrEqual(t, edits.Capability.MaxInputImages, uint(1))
 	}
 
-	updated.Models[OpenAIImage25Models[0]].SKUs["gen-1k-low"] = SKU{}
-	assert.Equal(t, "0.05", updated.Models[OpenAIImage25Models[1]].SKUs["gen-1k-low"].SalePriceUSD)
+	updated.Models[siblings[0]].SKUs["gen-1k-low"] = SKU{}
+	assert.Equal(t, "0.05", updated.Models[siblings[1]].SKUs["gen-1k-low"].SalePriceUSD)
 	assert.Equal(t, "0.05", catalog.Models["gpt-image-2"].SKUs["gen-1k-low"].SalePriceUSD)
 
-	_, changed = EnsureOpenAIImage25Models(updated)
+	_, changed = EnsureMissingProfileModels(updated, map[string][]string{imageprofile.OpenAIImagesProfile: siblings})
 	assert.False(t, changed)
 }
 
-func TestEnsureOpenAIImage25ModelsPreservesExistingIndependentEntry(t *testing.T) {
+func TestEnsureMissingProfileModelsPreservesExistingIndependentEntry(t *testing.T) {
 	source := ModelEntry{
 		Profile:        imageprofile.OpenAIImagesProfile,
 		ProfileVersion: imageprofile.OpenAIImagesVersion,
@@ -147,14 +153,40 @@ func TestEnsureOpenAIImage25ModelsPreservesExistingIndependentEntry(t *testing.T
 	customFlare := cloneModelEntry(source)
 	customFlare.SKUs["gen-1k-medium"] = SKU{Endpoint: imageprofile.EndpointGenerations, Tier: "1k", Quality: "medium", Unit: "image", SalePriceUSD: "0.99"}
 	catalog := Catalog{Version: CatalogVersion, Models: map[string]ModelEntry{
-		"gpt-image-2":          source,
-		OpenAIImage25Models[0]: customFlare,
+		"gpt-image-2":            source,
+		"gpt-image-2.5-flare":    customFlare,
 	}}
+	siblings := []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"}
 
-	updated, changed := EnsureOpenAIImage25Models(catalog)
+	updated, changed := EnsureMissingProfileModels(catalog, map[string][]string{imageprofile.OpenAIImagesProfile: siblings})
 	require.True(t, changed)
-	assert.Equal(t, "0.99", updated.Models[OpenAIImage25Models[0]].SKUs["gen-1k-medium"].SalePriceUSD)
-	assert.Equal(t, "0.03", updated.Models[OpenAIImage25Models[1]].SKUs["gen-1k-medium"].SalePriceUSD)
+	assert.Equal(t, "0.99", updated.Models["gpt-image-2.5-flare"].SKUs["gen-1k-medium"].SalePriceUSD)
+	assert.Equal(t, "0.03", updated.Models["gpt-image-2.5-sunburst"].SKUs["gen-1k-medium"].SalePriceUSD)
+	assert.Len(t, updated.Models["gpt-image-2.5-flare"].SKUs, 1)
+	assert.Len(t, updated.Models["gpt-image-2.5-sunburst"].SKUs, 2)
+}
+
+func TestHasBillableModel(t *testing.T) {
+	restore := Snapshot()
+	t.Cleanup(func() {
+		catalogMu.Lock()
+		currentCatalog = restore
+		catalogMu.Unlock()
+	})
+
+	require.NoError(t, UpdateCatalogByJSONString(`{"version":1,"models":{
+		"gpt-image-2":{"profile":"openai_images","profile_version":1,
+			"endpoints":{"generations":{"capability":{"enabled":true,"qualities":["medium"],"response_formats":["b64_json"],"max_n":1},"default_size":"1024x1024","default_quality":"medium","default_response_format":"b64_json"}},
+			"skus":{"gen-1k-medium":{"endpoint":"generations","tier":"1k","quality":"medium","unit":"image","sale_price_usd":"0.03"}}},
+		"gpt-image-2.5-sunburst":{"profile":"openai_images","profile_version":1,
+			"endpoints":{"generations":{"capability":{"enabled":true,"qualities":["medium"],"response_formats":["b64_json"],"max_n":1},"default_size":"1024x1024","default_quality":"medium","default_response_format":"b64_json"}},
+			"skus":{"gen-1k-medium":{"endpoint":"generations","tier":"1k","quality":"medium","unit":"image","sale_price_usd":"0.05"}}}
+	}}`))
+
+	assert.True(t, HasBillableModel("gpt-image-2"))
+	assert.True(t, HasBillableModel("gpt-image-2.5-sunburst"))
+	assert.False(t, HasBillableModel("gpt-image-9"))
+	assert.False(t, HasBillableModel(""))
 }
 
 func TestResolveUsesTierSKUForArbitraryImageSize(t *testing.T) {

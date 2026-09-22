@@ -24,14 +24,6 @@ const (
 	ResolutionTier4K ResolutionTier = "4k"
 )
 
-// OpenAIImage25Models are models sharing the OpenAI Images tier-quality
-// matrix. They are kept as independent catalog entries for pricing and
-// channel capability configuration.
-var OpenAIImage25Models = [...]string{
-	"gpt-image-2.5-flare",
-	"gpt-image-2.5-sunburst",
-}
-
 type ResolutionTier string
 
 const (
@@ -429,23 +421,119 @@ func Snapshot() Catalog {
 	return cloneCatalog(currentCatalog)
 }
 
-// EnsureOpenAIImage25Models adds missing Image 2.5 entries by deep-cloning
-// the configured gpt-image-2 entry. Existing entries are never overwritten.
-func EnsureOpenAIImage25Models(catalog Catalog) (Catalog, bool) {
+// EnsureMissingProfileModels seeds catalog entries for models that channels
+// advertise but the catalog lacks. missingByProfile maps an image profile to
+// the model names that should be seeded under it; each is deep-cloned from a
+// base entry sharing the profile (gpt-image-2 preferred for the OpenAI
+// Images family, otherwise the first name in sorted order). Existing entries
+// are never overwritten. When the base only declares generations, an edits
+// endpoint with edit-* SKUs is mirrored from generations so image-to-image
+// requests work immediately — generations and edits share per-image pricing
+// on OpenAI Images upstreams.
+func EnsureMissingProfileModels(catalog Catalog, missingByProfile map[string][]string) (Catalog, bool) {
 	updated := cloneCatalog(catalog)
-	source, ok := updated.Models["gpt-image-2"]
-	if !ok {
-		return updated, false
-	}
 	changed := false
-	for _, modelName := range OpenAIImage25Models {
-		if _, exists := updated.Models[modelName]; exists {
+	for profile, names := range missingByProfile {
+		base := baseImageModelForProfile(updated, profile)
+		if base == "" {
 			continue
 		}
-		updated.Models[modelName] = cloneModelEntry(source)
-		changed = true
+		for _, modelName := range names {
+			if _, exists := updated.Models[modelName]; exists {
+				continue
+			}
+			entry := cloneModelEntry(updated.Models[base])
+			ensureEditsEndpoint(&entry)
+			updated.Models[modelName] = entry
+			changed = true
+		}
 	}
 	return updated, changed
+}
+
+// baseImageModelForProfile picks the entry a missing sibling is cloned from.
+// gpt-image-2 stays the preferred base for the OpenAI Images profile so
+// clones keep inheriting the operator's canonical matrix; other profiles
+// fall back to the first entry name in sorted order for determinism.
+func baseImageModelForProfile(catalog Catalog, profile string) string {
+	if entry, ok := catalog.Models["gpt-image-2"]; ok && entry.Profile == profile {
+		return "gpt-image-2"
+	}
+	names := make([]string, 0, len(catalog.Models))
+	for name, entry := range catalog.Models {
+		if entry.Profile == profile {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return ""
+	}
+	return names[0]
+}
+
+// ensureEditsEndpoint mirrors the generations endpoint into an edits
+// endpoint. Catalog max_input_images of 0 rejects every reference image, so
+// the mirrored capability gets a positive bound (4, the common upstream
+// default for image edit batches).
+func ensureEditsEndpoint(entry *ModelEntry) {
+	if _, ok := entry.Endpoints[imageprofile.EndpointEdits]; ok {
+		return
+	}
+	generations, ok := entry.Endpoints[imageprofile.EndpointGenerations]
+	if !ok {
+		return
+	}
+	capability := generations.Capability
+	if capability.MaxInputImages < 1 {
+		capability.MaxInputImages = 4
+	}
+	entry.Endpoints[imageprofile.EndpointEdits] = EndpointCatalog{
+		Capability:            capability,
+		DefaultSize:           generations.DefaultSize,
+		DefaultQuality:        generations.DefaultQuality,
+		DefaultResponseFormat: generations.DefaultResponseFormat,
+	}
+	for _, sku := range entry.SKUs {
+		if sku.Endpoint != imageprofile.EndpointGenerations {
+			continue
+		}
+		editKey := BuildTierSKUKey(imageprofile.EndpointEdits, ResolutionTier(sku.Tier), sku.Quality)
+		if _, exists := entry.SKUs[editKey]; exists {
+			continue
+		}
+		entry.SKUs[editKey] = SKU{
+			Endpoint:     imageprofile.EndpointEdits,
+			Tier:         sku.Tier,
+			Size:         sku.Size,
+			Quality:      sku.Quality,
+			Unit:         sku.Unit,
+			SalePriceUSD: sku.SalePriceUSD,
+		}
+	}
+}
+
+// HasBillableModel reports whether the catalog prices the model through SKU
+// billing: the entry exists and exposes at least one enabled endpoint (or a
+// leftover SKU). Callers invoke it per model while listing models, so it
+// reads the live catalog directly instead of deep-cloning via Snapshot.
+func HasBillableModel(modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return false
+	}
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	entry, ok := currentCatalog.Models[modelName]
+	if !ok {
+		return false
+	}
+	for _, endpoint := range entry.Endpoints {
+		if endpoint.Capability.Enabled {
+			return true
+		}
+	}
+	return len(entry.SKUs) > 0
 }
 
 func Resolve(selection Selection) (ResolvedSKU, error) {

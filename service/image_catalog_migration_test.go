@@ -80,7 +80,14 @@ func TestMigrateImageCatalogAtStartupCopiesCostsAndIsIdempotent(t *testing.T) {
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = map[string]string{}
 	common.OptionMapRWMutex.Unlock()
-	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.ChannelModelCostRule{}))
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.ChannelModelCostRule{}, &model.Channel{}))
+	// Seeding is channel-driven: an enabled OpenAI Images channel advertises
+	// the 2.5 siblings that the catalog lacks.
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 41, Name: "vendor-image", Status: common.ChannelStatusEnabled, Type: 1,
+		Models: "gpt-image-2,gpt-image-2.5-flare,gpt-image-2.5-sunburst",
+		OtherSettings: `{"image_profile":{"profile":"openai_images","profile_version":1}}`,
+	}).Error)
 	t.Cleanup(func() {
 		model.DB = previousDB
 		common.SetDatabaseTypes(previousMainType, previousLogType)
@@ -105,12 +112,18 @@ func TestMigrateImageCatalogAtStartupCopiesCostsAndIsIdempotent(t *testing.T) {
 	assert.Contains(t, snapshot.Models["gpt-image-2"].SKUs, "gen-1k-medium")
 	assert.Contains(t, snapshot.Models["gpt-image-2"].SKUs, "gen-4k-medium")
 	assert.Empty(t, snapshot.Models["gpt-image-2"].SKUs["gen-4k-medium"].Size)
-	for _, modelName := range image_setting.OpenAIImage25Models {
+	for _, modelName := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
 		modelEntry, ok := snapshot.Models[modelName]
 		require.True(t, ok)
 		assert.Equal(t, imageprofile.OpenAIImagesProfile, modelEntry.Profile)
-		assert.Len(t, modelEntry.SKUs, 2)
+		// Clones mirror generations into edits, so each tier SKU doubles.
+		assert.Len(t, modelEntry.SKUs, 4)
 		assert.Equal(t, "0.08", modelEntry.SKUs["gen-4k-medium"].SalePriceUSD)
+		assert.Equal(t, "0.08", modelEntry.SKUs["edit-4k-medium"].SalePriceUSD)
+		edits, ok := modelEntry.Endpoints[imageprofile.EndpointEdits]
+		require.True(t, ok)
+		assert.True(t, edits.Capability.Enabled)
+		assert.GreaterOrEqual(t, edits.Capability.MaxInputImages, uint(1))
 	}
 	var migratedRules []model.ChannelModelCostRule
 	require.NoError(t, db.Where("channel_id = ? AND billable_upstream_model = ? AND cost_variant_key IN ?", 41, "vendor-image", []string{"gen-1k-medium", "gen-4k-medium"}).Find(&migratedRules).Error)

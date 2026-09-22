@@ -521,3 +521,17 @@ func videoContractTargetWithMinimums(modelName string, resolutions []string, min
 		},
 	}
 }
+
+func TestValidateDimensioJMGSeedance25Resolutions(t *testing.T) {
+	target := videoContractTarget("jmg-video-seedance-2.5", []string{"480p", "720p"}, 4, 30, nil, modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10})
+	require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeDimensio}, modelrouting.Seedance25, target))
+
+	target1080 := videoContractTarget("jmg-video-seedance-2.5", []string{"1080p"}, 4, 30, nil, modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10})
+	var contractErr *VideoRouteContractError
+	require.ErrorAs(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeDimensio}, modelrouting.Seedance25, target1080), &contractErr)
+	assert.Equal(t, "route_contract_resolution", contractErr.Code)
+
+	// 2.0 JMG unchanged: 1080p allowed for vip only.
+	target20 := videoContractTargetWithTotal("jmg-video-seedance-2.0-fast", []string{"720p"}, 4, 15, nil, modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3}, 12)
+	require.NoError(t, ValidateVideoRouteTargetContract(&model.Channel{Type: constant.ChannelTypeDimensio}, modelrouting.Seedance20, target20))
+}

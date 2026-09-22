@@ -334,7 +334,11 @@ func validateDimensioVideoRoute(canonicalModel string, target modelrouting.Targe
 		return newVideoRouteContractError("route_contract_resolution", "Dimensio Seedance 2.5 routes support only 480p and 720p")
 	}
 	if strings.HasPrefix(modelName, "jmg-") {
-		if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p") ||
+		if contract.Series == "2.5" {
+			if !routeResolutionsWithin(target.Constraints.OutputResolutions, "480p", "720p") {
+				return newVideoRouteContractError("route_contract_resolution", "Dimensio JMG Seedance 2.5 routes support only 480p and 720p")
+			}
+		} else if !routeResolutionsWithin(target.Constraints.OutputResolutions, "720p", "1080p") ||
 			(containsRouteResolution(target.Constraints.OutputResolutions, "1080p") && modelName != "jmg-video-seedance-2.0-vip") {
 			return newVideoRouteContractError("route_contract_resolution", "Dimensio JMG route resolution is unsupported")
 		}

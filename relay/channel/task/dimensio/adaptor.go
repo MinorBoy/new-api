@@ -160,7 +160,12 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by dimensio", resolution), "invalid_resolution", http.StatusBadRequest)
 	}
 	if strings.HasPrefix(requestModel, "jmg-") {
-		if resolution == "480p" || resolution == "4k" || (resolution == "1080p" && requestModel != "jmg-video-seedance-2.0-vip") {
+		isJMG25 := strings.Contains(requestModel, "seedance-2.5")
+		if isJMG25 {
+			if resolution != "480p" && resolution != "720p" {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, requestModel), "invalid_resolution", http.StatusBadRequest)
+			}
+		} else if resolution == "480p" || resolution == "4k" || (resolution == "1080p" && requestModel != "jmg-video-seedance-2.0-vip") {
 			return service.TaskErrorWrapperLocal(fmt.Errorf("resolution %s is not supported by %s", resolution, requestModel), "invalid_resolution", http.StatusBadRequest)
 		}
 	}

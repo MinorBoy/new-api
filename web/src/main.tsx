@@ -69,8 +69,9 @@ const queryClient = new QueryClient({
     onError: (error) => {
       if (error instanceof AxiosError) {
         if (error.response?.status === 500) {
+          // Queries degrade in place (toast + page-level empty/error state);
+          // a single transient 500 must not take over the whole route.
           toast.error(i18next.t('Internal Server Error!'))
-          router.navigate({ to: '/500' })
         }
       }
     },

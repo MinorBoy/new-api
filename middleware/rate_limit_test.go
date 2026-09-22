@@ -195,6 +195,33 @@ func TestRedisFixedWindowRepairsCounterWithoutTTL(t *testing.T) {
 	assert.False(t, redisServer.Exists(key), "a recovered counter must not remain permanently rate-limited")
 }
 
+func TestRedisRateLimiterAbortsSilentlyOnCanceledClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	useRateLimitMiniRedis(t)
+
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	handlerCalled := false
+	router.GET("/limited", rateLimitFactory(1, 30, "CANCEL"), func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusNoContent)
+	})
+
+	// A canceled request context means the client connection is already gone:
+	// the limiter failure must not surface as a 500 response or an error log.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodGet, "/limited", nil)
+	request.RemoteAddr = "192.0.2.70:12345"
+	request = request.WithContext(ctx)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	assert.False(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Empty(t, recorder.Body.String())
+}
+
 func TestRedisFailurePolicies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	_, redisClient := useRateLimitMiniRedis(t)

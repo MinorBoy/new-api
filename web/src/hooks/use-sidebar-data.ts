@@ -29,7 +29,7 @@ import {
 } from "@/lib/admin-permissions";
 import { ROLE } from "@/lib/roles";
 import { getEnabledApiKeys, getApiKeyValue } from "@/features/keys/api";
-import { getCommonHeaders } from "@/lib/api";
+import { getFreshAuthHeaders } from "@/lib/api";
 import type { ApiKey } from "@/features/keys/types";
 
 const studioUrl =
@@ -67,7 +67,7 @@ function isModelAllowedForKey(key: ApiKey, model: string): boolean {
 
 async function getModelsForGroup(baseUrl: string, group: string): Promise<string[]> {
   const response = await fetch(`${baseUrl}/api/user/models?group=${encodeURIComponent(group || "default")}`, {
-    headers: await getCommonHeaders(),
+    headers: await getFreshAuthHeaders(),
   });
   if (!response.ok) return [];
   const payload = (await response.json()) as { data?: unknown };
@@ -139,7 +139,12 @@ export async function openFlyreqStudioWithPreparation(
   openWindow: (url: string, target?: string) => Window | null = (url, target) => window.open(url, target),
   targetStudioUrl: string = studioUrl,
 ): Promise<void> {
-  const popup = openWindow(`${targetStudioUrl.replace(/\/$/, "")}/zh/`, "_blank");
+  // Reserve the tab on about:blank while the configuration loads. The blank
+  // tab stays same-origin with this page, so the later location assignment is
+  // always honored; assigning a provider URL to a tab that already runs the
+  // studio makes the studio silently cancel that navigation, dropping the
+  // configuration payload.
+  const popup = openWindow("about:blank", "_blank");
   if (!popup) {
     console.error("Failed to open FlyReq Studio tab");
     return;
@@ -147,10 +152,15 @@ export async function openFlyreqStudioWithPreparation(
   try {
     popup.location.href = await prepareUrl();
   } catch (error) {
-    // Keep the reserved tab on the already-open studio shell. Closing it after
-    // a transient API/configuration failure leaves users with an empty tab and
-    // makes recovery impossible without reopening the sidebar item.
+    // Load the studio shell so the reserved tab stays usable for recovery
+    // instead of sitting on about:blank after a transient API or
+    // configuration failure.
     console.error("Failed to prepare FlyReq Studio configuration", error);
+    try {
+      popup.location.href = `${targetStudioUrl.replace(/\/$/, "")}/zh/`;
+    } catch (navigateError) {
+      console.error("Failed to open FlyReq Studio shell", navigateError);
+    }
   }
 }
 

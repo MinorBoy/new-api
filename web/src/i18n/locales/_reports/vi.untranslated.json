@@ -9,11 +9,11 @@
   "Enter the raw API key issued by Z5API": "Enter the raw API key issued by Z5API",
   "Everything an AI gateway should ship with. Switched on or off per channel.": "Everything an AI gateway should ship with. Switched on or off per channel.",
   "Filter endpoints by name or path…": "Filter endpoints by name or path…",
-  "Unable to load image pricing costs": "Unable to load image pricing costs",
   "Map client-visible Ark model names to verified Z5API upstream models": "Map client-visible Ark model names to verified Z5API upstream models",
   "Millisecond fan-out across upstreams. Stream tokens back with zero added latency.": "Millisecond fan-out across upstreams. Stream tokens back with zero added latency.",
   "No tiers. No seats. No commitment. Metered to the token at provider cost.": "No tiers. No seats. No commitment. Metered to the token at provider cost.",
   "Read the docs": "Read the docs",
   "Run the gateway on your own infra — pricing is between you and providers.": "Run the gateway on your own infra — pricing is between you and providers.",
-  "Top up your balance once; every request is metered and deducted to the cent.": "Top up your balance once; every request is metered and deducted to the cent."
+  "Top up your balance once; every request is metered and deducted to the cent.": "Top up your balance once; every request is metered and deducted to the cent.",
+  "Unable to load image pricing costs": "Unable to load image pricing costs"
 }

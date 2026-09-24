@@ -146,7 +146,7 @@ export async function openFlyreqStudioWithPreparation(
   // configuration payload.
   const popup = openWindow("about:blank", "_blank");
   if (!popup) {
-    console.error("Failed to open FlyReq Studio tab");
+    console.error("Failed to open Lynwu Studio tab");
     return;
   }
   try {
@@ -155,11 +155,11 @@ export async function openFlyreqStudioWithPreparation(
     // Load the studio shell so the reserved tab stays usable for recovery
     // instead of sitting on about:blank after a transient API or
     // configuration failure.
-    console.error("Failed to prepare FlyReq Studio configuration", error);
+    console.error("Failed to prepare Lynwu Studio configuration", error);
     try {
       popup.location.href = `${targetStudioUrl.replace(/\/$/, "")}/zh/`;
     } catch (navigateError) {
-      console.error("Failed to open FlyReq Studio shell", navigateError);
+      console.error("Failed to open Lynwu Studio shell", navigateError);
     }
   }
 }

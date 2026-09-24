@@ -655,6 +655,42 @@ test('aggregates SKU duration while preserving each channel mapping duration', (
   )
 })
 
+test('rows without a declared duration do not weaken the SKU duration union', () => {
+  const source = sourceWithOfficialPrice()
+  const first = firstSourceModel(source)
+  first.fields.时长范围 = '4-15'
+  const second = structuredClone(first)
+  second.location.row = 4
+  second.fields.时长范围 = null
+  source.models.push(second)
+
+  const output = buildTemplateData(
+    source,
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+
+  assert.equal(output.skus[0]?.minDurationSeconds, 4)
+  assert.equal(output.skus[0]?.maxDurationSeconds, 15)
+})
+
+test('an undeclared leading row does not pin the SKU duration to zero', () => {
+  const source = sourceWithOfficialPrice()
+  const first = firstSourceModel(source)
+  first.fields.时长范围 = null
+  const second = structuredClone(first)
+  second.location.row = 4
+  second.fields.时长范围 = '4-15'
+  source.models.push(second)
+
+  const output = buildTemplateData(
+    source,
+    parseRules({ ...rulesInput, modelRules: {} })
+  )
+
+  assert.equal(output.skus[0]?.minDurationSeconds, 4)
+  assert.equal(output.skus[0]?.maxDurationSeconds, 15)
+})
+
 test('blocks verified channel contract conflicts before workbook generation', () => {
   const contractRules = parseRules({
     ...rulesInput,

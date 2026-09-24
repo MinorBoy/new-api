@@ -17,6 +17,7 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 	tests := []struct {
 		name        string
 		channelType int
+		canonical   string
 		settings    relaydto.ChannelOtherSettings
 		target      modelrouting.Target
 		wantCode    string
@@ -220,6 +221,20 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			wantCode: "route_contract_references",
 		},
 		{
+			name: "z5api accepts seedance 2.5 official reference limits", channelType: constant.ChannelTypeZ5API,
+			canonical: modelrouting.Seedance25,
+			target: videoContractTargetWithMinimums("sd-2.5-c1", []string{"720p"}, 4, 30,
+				[]modelrouting.InputMode{modelrouting.InputModeText, modelrouting.InputModeOmniReference},
+				modelrouting.ReferenceLimits{Images: 30, Videos: 10, Audios: 10}, modelrouting.ReferenceLimits{}),
+		},
+		{
+			name: "z5api rejects seedance 2.5 thirty-one images", channelType: constant.ChannelTypeZ5API,
+			canonical: modelrouting.Seedance25,
+			target: videoContractTarget("sd-2.5-c1", []string{"720p"}, 4, 30, nil,
+				modelrouting.ReferenceLimits{Images: 31, Videos: 10, Audios: 10}),
+			wantCode: "route_contract_references",
+		},
+		{
 			name: "zzone accepts documented references", channelType: constant.ChannelTypeZZone,
 			target: func() modelrouting.Target {
 				target := videoContractTargetWithMinimums("imported-zzone-model", []string{"720p"}, 1, 15,
@@ -410,7 +425,11 @@ func TestValidateVideoRouteTargetContract(t *testing.T) {
 			channel := &model.Channel{Type: tt.channelType}
 			channel.SetOtherSettings(tt.settings)
 
-			err := ValidateVideoRouteTargetContract(channel, modelrouting.Seedance20, tt.target)
+			canonical := tt.canonical
+			if canonical == "" {
+				canonical = modelrouting.Seedance20
+			}
+			err := ValidateVideoRouteTargetContract(channel, canonical, tt.target)
 			if tt.wantCode == "" {
 				require.NoError(t, err)
 				return

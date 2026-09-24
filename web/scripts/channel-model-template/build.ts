@@ -735,6 +735,7 @@ function buildSkus(
   issues: Issue[]
 ): SkuRow[] {
   const rows = new Map<string, SkuRow>()
+  const skuDurationBounds = new Map<string, { min?: number; max?: number }>()
   for (const modelRecord of source.models) {
     const rawModel = field(modelRecord, '模型ID')
     const seriesValue = field(modelRecord, '系列')
@@ -767,16 +768,26 @@ function buildSkus(
     const ruleMin = duration.min
     const ruleMax = duration.max
     const id = skuId(model, version, resolutionValue)
+    // 空时长源行解析为 0–0，参与并集会把 SKU 时长错误拉低到 0；
+    // 只有声明了时长（或规则覆盖提供边界）的行才允许收窄/拓宽 SKU 时长。
+    const durationDeclared =
+      field(modelRecord, '时长范围').trim() !== '' ||
+      modelRule.minDurationSeconds !== undefined ||
+      modelRule.maxDurationSeconds !== undefined
+    if (durationDeclared) {
+      const bounds = skuDurationBounds.get(id) ?? {}
+      bounds.min =
+        bounds.min === undefined
+          ? ruleMin
+          : Math.min(bounds.min, ruleMin)
+      bounds.max =
+        bounds.max === undefined
+          ? ruleMax
+          : Math.max(bounds.max, ruleMax)
+      skuDurationBounds.set(id, bounds)
+    }
     const existing = rows.get(id)
     if (existing) {
-      existing.minDurationSeconds = Math.min(
-        existing.minDurationSeconds,
-        ruleMin
-      )
-      existing.maxDurationSeconds = Math.max(
-        existing.maxDurationSeconds,
-        ruleMax
-      )
       continue
     }
     const [fallbackWidth, fallbackHeight] =
@@ -844,6 +855,13 @@ function buildSkus(
         ? '由官方价格矩阵和源模型能力合并生成。'
         : '缺少官方价格，已生成 draft SKU。',
     })
+  }
+  for (const row of rows.values()) {
+    const bounds = skuDurationBounds.get(row.businessId)
+    if (bounds) {
+      row.minDurationSeconds = bounds.min ?? 0
+      row.maxDurationSeconds = bounds.max ?? 0
+    }
   }
   if (rows.size === 0 && source.models.length > 0) {
     issues.push(

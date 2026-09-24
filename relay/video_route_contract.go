@@ -45,7 +45,7 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, canonicalModel str
 	case constant.ChannelTypePaipu:
 		return validatePaipuVideoRoute(canonicalModel, target)
 	case constant.ChannelTypeZ5API:
-		return validateZ5APIVideoRoute(target)
+		return validateZ5APIVideoRoute(canonicalModel, target)
 	case constant.ChannelTypeZZone:
 		return validateZZoneVideoRoute(canonicalModel, target)
 	case constant.ChannelTypeMikoto:
@@ -233,16 +233,18 @@ func validatePaipuVideoRoute(canonicalModel string, target modelrouting.Target) 
 	return nil
 }
 
-func validateZ5APIVideoRoute(target modelrouting.Target) error {
+func validateZ5APIVideoRoute(canonicalModel string, target modelrouting.Target) error {
 	if strings.TrimSpace(target.UpstreamModel) == "" {
 		return newVideoRouteContractError("route_contract_model", "Z5API mapped upstream model is required")
 	}
 	if !routeDurationWithin(target.Constraints.Durations, 1, relaycommon.MaxTaskDurationSeconds) {
 		return newVideoRouteContractError("route_contract_duration", "Z5API route duration exceeds the task protocol limit")
 	}
+	contract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+	maxImages, maxVideos, maxAudios, maxTotal := contract.ReferenceLimits.Images, contract.ReferenceLimits.Videos, contract.ReferenceLimits.Audios, contract.ReferenceTotalMax
 	limits := target.Constraints.ReferenceLimits
 	minimums := target.Constraints.ReferenceMinimums
-	if limits.Images > 9 || limits.Videos > 3 || limits.Audios > 3 ||
+	if limits.Images > maxImages || limits.Videos > maxVideos || limits.Audios > maxAudios || routeReferenceTotalMax(target.Constraints) > maxTotal ||
 		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios {
 		return newVideoRouteContractError("route_contract_references", "Z5API route reference limits exceed the protocol")
 	}

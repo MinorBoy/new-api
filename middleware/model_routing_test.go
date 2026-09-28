@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,6 +13,57 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExtractMiniMaxH3RoutingInputValidatesH3Contract(t *testing.T) {
+	validBody := func(resolution, duration, ratio string) string {
+		return `{"model":"minimax-h3","resolution":"` + resolution + `","duration":` + duration + `,"ratio":"` + ratio + `","content":[{"type":"text","text":"video"}]}`
+	}
+	for _, test := range []struct {
+		resolution string
+		duration   string
+		ratio      string
+	}{
+		{"720p", "4", "auto"},
+		{"2k", "15", "16:9"},
+	} {
+		c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", validBody(test.resolution, test.duration, test.ratio), true)
+		input, routeErr := extractSeedanceRoutingInput(c, modelrouting.MiniMaxH3)
+		require.Nil(t, routeErr)
+		require.NotNil(t, input)
+		assert.Equal(t, test.resolution, *input.OutputResolution)
+		assert.Equal(t, test.ratio, *input.AspectRatio)
+		assert.Equal(t, test.duration, strconv.Itoa(*input.DurationSeconds))
+	}
+
+	for _, test := range []struct {
+		name string
+		body string
+		code string
+	}{
+		{"Seedance resolution", validBody("1080p", "10", "16:9"), "InvalidParameter.resolution"},
+		{"Seedance ratio", validBody("720p", "10", "adaptive"), "InvalidParameter.ratio"},
+		{"duration below minimum", validBody("2k", "3", "16:9"), "InvalidParameter.duration"},
+		{"duration above maximum", validBody("2k", "16", "16:9"), "InvalidParameter.duration"},
+		{"H3 VIP alias is not canonical", validBody("2k", "10", "16:9"), ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			modelName := modelrouting.MiniMaxH3
+			if test.name == "H3 VIP alias is not canonical" {
+				modelName = modelrouting.MiniMaxH3VIP
+			}
+			c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", test.body, true)
+			input, routeErr := extractSeedanceRoutingInput(c, modelName)
+			if test.code == "" {
+				assert.Nil(t, input)
+				assert.Nil(t, routeErr)
+				return
+			}
+			assert.Nil(t, input)
+			require.NotNil(t, routeErr)
+			assert.Equal(t, test.code, string(routeErr.Code))
+		})
+	}
+}
 
 func TestExtractSeedanceRoutingInputExplicitFacts(t *testing.T) {
 	body := `{

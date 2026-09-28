@@ -111,6 +111,36 @@ test('accepts migrated channel economics and records optional price sheets', asy
   )
 })
 
+test('keeps known non-SD rows out of the Seedance model collection', async () => {
+  await withMutatedFixture(
+    (workbook) => {
+      const sd = workbook.getWorksheet('sd')
+      assert.ok(sd)
+      const headers = sd.getRow(2).values as unknown[]
+      const modelColumn = headers.indexOf('模型ID')
+      const seriesColumn = headers.indexOf('系列')
+      assert.ok(modelColumn > 0)
+      assert.ok(seriesColumn > 0)
+      sd.getRow(3).getCell(modelColumn).value = 'omni-test'
+      sd.getRow(3).getCell(seriesColumn).value = 'Omni'
+      workbook.addWorksheet('kling').addRow(['渠道', '模型ID', '系列'])
+      workbook.addWorksheet('kling官价').addRow(['系列', '模型', '分辨率'])
+    },
+    async (sourcePath) => {
+      const source = await readSourceWorkbook(sourcePath)
+      assert.equal(
+        source.models.some((record) => record.fields.模型ID === 'omni-test'),
+        false
+      )
+      assert.equal(source.ignoredNonSdModels?.length, 1)
+      assert.equal(source.ignoredNonSdModels?.[0]?.location.sheet, 'sd')
+      assert.equal(source.ignoredNonSdModels?.[0]?.location.row, 3)
+      assert.deepEqual(source.additionalSheets, ['kling', 'kling官价'])
+    }
+  )
+})
+
+
 test('accepts the latest channel API URL header as the canonical link field', async () => {
   await withMutatedFixture(
     (workbook) => {

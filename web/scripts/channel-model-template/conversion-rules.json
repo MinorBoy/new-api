@@ -104,6 +104,34 @@
     },
     "15/R258": {
       "status": "draft"
+    },
+    "1/R25": {
+      "status": "draft"
+    },
+    "1/R27": {
+      "status": "draft"
+    },
+    "6/R145": {
+      "status": "draft"
+    },
+    "6/R146": {
+      "status": "draft"
+    },
+    "6/R157": {
+      "status": "draft"
+    },
+    "6/R158": {
+      "status": "draft"
+    },
+    "6/R166": {
+      "status": "draft"
+    },
+    "15/R318": {
+      "status": "draft",
+      "maxDurationSeconds": 12
+    },
+    "15/R321": {
+      "status": "draft"
     }
   }
 }

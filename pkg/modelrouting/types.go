@@ -11,6 +11,15 @@ const (
 
 var CanonicalModels = []string{Seedance20, Seedance20Fast, Seedance20Mini, Seedance25}
 
+func IsCanonicalVideoModel(modelName string) bool {
+	modelName = NormalizeCanonicalModel(modelName)
+	if containsString(CanonicalModels, modelName) {
+		return true
+	}
+	contract, ok := VideoSeriesContractForModel(modelName)
+	return ok && contract.Series == modelName
+}
+
 // NormalizeCanonicalModel maps supported public aliases to the single routing
 // policy identity for that model family. The caller's original model remains
 // available for billing and audit; this normalization only selects a policy.

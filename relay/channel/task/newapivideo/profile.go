@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
@@ -31,6 +32,8 @@ const ChannelNameFYLink = "FYLink"
 
 const ChannelNameWxArt = "WxArt"
 
+const ChannelNameMiniMaxH3 = "MiniMaxH3"
+
 type videoRequestDialect string
 
 const (
@@ -50,6 +53,7 @@ const (
 	videoRequestDialectMikoto              videoRequestDialect = "mikoto"
 	videoRequestDialectFFLink              videoRequestDialect = "fflink"
 	videoRequestDialectWxArt               videoRequestDialect = "wxart"
+	videoRequestDialectMiniMaxH3           videoRequestDialect = "minimax_h3_media_arrays"
 )
 
 type omegaRequestProfile struct {
@@ -363,6 +367,19 @@ func fflinkProtocolProfile() protocolProfile {
 	}
 }
 
+func minimaxH3ProtocolProfile() protocolProfile {
+	return protocolProfile{
+		channelName:                   ChannelNameMiniMaxH3,
+		modelList:                     []string{modelrouting.MiniMaxH3VIP},
+		submitPath:                    "/v1/videos",
+		pollPath:                      "/v1/videos/{task_id}",
+		contentType:                   "application/json",
+		requestDialect:                videoRequestDialectMiniMaxH3,
+		requirePublicHTTPMedia:        true,
+		untypedImagesAreReferences:    true,
+		allowEmptyReferenceMediaRoles: true,
+	}
+}
 func wxartProtocolProfile() protocolProfile {
 	return protocolProfile{
 		channelName:                ChannelNameWxArt,
@@ -451,6 +468,10 @@ func NewFYLinkTaskAdaptor() *FYLinkTaskAdaptor {
 
 func NewWxArtTaskAdaptor() *TaskAdaptor {
 	return &TaskAdaptor{profile: wxartProtocolProfile()}
+}
+
+func NewMiniMaxH3TaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{profile: minimaxH3ProtocolProfile()}
 }
 
 func (a *TaskAdaptor) activeProfile() protocolProfile {

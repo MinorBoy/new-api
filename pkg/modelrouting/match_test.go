@@ -10,6 +10,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResolveFactsUsesMiniMaxH3ContractDefaults(t *testing.T) {
+	facts, err := modelrouting.ResolveFacts("group", modelrouting.FactsInput{
+		CanonicalModel: modelrouting.MiniMaxH3,
+	}, modelrouting.Defaults{})
+	require.NoError(t, err)
+	assert.Equal(t, "2k", facts.OutputResolution)
+	assert.Equal(t, 15, facts.DurationSeconds)
+	assert.Equal(t, "16:9", facts.AspectRatio)
+
+	resolution, ratio := "720p", "auto"
+	duration := 4
+	facts, err = modelrouting.ResolveFacts("group", modelrouting.FactsInput{
+		CanonicalModel: modelrouting.MiniMaxH3VIP, OutputResolution: &resolution,
+		DurationSeconds: &duration, AspectRatio: &ratio,
+	}, modelrouting.Defaults{})
+	require.NoError(t, err)
+	assert.Equal(t, "720p", facts.OutputResolution)
+	assert.Equal(t, 4, facts.DurationSeconds)
+	assert.Equal(t, "auto", facts.AspectRatio)
+}
+
 func TestResolveFactsPrefersExplicitValues(t *testing.T) {
 	resolution := " 1080P "
 	duration := 10

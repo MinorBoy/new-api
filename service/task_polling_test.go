@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -331,6 +332,44 @@ func TestTaskPollingCarriesSecureChannelProfileSettings(t *testing.T) {
 	assert.Equal(t, baseURL, info.ChannelMeta.ChannelBaseUrl)
 	assert.Equal(t, dto.SecureVideoGroupEnterprise, info.ChannelMeta.ChannelOtherSettings.SecureVideoGroup)
 	assert.Equal(t, "secure-enterprise-key", info.ApiKey)
+}
+
+func TestVideoTaskFetchRequestBodyIncludesPersistedUpstreamModel(t *testing.T) {
+	t.Run("task properties take precedence", func(t *testing.T) {
+		body := videoTaskFetchRequestBody(&model.Task{
+			TaskID: "task-public",
+			Action: constant.TaskActionGenerate,
+			Properties: model.Properties{
+				UpstreamModelName: "minimax-h3-vip",
+			},
+			PrivateData: model.TaskPrivateData{
+				UpstreamTaskID: "task-private",
+				BillingContext: &model.TaskBillingContext{UpstreamModelName: "other-model"},
+			},
+		})
+		assert.Equal(t, "task-private", body["task_id"])
+		assert.Equal(t, constant.TaskActionGenerate, body["action"])
+		assert.Equal(t, "minimax-h3-vip", body["upstream_model"])
+	})
+
+	t.Run("routing audit fallback", func(t *testing.T) {
+		body := videoTaskFetchRequestBody(&model.Task{
+			PrivateData: model.TaskPrivateData{
+				Routing: &modelrouting.Audit{UpstreamModel: "minimax-h3-vip"},
+			},
+		})
+		assert.Equal(t, "minimax-h3-vip", body["upstream_model"])
+	})
+
+	t.Run("billing context fallback", func(t *testing.T) {
+		body := videoTaskFetchRequestBody(&model.Task{
+			TaskID: "task-public",
+			PrivateData: model.TaskPrivateData{
+				BillingContext: &model.TaskBillingContext{UpstreamModelName: "minimax-h3-vip"},
+			},
+		})
+		assert.Equal(t, "minimax-h3-vip", body["upstream_model"])
+	})
 }
 
 func runSinglePollingUpdate(t *testing.T, adaptor TaskPollingAdaptor, task *model.Task) error {

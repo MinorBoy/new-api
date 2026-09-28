@@ -28,8 +28,14 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, canonicalModel str
 		return newVideoRouteContractError("route_contract_channel", "channel is required")
 	}
 	switch channel.Type {
+	case constant.ChannelTypeNewAPIVideo:
+		if modelrouting.IsMiniMaxH3Model(target.UpstreamModel) || modelrouting.IsMiniMaxH3Model(canonicalModel) {
+			return validateMiniMaxH3VideoRoute(canonicalModel, target)
+		}
+		return nil
 	case constant.ChannelTypeCangyuan:
 		return validateCangyuanVideoRoute(target)
+
 	case constant.ChannelTypeEightYes:
 		if required := modelResolutionSuffix(target.UpstreamModel); required != "" && !allRouteResolutions(target.Constraints.OutputResolutions, required) {
 			return newVideoRouteContractError("route_contract_resolution", fmt.Sprintf("mapped model requires %s", required))
@@ -65,6 +71,48 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, canonicalModel str
 	}
 }
 
+func validateMiniMaxH3VideoRoute(canonicalModel string, target modelrouting.Target) error {
+	if strings.TrimSpace(canonicalModel) != modelrouting.MiniMaxH3 || strings.TrimSpace(target.UpstreamModel) != modelrouting.MiniMaxH3VIP {
+		return newVideoRouteContractError("route_contract_model", "MiniMax H3 routes require minimax-h3-vip")
+	}
+	contract, _ := modelrouting.MiniMaxH3Contract(target.UpstreamModel)
+	if !routeResolutionsWithin(target.Constraints.OutputResolutions, contract.OutputResolutions...) {
+		return newVideoRouteContractError("route_contract_resolution", "MiniMax H3 route resolution is unsupported")
+	}
+	if !routeDurationWithin(target.Constraints.Durations, contract.MinDurationSeconds, contract.MaxDurationSeconds) {
+		return newVideoRouteContractError("route_contract_duration", "MiniMax H3 routes require durations from 4 to 15 seconds")
+	}
+	for _, ratio := range target.Constraints.AspectRatios {
+		ratio = strings.ToLower(strings.TrimSpace(ratio))
+		valid := false
+		for _, supported := range contract.AspectRatios {
+			if ratio == supported {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return newVideoRouteContractError("route_contract_ratio", "MiniMax H3 route aspect ratio is unsupported")
+		}
+	}
+	limits := target.Constraints.ReferenceLimits
+	minimums := target.Constraints.ReferenceMinimums
+	if limits.Images > contract.ReferenceLimits.Images || limits.Videos > contract.ReferenceLimits.Videos || limits.Audios > contract.ReferenceLimits.Audios ||
+		minimums.Images > limits.Images || minimums.Videos > limits.Videos || minimums.Audios > limits.Audios ||
+		routeReferenceTotalMax(target.Constraints) > contract.ReferenceTotalMax {
+		return newVideoRouteContractError("route_contract_references", "MiniMax H3 route reference limits exceed the verified protocol")
+	}
+	if target.CostVariantKey != "720p" && target.CostVariantKey != "2k" {
+		return newVideoRouteContractError("route_contract_cost_variant", "MiniMax H3 route requires a 720p or 2k cost variant")
+	}
+	if target.CostVariantKey == "720p" && !allRouteResolutions(target.Constraints.OutputResolutions, "720p") {
+		return newVideoRouteContractError("route_contract_cost_variant", "720p cost variant must target 720p")
+	}
+	if target.CostVariantKey == "2k" && !allRouteResolutions(target.Constraints.OutputResolutions, "2k") {
+		return newVideoRouteContractError("route_contract_cost_variant", "2k cost variant must target 2k")
+	}
+	return nil
+}
 func validateWxArtVideoRoute(target modelrouting.Target) error {
 	modelName, ok := tasknewapivideo.AnalyzeWxArtModel(target.UpstreamModel)
 	if !ok {

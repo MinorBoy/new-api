@@ -216,6 +216,100 @@ function ffLinkSource(): SourceWorkbook {
   return source
 }
 
+test('builds MiniMax H3 costs as disabled CNY per-duration drafts without sales', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        计费: 'second',
+        '单价 元/秒': 0.12,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: 'auto,16:9',
+        状态: '待验收',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+    {
+      location: { sheet: 'h3', row: 3 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '2k',
+        计费: 'second',
+        '单价 元/秒': 0.18,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: 'auto,16:9',
+        状态: '待验收',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+  source.h3OfficialPrices = []
+  const output = buildTemplateData(source, rules)
+  assert.deepEqual(
+    output.costs.filter((cost) => cost.upstreamModel === 'minimax-h3-vip').map((cost) => [cost.nativePerSecond, cost.currency, cost.mode, cost.status]),
+    [
+      ['0.12', 'CNY', 'per_duration', 'draft'],
+      ['0.18', 'CNY', 'per_duration', 'draft'],
+    ]
+  )
+  assert.equal(output.sales.some((sale) => sale.clientModel === 'minimax-h3'), false)
+  assert.equal(output.mappings.filter((mapping) => mapping.clientModel === 'minimax-h3').length, 2)
+})
+
+test('does not send non-SD source rows through Seedance pricing', () => {
+  const source = sourceWithOfficialPrice()
+  source.ignoredNonSdModels = [
+    {
+      location: { sheet: 'sd', row: 99 },
+      fields: {
+        渠道: 1,
+        模型ID: 'omni-test',
+        系列: 'Omni',
+        清晰度: '720p',
+        计费: 'call',
+        '单价 元': 2,
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.skus.some((sku) => sku.model === 'omni-test'), false)
+  assert.equal(
+    output.costs.some((cost) => cost.upstreamModel === 'omni-test'),
+    false
+  )
+  assert.equal(
+    output.mappings.some((mapping) => mapping.clientModel === 'omni-test'),
+    false
+  )
+  assert.ok(
+    output.issues.some(
+      (item) =>
+        item.code === 'UNSUPPORTED_SOURCE_RECORD' &&
+        item.severity === 'FAIL' &&
+        item.sheet === 'sd' &&
+        item.row === 99
+    )
+  )
+})
 test('maps a second-priced source row to a per-duration USD cost', () => {
   const output = buildTemplateData(sourceWithOfficialPrice(), rules)
   const cost = output.costs.find(

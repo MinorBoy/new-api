@@ -81,9 +81,9 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.Equal(t, types.ConfigImportEntityCounts{
-		Channels: 4, ChannelLines: 5, ModelSKUs: 8, SaleProposals: 16,
-		CostRuleDrafts: 45, ModelMappings: 45, RouteBlueprints: 45,
-		Sources: 7, UnresolvedVariants: 0,
+		Channels: 2, ChannelLines: 2, ModelSKUs: 8, SaleProposals: 16,
+		CostRuleDrafts: 10, ModelMappings: 10, RouteBlueprints: 10,
+		Sources: 6, UnresolvedVariants: 0,
 	}, first.ItemCounts)
 	assert.Equal(t, types.ConfigImportBatchStatusBinding, first.Status)
 	assert.Equal(t, []string{"bind", "resolve", "stage"}, first.AllowedActions)
@@ -127,19 +127,23 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	}
 	bindings := make([]dto.ConfigImportBindingInput, 0, len(document.Entities.ChannelLines))
 	channelIDsByLine := make(map[string]int, len(document.Entities.ChannelLines))
-	for _, line := range document.Entities.ChannelLines {
+	for index, line := range document.Entities.ChannelLines {
 		models := make([]string, 0, len(modelsByLine[line.LineRef]))
 		for upstreamModel := range modelsByLine[line.LineRef] {
 			models = append(models, upstreamModel)
 		}
 		sort.Strings(models)
+		priority := int64(100 - index*50)
+		weight := uint(100)
 		channel := &model.Channel{
-			Type:   channelTypes[line.ChannelRef],
-			Name:   "config-import-e2e-" + line.LineRef,
-			Group:  "default",
-			Models: strings.Join(models, ","),
-			Key:    "mock-key-" + line.LineRef,
-			Status: common.ChannelStatusEnabled,
+			Type:     channelTypes[line.ChannelRef],
+			Name:     "config-import-e2e-" + line.LineRef,
+			Group:    "default",
+			Models:   strings.Join(models, ","),
+			Key:      "mock-key-" + line.LineRef,
+			Status:   common.ChannelStatusEnabled,
+			Priority: &priority,
+			Weight:   &weight,
 		}
 		if strings.HasPrefix(line.LineRef, "secure-") {
 			settings, marshalErr := common.Marshal(relaydto.ChannelOtherSettings{
@@ -174,7 +178,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 
 	var distinctRouteCosts []model.ConfigImportItem
 	require.NoError(t, model.DB.Where("batch_id = ? AND business_id IN ?", first.ID, []string{
-		"COST-MIKOTO-R212-1080-DUR", "COST-MIKOTO-R213-720-DUR",
+		"COST-SECURE-R136-720-DUR", "COST-SECURE-R137-1080-DUR",
 	}).Order("business_id ASC").Find(&distinctRouteCosts).Error)
 	require.Len(t, distinctRouteCosts, 2)
 	require.NotNil(t, distinctRouteCosts[0].MaterializedID)
@@ -200,29 +204,31 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	assert.EqualValues(t, len(document.Entities.CostRuleDrafts), activeRuleCount)
 	require.NoError(t, model.DB.Model(&model.ChannelModelCostRule{}).Where("source = ? AND status = ?", "config_import", types.CostRuleDraft).Count(&remainingDraftCount).Error)
 	assert.Zero(t, remainingDraftCount)
-	var mikotoChannel model.Channel
-	require.NoError(t, model.DB.First(&mikotoChannel, channelIDsByLine["mikoto-sd"]).Error)
-	var mikotoMapping map[string]string
-	require.NoError(t, common.UnmarshalJsonStr(mikotoChannel.GetModelMapping(), &mikotoMapping))
-	assert.NotContains(t, mikotoMapping, modelrouting.Seedance20)
-	assert.Contains(t, mikotoChannel.GetModels(), modelrouting.Seedance20)
-	assert.Contains(t, mikotoChannel.GetModels(), "seedance-2.0-720p")
-	assert.Contains(t, mikotoChannel.GetModels(), "seedance-2.0-1080p")
+	var wxartChannel model.Channel
+	require.NoError(t, model.DB.First(&wxartChannel, channelIDsByLine["channel-wxart"]).Error)
+	var wxartMapping map[string]string
+	require.NoError(t, common.UnmarshalJsonStr(wxartChannel.GetModelMapping(), &wxartMapping))
+	assert.Equal(t, "seedance2.0", wxartMapping[modelrouting.Seedance20])
+	assert.Equal(t, "seedance2.5", wxartMapping[modelrouting.Seedance25])
+	assert.Contains(t, wxartChannel.GetModels(), modelrouting.Seedance20)
+	assert.Contains(t, wxartChannel.GetModels(), "seedance2.0")
+	assert.Contains(t, wxartChannel.GetModels(), modelrouting.Seedance25)
+	assert.Contains(t, wxartChannel.GetModels(), "seedance2.5")
 	var standardPolicy model.RoutingPolicy
 	require.NoError(t, model.DB.Where("group_name = ? AND model = ?", "default", modelrouting.Seedance20).First(&standardPolicy).Error)
-	var mikotoTargets []model.RouteTarget
-	require.NoError(t, model.DB.Where("policy_id = ? AND channel_id = ?", standardPolicy.ID, mikotoChannel.Id).Find(&mikotoTargets).Error)
+	var wxartTargets []model.RouteTarget
+	require.NoError(t, model.DB.Where("policy_id = ? AND channel_id = ?", standardPolicy.ID, wxartChannel.Id).Find(&wxartTargets).Error)
+	require.Len(t, wxartTargets, 4)
 	upstreamModels := make(map[string]struct{})
-	for _, target := range mikotoTargets {
+	for _, target := range wxartTargets {
 		upstreamModels[target.UpstreamModel] = struct{}{}
 	}
-	assert.Contains(t, upstreamModels, "seedance-2.0-720p")
-	assert.Contains(t, upstreamModels, "seedance-2.0-1080p")
+	assert.Contains(t, upstreamModels, "seedance2.0")
 
 	var selectedTarget model.RouteTarget
 	var selectedConstraints modelrouting.Constraints
-	for _, target := range mikotoTargets {
-		if target.UpstreamModel != "seedance-2.0-720p" {
+	for _, target := range wxartTargets {
+		if target.UpstreamModel != "seedance2.0" {
 			continue
 		}
 		var constraints modelrouting.Constraints
@@ -245,8 +251,8 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		ratio = selectedConstraints.AspectRatios[0]
 	}
 	resolution := "720p"
-	policyTargets := make([]service.RouteTargetWriteRequest, 0, len(mikotoTargets))
-	for _, target := range mikotoTargets {
+	policyTargets := make([]service.RouteTargetWriteRequest, 0, len(wxartTargets))
+	for _, target := range wxartTargets {
 		var constraints modelrouting.Constraints
 		require.NoError(t, common.UnmarshalJsonStr(target.Constraints, &constraints))
 		policyTargets = append(policyTargets, service.RouteTargetWriteRequest{
@@ -268,7 +274,7 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 		Targets: policyTargets,
 	})
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(enabledPolicy.Targets), len(mikotoTargets))
+	assert.GreaterOrEqual(t, len(enabledPolicy.Targets), len(wxartTargets))
 	var enabledTargetIDs []int
 	for _, target := range enabledPolicy.Targets {
 		if target.Enabled {
@@ -288,10 +294,10 @@ func TestConfigImportV1FixtureStagesStructuredMaterialContractsE2E(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.NotNil(t, selectedChannel)
-	assert.Equal(t, mikotoChannel.Id, selectedChannel.Id)
+	assert.Equal(t, wxartChannel.Id, selectedChannel.Id)
 	assert.Equal(t, "default", selectedGroup)
 	assert.True(t, common.GetContextKeyBool(ctx, constant.ContextKeyRoutingCapabilityMode))
-	assert.Equal(t, "seedance-2.0-720p", common.GetContextKeyString(ctx, constant.ContextKeyRoutingUpstreamModel))
+	assert.Equal(t, "seedance2.0", common.GetContextKeyString(ctx, constant.ContextKeyRoutingUpstreamModel))
 	assert.Equal(t, selectedTarget.CostVariantKey, common.GetContextKeyString(ctx, constant.ContextKeyRoutingCostVariant))
 
 	duplicate, created, err := service.CreateConfigImportBatch(context.Background(), 1, bytes.NewReader(payload))

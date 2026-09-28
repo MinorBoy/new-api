@@ -563,6 +563,21 @@ func sanitizeTaskPollingText(value string, privateTaskID string) string {
 	return value
 }
 
+func videoTaskFetchRequestBody(task *model.Task) map[string]any {
+	body := map[string]any{
+		"task_id": task.GetUpstreamTaskID(),
+		"action":  task.Action,
+	}
+	if task.Properties.UpstreamModelName != "" {
+		body["upstream_model"] = task.Properties.UpstreamModelName
+	} else if task.PrivateData.Routing != nil && task.PrivateData.Routing.UpstreamModel != "" {
+		body["upstream_model"] = task.PrivateData.Routing.UpstreamModel
+	} else if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.UpstreamModelName != "" {
+		body["upstream_model"] = task.PrivateData.BillingContext.UpstreamModelName
+	}
+	return body
+}
+
 func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *model.Channel, taskId string, taskM map[string]*model.Task) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -585,10 +600,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if privateData.Key != "" {
 		key = privateData.Key
 	}
-	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
-		"task_id": task.GetUpstreamTaskID(),
-		"action":  task.Action,
-	}, proxy)
+	resp, err := adaptor.FetchTask(baseURL, key, videoTaskFetchRequestBody(task), proxy)
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %s", task.TaskID, sanitizeTaskPollingText(err.Error(), privateTaskID))
 	}

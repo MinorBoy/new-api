@@ -128,12 +128,14 @@ export async function runGenerator(
     ? {
         ...data,
         issues: data.issues.map((item) =>
-          item.code === 'UNSUPPORTED_SOURCE_SHEET' && item.severity === 'FAIL'
+          (item.code === 'UNSUPPORTED_SOURCE_SHEET' ||
+            item.code === 'UNSUPPORTED_SOURCE_RECORD') &&
+          item.severity === 'FAIL'
             ? {
                 ...item,
                 severity: 'WARN' as const,
                 suggestion:
-                  '本次显式使用 SD-only 范围；H3 数据保留在源表，未生成或发布。',
+                  '本次显式使用 SD-only 范围；该辅助数据保留在源表，未生成或发布。',
               }
             : item
         ),

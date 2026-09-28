@@ -17,6 +17,7 @@ License, or (at your option) any later version.
 2. `sd`：渠道模型、系列、计费方式、统一单价、结构化素材限制、状态和备注；三项渠道级财务字段不再放在此表。
 3. `sd官价`：Seedance 官方 SKU、系列、分辨率、帧率、尺寸和官方售价。
 4. `h3` / `h3官价`：H3 渠道模型和按秒官方价格；当前 V1 SD 模板只登记并阻断未实现的 H3 转换，不会静默忽略这些数据。
+5. `kling` / `kling官价`：Kling 渠道模型和带 `功能` 维度的按秒官方价格；当前 V1 SD 模板保留这些工作表用于源数据审计，但不将其转换为 Seedance SKU、售价、成本或模型映射。
 
 `sd` 的供应商成本字段使用同一组新契约：`计费方式` 与 `单价 元`。`计费方式` 为 `second`、`call`、`token` 时，分别按秒、按次、按百万 Token 解释 `单价 元`；旧的 `元/秒`、`元/次`、`元/1M` 表头不再支持，不能与新字段混用。
 
@@ -31,6 +32,8 @@ License, or (at your option) any later version.
 - `充值汇率`、`手续费`、`计费倍率` 必须从 `channel` 读取；生成器兼容旧测试夹具中的回退读取，但新源表若同时在 `sd` 保留这些字段会停止生成。
 - `sd官价` 可以先收录 Seedance 2.5 官方价格；只有 `sd` 中存在同系列的有效渠道模型行时，才生成对应 SKU、售价、成本映射和活动配置。仅有官方价格不得发布或激活 2.5。
 - `h3官价` 的价格列是输入素材与输出按秒价格，不能套用 Seedance 的 Token/M 公式。V1 模板尚未定义 H3 的独立售价场景，因此检测到 `h3` 或 `h3官价` 时报告 `UNSUPPORTED_SOURCE_SHEET` 并阻止生成。
+- `kling` 的 `功能` 是官方价格匹配维度，不能按模型和分辨率单独取价。V1 模板没有 Kling 的功能字段和按秒官方售价合同，因此检测到 Kling 工作表时报告 `UNSUPPORTED_SOURCE_SHEET`；显式 SD-only 运行只会把它降为审阅警告。
+- `sd` 中系列为 Kling、Omni、3、3.1 或 h3 的记录会被记录为 `UNSUPPORTED_SOURCE_RECORD`，不会进入 Seedance 价格、SKU、成本和映射计算。迁移到专用工作表后仍需完成独立转换合同，不能通过 Seedance 规则猜测。
 
 ### 显式 SD-only 生成
 

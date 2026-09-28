@@ -7,6 +7,17 @@ import (
 )
 
 func ResolveFacts(group string, input FactsInput, defaults Defaults) (Facts, error) {
+	if contract, ok := VideoSeriesContractForModel(input.CanonicalModel); ok {
+		if defaults.OutputResolution == "" {
+			defaults.OutputResolution = contract.DefaultResolution
+		}
+		if defaults.DurationSeconds == 0 {
+			defaults.DurationSeconds = contract.DefaultDuration
+		}
+		if defaults.AspectRatio == "" {
+			defaults.AspectRatio = contract.DefaultAspectRatio
+		}
+	}
 	inputMode := InputMode(strings.ToLower(strings.TrimSpace(string(input.InputMode))))
 	if inputMode == "" && input.ReferenceImages == 0 && input.ReferenceVideos == 0 && input.ReferenceAudios == 0 {
 		inputMode = InputModeText

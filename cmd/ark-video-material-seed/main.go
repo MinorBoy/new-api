@@ -1360,6 +1360,8 @@ func runtimeModel(modelName string) string {
 		return modelrouting.Seedance20Mini
 	case "seedance-2.5":
 		return modelrouting.Seedance25
+	case modelrouting.MiniMaxH3, modelrouting.MiniMaxH3VIP:
+		return modelrouting.MiniMaxH3
 	default:
 		return ""
 	}

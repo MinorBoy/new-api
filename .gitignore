@@ -95,3 +95,4 @@ options-*.json
 docs/acceptance/*.md
 .zcodeignore
 .zcode*
+NUL

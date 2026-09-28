@@ -40,6 +40,7 @@ type TaskAdaptor struct {
 	profile            protocolProfile
 	profileErr         error
 	requestContentType string
+	mappedModel        string
 }
 
 func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
@@ -79,8 +80,10 @@ type upstreamError struct {
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.requestContentType = ""
+	a.mappedModel = ""
 	a.profileErr = nil
 	if info == nil {
+		a.profile = genericProtocolProfile()
 		return
 	}
 	a.apiKey = info.ApiKey
@@ -170,6 +173,29 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 				}
 				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
 			}
+			return nil
+		}
+		if profile.requestDialect == videoRequestDialectMiniMaxH3 {
+			state, err := getRequestState(c)
+			if err != nil || state.ARK == nil {
+				return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+			}
+			upstreamModel := ""
+			if info != nil {
+				upstreamModel = info.UpstreamModelName
+				if upstreamModel == "" {
+					upstreamModel = info.OriginModelName
+				}
+			}
+			if err := validateMiniMaxH3Request(*state.ARK, upstreamModel); err != nil {
+				var requestErr *arkRequestError
+				if errors.As(err, &requestErr) {
+					return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+				}
+				return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+			}
+			state.ProviderValidationComplete = true
+			c.Set(requestStateContextKey, state)
 			return nil
 		}
 		if profile.requestDialect == videoRequestDialectPaipuMediaArrays {
@@ -384,6 +410,15 @@ func validateMegaByAIMedia(ctx context.Context, request arkRequest) *taskdto.Tas
 // duration from capability-routing facts, so provider constraints cannot be bypassed
 // by a client alias or discovered only while building the upstream body.
 func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
+	if info != nil {
+		a.mappedModel = info.UpstreamModelName
+		if a.mappedModel == "" {
+			a.mappedModel = info.OriginModelName
+		}
+		if modelrouting.IsMiniMaxH3Model(a.mappedModel) && a.profile.requestDialect == videoRequestDialectNewAPIGenerations {
+			a.profile = minimaxH3ProtocolProfile()
+		}
+	}
 	if a.profileErr != nil {
 		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
 	}
@@ -666,6 +701,28 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		}
 		return nil
 	}
+	if profile.requestDialect == videoRequestDialectMiniMaxH3 {
+		state, err := getRequestState(c)
+		if err != nil || state.ARK == nil {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+		}
+		if state.Seconds == nil {
+			contract, _ := modelrouting.MiniMaxH3Contract(modelrouting.MiniMaxH3)
+			value := decimal.NewFromInt(int64(contract.DefaultDuration))
+			state.Seconds = &value
+			state.ARK.Duration = common.GetPointer(contract.DefaultDuration)
+		}
+		if err := validateMiniMaxH3Request(*state.ARK, a.mappedModel); err != nil {
+			var requestErr *arkRequestError
+			if errors.As(err, &requestErr) {
+				return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+			}
+			return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+		}
+		state.ProviderValidationComplete = true
+		c.Set(requestStateContextKey, state)
+		return nil
+	}
 	if profile.channelName != ChannelNameLucen && (profile.textRequest == nil || !profile.textRequest.enforceModelResolutionSuffix) {
 		return nil
 	}
@@ -762,7 +819,14 @@ func routingDurationSeconds(c *gin.Context) int {
 	return 0
 }
 
+func (a *TaskAdaptor) selectMappedProfile() {
+	if modelrouting.IsMiniMaxH3Model(a.mappedModel) && a.profile.requestDialect == videoRequestDialectNewAPIGenerations {
+		a.profile = minimaxH3ProtocolProfile()
+	}
+}
+
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	a.selectMappedProfile()
 	if a.profileErr != nil {
 		return "", a.profileErr
 	}
@@ -770,6 +834,7 @@ func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) 
 }
 
 func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
+	a.selectMappedProfile()
 	if a.profileErr != nil {
 		return a.profileErr
 	}
@@ -894,6 +959,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, fmt.Errorf("8yes provider validation is incomplete")
 			}
 			body, err = buildEightYesRequest(*state.ARK, modelName)
+		case videoRequestDialectMiniMaxH3:
+			state, stateErr := getRequestState(c)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if state.ARK == nil {
+				return nil, fmt.Errorf("ARK request state is missing")
+			}
+			if !state.ProviderValidationComplete {
+				return nil, fmt.Errorf("MiniMax H3 provider validation is incomplete")
+			}
+			body, err = buildMiniMaxH3Request(*state.ARK, modelName)
 		case videoRequestDialectPaipuMediaArrays:
 			state, stateErr := getRequestState(c)
 			if stateErr != nil {
@@ -1048,11 +1125,19 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	if a.profileErr != nil {
 		return nil, a.profileErr
 	}
+	profile := a.activeProfile()
+	upstreamModel, _ := body["upstream_model"].(string)
+	if strings.TrimSpace(upstreamModel) == "" {
+		upstreamModel, _ = body["model"].(string)
+	}
+	if modelrouting.IsMiniMaxH3Model(upstreamModel) && profile.requestDialect == videoRequestDialectNewAPIGenerations {
+		profile = minimaxH3ProtocolProfile()
+	}
 	taskID, ok := body["task_id"].(string)
 	if !ok || strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
-	pollPath := a.activeProfile().pollPath
+	pollPath := profile.pollPath
 	if strings.Count(pollPath, "{task_id}") != 1 {
 		return nil, fmt.Errorf("task polling path must contain {task_id} exactly once")
 	}

@@ -26,7 +26,7 @@ func (e *routingInputError) Error() string {
 func extractSeedanceRoutingInput(c *gin.Context, canonicalModel string) (*modelrouting.FactsInput, *routingInputError) {
 	canonicalModel = modelrouting.NormalizeCanonicalModel(canonicalModel)
 	if !c.GetBool(common.KeySeedanceOfficialAPI) || c.Request.Method != http.MethodPost ||
-		c.Request.URL.Path != "/v1/video/generations" || !containsRoutingString(modelrouting.CanonicalModels, canonicalModel) {
+		c.Request.URL.Path != "/v1/video/generations" || !modelrouting.IsCanonicalVideoModel(canonicalModel) {
 		return nil, nil
 	}
 	storage, err := common.GetBodyStorage(c)
@@ -51,9 +51,19 @@ func parseSeedanceRoutingFields(body []byte, canonicalModel string) (modelroutin
 	}
 	input := modelrouting.FactsInput{CanonicalModel: canonicalModel}
 
+	allowedResolutions := []string{"480p", "720p", "1080p", "4k"}
+	allowedRatios := []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"}
+	minDuration, maxDuration := 1, relaycommon.MaxTaskDurationSeconds
+	contract, isH3 := modelrouting.VideoSeriesContractForModel(canonicalModel)
+	if isH3 {
+		allowedResolutions = contract.OutputResolutions
+		allowedRatios = contract.AspectRatios
+		minDuration, maxDuration = contract.MinDurationSeconds, contract.MaxDurationSeconds
+	}
+
 	if raw, ok := fields["resolution"]; ok {
 		value, err := routingStringField(raw, "resolution")
-		if err != nil || !containsRoutingString([]string{"480p", "720p", "1080p", "4k"}, value) {
+		if err != nil || !containsRoutingString(allowedResolutions, value) {
 			return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.resolution", "resolution is invalid")
 		}
 		input.OutputResolution = &value
@@ -63,14 +73,22 @@ func parseSeedanceRoutingFields(body []byte, canonicalModel string) (modelroutin
 			return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.duration", "duration must be an integer")
 		}
 		var value int
-		if err := common.Unmarshal(raw, &value); err != nil || value == 0 || value < -1 || value > relaycommon.MaxTaskDurationSeconds {
-			return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.duration", fmt.Sprintf("duration must be -1 or between 1 and %d", relaycommon.MaxTaskDurationSeconds))
+		if isH3 {
+			if err := common.Unmarshal(raw, &value); err != nil {
+				return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.duration", "duration must be an integer")
+			}
+			if value < minDuration || value > maxDuration {
+				return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.duration", fmt.Sprintf("duration must be between %d and %d", minDuration, maxDuration))
+			}
+		} else if err := common.Unmarshal(raw, &value); err != nil || value == 0 || value < -1 || value > maxDuration {
+			return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.duration", fmt.Sprintf("duration must be -1 or between 1 and %d", maxDuration))
 		}
+
 		input.DurationSeconds = &value
 	}
 	if raw, ok := fields["ratio"]; ok {
 		value, err := routingStringField(raw, "ratio")
-		if err != nil || !containsRoutingString([]string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"}, value) {
+		if err != nil || !containsRoutingString(allowedRatios, value) {
 			return modelrouting.FactsInput{}, newRoutingInputError("InvalidParameter.ratio", "ratio is invalid")
 		}
 		input.AspectRatio = &value
@@ -223,11 +241,15 @@ func extractSeedanceContentFacts(raw json.RawMessage, canonicalModel string) (se
 	if facts.texts != 1 {
 		return facts, newRoutingInputError("InvalidParameter.content", "exactly one non-empty text item is required")
 	}
-	seriesContract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
-	if facts.images > seriesContract.ReferenceLimits.Images ||
-		facts.videos > seriesContract.ReferenceLimits.Videos ||
-		facts.audios > seriesContract.ReferenceLimits.Audios {
-		return facts, newRoutingInputError("InvalidParameter.content", fmt.Sprintf("reference media count exceeds Seedance %s limits", seriesContract.Series))
+	if contract, ok := modelrouting.VideoSeriesContractForModel(canonicalModel); ok {
+		if facts.images > contract.ReferenceLimits.Images || facts.videos > contract.ReferenceLimits.Videos || facts.audios > contract.ReferenceLimits.Audios || facts.images+facts.videos+facts.audios > contract.ReferenceTotalMax {
+			return facts, newRoutingInputError("InvalidParameter.content", "reference media count exceeds MiniMax H3 limits")
+		}
+	} else {
+		seriesContract := modelrouting.SeedanceSeriesContractForModel(canonicalModel)
+		if facts.images > seriesContract.ReferenceLimits.Images || facts.videos > seriesContract.ReferenceLimits.Videos || facts.audios > seriesContract.ReferenceLimits.Audios {
+			return facts, newRoutingInputError("InvalidParameter.content", fmt.Sprintf("reference media count exceeds Seedance %s limits", seriesContract.Series))
+		}
 	}
 	if facts.audios > 0 && facts.images == 0 && facts.videos == 0 {
 		return facts, newRoutingInputError("InvalidParameter.content", "audio input requires an image or video")

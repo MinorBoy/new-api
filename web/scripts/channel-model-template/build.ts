@@ -233,6 +233,7 @@ function resolution(value: string): string {
   const normalized = value.trim().toLowerCase()
   if (normalized === '') return 'default'
   if (normalized === '2160p') return '4k'
+  if (normalized === '2kp' || normalized === '2k') return '2k'
   return normalized.endsWith('p') || normalized === '4k'
     ? normalized
     : `${normalized}p`
@@ -962,6 +963,102 @@ function overridePrice(
   }
 }
 
+function buildH3CostsAndMappings(
+  rules: Rules,
+  channels: ChannelRow[],
+  records: SourceRecord[],
+  officialPrices: SourceRecord[],
+  issues: Issue[]
+): { costs: CostRow[]; mappings: MappingRow[] } {
+  const costs: CostRow[] = []
+  const mappings: MappingRow[] = []
+  for (const record of records) {
+    const clientModel = field(record, '模型ID') || 'minimax-h3'
+    const upstreamModel = field(record, '上游模型') || 'minimax-h3-vip'
+    const resolutionValue = resolution(field(record, '清晰度')).toLowerCase()
+    let variant = ''
+    if (resolutionValue === '2k') {
+      variant = '2k'
+    } else if (resolutionValue === '720p') {
+      variant = '720p'
+    }
+    const channelName = field(record, '渠道')
+    const channelCode = rules.channelCodes[channelName] ?? `CH-RAW-${slug(channelName)}`
+    const official = officialPrices.find(
+      (candidate) =>
+        field(candidate, '模型') === clientModel &&
+        resolution(field(candidate, '分辨率')).toLowerCase() === resolutionValue
+    )
+    const price =
+      numericField(official, '价格 元/秒') ??
+      numericField(official, '素材价格 元/秒') ??
+      numericField(record, '单价 元/秒') ??
+      numericField(record, '单价 元')
+    if (!variant || !price || !price.gt(0)) {
+      issues.push(issue('H3_COST_INVALID', 'FAIL', 'H3 必须提供 720p/2k 和正的 CNY/秒成本。', record))
+      continue
+    }
+    const duration = parseDuration(field(record, '时长范围'))
+    const sourceChannel = channels.find((channel) => channel.name === channelName)
+    const sourceId = sourceChannel?.sourceId ?? `SRC-${slug(channelName)}-H3-${record.location.row}`
+    const skuCode = skuId(clientModel, field(record, '版本') || 'standard', resolutionValue)
+    const base = `COST-${slug(channelCode.replace(/^CH-/, ''))}-H3-${variant}-${record.location.row}`
+    const native = price.toFixed()
+    const normalized = price.mul(new Decimal(rules.defaults.currencyToUsd)).toFixed()
+    costs.push({
+      businessId: base,
+      channelCode,
+      upstreamModel,
+      skuCode,
+      scenario: 'no_video',
+      mode: 'per_duration',
+      tokenSubMode: '',
+      meterSource: 'validated_request',
+      tokenField: '',
+      chargeEvent: 'task_succeeded',
+      currency: 'CNY',
+      nativePerRequest: '',
+      nativePerSecond: native,
+      nativePerMillion: '',
+      nativeBasePrice: native,
+      billingMultiplier: '1',
+      purchaseDiscountRatio: '1',
+      rechargeRatio: '1',
+      feeRate: '0',
+      currencyToUsd: rules.defaults.currencyToUsd,
+      normalizedUsdUnitPrice: normalized,
+      unit: 'CNY/second',
+      status: 'draft',
+      sourceId,
+      sourceSheet: official?.location.sheet ?? record.location.sheet,
+      sourceRow: official?.location.row ?? record.location.row,
+      note: 'MiniMax H3 渠道成本草稿；不代表用户售价。',
+    })
+    const reference = {
+      images: Number(field(record, '参考图数')) || 0,
+      videos: Number(field(record, '参考视频数')) || 0,
+      audios: Number(field(record, '参考音频数')) || 0,
+      total: Number(field(record, '最大素材数')) || 15,
+    }
+    mappings.push({
+      businessId: `MAP-${slug(channelCode)}-H3-${variant}-${record.location.row}`,
+      clientModel,
+      channelCode,
+      upstreamModel,
+      skuCode,
+      defaultScenario: 'no_video',
+      enabled: '否',
+      minDurationSeconds: duration.min || 4,
+      maxDurationSeconds: duration.max || 15,
+      sourceId,
+      sourceSheet: record.location.sheet,
+      sourceRow: record.location.row,
+      note: `H3 draft target ${variant}; refs=${reference.images}/${reference.videos}/${reference.audios}/${reference.total}`,
+    })
+  }
+  return { costs, mappings }
+}
+
 function buildCostsAndMappings(
   source: SourceWorkbook,
   rules: Rules,
@@ -1315,23 +1412,45 @@ export function buildTemplateData(
   rules: Rules
 ): TemplateData {
   const issues: Issue[] = []
+  const h3Records = source.h3Models ?? []
+  const h3OfficialRecords = source.h3OfficialPrices ?? []
+  for (const record of source.ignoredNonSdModels ?? []) {
+    issues.push({
+      code: 'UNSUPPORTED_SOURCE_RECORD',
+      severity: 'FAIL',
+      message: `源表中的非 SD 记录未进入 Seedance V1 模板：${field(record, '模型ID') || '未命名模型'}。`,
+      sheet: record.location.sheet,
+      row: record.location.row,
+      suggestion: '将该记录迁移到对应的专用工作表，或显式使用 SD-only 范围生成。',
+    })
+  }
   const unsupportedSheets = (source.additionalSheets ?? []).filter((name) =>
-    ['h3', 'h3官价'].includes(name)
+    ['kling', 'kling官价'].includes(name)
   )
   if (unsupportedSheets.length > 0) {
     issues.push({
       code: 'UNSUPPORTED_SOURCE_SHEET',
       severity: 'FAIL',
       message: `当前 V1 SD 模板尚未支持工作表：${unsupportedSheets.join('、')}。`,
-      suggestion:
-        '先将 H3 价格单位和素材语义映射到独立模板，再生成或发布 H3 配置。',
+      suggestion: '本次只生成 Seedance V1；辅助工作表保留在源表，不会进入模板。',
+    })
+  }
+  const h3Sheets = (source.additionalSheets ?? []).filter((name) =>
+    ['h3', 'h3官价'].includes(name)
+  )
+  if (h3Sheets.length > 0 && h3Records.length === 0) {
+    issues.push({
+      code: 'UNSUPPORTED_SOURCE_SHEET',
+      severity: 'FAIL',
+      message: `H3 工作表为空或未成功解析：${h3Sheets.join('、')}。`,
+      suggestion: '检查 H3 表头和记录后重新生成。',
     })
   }
   const officialIndex = indexOfficialPrices(source)
   const channels = buildChannels(source, rules)
   const skus = buildSkus(source, rules, officialIndex, issues)
   const sales = buildSales(skus, officialIndex, rules)
-  const { costs, mappings } = buildCostsAndMappings(
+  const base = buildCostsAndMappings(
     source,
     rules,
     channels,
@@ -1339,6 +1458,15 @@ export function buildTemplateData(
     officialIndex,
     issues
   )
+  const h3 = buildH3CostsAndMappings(
+    rules,
+    channels,
+    h3Records,
+    h3OfficialRecords,
+    issues
+  )
+  const costs = [...base.costs, ...h3.costs]
+  const mappings = [...base.mappings, ...h3.mappings]
   const profits = buildProfits(sales, costs, skus, rules.defaults.groupRatio)
   const sources = [
     ...source.channels.map((channel) => ({

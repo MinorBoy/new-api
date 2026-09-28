@@ -13,8 +13,6 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
@@ -168,6 +166,82 @@ test('supports an explicit SD-only generation scope when H3 sheets are present',
       )
     )
     await fs.access(outputPath)
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('blocks non-SD source records by default and allows an explicit SD-only run', async () => {
+  const directory = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'channel-template-generator-non-sd-')
+  )
+  const outputPath = path.join(directory, 'template.xlsx')
+  const reportPath = path.join(directory, 'template.report.json')
+  const allowedOutputPath = path.join(directory, 'template-allowed.xlsx')
+  const allowedReportPath = path.join(directory, 'template-allowed.report.json')
+  const sourceWithKlingPath = path.join(directory, 'source-with-kling.xlsx')
+  try {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.readFile(sourcePath)
+    const sourceSheet = workbook.getWorksheet('sd')
+    assert.ok(sourceSheet)
+    const headers = sourceSheet.getRow(2).values as unknown[]
+    const modelColumn = headers.indexOf('模型ID')
+    const seriesColumn = headers.indexOf('系列')
+    assert.ok(modelColumn > 0)
+    assert.ok(seriesColumn > 0)
+    sourceSheet.getRow(3).getCell(modelColumn).value = 'omni-test'
+    sourceSheet.getRow(3).getCell(seriesColumn).value = 'Omni'
+    for (let row = 4; row <= sourceSheet.rowCount; row += 1) {
+      sourceSheet.getRow(row).getCell(1).value = null
+      sourceSheet.getRow(row).getCell(6).value = null
+    }
+    workbook.addWorksheet('kling').addRow(['渠道', '模型ID', '系列'])
+    workbook.addWorksheet('kling官价').addRow(['系列', '模型', '分辨率'])
+    await workbook.xlsx.writeFile(sourceWithKlingPath)
+
+    const blocked = await runGenerator([
+      '--source',
+      sourceWithKlingPath,
+      '--rules',
+      rulesPath,
+      '--base',
+      basePath,
+      '--output',
+      outputPath,
+      '--report',
+      reportPath,
+    ])
+    assert.equal(blocked.hasFailures, true)
+    assert.ok(
+      blocked.report.issues.some(
+        (item) =>
+          item.code === 'UNSUPPORTED_SOURCE_RECORD' && item.severity === 'FAIL'
+      )
+    )
+
+    const allowed = await runGenerator([
+      '--source',
+      sourceWithKlingPath,
+      '--rules',
+      rulesPath,
+      '--base',
+      basePath,
+      '--output',
+      allowedOutputPath,
+      '--report',
+      allowedReportPath,
+      '--allow-warnings',
+      '--allow-unsupported-sheets',
+    ])
+    assert.equal(allowed.hasFailures, false)
+    assert.ok(
+      allowed.report.issues.some(
+        (item) =>
+          item.code === 'UNSUPPORTED_SOURCE_RECORD' && item.severity === 'WARN'
+      )
+    )
+    await fs.access(allowedOutputPath)
   } finally {
     await fs.rm(directory, { recursive: true, force: true })
   }

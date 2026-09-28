@@ -9,6 +9,71 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateMiniMaxH3PolicyContract(t *testing.T) {
+	validPolicy := func() modelrouting.PolicySnapshot {
+		policy := validPolicySnapshot()
+		policy.CanonicalModel = modelrouting.MiniMaxH3
+		policy.Defaults = modelrouting.Defaults{OutputResolution: "2k", DurationSeconds: 15, AspectRatio: "16:9"}
+		policy.TargetsByChannel[11][0].Constraints = modelrouting.Constraints{
+			OutputResolutions: []string{"720p", "2k"},
+			Durations:         modelrouting.DurationConstraint{Min: intPtr(4), Max: intPtr(15)},
+			AspectRatios:      []string{"auto", "16:9"},
+			ReferenceLimits:   modelrouting.ReferenceLimits{Images: 9, Videos: 3, Audios: 3},
+			ReferenceTotalMax: intPtr(15),
+		}
+		return policy
+	}
+
+	t.Run("accepts H3 defaults and ranges", func(t *testing.T) {
+		require.NoError(t, modelrouting.ValidatePolicy(validPolicy(), relaycommon.MaxTaskDurationSeconds))
+	})
+	t.Run("omitted defaults use contract defaults", func(t *testing.T) {
+		policy := validPolicy()
+		policy.Defaults = modelrouting.Defaults{}
+		require.NoError(t, modelrouting.ValidatePolicy(policy, relaycommon.MaxTaskDurationSeconds))
+	})
+
+	tests := []struct {
+		name     string
+		mutate   func(*modelrouting.PolicySnapshot)
+		expected modelrouting.ValidationCode
+	}{
+		{"unsupported resolution", func(p *modelrouting.PolicySnapshot) {
+			p.TargetsByChannel[11][0].Constraints.OutputResolutions = []string{"1080p"}
+		}, modelrouting.ValidationInvalidOutputResolution},
+		{"unsupported ratio", func(p *modelrouting.PolicySnapshot) {
+			p.TargetsByChannel[11][0].Constraints.AspectRatios = []string{"adaptive"}
+		}, modelrouting.ValidationInvalidAspectRatio},
+		{"duration below minimum", func(p *modelrouting.PolicySnapshot) {
+			p.TargetsByChannel[11][0].Constraints.Durations = modelrouting.DurationConstraint{Values: []int{3}}
+		}, modelrouting.ValidationInvalidDuration},
+		{"duration above maximum", func(p *modelrouting.PolicySnapshot) {
+			p.TargetsByChannel[11][0].Constraints.Durations = modelrouting.DurationConstraint{Values: []int{16}}
+		}, modelrouting.ValidationInvalidDuration},
+		{"default below minimum", func(p *modelrouting.PolicySnapshot) { p.Defaults.DurationSeconds = 3 }, modelrouting.ValidationInvalidDuration},
+		{"default above maximum", func(p *modelrouting.PolicySnapshot) { p.Defaults.DurationSeconds = 16 }, modelrouting.ValidationInvalidDuration},
+		{"per-type reference limit", func(p *modelrouting.PolicySnapshot) { p.TargetsByChannel[11][0].Constraints.ReferenceLimits.Videos = 4 }, modelrouting.ValidationInvalidReferenceLimit},
+		{"aggregate reference limit", func(p *modelrouting.PolicySnapshot) {
+			p.TargetsByChannel[11][0].Constraints.ReferenceTotalMax = intPtr(16)
+		}, modelrouting.ValidationInvalidReferenceLimit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := validPolicy()
+			tt.mutate(&policy)
+			var validationErr *modelrouting.ValidationError
+			require.ErrorAs(t, modelrouting.ValidatePolicy(policy, relaycommon.MaxTaskDurationSeconds), &validationErr)
+			assert.Equal(t, tt.expected, validationErr.Code)
+		})
+	}
+
+	t.Run("does not join Seedance canonical models", func(t *testing.T) {
+		assert.NotContains(t, modelrouting.CanonicalModels, modelrouting.MiniMaxH3)
+		assert.True(t, modelrouting.IsCanonicalVideoModel(modelrouting.MiniMaxH3))
+		assert.False(t, modelrouting.IsCanonicalVideoModel(modelrouting.MiniMaxH3VIP))
+	})
+}
+
 func TestValidatePolicyRejectsAmbiguousSamePriorityTargets(t *testing.T) {
 	policy := validPolicySnapshot()
 	policy.TargetsByChannel[11] = []modelrouting.Target{

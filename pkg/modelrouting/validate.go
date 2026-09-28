@@ -38,25 +38,48 @@ var allowedInputModes = []InputMode{InputModeText, InputModeFirstFrame, InputMod
 var allowedReferenceModes = []string{"first_last_frames", "omni_reference", "agentic"}
 
 func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
-	if !containsString(CanonicalModels, policy.CanonicalModel) {
-		return newValidationError(ValidationInvalidModel, "model", "model must be a supported canonical Seedance model")
+	if !containsString(CanonicalModels, policy.CanonicalModel) && policy.CanonicalModel != MiniMaxH3 {
+		return newValidationError(ValidationInvalidModel, "model", "model must be a supported canonical video model")
 	}
 	groupName := strings.TrimSpace(policy.GroupName)
 	if groupName == "" || strings.EqualFold(groupName, "auto") {
 		return newValidationError(ValidationInvalidGroup, "group_name", "group_name must be a concrete group")
 	}
-	if !containsString(allowedResolutions, policy.Defaults.OutputResolution) {
+
+	defaults := policy.Defaults
+	modelResolutions := allowedResolutions
+	modelRatios := allowedRatios
+	minDuration := 1
+	policyMaxDuration := maxDuration
+	if contract, ok := VideoSeriesContractForModel(policy.CanonicalModel); ok {
+		modelResolutions = contract.OutputResolutions
+		modelRatios = contract.AspectRatios
+		minDuration = contract.MinDurationSeconds
+		if defaults.OutputResolution == "" {
+			defaults.OutputResolution = contract.DefaultResolution
+		}
+		if defaults.DurationSeconds == 0 {
+			defaults.DurationSeconds = contract.DefaultDuration
+		}
+		if defaults.AspectRatio == "" {
+			defaults.AspectRatio = contract.DefaultAspectRatio
+		}
+		if policyMaxDuration > contract.MaxDurationSeconds {
+			policyMaxDuration = contract.MaxDurationSeconds
+		}
+	} else {
+		contract := SeedanceSeriesContractForModel(policy.CanonicalModel)
+		if policyMaxDuration > contract.MaxDurationSeconds {
+			policyMaxDuration = contract.MaxDurationSeconds
+		}
+	}
+	if !containsString(modelResolutions, defaults.OutputResolution) {
 		return newValidationError(ValidationInvalidOutputResolution, "defaults.output_resolution", "default output resolution is invalid")
 	}
-	modelContract := SeedanceSeriesContractForModel(policy.CanonicalModel)
-	policyMaxDuration := maxDuration
-	if policyMaxDuration > modelContract.MaxDurationSeconds {
-		policyMaxDuration = modelContract.MaxDurationSeconds
-	}
-	if policy.Defaults.DurationSeconds < 1 || policy.Defaults.DurationSeconds > policyMaxDuration {
+	if defaults.DurationSeconds < minDuration || defaults.DurationSeconds > policyMaxDuration {
 		return newValidationError(ValidationInvalidDuration, "defaults.duration_seconds", "default duration is invalid")
 	}
-	if !containsString(allowedRatios, policy.Defaults.AspectRatio) {
+	if !containsString(modelRatios, defaults.AspectRatio) {
 		return newValidationError(ValidationInvalidAspectRatio, "defaults.aspect_ratio", "default aspect ratio is invalid")
 	}
 
@@ -84,7 +107,8 @@ func ValidatePolicy(policy PolicySnapshot, maxDuration int) error {
 			}
 			for _, input := range representativeFactsInputs(target.Constraints) {
 				input.CanonicalModel = policy.CanonicalModel
-				facts, err := ResolveFacts(policy.GroupName, input, policy.Defaults)
+				facts, err := ResolveFacts(policy.GroupName, input, defaults)
+
 				if err != nil {
 					continue
 				}
@@ -105,17 +129,35 @@ func validateConstraints(constraints Constraints, maxDuration int, canonicalMode
 	if len(constraints.OutputResolutions) == 0 {
 		return newValidationError(ValidationInvalidOutputResolution, "targets.constraints.output_resolutions", "at least one output resolution is required")
 	}
-	contract := SeedanceSeriesContractForModel(canonicalModel)
 	allowedModelResolutions := allowedResolutions
+	allowedModelRatios := allowedRatios
+	minDuration := 1
 	modelMaxDuration := maxDuration
-	if modelMaxDuration > contract.MaxDurationSeconds {
-		modelMaxDuration = contract.MaxDurationSeconds
-	}
-	maxImages := contract.ReferenceLimits.Images
-	maxVideos := contract.ReferenceLimits.Videos
-	maxAudios := contract.ReferenceLimits.Audios
-	if contract.Series == "2.5" {
-		allowedModelResolutions = []string{"480p", "720p"}
+	maxImages, maxVideos, maxAudios := 9, 3, 3
+	referenceTotalMax := 0
+	if videoContract, ok := VideoSeriesContractForModel(canonicalModel); ok {
+		allowedModelResolutions = videoContract.OutputResolutions
+		allowedModelRatios = videoContract.AspectRatios
+		minDuration = videoContract.MinDurationSeconds
+		maxImages = videoContract.ReferenceLimits.Images
+		maxVideos = videoContract.ReferenceLimits.Videos
+		maxAudios = videoContract.ReferenceLimits.Audios
+		referenceTotalMax = videoContract.ReferenceTotalMax
+		if modelMaxDuration > videoContract.MaxDurationSeconds {
+			modelMaxDuration = videoContract.MaxDurationSeconds
+		}
+	} else {
+		seedanceContract := SeedanceSeriesContractForModel(canonicalModel)
+		if modelMaxDuration > seedanceContract.MaxDurationSeconds {
+			modelMaxDuration = seedanceContract.MaxDurationSeconds
+		}
+		maxImages = seedanceContract.ReferenceLimits.Images
+		maxVideos = seedanceContract.ReferenceLimits.Videos
+		maxAudios = seedanceContract.ReferenceLimits.Audios
+		referenceTotalMax = seedanceContract.ReferenceTotalMax
+		if seedanceContract.Series == "2.5" {
+			allowedModelResolutions = []string{"480p", "720p"}
+		}
 	}
 	for _, resolution := range constraints.OutputResolutions {
 		if !containsString(allowedModelResolutions, resolution) {
@@ -123,11 +165,11 @@ func validateConstraints(constraints Constraints, maxDuration int, canonicalMode
 		}
 	}
 
-	if err := validateDurationConstraint(constraints.Durations, modelMaxDuration); err != nil {
+	if err := validateDurationConstraint(constraints.Durations, minDuration, modelMaxDuration); err != nil {
 		return err
 	}
 	for _, ratio := range constraints.AspectRatios {
-		if !containsString(allowedRatios, ratio) {
+		if !containsString(allowedModelRatios, ratio) {
 			return newValidationError(ValidationInvalidAspectRatio, "targets.constraints.aspect_ratios", "aspect ratio is invalid")
 		}
 	}
@@ -146,7 +188,7 @@ func validateConstraints(constraints Constraints, maxDuration int, canonicalMode
 		minimums.Audios < 0 || minimums.Audios > limits.Audios {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_minimums", "reference minimums are invalid")
 	}
-	if constraints.ReferenceTotalMax != nil && (*constraints.ReferenceTotalMax < 0 || *constraints.ReferenceTotalMax > contract.ReferenceTotalMax || *constraints.ReferenceTotalMax > limits.Images+limits.Videos+limits.Audios) {
+	if constraints.ReferenceTotalMax != nil && (*constraints.ReferenceTotalMax < 0 || (referenceTotalMax > 0 && *constraints.ReferenceTotalMax > referenceTotalMax) || *constraints.ReferenceTotalMax > limits.Images+limits.Videos+limits.Audios) {
 		return newValidationError(ValidationInvalidReferenceLimit, "targets.constraints.reference_total_max", "reference total maximum is invalid")
 	}
 	if constraints.ReferenceVideoAudioTotalMax != nil {
@@ -218,7 +260,7 @@ func representativeFactsInputs(constraints Constraints) []FactsInput {
 	return inputs
 }
 
-func validateDurationConstraint(constraint DurationConstraint, maxDuration int) error {
+func validateDurationConstraint(constraint DurationConstraint, minDuration, maxDuration int) error {
 	hasValues := len(constraint.Values) > 0
 	hasMin := constraint.Min != nil
 	hasMax := constraint.Max != nil
@@ -227,13 +269,13 @@ func validateDurationConstraint(constraint DurationConstraint, maxDuration int) 
 	}
 	if hasValues {
 		for _, duration := range constraint.Values {
-			if duration < 1 || duration > maxDuration {
+			if duration < minDuration || duration > maxDuration {
 				return newValidationError(ValidationInvalidDuration, "targets.constraints.durations.values", "duration value is out of range")
 			}
 		}
 		return nil
 	}
-	if *constraint.Min < 1 || *constraint.Max > maxDuration || *constraint.Min > *constraint.Max {
+	if *constraint.Min < minDuration || *constraint.Max > maxDuration || *constraint.Min > *constraint.Max {
 		return newValidationError(ValidationInvalidDuration, "targets.constraints.durations", "duration range is invalid")
 	}
 	return nil

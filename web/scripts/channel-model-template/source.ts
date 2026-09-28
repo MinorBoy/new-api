@@ -77,8 +77,46 @@ export const OFFICIAL_PRICE_HEADERS = [
   '包含视频 元/秒',
   '备注',
 ] as const
+export const H3_MODEL_HEADERS = [
+  '渠道',
+  '模型ID',
+  '系列',
+  '版本',
+  '清晰度',
+  '计费方式',
+  '单价 元/秒',
+  '参考图数',
+  '参考视频数',
+  '参考音频数',
+  '最大素材数',
+  '时长范围',
+  '比例',
+  '状态',
+  '上游模型',
+] as const
+export const H3_OFFICIAL_HEADERS = [
+  '模型',
+  '上游模型',
+  '分辨率',
+  '价格 元/秒',
+  '价格版本',
+  '来源 URL',
+  '原始响应 SHA-256',
+] as const
 const FORBIDDEN_SD_HEADERS = ['元/秒', '元/次', '元/1M', '视频输入'] as const
-const OPTIONAL_SHEETS = ['gpt-image官价', 'h3官价', 'h3'] as const
+const OPTIONAL_SHEETS = [
+  'gpt-image官价',
+  'h3官价',
+  'h3',
+  'gemini-image官价',
+  'gpt官价',
+  'gpt-image',
+  'gemini-image',
+  'gpt',
+  'kling',
+  'kling官价',
+] as const
+const KNOWN_NON_SD_SERIES = new Set(['kling', 'omni', '3', '3.1', 'h3'])
 
 export type SourceValue = boolean | Date | number | string | null
 
@@ -96,6 +134,9 @@ export type SourceWorkbook = {
   channels: SourceRecord[]
   models: SourceRecord[]
   officialPrices: SourceRecord[]
+  h3Models?: SourceRecord[]
+  h3OfficialPrices?: SourceRecord[]
+  ignoredNonSdModels?: SourceRecord[]
   additionalSheets?: string[]
 }
 
@@ -218,6 +259,46 @@ function readRecords(
   return records
 }
 
+function readFlexibleRecords(
+  sheet: ExcelJS.Worksheet,
+  headers: readonly string[],
+  headerRow: number,
+  requiredHeaders: readonly string[],
+  aliases: Readonly<Record<string, readonly string[]>> = {}
+): SourceRecord[] {
+  const columns = readOptionalHeaders(sheet, headerRow, headers.map((header) => header))
+  const actualHeaders = headers.map((header, index) => {
+    if (columns[index] !== 0) return header
+    const accepted = aliases[header] ?? []
+    const headerRowValues = sheet.getRow(headerRow)
+    for (let column = 1; column <= sheet.columnCount; column += 1) {
+      if (accepted.includes(cellText(cellValue(headerRowValues.getCell(column).value)))) {
+        columns[index] = column
+        return header
+      }
+    }
+    return header
+  })
+  const present = new Set(
+    actualHeaders.filter((_, index) => columns[index] !== 0)
+  )
+  if (requiredHeaders.some((header) => !present.has(header))) {
+    return []
+  }
+  const records: SourceRecord[] = []
+  for (let rowNumber = headerRow + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber)
+    if (rowIsBlank(row, columns.filter((column) => column !== 0))) continue
+    const fields: Record<string, SourceValue> = {}
+    actualHeaders.forEach((header, index) => {
+      const column = columns[index]
+      fields[header] = column ? cellValue(row.getCell(column).value) : null
+    })
+    records.push({ fields, location: { sheet: sheet.name, row: rowNumber } })
+  }
+  return records
+}
+
 function normalizeSeries(record: SourceRecord): SourceRecord {
   const text = cellText(record.fields.系列 ?? null)
   const value = Number(text)
@@ -331,11 +412,41 @@ export async function readSourceWorkbook(
   ]).map((record) => {
     const billingMode = record.fields.计费方式 ?? null
     const { 计费方式: _ignored, ...fields } = record.fields
-    return normalizeSeries({
+    return {
       ...record,
       fields: { ...fields, 计费: billingMode },
-    })
+    }
   })
+  const ignoredNonSdModels = modelRecords.filter((record) =>
+    KNOWN_NON_SD_SERIES.has(cellText(record.fields.系列 ?? null).toLowerCase())
+  )
+  const seedanceModels = modelRecords.filter(
+    (record) => !ignoredNonSdModels.includes(record)
+  ).map(normalizeSeries)
+  const h3Sheet = workbook.getWorksheet('h3')
+  const h3OfficialSheet = workbook.getWorksheet('h3官价')
+  const h3Records = h3Sheet
+    ? readFlexibleRecords(
+        h3Sheet,
+        H3_MODEL_HEADERS,
+        1,
+        ['渠道', '模型ID'],
+        { '单价 元/秒': ['单价 元'] }
+      )
+    : []
+  const h3OfficialRecords = h3OfficialSheet
+    ? readFlexibleRecords(
+        h3OfficialSheet,
+        H3_OFFICIAL_HEADERS,
+        1,
+        ['模型', '分辨率'],
+        {
+          模型: ['模型ID'],
+          '价格 元/秒': ['输出价格 元/秒', '素材价格 元/秒'],
+          '上游模型': ['上游'],
+        }
+      )
+    : []
   const allChannelHeaders = [
     ...CHANNEL_HEADERS,
     ...(channelEconomicColumns.every((column) => column !== 0)
@@ -350,13 +461,16 @@ export async function readSourceWorkbook(
   ]
   return {
     channels: readRecords(channel, allChannelHeaders, allChannelColumns, 2),
-    models: modelRecords,
+    models: seedanceModels,
     officialPrices: readRecords(
       officialPrices,
       OFFICIAL_PRICE_HEADERS,
       officialPriceColumns,
       6
     ).map(normalizeSeries),
+    h3Models: h3Records,
+    h3OfficialPrices: h3OfficialRecords,
+    ignoredNonSdModels,
     additionalSheets: sheetNames.filter((name) =>
       (OPTIONAL_SHEETS as readonly string[]).includes(name)
     ),

@@ -647,9 +647,10 @@ func importedMaterialChannelType(t *testing.T, document types.ConfigImportDocume
 	return 0
 }
 
-func TestImportedMaterialChannelTypePreservesMikotoType(t *testing.T) {
+func TestImportedMaterialChannelTypePreservesSecureAndWxArtTypes(t *testing.T) {
 	document := loadImportedMaterialMatrixDocument(t)
-	require.Equal(t, constant.ChannelTypeMikoto, importedMaterialChannelType(t, document, "mikoto-sd"))
+	require.Equal(t, constant.ChannelTypeSecure, importedMaterialChannelType(t, document, "secure-overseas"))
+	require.Equal(t, constant.ChannelTypeWxArt, importedMaterialChannelType(t, document, "channel-wxart"))
 }
 
 func importedMaterialChannelModels(t *testing.T, document types.ConfigImportDocument, lineRef string) []string {

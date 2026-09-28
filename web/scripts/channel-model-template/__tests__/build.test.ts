@@ -216,6 +216,358 @@ function ffLinkSource(): SourceWorkbook {
   return source
 }
 
+test('builds MiniMax H3 costs from second and call billing modes', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        计费方式: 'second',
+        '单价 元': 0.12,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: '16:9',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+    {
+      location: { sheet: 'h3', row: 3 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '2k',
+        计费方式: 'call',
+        '单价 元': 2.5,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: '16:9',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+  source.h3OfficialPrices = []
+
+  const output = buildTemplateData(source, rules)
+  const h3Costs = output.costs.filter((cost) => cost.upstreamModel === 'minimax-h3-vip')
+
+  assert.deepEqual(
+    h3Costs.map((cost) => [cost.mode, cost.nativePerSecond, cost.nativePerRequest, cost.unit]),
+    [
+      ['per_duration', '0.12', '', 'CNY/second'],
+      ['per_request', '', '2.5', 'CNY/call'],
+    ]
+  )
+  assert.equal(output.issues.some((item) => item.code === 'COST_MODE_UNKNOWN'), false)
+})
+
+test('matches H3 official prices by normalized model and H3 series', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        计费方式: 'second',
+        '单价 元': 0.12,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: '16:9',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+  source.h3OfficialPrices = [
+    {
+      location: { sheet: 'h3官价', row: 2 },
+      fields: {
+        系列: 'other',
+        模型: 'MiniMax-H3',
+        版本: '标准',
+        分辨率: '720p',
+        '价格 元/秒': 0.99,
+      },
+    },
+    {
+      location: { sheet: 'h3官价', row: 3 },
+      fields: {
+        系列: 'h3',
+        模型: 'MiniMax-H3',
+        版本: '标准',
+        分辨率: '720P',
+        '价格 元/秒': 0.2,
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+  const cost = output.costs.find((item) => item.upstreamModel === 'minimax-h3-vip')
+
+  assert.ok(cost)
+  assert.equal(cost.nativePerSecond, '0.2')
+  assert.equal(cost.unit, 'CNY/second')
+  assert.equal(cost.sourceSheet, 'h3官价')
+  assert.equal(cost.sourceRow, 3)
+  assert.equal(output.issues.some((item) => item.code === 'H3_COST_INVALID'), false)
+})
+
+test('keeps H3 call pricing independent from official per-second prices', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '2k',
+        计费方式: 'call',
+        '单价 元': 2.5,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: '16:9',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+  source.h3OfficialPrices = [
+    {
+      location: { sheet: 'h3官价', row: 2 },
+      fields: {
+        系列: 'h3',
+        模型: 'MiniMax-H3',
+        版本: '标准',
+        分辨率: '2k',
+        '价格 元/秒': 0.2,
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+  const cost = output.costs.find((item) => item.upstreamModel === 'minimax-h3-vip')
+
+  assert.ok(cost)
+  assert.equal(cost.mode, 'per_request')
+  assert.equal(cost.nativePerRequest, '2.5')
+  assert.equal(cost.nativePerSecond, '')
+  assert.equal(cost.unit, 'CNY/call')
+  assert.equal(cost.sourceSheet, 'h3')
+  assert.equal(cost.sourceRow, 2)
+})
+
+test('blocks H3 rows with invalid capability contracts before generating entities', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '768p',
+        计费方式: 'second',
+        '单价 元': 0.12,
+        参考图数: 10,
+        参考视频数: 4,
+        参考音频数: 4,
+        最大素材数: 20,
+        时长范围: '3-16',
+        比例: 'square',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+  const h3Issues = output.issues.filter((item) => item.sheet === 'h3')
+
+  assert.equal(output.costs.some((cost) => cost.upstreamModel === 'minimax-h3-vip'), false)
+  assert.equal(output.mappings.some((mapping) => mapping.clientModel === 'minimax-h3'), false)
+  for (const code of [
+    'H3_RESOLUTION_INVALID',
+    'H3_DURATION_INVALID',
+    'H3_RATIO_INVALID',
+    'H3_REFERENCE_参考图数_INVALID',
+    'H3_REFERENCE_参考视频数_INVALID',
+    'H3_REFERENCE_参考音频数_INVALID',
+    'H3_REFERENCE_最大素材数_INVALID',
+  ]) {
+    assert.ok(h3Issues.some((item) => item.code === code && item.severity === 'FAIL'))
+  }
+})
+
+test('blocks duplicate normalized H3 official prices instead of choosing one', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        计费方式: 'second',
+        '单价 元': 0.12,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: '16:9',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+  source.h3OfficialPrices = [
+    {
+      location: { sheet: 'h3官价', row: 2 },
+      fields: {
+        系列: 'h3',
+        模型: 'MiniMax-H3',
+        版本: '标准',
+        分辨率: '720p',
+        '价格 元/秒': 0.2,
+      },
+    },
+    {
+      location: { sheet: 'h3官价', row: 3 },
+      fields: {
+        系列: 'h3',
+        模型: 'minimax-h3',
+        版本: '标准',
+        分辨率: '720P',
+        '价格 元/秒': 0.3,
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs.some((cost) => cost.upstreamModel === 'minimax-h3-vip'), false)
+  assert.ok(
+    output.issues.some(
+      (item) =>
+        item.code === 'H3_OFFICIAL_PRICE_AMBIGUOUS' &&
+        item.severity === 'FAIL' &&
+        item.sheet === 'h3' &&
+        item.row === 2
+    )
+  )
+})
+
+test('blocks MiniMax H3 rows without a supported billing mode', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        '单价 元': 0.12,
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs.some((cost) => cost.upstreamModel === 'minimax-h3-vip'), false)
+  assert.ok(output.issues.some((item) => item.code === 'COST_MODE_UNKNOWN' && item.severity === 'FAIL'))
+})
+
+test('blocks MiniMax H3 rows with a non-canonical client model', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3-vip',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        计费方式: 'second',
+        '单价 元': 0.12,
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs.some((cost) => cost.upstreamModel === 'minimax-h3-vip'), false)
+  assert.ok(
+    output.issues.some(
+      (item) =>
+        item.code === 'H3_CLIENT_MODEL_INVALID' &&
+        item.severity === 'FAIL' &&
+        item.sheet === 'h3' &&
+        item.row === 2
+    )
+  )
+})
+
+
+test('blocks MiniMax H3 rows without an explicit upstream model', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '720p',
+        计费方式: 'second',
+        '单价 元': 0.12,
+        上游模型分组: '默认',
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+
+  assert.equal(output.costs.some((cost) => cost.upstreamModel === 'minimax-h3-vip'), false)
+  assert.ok(
+    output.issues.some(
+      (item) =>
+        item.code === 'H3_UPSTREAM_MODEL_INVALID' &&
+        item.severity === 'FAIL' &&
+        item.sheet === 'h3' &&
+        item.row === 2
+    )
+  )
+})
+
 test('builds MiniMax H3 costs as disabled CNY per-duration drafts without sales', () => {
   const source = sourceWithOfficialPrice(false)
   source.h3Models = [
@@ -263,15 +615,21 @@ test('builds MiniMax H3 costs as disabled CNY per-duration drafts without sales'
   source.h3OfficialPrices = []
   const output = buildTemplateData(source, rules)
   assert.deepEqual(
-    output.costs.filter((cost) => cost.upstreamModel === 'minimax-h3-vip').map((cost) => [cost.nativePerSecond, cost.currency, cost.mode, cost.status]),
+    output.costs
+      .filter((cost) => cost.upstreamModel === 'minimax-h3-vip')
+      .map((cost) => [cost.nativePerSecond, cost.currency, cost.mode, cost.status]),
     [
       ['0.12', 'CNY', 'per_duration', 'draft'],
       ['0.18', 'CNY', 'per_duration', 'draft'],
     ]
   )
   assert.equal(output.sales.some((sale) => sale.clientModel === 'minimax-h3'), false)
-  assert.equal(output.mappings.filter((mapping) => mapping.clientModel === 'minimax-h3').length, 2)
+  assert.equal(
+    output.mappings.filter((mapping) => mapping.clientModel === 'minimax-h3').length,
+    2
+  )
 })
+
 
 test('does not send non-SD source rows through Seedance pricing', () => {
   const source = sourceWithOfficialPrice()

@@ -40,6 +40,15 @@ const COST_MODES = {
   token: 'per_token',
 } as const
 
+const H3_RESOLUTIONS = ['720p', '2k'] as const
+const H3_ASPECT_RATIOS = ['auto', '1:1', '16:9', '9:16', '3:4', '4:3'] as const
+const H3_REFERENCE_LIMITS = {
+  images: 9,
+  videos: 3,
+  audios: 3,
+  total: 15,
+} as const
+
 type CostMode = (typeof COST_MODES)[keyof typeof COST_MODES]
 
 type ReferenceContract = {
@@ -237,6 +246,10 @@ function resolution(value: string): string {
   return normalized.endsWith('p') || normalized === '4k'
     ? normalized
     : `${normalized}p`
+}
+
+function h3ModelKey(value: string): string {
+  return value.trim().toLowerCase()
 }
 
 type ParsedDuration = {
@@ -973,52 +986,203 @@ function buildH3CostsAndMappings(
   const costs: CostRow[] = []
   const mappings: MappingRow[] = []
   for (const record of records) {
-    const clientModel = field(record, '模型ID') || 'minimax-h3'
-    const upstreamModel = field(record, '上游模型') || 'minimax-h3-vip'
-    const resolutionValue = resolution(field(record, '清晰度')).toLowerCase()
-    let variant = ''
-    if (resolutionValue === '2k') {
-      variant = '2k'
-    } else if (resolutionValue === '720p') {
-      variant = '720p'
+    const clientModel = field(record, '模型ID')
+    const upstreamModel = field(record, '上游模型')
+    const series = field(record, '系列').toLowerCase()
+    const billingName = (field(record, '计费方式') || field(record, '计费')).toLowerCase()
+    const mode = COST_MODES[billingName as keyof typeof COST_MODES]
+    let contractInvalid = false
+    if (clientModel !== 'minimax-h3') {
+      issues.push(
+        issue(
+          'H3_CLIENT_MODEL_INVALID',
+          'FAIL',
+          'H3 客户模型必须明确为 minimax-h3，不能把其他模型 ID 当作 H3 客户模型。',
+          record
+        )
+      )
+      contractInvalid = true
     }
-    const channelName = field(record, '渠道')
-    const channelCode = rules.channelCodes[channelName] ?? `CH-RAW-${slug(channelName)}`
-    const official = officialPrices.find(
-      (candidate) =>
-        field(candidate, '模型') === clientModel &&
-        resolution(field(candidate, '分辨率')).toLowerCase() === resolutionValue
-    )
-    const price =
-      numericField(official, '价格 元/秒') ??
-      numericField(official, '素材价格 元/秒') ??
-      numericField(record, '单价 元/秒') ??
-      numericField(record, '单价 元')
-    if (!variant || !price || !price.gt(0)) {
-      issues.push(issue('H3_COST_INVALID', 'FAIL', 'H3 必须提供 720p/2k 和正的 CNY/秒成本。', record))
+    if (series !== 'h3') {
+      issues.push(
+        issue(
+          'H3_SERIES_INVALID',
+          'FAIL',
+          'H3 系列字段必须明确为 h3，不能从模型名或其他工作表推断。',
+          record
+        )
+      )
+      contractInvalid = true
+    }
+    if (upstreamModel !== 'minimax-h3-vip') {
+      issues.push(
+        issue(
+          'H3_UPSTREAM_MODEL_INVALID',
+          'FAIL',
+          'H3 上游模型必须明确为 minimax-h3-vip，不能从上游模型分组或缺失字段推断。',
+          record
+        )
+      )
+      contractInvalid = true
+    }
+    if (contractInvalid) continue
+    if (mode !== 'per_duration' && mode !== 'per_request') {
+      issues.push(issue('COST_MODE_UNKNOWN', 'FAIL', 'H3 计费方式必须是 second 或 call。', record))
       continue
     }
+    const resolutionValue = resolution(field(record, '清晰度')).toLowerCase()
     const duration = parseDuration(field(record, '时长范围'))
+    const ratios = field(record, '比例')
+      .split(/[,，]/u)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+    const integerField = (name: string): number | null => {
+      const raw = field(record, name)
+      if (raw === '') return null
+      const value = Number(raw)
+      return Number.isSafeInteger(value) && value >= 0 ? value : null
+    }
+    const references = {
+      images: integerField('参考图数'),
+      videos: integerField('参考视频数'),
+      audios: integerField('参考音频数'),
+      total: integerField('最大素材数'),
+    }
+    if (!H3_RESOLUTIONS.includes(resolutionValue as (typeof H3_RESOLUTIONS)[number])) {
+      issues.push(
+        issue(
+          'H3_RESOLUTION_INVALID',
+          'FAIL',
+          'H3 清晰度只能是 720p 或 2k。',
+          record
+        )
+      )
+      contractInvalid = true
+    }
+    if (
+      duration.min < 4 ||
+      duration.max > 15 ||
+      duration.min > duration.max
+    ) {
+      issues.push(
+        issue(
+          'H3_DURATION_INVALID',
+          'FAIL',
+          'H3 时长必须落在 4 至 15 秒合同内。',
+          record
+        )
+      )
+      contractInvalid = true
+    }
+    if (
+      ratios.length === 0 ||
+      ratios.some(
+        (ratio) => !H3_ASPECT_RATIOS.includes(ratio as (typeof H3_ASPECT_RATIOS)[number])
+      )
+    ) {
+      issues.push(
+        issue(
+          'H3_RATIO_INVALID',
+          'FAIL',
+          'H3 比例只能使用 auto、1:1、16:9、9:16、3:4 或 4:3。',
+          record
+        )
+      )
+      contractInvalid = true
+    }
+    const referenceChecks = [
+      ['参考图数', references.images, H3_REFERENCE_LIMITS.images],
+      ['参考视频数', references.videos, H3_REFERENCE_LIMITS.videos],
+      ['参考音频数', references.audios, H3_REFERENCE_LIMITS.audios],
+      ['最大素材数', references.total, H3_REFERENCE_LIMITS.total],
+    ] as const
+    for (const [name, value, maximum] of referenceChecks) {
+      if (value === null || value > maximum) {
+        issues.push(
+          issue(
+            `H3_REFERENCE_${name}_INVALID`,
+            'FAIL',
+            `H3 ${name} 必须是合同范围内的非负整数，最大为 ${maximum}。`,
+            record
+          )
+        )
+        contractInvalid = true
+      }
+    }
+    if (
+      references.total !== null &&
+      references.images !== null &&
+      references.videos !== null &&
+      references.audios !== null &&
+      references.total > references.images + references.videos + references.audios
+    ) {
+      issues.push(
+        issue(
+          'H3_REFERENCE_最大素材数_INVALID',
+          'FAIL',
+          'H3 最大素材数不能超过参考图、参考视频和参考音频上限之和。',
+          record
+        )
+      )
+      contractInvalid = true
+    }
+    if (contractInvalid) continue
+    const channelName = field(record, '渠道')
+    const channelCode = rules.channelCodes[channelName] ?? `CH-RAW-${slug(channelName)}`
+    const officialMatches =
+      mode === 'per_duration'
+        ? officialPrices.filter(
+            (candidate) =>
+              field(candidate, '系列').toLowerCase() === 'h3' &&
+              h3ModelKey(field(candidate, '模型')) === h3ModelKey(clientModel) &&
+              resolution(field(candidate, '分辨率')).toLowerCase() === resolutionValue
+          )
+        : []
+    if (officialMatches.length > 1) {
+      issues.push(
+        issue(
+          'H3_OFFICIAL_PRICE_AMBIGUOUS',
+          'FAIL',
+          'H3 官方按秒价格必须按系列、模型和清晰度唯一匹配，不能按数组顺序选取。',
+          record
+        )
+      )
+      continue
+    }
+    const official = officialMatches[0]
+    const price =
+      mode === 'per_duration'
+        ? numericField(official, '价格 元/秒') ??
+          numericField(official, '素材价格 元/秒') ??
+          numericField(record, '单价 元/秒') ??
+          numericField(record, '单价 元')
+        : numericField(record, '单价 元') ?? numericField(record, '单价 元/次')
+    const variant = resolutionValue
+    if (!price || !price.gt(0)) {
+      issues.push(issue('H3_COST_INVALID', 'FAIL', 'H3 必须提供正的成本；second 为 CNY/秒，call 为 CNY/次。', record))
+      continue
+    }
     const sourceChannel = channels.find((channel) => channel.name === channelName)
     const sourceId = sourceChannel?.sourceId ?? `SRC-${slug(channelName)}-H3-${record.location.row}`
     const skuCode = skuId(clientModel, field(record, '版本') || 'standard', resolutionValue)
     const base = `COST-${slug(channelCode.replace(/^CH-/, ''))}-H3-${variant}-${record.location.row}`
     const native = price.toFixed()
     const normalized = price.mul(new Decimal(rules.defaults.currencyToUsd)).toFixed()
+    const isPerRequest = mode === 'per_request'
     costs.push({
-      businessId: base,
+      businessId: `${base}-${billingName.toUpperCase()}`,
       channelCode,
       upstreamModel,
       skuCode,
       scenario: 'no_video',
-      mode: 'per_duration',
+      mode,
       tokenSubMode: '',
       meterSource: 'validated_request',
       tokenField: '',
       chargeEvent: 'task_succeeded',
       currency: 'CNY',
-      nativePerRequest: '',
-      nativePerSecond: native,
+      nativePerRequest: isPerRequest ? native : '',
+      nativePerSecond: isPerRequest ? '' : native,
       nativePerMillion: '',
       nativeBasePrice: native,
       billingMultiplier: '1',
@@ -1027,21 +1191,21 @@ function buildH3CostsAndMappings(
       feeRate: '0',
       currencyToUsd: rules.defaults.currencyToUsd,
       normalizedUsdUnitPrice: normalized,
-      unit: 'CNY/second',
+      unit: isPerRequest ? 'CNY/call' : 'CNY/second',
       status: 'draft',
       sourceId,
       sourceSheet: official?.location.sheet ?? record.location.sheet,
       sourceRow: official?.location.row ?? record.location.row,
-      note: 'MiniMax H3 渠道成本草稿；不代表用户售价。',
+      note: `MiniMax H3 渠道成本草稿；计费方式=${billingName}；不代表用户售价。`,
     })
     const reference = {
-      images: Number(field(record, '参考图数')) || 0,
-      videos: Number(field(record, '参考视频数')) || 0,
-      audios: Number(field(record, '参考音频数')) || 0,
-      total: Number(field(record, '最大素材数')) || 15,
+      images: references.images ?? 0,
+      videos: references.videos ?? 0,
+      audios: references.audios ?? 0,
+      total: references.total ?? 0,
     }
     mappings.push({
-      businessId: `MAP-${slug(channelCode)}-H3-${variant}-${record.location.row}`,
+      businessId: `MAP-${slug(channelCode)}-H3-${variant}-${billingName.toUpperCase()}-${record.location.row}`,
       clientModel,
       channelCode,
       upstreamModel,

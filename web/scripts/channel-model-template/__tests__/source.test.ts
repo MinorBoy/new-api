@@ -107,6 +107,48 @@ test('accepts migrated channel economics and records optional price sheets', asy
       assert.equal(source.channels[0]?.fields.计费倍率, 1.25)
       assert.equal(source.channels[0]?.fields.手续费, '3%')
       assert.deepEqual(source.additionalSheets, ['h3', 'h3官价'])
+      assert.equal(source.h3Models?.[0]?.fields.计费方式, 'second')
+      assert.equal(source.h3Models?.[0]?.fields['单价 元'], 0.15)
+      assert.equal(source.h3Models?.[0]?.fields.计费, undefined)
+      assert.equal(source.h3OfficialPrices?.length, 1)
+      assert.equal(source.h3OfficialPrices?.[0]?.fields['价格 元/秒'], 0.5)
+    }
+  )
+})
+
+test('reads the real H3 layout with a second-row header and legacy official price rows', async () => {
+  await withMutatedFixture(
+    (workbook) => {
+      const h3 = workbook.addWorksheet('h3')
+      h3.addRow([])
+      h3.addRow(['渠道', '模型ID', '系列', '版本', '清晰度', '计费方式', '单价 元'])
+      h3.addRow([2, 'minimax-h3', 'h3', '标准', '720p', 'second', 0.08])
+      const official = workbook.addWorksheet('h3官价')
+      official.addRow(['h3', 'MiniMax-H3', '标准', '720p', '视频', 0.5, '图片', 0.2, 0.5])
+    },
+    async (sourcePath) => {
+      const source = await readSourceWorkbook(sourcePath)
+      assert.equal(source.h3Models?.length, 1)
+      assert.equal(source.h3Models?.[0]?.location.row, 3)
+      assert.equal(source.h3Models?.[0]?.fields['单价 元'], 0.08)
+      assert.equal(source.h3OfficialPrices?.length, 1)
+      assert.equal(source.h3OfficialPrices?.[0]?.fields['价格 元/秒'], 0.5)
+    }
+  )
+})
+
+test('ignores blank H3 placeholder rows without a model ID', async () => {
+  await withMutatedFixture(
+    (workbook) => {
+      const h3 = workbook.addWorksheet('h3')
+      h3.addRow(['渠道', '模型ID', '系列', '版本', '清晰度', '计费方式', '单价 元'])
+      h3.addRow([2, 'minimax-h3', 'h3', '标准', '720p', 'second', 0.08])
+      h3.addRow([2, null, null, null, null, null, null])
+    },
+    async (sourcePath) => {
+      const source = await readSourceWorkbook(sourcePath)
+      assert.equal(source.h3Models?.length, 1)
+      assert.equal(source.h3Models?.[0]?.fields.模型ID, 'minimax-h3')
     }
   )
 })

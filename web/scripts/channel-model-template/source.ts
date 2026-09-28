@@ -84,7 +84,7 @@ export const H3_MODEL_HEADERS = [
   '版本',
   '清晰度',
   '计费方式',
-  '单价 元/秒',
+  '单价 元',
   '参考图数',
   '参考视频数',
   '参考音频数',
@@ -259,6 +259,81 @@ function readRecords(
   return records
 }
 
+function readLegacyH3OfficialPrices(
+  sheet: ExcelJS.Worksheet,
+  headerRow = 0
+): SourceRecord[] {
+  const records: SourceRecord[] = []
+  let seriesColumn = 1
+  let modelColumn = 2
+  let versionColumn = 3
+  let resolutionColumn = 4
+  let priceColumn = 9
+  let startRow = 1
+  if (headerRow > 0) {
+    const header = sheet.getRow(headerRow)
+    const columnsByName = (name: string): number[] =>
+      Array.from({ length: sheet.columnCount }, (_, index) => index + 1).filter(
+        (column) => cellText(cellValue(header.getCell(column).value)) === name
+      )
+    seriesColumn = columnsByName('系列')[0] ?? seriesColumn
+    modelColumn = columnsByName('模型')[0] ?? modelColumn
+    versionColumn = columnsByName('版本')[0] ?? versionColumn
+    resolutionColumn = columnsByName('分辨率')[0] ?? resolutionColumn
+    const outputPriceColumns = columnsByName('输出价格 元/秒')
+    const priceColumns = columnsByName('价格 元/秒')
+    priceColumn = outputPriceColumns.at(-1) ?? priceColumns.at(-1) ?? priceColumn
+    startRow = headerRow + 1
+  }
+  for (let rowNumber = startRow; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber)
+    const series = cellText(cellValue(row.getCell(seriesColumn).value))
+    const model = cellText(cellValue(row.getCell(modelColumn).value))
+    const version = cellText(cellValue(row.getCell(versionColumn).value))
+    const resolutionValue = cellText(cellValue(row.getCell(resolutionColumn).value))
+    const price = cellValue(row.getCell(priceColumn).value)
+    if (!series || !model || !version || !resolutionValue || price === null) continue
+    records.push({
+      fields: {
+        系列: series,
+        模型: model,
+        版本: version,
+        分辨率: resolutionValue,
+        '价格 元/秒': price,
+        '价格版本': null,
+        '来源 URL': null,
+        '原始响应 SHA-256': null,
+      },
+      location: { sheet: sheet.name, row: rowNumber },
+    })
+  }
+  return records
+}
+
+function findHeaderRow(
+  sheet: ExcelJS.Worksheet,
+  requiredHeaders: readonly string[],
+  aliases: Readonly<Record<string, readonly string[]>> = {},
+  maxRows = 10
+): number {
+  const limit = Math.min(sheet.rowCount, maxRows)
+  for (let rowNumber = 1; rowNumber <= limit; rowNumber += 1) {
+    const values = new Set(
+      Array.from({ length: sheet.columnCount }, (_, index) =>
+        cellText(cellValue(sheet.getRow(rowNumber).getCell(index + 1).value))
+      )
+    )
+    if (
+      requiredHeaders.every((header) =>
+        [header, ...(aliases[header] ?? [])].some((candidate) => values.has(candidate))
+      )
+    ) {
+      return rowNumber
+    }
+  }
+  return 0
+}
+
 function readFlexibleRecords(
   sheet: ExcelJS.Worksheet,
   headers: readonly string[],
@@ -425,27 +500,40 @@ export async function readSourceWorkbook(
   ).map(normalizeSeries)
   const h3Sheet = workbook.getWorksheet('h3')
   const h3OfficialSheet = workbook.getWorksheet('h3官价')
-  const h3Records = h3Sheet
+  const h3HeaderRow = h3Sheet
+    ? findHeaderRow(h3Sheet, ['渠道', '模型ID', '计费方式', '单价 元'], { '单价 元': ['单价 元/秒'] })
+    : 0
+  const h3OfficialHeaderRow = h3OfficialSheet
+    ? findHeaderRow(h3OfficialSheet, ['系列', '模型', '版本', '分辨率'])
+    : 0
+  const h3Records = h3Sheet && h3HeaderRow
     ? readFlexibleRecords(
         h3Sheet,
         H3_MODEL_HEADERS,
-        1,
-        ['渠道', '模型ID'],
-        { '单价 元/秒': ['单价 元'] }
+        h3HeaderRow,
+        ['渠道', '模型ID', '计费方式', '单价 元'],
+        { '单价 元': ['单价 元/秒'], '上游模型': ['上游模型分组'] }
       )
     : []
   const h3OfficialRecords = h3OfficialSheet
-    ? readFlexibleRecords(
-        h3OfficialSheet,
-        H3_OFFICIAL_HEADERS,
-        1,
-        ['模型', '分辨率'],
-        {
-          模型: ['模型ID'],
-          '价格 元/秒': ['输出价格 元/秒', '素材价格 元/秒'],
-          '上游模型': ['上游'],
-        }
-      )
+    ? h3OfficialHeaderRow
+      ? (() => {
+          const parsed = readFlexibleRecords(
+            h3OfficialSheet,
+            H3_OFFICIAL_HEADERS,
+            h3OfficialHeaderRow,
+            ['系列', '模型', '分辨率'],
+            {
+              模型: ['模型ID'],
+              '上游模型': ['上游', '上游模型分组'],
+              '价格 元/秒': ['输出价格 元/秒', '素材价格 元/秒'],
+            }
+          )
+          return parsed.length > 0
+            ? parsed
+            : readLegacyH3OfficialPrices(h3OfficialSheet, h3OfficialHeaderRow)
+        })()
+      : readLegacyH3OfficialPrices(h3OfficialSheet)
     : []
   const allChannelHeaders = [
     ...CHANNEL_HEADERS,
@@ -468,7 +556,9 @@ export async function readSourceWorkbook(
       officialPriceColumns,
       6
     ).map(normalizeSeries),
-    h3Models: h3Records,
+    h3Models: h3Records.filter(
+      (record) => cellText(record.fields.模型ID ?? null) !== ''
+    ),
     h3OfficialPrices: h3OfficialRecords,
     ignoredNonSdModels,
     additionalSheets: sheetNames.filter((name) =>

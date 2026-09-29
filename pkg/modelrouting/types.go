@@ -16,8 +16,10 @@ func IsCanonicalVideoModel(modelName string) bool {
 	if containsString(CanonicalModels, modelName) {
 		return true
 	}
-	contract, ok := VideoSeriesContractForModel(modelName)
-	return ok && contract.Series == modelName
+	// Only the canonical client identity qualifies. Provider upstream IDs such as
+	// minimax-h3-vip share the H3 contract but must never be treated as a public
+	// model, or they would bypass capability routing and reveal the route target.
+	return modelName == MiniMaxH3
 }
 
 // NormalizeCanonicalModel maps supported public aliases to the single routing
@@ -27,6 +29,11 @@ func NormalizeCanonicalModel(modelName string) string {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "doubao-seedance-2-0-mini-260128" {
 		return Seedance20Mini
+	}
+	// MiniMax-H3 is the documented client spelling; routing policies, caches and
+	// task facts all key on the lowercase canonical identity.
+	if strings.EqualFold(modelName, MiniMaxH3) {
+		return MiniMaxH3
 	}
 	return modelName
 }

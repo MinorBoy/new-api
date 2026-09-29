@@ -50,6 +50,30 @@ func TestSaveRoutingPolicyNormalizesAndPublishesCompleteReplacement(t *testing.T
 	assert.Equal(t, saved.Targets[0].UpstreamModel, snapshot.TargetsByChannel[11][0].UpstreamModel)
 }
 
+// The admin UI accepts the documented client spelling; storage and the routing
+// cache must key the policy on the canonical lowercase identity.
+func TestSaveRoutingPolicyNormalizesMiniMaxH3ClientSpelling(t *testing.T) {
+	prepareRoutingPolicyServiceTest(t)
+	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.MiniMaxH3, true)
+	request := validRoutingPolicyWriteRequest()
+	request.Model = "MiniMax-H3"
+	request.Defaults.OutputResolution = "768p"
+	request.Defaults.DurationSeconds = 15
+	request.Targets[0].UpstreamModel = "vendor-h3-768p"
+	request.Targets[0].CostVariantKey = "768p"
+	request.Targets[0].Constraints.OutputResolutions = []string{"768p"}
+
+	saved, err := service.SaveRoutingPolicy(0, request)
+	require.NoError(t, err)
+	assert.Equal(t, modelrouting.MiniMaxH3, saved.Model)
+
+	snapshot, ok := model.GetRoutingPolicySnapshot("分组A", modelrouting.MiniMaxH3)
+	require.True(t, ok)
+	assert.Equal(t, saved.ID, snapshot.ID)
+	require.Len(t, snapshot.TargetsByChannel[11], 1)
+	assert.Equal(t, "vendor-h3-768p", snapshot.TargetsByChannel[11][0].UpstreamModel)
+}
+
 func TestSaveRoutingPolicyPreservesExplicitZeroMinimumExpectedMargin(t *testing.T) {
 	prepareRoutingPolicyServiceTest(t)
 	seedRoutingCandidate(t, 11, "A1", "分组A", modelrouting.Seedance20, true)

@@ -404,6 +404,7 @@ func DeleteRoutingPolicy(id int) error {
 }
 
 func ListRoutingCandidates(groupName, canonicalModel string) ([]RoutingCandidateChannel, error) {
+	canonicalModel = modelrouting.NormalizeCanonicalModel(canonicalModel)
 	var channelIDs []int
 	if err := DB.Model(&Ability{}).
 		Where(commonGroupCol+" = ? AND model = ?", groupName, canonicalModel).

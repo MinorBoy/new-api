@@ -22,11 +22,24 @@ func IsPublicSeedanceModel(modelName string) bool {
 	}
 }
 
+// IsHiddenSeedanceModel reports whether a model ID must stay private. Besides
+// the Seedance family, every MiniMax H3 provider upstream ID is hidden:
+// downstream clients only ever address the canonical MiniMax-H3 model and let
+// capability routing resolve the provider ID per channel.
 func IsHiddenSeedanceModel(modelName string) bool {
 	if IsPublicSeedanceModel(modelName) {
 		return false
 	}
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if modelName == "" {
+		return false
+	}
+	if IsMiniMaxH3Canonical(modelName) {
+		return false
+	}
+	if strings.Contains(modelName, "minimax-h3") {
+		return true
+	}
 	if strings.Contains(modelName, "seedance") {
 		return true
 	}
@@ -35,12 +48,12 @@ func IsHiddenSeedanceModel(modelName string) bool {
 }
 
 // SetHiddenSeedanceModels replaces the upstream model IDs associated with the
-// current public Seedance routing policies.
+// current public Seedance and MiniMax H3 routing policies.
 func SetHiddenSeedanceModels(modelNames []string) {
 	next := make(map[string]struct{}, len(modelNames))
 	for _, modelName := range modelNames {
 		modelName = strings.ToLower(strings.TrimSpace(modelName))
-		if modelName == "" || IsPublicSeedanceModel(modelName) {
+		if modelName == "" || IsPublicSeedanceModel(modelName) || IsMiniMaxH3Canonical(modelName) {
 			continue
 		}
 		next[modelName] = struct{}{}

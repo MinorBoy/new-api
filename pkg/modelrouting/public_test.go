@@ -52,6 +52,29 @@ func TestIsHiddenSeedanceModelOnlyRejectsNonPublicSeedanceIDs(t *testing.T) {
 	}
 }
 
+func TestFilterPublicModelsHidesMiniMaxH3ProviderUpstreamIDs(t *testing.T) {
+	// Clients address the canonical MiniMax-H3 identity; every provider upstream
+	// ID must stay private so capability routing decides the channel.
+	SetHiddenSeedanceModels([]string{"vendor-h3-2k", "vendor-h3-768p"})
+	t.Cleanup(func() { SetHiddenSeedanceModels(nil) })
+
+	actual := FilterPublicModels([]string{
+		"gpt-5",
+		MiniMaxH3,
+		MiniMaxH3VIP,
+		"vendor-h3-2k",
+		"minimax-h3-768p",
+		"MiniMax-H3",
+	})
+
+	require.Equal(t, []string{"gpt-5", MiniMaxH3, "MiniMax-H3"}, actual)
+	for _, modelName := range []string{MiniMaxH3VIP, "vendor-h3-2k"} {
+		assert.True(t, IsHiddenSeedanceModel(modelName), modelName)
+	}
+	assert.False(t, IsHiddenSeedanceModel(MiniMaxH3))
+	assert.False(t, IsHiddenSeedanceModel("MiniMax-H3"))
+}
+
 func TestFilterPublicModelsKeepsNonSeedanceAndPublicSeedanceInInputOrder(t *testing.T) {
 	SetHiddenSeedanceModels([]string{"4sdance431", "videos-fast", "video-2.0-pro"})
 	t.Cleanup(func() { SetHiddenSeedanceModels(nil) })

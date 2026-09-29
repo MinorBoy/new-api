@@ -281,7 +281,10 @@ func RemoveRoutingPolicy(id int) error {
 
 func normalizeRoutingPolicyWriteRequest(request *RoutingPolicyWriteRequest) {
 	request.GroupName = strings.TrimSpace(request.GroupName)
-	request.Model = strings.TrimSpace(request.Model)
+	// Routing policies are stored under the canonical model identity, so an
+	// admin typing "MiniMax-H3" must still produce a policy that the router can
+	// find with the normalized lowercase key.
+	request.Model = modelrouting.NormalizeCanonicalModel(request.Model)
 	request.Defaults.OutputResolution = strings.ToLower(strings.TrimSpace(request.Defaults.OutputResolution))
 	request.Defaults.AspectRatio = strings.ToLower(strings.TrimSpace(request.Defaults.AspectRatio))
 	for index := range request.Targets {

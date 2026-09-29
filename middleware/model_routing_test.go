@@ -18,15 +18,18 @@ func TestExtractMiniMaxH3RoutingInputValidatesH3Contract(t *testing.T) {
 	validBody := func(resolution, duration, ratio string) string {
 		return `{"model":"minimax-h3","resolution":"` + resolution + `","duration":` + duration + `,"ratio":"` + ratio + `","content":[{"type":"text","text":"video"}]}`
 	}
+	// MiniMax H3 is served from the new-api video entry, not the ARK native
+	// endpoint, so the routing input is extracted without the Seedance flag.
 	for _, test := range []struct {
 		resolution string
 		duration   string
 		ratio      string
 	}{
 		{"720p", "4", "auto"},
+		{"768p", "10", "16:9"},
 		{"2k", "15", "16:9"},
 	} {
-		c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", validBody(test.resolution, test.duration, test.ratio), true)
+		c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", validBody(test.resolution, test.duration, test.ratio), false)
 		input, routeErr := extractSeedanceRoutingInput(c, modelrouting.MiniMaxH3)
 		require.Nil(t, routeErr)
 		require.NotNil(t, input)
@@ -51,7 +54,7 @@ func TestExtractMiniMaxH3RoutingInputValidatesH3Contract(t *testing.T) {
 			if test.name == "H3 VIP alias is not canonical" {
 				modelName = modelrouting.MiniMaxH3VIP
 			}
-			c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", test.body, true)
+			c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations", test.body, false)
 			input, routeErr := extractSeedanceRoutingInput(c, modelName)
 			if test.code == "" {
 				assert.Nil(t, input)
@@ -63,6 +66,29 @@ func TestExtractMiniMaxH3RoutingInputValidatesH3Contract(t *testing.T) {
 			assert.Equal(t, test.code, string(routeErr.Code))
 		})
 	}
+}
+
+func TestExtractMiniMaxH3RoutingInputRejectsArkNativeEntry(t *testing.T) {
+	// The ARK native endpoint stays Seedance-only: an H3 request there must fail
+	// instead of being dispatched to a Seedance-shaped upstream call.
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/video/generations",
+		`{"model":"minimax-h3","resolution":"2k","duration":10,"ratio":"16:9","content":[{"type":"text","text":"video"}]}`, true)
+
+	input, routeErr := extractSeedanceRoutingInput(c, modelrouting.MiniMaxH3)
+	assert.Nil(t, input)
+	require.NotNil(t, routeErr)
+	assert.Equal(t, "InvalidParameter.model", string(routeErr.Code))
+}
+
+func TestExtractMiniMaxH3RoutingInputNormalizesClientSpelling(t *testing.T) {
+	c := seedanceRoutingContext(t, http.MethodPost, "/v1/videos",
+		`{"model":"MiniMax-H3","resolution":"768p","duration":8,"ratio":"9:16","content":[{"type":"text","text":"video"}]}`, false)
+
+	input, routeErr := extractSeedanceRoutingInput(c, "MiniMax-H3")
+	require.Nil(t, routeErr)
+	require.NotNil(t, input)
+	assert.Equal(t, modelrouting.MiniMaxH3, input.CanonicalModel)
+	assert.Equal(t, "768p", *input.OutputResolution)
 }
 
 func TestExtractSeedanceRoutingInputExplicitFacts(t *testing.T) {

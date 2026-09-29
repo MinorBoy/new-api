@@ -575,6 +575,13 @@ func videoTaskFetchRequestBody(task *model.Task) map[string]any {
 	} else if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.UpstreamModelName != "" {
 		body["upstream_model"] = task.PrivateData.BillingContext.UpstreamModelName
 	}
+	// The canonical client model selects the provider dialect during polling.
+	// Provider upstream IDs vary per channel, so they cannot identify the family.
+	if task.Properties.OriginModelName != "" {
+		body["origin_model"] = task.Properties.OriginModelName
+	} else if task.PrivateData.Routing != nil && task.PrivateData.Routing.Facts.CanonicalModel != "" {
+		body["origin_model"] = task.PrivateData.Routing.Facts.CanonicalModel
+	}
 	return body
 }
 

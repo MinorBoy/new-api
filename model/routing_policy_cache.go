@@ -91,7 +91,10 @@ func RefreshRoutingPolicyCacheKeys(keys []RoutingPolicyKey) error {
 func syncHiddenSeedanceModels(snapshots map[RoutingPolicyKey]modelrouting.PolicySnapshot) {
 	upstreamModels := make([]string, 0)
 	for key, snapshot := range snapshots {
-		if !modelrouting.IsPublicSeedanceModel(key.Model) {
+		// H3 provider upstream IDs are per-channel data. They must stay hidden
+		// exactly like Seedance ones, otherwise clients could address a provider
+		// model directly and bypass capability routing.
+		if !modelrouting.IsPublicSeedanceModel(key.Model) && !modelrouting.IsMiniMaxH3Canonical(key.Model) {
 			continue
 		}
 		for _, targets := range snapshot.TargetsByChannel {

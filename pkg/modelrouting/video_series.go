@@ -28,8 +28,10 @@ type VideoSeriesContract struct {
 var miniMaxH3Contract = VideoSeriesContract{
 	Series:             MiniMaxH3,
 	UpstreamModels:     []string{MiniMaxH3VIP},
-	OutputResolutions:  []string{"720p", "2k"},
-	AspectRatios:       []string{"auto", "1:1", "16:9", "9:16", "3:4", "4:3"},
+	OutputResolutions:  []string{"720p", "768p", "2k"},
+	// 21:9 is verified in the provider dialect for text/reference modes and is
+	// declared by every H3 channel row; Auto only applies to first/last frames.
+	AspectRatios:       []string{"auto", "1:1", "16:9", "9:16", "21:9", "3:4", "4:3"},
 	MinDurationSeconds: 4,
 	MaxDurationSeconds: 15,
 	DefaultResolution:  "2k",
@@ -54,6 +56,15 @@ func MiniMaxH3Contract(modelName string) (VideoSeriesContract, bool) {
 	}
 }
 
+// IsMiniMaxH3Canonical reports whether the name is the single public H3 model
+// identity. Provider upstream IDs (including the legacy minimax-h3-vip) are not
+// canonical: they only appear inside route targets.
+func IsMiniMaxH3Canonical(modelName string) bool {
+	return NormalizeCanonicalModel(modelName) == MiniMaxH3
+}
+
+// IsMiniMaxH3Model reports whether the name belongs to the H3 family, either as
+// the canonical client model or as a known upstream model ID.
 func IsMiniMaxH3Model(modelName string) bool {
 	_, ok := MiniMaxH3Contract(modelName)
 	return ok

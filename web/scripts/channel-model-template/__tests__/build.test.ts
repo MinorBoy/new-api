@@ -378,7 +378,7 @@ test('keeps H3 call pricing independent from official per-second prices', () => 
   assert.equal(cost.sourceRow, 2)
 })
 
-test('blocks H3 rows with invalid capability contracts before generating entities', () => {
+test('builds H3 768p cost variants alongside 720p and 2k', () => {
   const source = sourceWithOfficialPrice(false)
   source.h3Models = [
     {
@@ -389,6 +389,42 @@ test('blocks H3 rows with invalid capability contracts before generating entitie
         系列: 'h3',
         版本: 'standard',
         清晰度: '768p',
+        计费方式: 'second',
+        '单价 元': 0.05,
+        参考图数: 9,
+        参考视频数: 3,
+        参考音频数: 3,
+        最大素材数: 15,
+        时长范围: '4-15',
+        比例: '16:9',
+        上游模型: 'minimax-h3-vip',
+      },
+    },
+  ]
+
+  const output = buildTemplateData(source, rules)
+  const cost = output.costs.find((item) => item.upstreamModel === 'minimax-h3-vip')
+  const mapping = output.mappings.find((item) => item.clientModel === 'minimax-h3')
+
+  assert.ok(cost)
+  assert.equal(cost.unit, 'CNY/second')
+  assert.match(cost.businessId, /-H3-768p-/)
+  assert.ok(mapping)
+  assert.match(mapping.businessId, /-H3-768p-/)
+  assert.equal(output.issues.some((item) => item.code === 'H3_RESOLUTION_INVALID'), false)
+})
+
+test('blocks H3 rows with invalid capability contracts before generating entities', () => {
+  const source = sourceWithOfficialPrice(false)
+  source.h3Models = [
+    {
+      location: { sheet: 'h3', row: 2 },
+      fields: {
+        渠道: 1,
+        模型ID: 'minimax-h3',
+        系列: 'h3',
+        版本: 'standard',
+        清晰度: '1080p',
         计费方式: 'second',
         '单价 元': 0.12,
         参考图数: 10,

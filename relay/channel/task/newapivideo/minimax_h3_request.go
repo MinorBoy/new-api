@@ -5,13 +5,43 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/modelrouting"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 )
+
+// requestUsesMiniMaxH3Protocol reports whether the request is an H3 request that
+// must use the MiniMax H3 dialect. The client model is the canonical minimax-h3
+// identity; provider upstream IDs are channel-level data and are resolved later,
+// so capability routing facts count as evidence too.
+func requestUsesMiniMaxH3Protocol(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if info != nil {
+		if modelrouting.IsMiniMaxH3Canonical(info.OriginModelName) {
+			return true
+		}
+		// UpstreamModelName is promoted from the embedded ChannelMeta pointer, so
+		// it must be read only when that pointer is set.
+		if info.ChannelMeta != nil && modelrouting.IsMiniMaxH3Canonical(info.ChannelMeta.UpstreamModelName) {
+			return true
+		}
+	}
+	if c == nil {
+		return false
+	}
+	if input, ok := common.GetContextKeyType[modelrouting.FactsInput](c, constant.ContextKeyRoutingFactsInput); ok && modelrouting.IsMiniMaxH3Canonical(input.CanonicalModel) {
+		return true
+	}
+	if facts, ok := common.GetContextKeyType[modelrouting.Facts](c, constant.ContextKeyRoutingFacts); ok && modelrouting.IsMiniMaxH3Canonical(facts.CanonicalModel) {
+		return true
+	}
+	return false
+}
 
 type minimaxH3Request struct {
 	Model       string   `json:"model"`
 	Prompt      string   `json:"prompt"`
+	Mode        string   `json:"mode"`
 	Duration    *int     `json:"duration,omitempty"`
 	AspectRatio *string  `json:"aspect_ratio,omitempty"`
 	Resolution  *string  `json:"resolution,omitempty"`
@@ -21,9 +51,14 @@ type minimaxH3Request struct {
 }
 
 func validateMiniMaxH3Request(request arkRequest, upstreamModel string) error {
-	contract, ok := modelrouting.MiniMaxH3Contract(upstreamModel)
-	if !ok || strings.TrimSpace(upstreamModel) != modelrouting.MiniMaxH3VIP {
-		return &arkRequestError{Code: "InvalidParameter.model", Message: "mapped model is not verified for MiniMax H3"}
+	contract, ok := modelrouting.MiniMaxH3Contract(modelrouting.MiniMaxH3)
+	if !ok {
+		return &arkRequestError{Code: "internal_error", Message: "MiniMax H3 contract is unavailable"}
+	}
+	// The upstream model is a channel-level provider ID. Any non-empty ID is
+	// accepted; the route contract already rejects Seedance canonical models.
+	if strings.TrimSpace(upstreamModel) == "" {
+		return &arkRequestError{Code: "InvalidParameter.model", Message: "MiniMax H3 requires an explicit upstream model"}
 	}
 	if strings.TrimSpace(request.Model) == "" {
 		return &arkRequestError{Code: "MissingParameter.model", Message: "model is required"}
@@ -59,8 +94,15 @@ func validateMiniMaxH3Request(request arkRequest, upstreamModel string) error {
 			}
 			textCount++
 		case "image_url":
-			if item.ImageURL == nil || !validMediaURL(item.ImageURL.URL, minimaxH3ProtocolProfile()) || item.VideoURL != nil || item.AudioURL != nil || item.DraftTask != nil || strings.TrimSpace(item.Role) != "" && strings.TrimSpace(item.Role) != "reference_image" {
+			if item.ImageURL == nil || !validMediaURL(item.ImageURL.URL, minimaxH3ProtocolProfile()) || item.VideoURL != nil || item.AudioURL != nil || item.DraftTask != nil {
 				return &arkRequestError{Code: "InvalidParameter.content", Message: "MiniMax H3 images must be public HTTP(S) reference images"}
+			}
+			// The H3 contract allows reference images and first/last frame roles;
+			// an untyped image defaults to a reference image.
+			switch strings.TrimSpace(item.Role) {
+			case "", "reference_image", "first_frame", "last_frame":
+			default:
+				return &arkRequestError{Code: "InvalidParameter.content", Message: "unsupported MiniMax H3 image role: " + item.Role}
 			}
 			imageCount++
 		case "video_url":
@@ -93,10 +135,36 @@ func buildMiniMaxH3Request(request arkRequest, upstreamModel string) ([]byte, er
 	if err := validateMiniMaxH3Request(request, upstreamModel); err != nil {
 		return nil, err
 	}
-	contract, _ := modelrouting.MiniMaxH3Contract(upstreamModel)
+	contract, _ := modelrouting.MiniMaxH3Contract(modelrouting.MiniMaxH3)
+	// The provider gateway requires an explicit generation mode with its own
+	// enum (text2video / image2video / reference2video / frames2video); derive
+	// it from the content roles instead of asking clients to pass a
+	// provider-specific field through the unified new-api video entry.
+	mode := "text2video"
+	hasFrameRole := false
+	hasReference := false
+	for _, item := range request.Content {
+		switch item.Type {
+		case "image_url":
+			switch strings.TrimSpace(item.Role) {
+			case "first_frame", "last_frame":
+				hasFrameRole = true
+			default:
+				hasReference = true
+			}
+		case "video_url", "audio_url":
+			hasReference = true
+		}
+	}
+	if hasFrameRole {
+		mode = "frames2video"
+	} else if hasReference {
+		mode = "reference2video"
+	}
 	result := minimaxH3Request{
 		Model:       upstreamModel,
 		Prompt:      arkPrompt(request.Content),
+		Mode:        mode,
 		Duration:    request.Duration,
 		AspectRatio: request.Ratio,
 		Resolution:  request.Resolution,

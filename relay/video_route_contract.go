@@ -29,7 +29,7 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, canonicalModel str
 	}
 	switch channel.Type {
 	case constant.ChannelTypeNewAPIVideo:
-		if modelrouting.IsMiniMaxH3Model(target.UpstreamModel) || modelrouting.IsMiniMaxH3Model(canonicalModel) {
+		if modelrouting.IsMiniMaxH3Canonical(canonicalModel) || modelrouting.IsMiniMaxH3Model(target.UpstreamModel) {
 			return validateMiniMaxH3VideoRoute(canonicalModel, target)
 		}
 		return nil
@@ -71,11 +71,22 @@ func ValidateVideoRouteTargetContract(channel *model.Channel, canonicalModel str
 	}
 }
 
+// validateMiniMaxH3VideoRoute validates the H3 capability contract. The client
+// model is always the canonical minimax-h3 identity, while the upstream model is
+// whatever ID the selected provider expects; that ID is channel-level data and is
+// intentionally not restricted to one vendor spelling.
 func validateMiniMaxH3VideoRoute(canonicalModel string, target modelrouting.Target) error {
-	if strings.TrimSpace(canonicalModel) != modelrouting.MiniMaxH3 || strings.TrimSpace(target.UpstreamModel) != modelrouting.MiniMaxH3VIP {
-		return newVideoRouteContractError("route_contract_model", "MiniMax H3 routes require minimax-h3-vip")
+	if !modelrouting.IsMiniMaxH3Canonical(canonicalModel) {
+		return newVideoRouteContractError("route_contract_model", "MiniMax H3 routes require the minimax-h3 client model")
 	}
-	contract, _ := modelrouting.MiniMaxH3Contract(target.UpstreamModel)
+	upstreamModel := strings.TrimSpace(target.UpstreamModel)
+	if upstreamModel == "" {
+		return newVideoRouteContractError("route_contract_model", "MiniMax H3 routes require an explicit upstream model")
+	}
+	if modelrouting.IsPublicSeedanceModel(upstreamModel) {
+		return newVideoRouteContractError("route_contract_model", "MiniMax H3 routes cannot map onto a Seedance canonical model")
+	}
+	contract, _ := modelrouting.MiniMaxH3Contract(modelrouting.MiniMaxH3)
 	if !routeResolutionsWithin(target.Constraints.OutputResolutions, contract.OutputResolutions...) {
 		return newVideoRouteContractError("route_contract_resolution", "MiniMax H3 route resolution is unsupported")
 	}
@@ -102,14 +113,14 @@ func validateMiniMaxH3VideoRoute(canonicalModel string, target modelrouting.Targ
 		routeReferenceTotalMax(target.Constraints) > contract.ReferenceTotalMax {
 		return newVideoRouteContractError("route_contract_references", "MiniMax H3 route reference limits exceed the verified protocol")
 	}
-	if target.CostVariantKey != "720p" && target.CostVariantKey != "2k" {
-		return newVideoRouteContractError("route_contract_cost_variant", "MiniMax H3 route requires a 720p or 2k cost variant")
+	variant := strings.ToLower(strings.TrimSpace(target.CostVariantKey))
+	switch variant {
+	case "720p", "768p", "2k":
+	default:
+		return newVideoRouteContractError("route_contract_cost_variant", "MiniMax H3 route requires a 720p, 768p or 2k cost variant")
 	}
-	if target.CostVariantKey == "720p" && !allRouteResolutions(target.Constraints.OutputResolutions, "720p") {
-		return newVideoRouteContractError("route_contract_cost_variant", "720p cost variant must target 720p")
-	}
-	if target.CostVariantKey == "2k" && !allRouteResolutions(target.Constraints.OutputResolutions, "2k") {
-		return newVideoRouteContractError("route_contract_cost_variant", "2k cost variant must target 2k")
+	if !allRouteResolutions(target.Constraints.OutputResolutions, variant) {
+		return newVideoRouteContractError("route_contract_cost_variant", fmt.Sprintf("%s cost variant must target %s", variant, variant))
 	}
 	return nil
 }

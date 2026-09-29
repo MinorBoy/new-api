@@ -41,6 +41,11 @@ type TaskAdaptor struct {
 	profileErr         error
 	requestContentType string
 	mappedModel        string
+	// usesMiniMaxH3 records that this request targets the canonical minimax-h3
+	// client model. The provider upstream model varies per channel, so the H3
+	// dialect must be selected from the canonical identity rather than from the
+	// mapped upstream ID.
+	usesMiniMaxH3 bool
 }
 
 func (a *TaskAdaptor) CostCapabilities(_ *relaycommon.RelayInfo) types.CostCapabilities {
@@ -81,6 +86,7 @@ type upstreamError struct {
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.requestContentType = ""
 	a.mappedModel = ""
+	a.usesMiniMaxH3 = false
 	a.profileErr = nil
 	if info == nil {
 		a.profile = genericProtocolProfile()
@@ -117,6 +123,13 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	body, err := storage.Bytes()
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_json", http.StatusBadRequest)
+	}
+	// MiniMax H3 is a new-api video model served from /v1/video/generations. It
+	// uses the ARK content dialect but must not depend on the Seedance native API
+	// flag, and its provider upstream model is resolved later by capability
+	// routing, so this stage only enforces the H3 request contract.
+	if requestUsesMiniMaxH3Protocol(c, info) {
+		return a.validateMiniMaxH3RequestAndSetAction(c, info, body)
 	}
 	if c.GetBool(common.KeySeedanceOfficialAPI) {
 		profile := a.activeProfile()
@@ -365,6 +378,45 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return validateOpenAIRequest(c, info, body)
 }
 
+// validateMiniMaxH3RequestAndSetAction validates a MiniMax H3 request that
+// arrived on the standard new-api video entry. It reuses the ARK content parser
+// and the H3 request contract, then marks provider validation complete so the
+// later build stage only needs the resolved upstream model.
+func (a *TaskAdaptor) validateMiniMaxH3RequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo, body []byte) *taskdto.TaskError {
+	a.usesMiniMaxH3 = true
+	if a.profile.requestDialect == videoRequestDialectNewAPIGenerations {
+		a.profile = minimaxH3ProtocolProfile()
+	}
+	if taskErr := validateARKRequest(c, info, body, a.activeProfile()); taskErr != nil {
+		return taskErr
+	}
+	state, err := getRequestState(c)
+	if err != nil || state.ARK == nil {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("ARK request state is missing"), "InvalidParameter", http.StatusBadRequest)
+	}
+	// Model mapping has not run yet, so the upstream model is usually empty here.
+	// The provider ID is validated after capability routing resolves it.
+	upstreamModel := ""
+	if info != nil {
+		if info.ChannelMeta != nil {
+			upstreamModel = info.ChannelMeta.UpstreamModelName
+		}
+		if upstreamModel == "" {
+			upstreamModel = info.OriginModelName
+		}
+	}
+	if err := validateMiniMaxH3Request(*state.ARK, upstreamModel); err != nil {
+		var requestErr *arkRequestError
+		if errors.As(err, &requestErr) {
+			return service.TaskErrorWrapperLocal(err, requestErr.Code, http.StatusBadRequest)
+		}
+		return service.TaskErrorWrapperLocal(err, "InvalidParameter", http.StatusBadRequest)
+	}
+	state.ProviderValidationComplete = true
+	c.Set(requestStateContextKey, state)
+	return nil
+}
+
 func validateMegaByAIMedia(ctx context.Context, request arkRequest) *taskdto.TaskError {
 	videoURLs := make([]string, 0, 3)
 	audioURLs := make([]string, 0, 3)
@@ -415,9 +467,10 @@ func (a *TaskAdaptor) ValidateBillingRequest(c *gin.Context, info *relaycommon.R
 		if a.mappedModel == "" {
 			a.mappedModel = info.OriginModelName
 		}
-		if modelrouting.IsMiniMaxH3Model(a.mappedModel) && a.profile.requestDialect == videoRequestDialectNewAPIGenerations {
-			a.profile = minimaxH3ProtocolProfile()
-		}
+	}
+	if requestUsesMiniMaxH3Protocol(c, info) || modelrouting.IsMiniMaxH3Canonical(a.mappedModel) {
+		a.usesMiniMaxH3 = true
+		a.selectMappedProfile()
 	}
 	if a.profileErr != nil {
 		return service.TaskErrorWrapperLocal(a.profileErr, "invalid_secure_channel_config", http.StatusInternalServerError)
@@ -820,9 +873,15 @@ func routingDurationSeconds(c *gin.Context) int {
 }
 
 func (a *TaskAdaptor) selectMappedProfile() {
-	if modelrouting.IsMiniMaxH3Model(a.mappedModel) && a.profile.requestDialect == videoRequestDialectNewAPIGenerations {
+	if !a.usesMiniMaxH3 && !modelrouting.IsMiniMaxH3Canonical(a.mappedModel) && !modelrouting.IsMiniMaxH3Model(a.mappedModel) {
+		return
+	}
+	// A NewAPIVideo channel (type 201) starts with an empty profile, so the check
+	// must read the normalized dialect rather than the raw zero value.
+	if a.activeProfile().requestDialect == videoRequestDialectNewAPIGenerations {
 		a.profile = minimaxH3ProtocolProfile()
 	}
+	a.usesMiniMaxH3 = true
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
@@ -865,7 +924,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	}
 	var body []byte
 	var err error
-	if c.GetBool(common.KeySeedanceOfficialAPI) {
+	if c.GetBool(common.KeySeedanceOfficialAPI) || a.usesMiniMaxH3 {
 		profile := a.activeProfile()
 		switch profile.requestDialect {
 		case videoRequestDialectSecureDiscount, videoRequestDialectSecureOverseas, videoRequestDialectSecureEnterprise:
@@ -1130,7 +1189,11 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel, _ = body["model"].(string)
 	}
-	if modelrouting.IsMiniMaxH3Model(upstreamModel) && profile.requestDialect == videoRequestDialectNewAPIGenerations {
+	// Provider upstream IDs are channel-level data, so polling decides the H3
+	// dialect from the canonical client model the task was submitted with, then
+	// falls back to known H3 names for tasks created before that field existed.
+	originModel, _ := body["origin_model"].(string)
+	if (modelrouting.IsMiniMaxH3Canonical(originModel) || modelrouting.IsMiniMaxH3Model(upstreamModel)) && profile.requestDialect == videoRequestDialectNewAPIGenerations {
 		profile = minimaxH3ProtocolProfile()
 	}
 	taskID, ok := body["task_id"].(string)

@@ -370,6 +370,35 @@ func TestVideoTaskFetchRequestBodyIncludesPersistedUpstreamModel(t *testing.T) {
 		})
 		assert.Equal(t, "minimax-h3-vip", body["upstream_model"])
 	})
+
+	// Provider upstream IDs vary per channel, so the H3 polling dialect must be
+	// chosen from the canonical client model persisted on the task.
+	t.Run("origin model prefers task properties over routing facts", func(t *testing.T) {
+		body := videoTaskFetchRequestBody(&model.Task{
+			Properties: model.Properties{OriginModelName: modelrouting.MiniMaxH3},
+			PrivateData: model.TaskPrivateData{
+				Routing: &modelrouting.Audit{Facts: modelrouting.Facts{CanonicalModel: "other-model"}},
+			},
+		})
+		assert.Equal(t, modelrouting.MiniMaxH3, body["origin_model"])
+	})
+
+	t.Run("origin model falls back to routing facts", func(t *testing.T) {
+		body := videoTaskFetchRequestBody(&model.Task{
+			PrivateData: model.TaskPrivateData{
+				Routing: &modelrouting.Audit{Facts: modelrouting.Facts{CanonicalModel: "MiniMax-H3"}},
+			},
+		})
+		assert.Equal(t, "MiniMax-H3", body["origin_model"])
+	})
+
+	t.Run("origin model omitted for non-video tasks without routing", func(t *testing.T) {
+		body := videoTaskFetchRequestBody(&model.Task{
+			Properties: model.Properties{UpstreamModelName: "some-upstream"},
+		})
+		_, hasOriginModel := body["origin_model"]
+		assert.False(t, hasOriginModel)
+	})
 }
 
 func runSinglePollingUpdate(t *testing.T, adaptor TaskPollingAdaptor, task *model.Task) error {

@@ -40,7 +40,7 @@ const COST_MODES = {
   token: 'per_token',
 } as const
 
-const H3_RESOLUTIONS = ['720p', '2k'] as const
+const H3_RESOLUTIONS = ['720p', '768p', '2k'] as const
 const H3_ASPECT_RATIOS = ['auto', '1:1', '16:9', '9:16', '3:4', '4:3'] as const
 const H3_REFERENCE_LIMITS = {
   images: 9,
@@ -1053,7 +1053,7 @@ function buildH3CostsAndMappings(
         issue(
           'H3_RESOLUTION_INVALID',
           'FAIL',
-          'H3 清晰度只能是 720p 或 2k。',
+          'H3 清晰度只能是 720p、768p 或 2k。',
           record
         )
       )

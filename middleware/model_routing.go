@@ -25,10 +25,32 @@ func (e *routingInputError) Error() string {
 
 func extractSeedanceRoutingInput(c *gin.Context, canonicalModel string) (*modelrouting.FactsInput, *routingInputError) {
 	canonicalModel = modelrouting.NormalizeCanonicalModel(canonicalModel)
-	if !c.GetBool(common.KeySeedanceOfficialAPI) || c.Request.Method != http.MethodPost ||
-		c.Request.URL.Path != "/v1/video/generations" || !modelrouting.IsCanonicalVideoModel(canonicalModel) {
+	if c.Request.Method != http.MethodPost {
 		return nil, nil
 	}
+	if c.GetBool(common.KeySeedanceOfficialAPI) {
+		// The ARK native endpoint stays Seedance-only. MiniMax H3 is served from
+		// the new-api video entry, so mapping it here would send an H3 request to a
+		// Seedance-shaped upstream call.
+		if modelrouting.IsMiniMaxH3Canonical(canonicalModel) {
+			return nil, newRoutingInputError("InvalidParameter.model", "the ARK native endpoint only serves Seedance models")
+		}
+		if c.Request.URL.Path != "/v1/video/generations" || !modelrouting.IsCanonicalVideoModel(canonicalModel) {
+			return nil, nil
+		}
+		return parseRoutingInput(c, canonicalModel)
+	}
+	// MiniMax H3 external upstream model IDs vary per channel, so the client model
+	// always enters through the new-api video entry where capability routing picks
+	// the channel and its upstream model.
+	if modelrouting.IsMiniMaxH3Canonical(canonicalModel) &&
+		(c.Request.URL.Path == "/v1/video/generations" || c.Request.URL.Path == "/v1/videos") {
+		return parseRoutingInput(c, canonicalModel)
+	}
+	return nil, nil
+}
+
+func parseRoutingInput(c *gin.Context, canonicalModel string) (*modelrouting.FactsInput, *routingInputError) {
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return nil, newRoutingInputError("InvalidParameter", err.Error())

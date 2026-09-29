@@ -68,10 +68,10 @@ describe('resolveDoc', () => {
 
 describe('getDocNeighbors', () => {
   test('links across group boundaries in sidebar order', () => {
-    // error-codes is the last page of the api-reference group; next is the
-    // first page of the clients group.
-    const { prev, next } = getDocNeighbors('error-codes', 'en')
-    assert.equal(prev?.slug, 'pricing')
+    // minimax-h3-video is the last page of the api-reference group; next is
+    // the first page of the clients group.
+    const { prev, next } = getDocNeighbors('minimax-h3-video', 'en')
+    assert.equal(prev?.slug, 'error-codes')
     assert.equal(next?.slug, 'clients/curl')
   })
 
@@ -126,6 +126,29 @@ describe('public documentation boundary', () => {
         bodies.includes(expected),
         `must continue to publish ${expected}`
       )
+    }
+  })
+
+  test('publishes the MiniMax H3 video guide with canonical model only', () => {
+    const entry = flatDocEntries.find(
+      ({ page }) => page.slug === 'minimax-h3-video'
+    )
+    assert.ok(entry, 'minimax-h3-video page must be registered')
+    const zh = entry.page.content.zh ?? ''
+    const en = entry.page.content.en ?? ''
+    // Downstream docs teach the single canonical client model and the unified
+    // video entry; per-channel upstream IDs stay private to routing.
+    for (const expected of ['MiniMax-H3', '/v1/video/generations']) {
+      assert.ok(zh.includes(expected), `zh guide must mention ${expected}`)
+      assert.ok(en.includes(expected), `en guide must mention ${expected}`)
+    }
+    for (const upstream of [
+      'minimax-h3-vip',
+      'lec-minimax-h3',
+      'mm2-minimax-h3',
+    ]) {
+      assert.ok(!zh.includes(upstream), `zh guide must not leak ${upstream}`)
+      assert.ok(!en.includes(upstream), `en guide must not leak ${upstream}`)
     }
   })
 })

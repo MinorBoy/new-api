@@ -98,7 +98,20 @@ export const apiEndpoints: ApiEndpoint[] = [
         },
       },
     ],
-    codeSamples: [],
+    codeSamples: [
+      {
+        lang: 'curl',
+        label: 'cURL',
+        highlight: 'bash',
+        code: `curl https://<your-domain>/api/v3/assets \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer <YOUR_API_KEY>" \\
+  -d '{
+    "type": "image",
+    "url": "https://example.com/role.png"
+  }'`,
+      },
+    ],
   },
   {
     slug: 'role-assets-query',
@@ -138,7 +151,15 @@ export const apiEndpoints: ApiEndpoint[] = [
         },
       },
     ],
-    codeSamples: [],
+    codeSamples: [
+      {
+        lang: 'curl',
+        label: 'cURL',
+        highlight: 'bash',
+        code: `curl https://<your-domain>/api/v3/assets/<asset_id> \\
+  -H "Authorization: Bearer <YOUR_API_KEY>"`,
+      },
+    ],
   },
   {
     slug: 'chat-completions',

@@ -4,6 +4,7 @@ import billingRulesEn from './content/en/billing-rules.md'
 import curlEn from './content/en/clients/curl.md'
 import pythonEn from './content/en/clients/python.md'
 import errorCodesEn from './content/en/error-codes.md'
+import minimaxH3VideoEn from './content/en/minimax-h3-video.md'
 import overviewEn from './content/en/overview.md'
 import pricingEn from './content/en/pricing.md'
 import quickstartEn from './content/en/quickstart.md'
@@ -14,6 +15,7 @@ import errorCodesZh from './content/zh/error-codes.md'
 // Markdown sources are inlined as raw strings by the rsbuild `asset/source`
 // rule (see rsbuild.config.ts). Keep these imports grouped per category so the
 // tree reads top-to-bottom in sidebar order.
+import minimaxH3VideoZh from './content/zh/minimax-h3-video.md'
 import overviewZh from './content/zh/overview.md'
 import pricingZh from './content/zh/pricing.md'
 import quickstartZh from './content/zh/quickstart.md'
@@ -72,6 +74,12 @@ export const docsNavGroups: DocNavGroup[] = [
         title: { en: 'Error Codes', zh: '错误码参考' },
         content: { en: errorCodesEn, zh: errorCodesZh },
         order: 3,
+      },
+      {
+        slug: 'minimax-h3-video',
+        title: { en: 'MiniMax H3 Video', zh: 'MiniMax H3 视频生成' },
+        content: { en: minimaxH3VideoEn, zh: minimaxH3VideoZh },
+        order: 4,
       },
     ],
   },

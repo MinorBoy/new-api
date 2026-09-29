@@ -33,6 +33,11 @@ services:
     command: ["--log-dir", "/app/logs"]
     ports:
       - "127.0.0.1:${NEW_API_PORT:-3000}:3000"
+    # secure-skill 网关对 docker 桥接路径的 TLS 握手会确定性中断（宿主机/WSL 正常）。
+    # 把域名钉到宿主机，由宿主机上的 secure-forward.exe (0.0.0.0:8443 -> token.secure-skill.com:443) 转发，
+    # 渠道 80 的 Base URL 需带端口 :8443。
+    extra_hosts:
+      - "token.secure-skill.com:host-gateway"
     volumes:
       - ./data:/data
       - ./logs:/app/logs

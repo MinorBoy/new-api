@@ -184,6 +184,26 @@ done
 
 按次计费：一次成功生成记一次费用，与时长无关。生成失败不扣费，预扣额度自动全额返还。不同清晰度对应不同售价档位，以模型广场为准。
 
+## 与 MiniMax 官方 v2 接口的差异
+
+本站请求体与 MiniMax 官方 [创建视频生成任务 v2](https://platform.minimax.cn/docs/api-reference/video-generation-v2-create)（`POST /v2/video_generation`）刻意对齐：`content` 数组结构、角色语义、模式组合规则、素材限制完全一致。已会用官方 v2 的用户，把地址与鉴权换成站点地址与令牌即可迁移。以下差异需要留意：
+
+| 项 | MiniMax 官方 v2 | 本站 |
+| --- | --- | --- |
+| 提交端点 | `POST /v2/video_generation` | `POST /v1/video/generations`（或 `POST /v1/videos`） |
+| 提交响应 | `{"task_id": "..."}` | OpenAI video 对象（`id` / `task_id` / `object` / `status` / `progress`） |
+| 查询端点 | `GET /v2/video_generation/{task_id}` | `GET /v1/videos/{task_id}` |
+| 查询响应 | `{"task": {...}}`，状态 `queued` / `running` / `succeeded` / `failed` / `cancelled` | OpenAI video 对象，状态 `queued` / `in_progress` / `completed` / `failed`，视频地址在 `metadata.url` |
+| `ratio` | 可用 `adaptive`（且为默认）；文生必填且禁用 `adaptive` | 不支持 `adaptive`，用 `auto` 等价替代；不强制文生必填 |
+| `resolution` | 必填，仅 `768P` / `2K` | 选填（缺省走路由默认 `2k`），支持 `720p` / `768p` / `2k`；官方大小写写法（`2K`/`768P`）可直接使用 |
+| `duration` | 必填 | 选填（缺省 15） |
+| 模型 | `MiniMax-H3` / `MiniMax-H3-Max` | 仅 `MiniMax-H3` |
+| 单图无 role 的解释 | 首帧（图生视频） | 参考图（多模态参考）；表达首帧请显式写 `role: first_frame` |
+| `callback_url` 回调 | 支持（challenge 验证后状态推送） | 不支持，请使用轮询 |
+| `aigc_watermark` | 支持 | 不支持 |
+
+迁移要点：`ratio` 不要用 `adaptive`（用 `auto`）；解析响应改为读 `task_id` 与 `metadata.url`；状态词汇从 `running/succeeded` 映射到 `in_progress/completed`。其余请求字段无需改动。
+
 ## 常见问题
 
 **为什么用 `prompt` 提交返回 400？** H3 使用 content 数组结构，把提示词放进 `content` 的 `text` 项即可。

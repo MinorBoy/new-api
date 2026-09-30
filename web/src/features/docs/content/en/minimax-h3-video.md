@@ -184,6 +184,26 @@ done
 
 Per-request billing: one successful generation is one charge, independent of duration. Failed generations are not billed; pre-deducted quota is fully refunded. Different resolutions map to different price tiers; see the model plaza.
 
+## Differences from the MiniMax official v2 API
+
+This station's request body deliberately mirrors the MiniMax official [video generation v2 API](https://platform.minimax.cn/docs/api-reference/video-generation-v2-create) (`POST /v2/video_generation`): the `content` array structure, role semantics, mode composition rules, and media limits are identical. If you already use the official v2 API, swap the base URL and credentials to migrate. Watch these differences:
+
+| Item | MiniMax official v2 | This station |
+| --- | --- | --- |
+| Submit endpoint | `POST /v2/video_generation` | `POST /v1/video/generations` (or `POST /v1/videos`) |
+| Submit response | `{"task_id": "..."}` | OpenAI video object (`id` / `task_id` / `object` / `status` / `progress`) |
+| Poll endpoint | `GET /v2/video_generation/{task_id}` | `GET /v1/videos/{task_id}` |
+| Poll response | `{"task": {...}}` with `queued` / `running` / `succeeded` / `failed` / `cancelled` | OpenAI video object with `queued` / `in_progress` / `completed` / `failed`; video URL in `metadata.url` |
+| `ratio` | `adaptive` supported (and default); required for text-to-video, `adaptive` forbidden there | `adaptive` unsupported — use `auto`; not strictly required for text-to-video |
+| `resolution` | required, `768P` / `2K` only | optional (routing default `2k`), supports `720p` / `768p` / `2k`; official uppercase spellings (`2K`/`768P`) are accepted |
+| `duration` | required | optional (defaults to 15) |
+| Models | `MiniMax-H3` / `MiniMax-H3-Max` | `MiniMax-H3` only |
+| Single image without role | treated as first frame (image-to-video) | treated as reference image (multimodal reference); use explicit `role: first_frame` for frame input |
+| `callback_url` webhook | supported (challenge verification, then status pushes) | unsupported — use polling |
+| `aigc_watermark` | supported | unsupported |
+
+Migration notes: don't send `adaptive` for `ratio` (use `auto`); parse responses for `task_id` and `metadata.url`; map `running`/`succeeded` to `in_progress`/`completed`. All other request fields carry over unchanged.
+
 ## FAQ
 
 **Why is my `prompt`-only request rejected with 400?** H3 uses the content array structure; put the prompt in the `text` item of `content`.
